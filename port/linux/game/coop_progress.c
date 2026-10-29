@@ -70,6 +70,12 @@ void coop_progress_host_won(char const *map_name, short difficulty)
 	record(map_name ? main_get_solo_level_from_name(map_name) : NONE, difficulty, "this machine hosted it");
 }
 
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+struct network_game_client *global_network_game_client_get(void);
+
 void coop_progress_client_level_started(char const *map_name, short difficulty)
 {
 	coop_progress.level = map_name ? main_get_solo_level_from_name(map_name) : NONE;

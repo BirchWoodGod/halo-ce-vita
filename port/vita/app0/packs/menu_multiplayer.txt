@@ -1,0 +1,55 @@
+# The multiplayer lobby's scene in the Halo 3 menus (menus/halo3/
+# multiplayer.xml's scene_object=, port/linux/game/menu_scene_objects.c):
+# three multiplayer Spartans - a rocket launcher, the flag, a sniper rifle -
+# from the player's own multiplayer maps. What a still scene does not need is
+# left out: sounds, effects, damage, the HUD, the weapons' first-person models
+# and rounds.
+pack menu_multiplayer
+map bloodgulch sidewinder damnation hangemhigh boardingaction chillout ratrace prisoner longest beavercreek carousel wizard putput
+tag bipd characters\cyborg_mp\cyborg_mp
+tag weap weapons\rocket launcher\rocket launcher
+tag weap weapons\sniper rifle\sniper rifle
+tag weap weapons\flag\flag
+strip snd!
+strip lsnd
+strip effe
+strip part
+strip pctl
+strip cont
+strip deca
+strip jpt!
+strip ligh
+strip lens
+strip glw!
+strip udlg
+strip foot
+strip wphi
+strip unhi
+strip hud#
+strip trak
+strip mgs2
+strip spla
+strip proj
+strip eqip
+strip mode weapons\rocket launcher\fp\fp
+strip antr weapons\rocket launcher\fp\fp
+strip mode weapons\sniper rifle\fp\fp
+strip antr weapons\sniper rifle\fp\fp
+strip mode weapons\flag\fp\fp
+strip antr weapons\flag\fp\fp
+strip weap weapons\pistol\pistol
+strip weap weapons\assault rifle\assault rifle
+# The poses the three Spartans hold (the rocket launcher's airborne frame, the
+# flag's stance, the sniper's crouch: their other animations take these
+# frames, none of their bytes in the pack)
+keep characters\cyborg\cyborg|stand missile idle
+keep characters\cyborg\cyborg|stand missile aim-still
+keep characters\cyborg\cyborg|stand missile aim-move
+keep characters\cyborg\cyborg|stand missile airborne
+keep characters\cyborg\cyborg|stand rifle idle
+keep characters\cyborg\cyborg|stand rifle aim-still
+keep characters\cyborg\cyborg|stand rifle aim-move
+keep characters\cyborg\cyborg|crouch rifle idle
+keep characters\cyborg\cyborg|crouch rifle aim-still
+keep characters\cyborg\cyborg|crouch rifle aim-move
+keep characters\cyborg\cyborg|stand look

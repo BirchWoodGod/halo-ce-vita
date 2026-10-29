@@ -85,8 +85,9 @@ parser.add_argument(
     "--lto",
     choices=["full", "thin", "off"],
     default="full",
-    help="link-time optimisation of the native ports (Linux, Windows): full (the default: the whole game "
-    "optimised as one module, the fastest code and the slowest links), thin (parallel and incremental) or off",
+    help="link-time optimisation of the native ports (Linux, Windows) and of the Vita build's clang side "
+    "(the game and platform layer; thin is full there): full (the default: the whole game optimised as one "
+    "module, the fastest code and the slowest links), thin (parallel and incremental) or off",
 )
 parser.add_argument(
     "--portable",
@@ -109,7 +110,8 @@ parser.add_argument(
     "--pgo-profile",
     metavar="PROFDATA",
     type=Path,
-    help="native ports: profile-guided optimisation from this profile instead",
+    help="native ports: profile-guided optimisation from this profile instead; the Vita build's clang side "
+    "uses one only when given here (triage/vita-lto-1.1.1.md: a harness's front-end instrumented profile)",
 )
 parser.add_argument(
     "--linux-d3d",
@@ -122,8 +124,18 @@ parser.add_argument(
 parser.add_argument(
     "--linux-net-vita",
     action="store_true",
-    help="the Linux build plays online as a PlayStation Vita (HALO_NET_AS_VITA): Vitas play only Vitas, so the "
-    "automated network tests need a Linux build on the Vitas' side (port/linux/include/halo_port_limits.h)",
+    help="the PC build (Linux, and Windows) plays online on the Vitas' side (HALO_NET_AS_VITA), as the released "
+    "PC build does (tools/package_pc.py), and the automated network tests' Linux builds stand in for Vitas "
+    "(port/linux/include/halo_port_limits.h)",
+)
+parser.add_argument(
+    "--linux-fuzz",
+    action="store_true",
+    help="TEST builds only, never a release: `ninja linux-fuzz` also builds the network fuzz builds - "
+    "build/linux/halo-fuzz (AddressSanitizer + UBSan) and build/linux/halo-fuzz-ub (UBSan alone, quicker: "
+    "a joiner that must load a level in time) - with HALO_NET_FUZZ_TWIN (port/linux/game/net_fuzz_twin.h), "
+    "as run_netns_online_test.sh hostfuzz* and run_netns_crossplay_test.sh's fuzz modes take them "
+    "(HALO_TEST_FUZZ_HOST, HALO_TEST_FUZZ_JOINER)",
 )
 parser.add_argument(
     "--vita-aligned",
@@ -149,10 +161,26 @@ parser.add_argument(
     "port/vita/include/vita_update_key.h's (HALO_UPDATE_PUBLIC_KEY)",
 )
 parser.add_argument(
+    "--testers-test-key",
+    type=str,
+    help="TEST builds only, never a release: the tester list's Ed25519 public key (64 hexadecimal digits) in place "
+    "of the owner's release key (port/linux/src/tester_list.h; the flaming helmet's automated tests)",
+)
+parser.add_argument(
     "--vita-version",
     type=str,
-    help="TEST builds only: the version the Vita build says it is (HALO_VITA_VERSION) in place of "
-    "port/vita/include/vita_version.h's, e.g. 1.1.0-beta.4 for an update test's newer build",
+    help="the version the builds say they are (HALO_VITA_VERSION: the Vita's, and the PC builds', Linux and "
+    "Windows, with \" (PC)\" after it) in place of port/vita/include/vita_version.h's: an insider build's "
+    "1.1.1-insider.17, a candidate's 1.1.1-beta.1-rc, an update test's newer 1.1.0-beta.4; "
+    "tools/package_pc.py names its files for the one configured",
+)
+parser.add_argument(
+    "--windows-xwin",
+    metavar="DIR",
+    type=Path,
+    help="`ninja windows` from Linux: the Windows SDK and MSVC C runtime that xwin splatted here "
+    "(xwin --accept-license --arch x86 splat --output DIR); on Windows, Visual Studio's are used instead "
+    "(port/windows/README.md)",
 )
 parser.add_argument(
     "--android-ndk",
@@ -224,6 +252,7 @@ sln.ml_path = args.ml
 sln.linux_cc = args.linux_cc
 sln.linux_d3d = args.linux_d3d
 sln.linux_net_vita = args.linux_net_vita
+sln.linux_fuzz = args.linux_fuzz
 sln.compiler_launcher = args.compiler_launcher
 sln.port_release = args.release
 sln.port_lto = args.lto
@@ -234,6 +263,8 @@ sln.vita_aligned = args.vita_aligned
 sln.vita_update_test_sources = args.vita_update_test_sources
 sln.vita_update_key = args.vita_update_key
 sln.vita_version = args.vita_version
+sln.testers_test_key = args.testers_test_key
+sln.windows_xwin = args.windows_xwin
 sln.android_ndk = args.android_ndk
 sln.android_guest_cc = args.android_guest_cc
 if not is_windows():

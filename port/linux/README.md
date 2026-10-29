@@ -49,16 +49,66 @@ sequence:
 4. `assets/` in the current folder, and `assets/` in the repository that
    contains the executable.
 
-If the game finds no data, it asks for an Xbox disc image (`.xiso` or
-`.iso`). This occurs at the first start:
+### Halo: The Master Chief Collection
+
+You do not need an install tool for MCC. At each start the game finds the
+Halo content folder: the folder of your own Halo: The Master Chief
+Collection that contains `halo1`. The game only reads this folder. It
+does not copy or change MCC's files. The game looks in this sequence and
+uses the first folder that it finds:
+
+1. `paths.content` in `config.toml` (`HALO_CONTENT_ROOT`). `"auto"` (the
+   default) or empty: continue with step 2. `"none"`: no MCC. A folder:
+   MCC's folder, its `halo1` or `halo1/maps` folder, or a Steam library
+   that contains MCC. If the folder is gone, or it contains no Halo CE map
+   of MCC, the log tells you and the game continues with step 2.
+2. `mcc/` in the data root.
+3. Steam's libraries. On Linux, in `~/.local/share/Steam`, `~/.steam/steam`,
+   `~/.steam/root`, `~/.var/app/com.valvesoftware.Steam/.local/share/Steam`
+   (Flatpak) and `~/snap/steam/common/.local/share/Steam` (Snap): each
+   library that `steamapps/libraryfolders.vdf` (or
+   `config/libraryfolders.vdf`) lists, then the Steam folder itself. On
+   Windows: the Steam folder of the registry (`HKCU\Software\Valve\Steam`
+   `SteamPath`, `HKLM\SOFTWARE\WOW6432Node\Valve\Steam` and
+   `HKLM\SOFTWARE\Valve\Steam` `InstallPath`), `Steam` in Program Files,
+   `SteamLibrary`, `Steam` and `Games\Steam` on each fixed drive, then the
+   uninstall entry `Steam App 976730` (`InstallLocation`) and the Xbox
+   app's `<drive>:\XboxGames\Halo The Master Chief Collection\Content`.
+   In each library: `steamapps/common/Halo The Master Chief Collection`.
+
+A folder is MCC's only if `halo1/maps` contains a Halo CE stock map
+(`bloodgulch.map`, `a10.map` and the others) with MCC's cache header
+(`head`, version 13). The log (`content:` lines) shows each library that
+the game examined and the folder that it found.
+
+If the game finds MCC but no `maps/` folder, it does not ask for a disc
+image. It uses the folder of the executable as the data root, and makes an
+empty `maps/` folder there. The menus then come from MCC's `ui.map`, and
+the Halo PC files from MCC's `halo1/maps/custom_edition`.
+
+If the game finds no MCC (with `"auto"`), the log tells you, and the main
+menu shows "Halo MCC not found" (the Halo 3 menu: below the title; the
+original menu: in the corner, in turn with the version).
+
+The Xbox `maps/` folder and MCC can be used together. Priority, from first
+to last: the settings in `config.toml` (`paths.data`, `paths.content`,
+`paths.menu_source`), then the files of the Xbox `maps/` folder (`ui.map`
+for the menus, the Halo PC files), then the files of MCC. MCC's levels are
+always added to the lists. Refer to `docs/mcc_cea_maps.md`.
+
+### No game data
+
+If the game finds no data and no MCC, it asks for an Xbox disc image
+(`.xiso` or `.iso`). This occurs at the first start:
 
 - Select "No" to stop the game.
 - Select "Yes" to open a file picker. Select the disc image. The game copies
   `maps/` and `default.xbe` next to the executable and shows the progress.
 
-The loading screen takes its picture from the disc's `default.xbe` (the
-retail Xbox game has it in the executable, not in `maps/`). Put the file in
-the data root, next to `maps/`. Without it, the loading screen stays dark.
+The loading screen takes its picture and its hum from the disc's
+`default.xbe` (the retail Xbox game has them in the executable, not in
+`maps/`). Put the file in the data root, next to `maps/`, or in the folder
+above it. Without it, the loading screen stays dark and silent.
 
 The game writes the copy to `maps.partial`. When the copy is complete, the
 game changes the name to `maps`. If the copy stops before it is complete,
@@ -99,26 +149,50 @@ The keyboard and the mouse operate controller 1. The game adds the input of
 the first gamepad to controller 1. The other gamepads operate controllers 2
 to 4.
 
-| Key | Controller | Function in the game |
+In play the keyboard and the mouse operate the player's actions
+(`src/key_bindings.c`, `include/halo_key_bindings.h`), each bound to keys,
+mouse buttons or the wheel in `config.toml`'s `[controls.keyboard]` (up to
+four each, names as SDL gives them: `"Left Ctrl"`, `"Mouse Right"`,
+`"Wheel Up"`). The defaults are Halo MCC's PC Halo: CE layout. An action
+that is one of the game's controls presses the controller button that the
+profile's button layout puts that control on, so a button layout never
+moves a key.
+
+| Action (`config.toml` key) | Default | Controller (standard layout) |
 | --- | --- | --- |
-| W, A, S, D | left stick | move |
-| mouse | (direct aim) | aim |
-| left mouse button | right trigger | fire |
-| right mouse button, G | left trigger | throw a grenade |
-| space, enter | A | jump, accept |
-| F, backspace, mouse button 4 | B | melee, back |
-| E, R | X | action, reload |
-| tab, mouse wheel | Y | change the weapon |
-| Q | white | flashlight |
-| X | black | change the grenade |
-| left ctrl, C | left stick click | crouch |
-| Z, middle mouse button | right stick click | zoom |
-| arrow keys | D-pad | |
-| escape | start | pause menu |
-| F1 | back | |
+| `move_forward`, `move_backward`, `strafe_left`, `strafe_right` | W, S, A, D | left stick |
+| (aim) | mouse | (direct aim) |
+| `fire` | left mouse button | right trigger |
+| `zoom` | right mouse button, Z | right stick click |
+| `throw_grenade` | G | left trigger |
+| `melee` | F, mouse button 4 | B |
+| `action` | E | X (never reloads when there is nothing to act on) |
+| `reload` | R | (reload alone) |
+| `switch_weapon` | Tab, mouse wheel | Y |
+| `switch_grenade` | H, middle mouse button | black |
+| `flashlight` | Q | white |
+| `jump` | space | A |
+| `crouch` | left ctrl, C | left stick click (also while walking) |
+| `scoreboard` | backspace | back |
+| (pause) | escape | start |
+| (fixed) | arrow keys, F1, enter | D-pad, back, A (unless bound) |
 | \` | | open the developer console |
 | F12 | | release or capture the mouse |
 | F11 | | change between fullscreen and window |
+
+The menus' **KEYBOARD & MOUSE** page (`game/controls_menu.c`; Halo 3
+menus: CUSTOMIZATION, a profile; Halo CE menus: SETTINGS, a profile;
+ElDewrito menus: CUSTOMIZATION's CONTROLS tab) lists the actions with their
+first and second keys, and the mouse's `input.mouse_sensitivity`,
+`input.invert_mouse` and `input.raw_mouse`. A (or a click) asks for the
+key: the next key or mouse button is bound (Escape cancels, Delete clears);
+a key that another action has is swapped with it, and the page says what
+the other action has now. X clears the chosen key, Y (or RESET TO MCC
+DEFAULTS) puts every key back. Each change is written to `config.toml` at
+once. A `config.toml` of an earlier version is migrated: an action at an
+earlier version's default (the fixed layout up to 1.1.1-insider.24) gets
+the MCC default; an action you set yourself is kept, and a default gives
+up a key that you bound to another action.
 
 One movement of the mouse wheel changes the weapon one time. A second
 movement after a short pause changes it again.
@@ -132,9 +206,53 @@ In the menus, the mouse moves a pointer:
 - A right click goes back.
 - The mouse wheel moves through the items.
 
-The keyboard also operates the menus. When the game continues, the mouse
-aims again. A mouse button that you hold from the menu does not fire until
+The keyboard also operates the menus, with fixed keys: the arrow keys (or
+W A S D) move, Enter accepts, Escape (or Backspace, F) goes back, space is
+the controller's start, E is X, Tab Y, Q white, X black, G the left
+trigger, F1 back. In
+play, Escape opens the pause menu; Escape in the pause menu closes it.
+When the game continues, the mouse aims again. A mouse button that you hold from the menu does not fire until
 you push it again.
+
+The prompts and the menus show the keys and the mouse buttons bound (the
+first with a keycap) while you play with the keyboard and the mouse, and a gamepad's buttons
+once you use a gamepad (`display.button_icons` in "Settings").
+
+### Typing
+
+When a menu asks for text (a new profile's name, a password, a game's code,
+a lobby's name, a friend's code, the party chat, a map variant's name), a
+text box opens over the game (`src/pc_text_entry.c`, drawn by
+`game/pc_text_entry_overlay.c`). While it is open, the game gets no keys,
+no clicks and no gamepad buttons.
+
+| Keyboard | |
+| --- | --- |
+| letters, digits, punctuation | type |
+| Backspace, Delete | erase before or after the caret |
+| Left, Right, Home, End | move the caret |
+| Ctrl+V, Shift+Insert | paste |
+| Enter | accept |
+| Escape | cancel |
+
+With a gamepad, the box shows an on-screen keyboard (it shows when the
+gamepad was the last device you used, or when you push a gamepad button):
+
+| Gamepad | |
+| --- | --- |
+| D-pad, left stick | choose a key (hold to repeat) |
+| A | push the key (ABC: capitals, #+=: symbols, SPACE, DELETE, DONE) |
+| B | erase |
+| X | space |
+| left / right shoulder | capitals / symbols |
+| left / right trigger | move the caret |
+| Start | accept |
+| Y | cancel |
+
+The text keeps only the characters that the game's text can show
+(printable ASCII). The game drops other characters (letters with accents,
+emoji). The box shows how many characters you typed and how many the field
+takes; a password shows as stars.
 
 ## Settings
 
@@ -157,18 +275,25 @@ the setting for one start of the game. It has priority over the file.
 | `display.vsync` | `true` | `HALO_NO_VSYNC=1` sets `false` | `true`: each frame waits for the display. |
 | `display.interpolation` | `true` | `HALO_INTERPOLATION` | `true`: one frame for each refresh of the display. `false`: 30 frames each second, as on the Xbox. Refer to "Frame rate". |
 | `display.first_person_legs` | `false` | `HALO_FIRST_PERSON_LEGS` | `true`: in first person, your own body is drawn from the waist down, so you see your legs when you look down, moving as everyone else sees them. Not in a vehicle, zoomed, in a cutscene or in third person. Only the picture changes: hit boxes, the camera and the network are as before. From OpenCE. |
+| `display.ragdolls` | `true` | `HALO_RAGDOLLS` | `true`: a character killed falls limp, thrown by the blow that killed it, and comes to rest where it lands, instead of its death animation's last pose laid on the ground. Only the picture changes: the body's place, hit boxes, saved games and the network are as before, and each machine simulates its own. Four fall at once at most (`HALO_RAGDOLLS_ACTIVE`), twelve are kept. The idea is from jojoxdk's Halo 1 MCC Box3D Physics Mod. |
+| `display.button_icons` | `"auto"` | `HALO_BUTTON_ICONS` | The button icons of the prompts, the menus' hints and the help lines (the HUD's "Hold E to pick up", the Halo 3 menus' strips, the Halo CE menus' keys, the Forge menu's controls). `"auto"`: the keyboard and mouse's keys and buttons while you play with them, a gamepad's buttons once you use one (a PlayStation pad's, by SDL's gamepad type, the PlayStation's; any other the Xbox's), and back to the keyboard's at the next key or mouse use, as Halo PC did; the keyboard's before any input, unless a gamepad is connected at the start. `"keyboard"`, `"xbox"` or `"playstation"`: always those. The variable is read each time (a test's `@set HALO_BUTTON_ICONS ...` is live). The keys are the ones in "Controls" (in the menus, where the mouse moves the pointer: Enter, Escape, G, and space for start; the right trigger has no key there and keeps the Xbox's icon). Our own art: `tools/halo3_menu_art.py` draws the keycaps (Saira Semi Condensed, SIL OFL), the mouse and the Xbox buttons into `menus/halo3/key_atlas.png` and `xbox_atlas.png`; without them, words ("Space", "left click"). Not on the Vita, which keeps its own Button icons. |
 | `graphics.particles` | `"full"` | `HALO_PARTICLE_BUDGET` | The particles that the effects of a fight make. `"full"`: all, as on the Xbox. `"reduced"` or `"low"`: fewer sparks, smoke, dust and debris, and they go sooner (in multiplayer, out of view, after a sixth of a second; `"low"` a tenth). Muzzle flashes, flashes, your own weapon and the effects of scripts and cutscenes are not changed. |
 | `audio.enabled` | `true` | `HALO_NO_AUDIO=1` sets `false` | `false`: no audio device. The sound continues without output. |
 | `audio.volume` | `1.0` | `HALO_VOLUME` | The master volume. |
 | `input.mouse_sensitivity` | `1.0` | `HALO_MOUSE_SENSITIVITY` | The multiplier for the mouse aim. |
 | `input.invert_mouse` | `false` | `HALO_MOUSE_INVERT=1` sets `true` | `true`: the vertical mouse aim is inverted. |
+| `input.raw_mouse` | `true` | `HALO_MOUSE_RAW` | `true`: the mouse's own movement aims (raw input). `false`: with the system's pointer speed and acceleration (SDL's `SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE`). |
+| `controls.keyboard.<action>` | MCC's (see "Controls") | `HALO_KEY_<ACTION>` | The keys of each action, separated by commas ("Controls"). The KEYBOARD & MOUSE page writes them. |
 | `game.language` | `""` | `HALO_LANGUAGE` | The language of the menus: `ja`, `de`, `fr`, `es` or `it`. Empty: English. |
 | `paths.data` | `""` | `HALO_DATA_ROOT` | The data root. Refer to "Start the game". |
 | `paths.saves` | `""` | `HALO_SAVE_ROOT` | The save root. Refer to "Files and folders". |
+| `paths.content` | `"auto"` | `HALO_CONTENT_ROOT` | The Halo MCC folder. `"auto"`: the game finds it. `"none"`: no MCC. A folder: that folder. Refer to "Halo: The Master Chief Collection". |
 | `network.netcode` | `"distributed"` | `HALO_NETCODE` | Each machine moves its own player at once, and the host makes the decisions (refer to `NETCODE.md`). The only netcode network version 9 plays; kept so older settings files load. |
 | `network.address` | `""` | `HALO_NET_ADDRESS` | The IPv4 address of this machine for system link. Refer to "Play on one computer". |
 | `network.broadcast` | `""` | `HALO_NET_BROADCAST` | IPv4 addresses, with commas between them, that get the broadcasts of the game. Empty: 255.255.255.255. |
 | `network.online` | `true` | `HALO_NET_ONLINE` | `true`: internet play. `false`: system link on the local network only. |
+| `network.chat` | `true` | `HALO_CHAT` | The in-game chat (`port/linux/game/game_chat.c`): lines to everyone, the team or the party, from the quick chat wheel (Back + D-pad left in play; F1 + Left on the keyboard: up and down a phrase or Type a message, left and right or the shoulders the channel, A sends, Y types, B closes) or typed. OpenCE's text chat on the wire: its players and the Vitas read each other's lines. `false`: no chat over the game, none sent. |
+| `network.chat_filter` | `true` | `HALO_CHAT_FILTER` | Slurs and hate speech in other players' chat lines (PC players' too) shown as `****`, however they are spelled; a player it catches three times in five minutes muted here. Changes only what this player sees. The words: `port/vita/app0/chat/filter.txt`. |
 | `network.join_from_clipboard` | `true` | `HALO_NET_JOIN_FROM_CLIPBOARD` | `true`: when the game comes to the front, it joins the game of an invite link on the clipboard. |
 | `network.tunnel_port` | `0` | `HALO_NET_TUNNEL_PORT` | The UDP port for internet play. `0`: the game selects a port. Refer to "Internet play". |
 | `network.allow_upnp` | `true` | `HALO_NET_ALLOW_UPNP` | `true`: internet play can ask the router to forward its port (UPnP). `false`: the game does not ask. Refer to "Internet play". |
@@ -182,9 +307,18 @@ the setting for one start of the game. It has priority over the file.
 | `network.coop_enemies_multiplier` | `2` | `HALO_NET_COOP_ENEMIES_MULTIPLIER` | The static multiplier of the enemies, `2` to `32`: each squad of enemies is this many times as large. MULTIPLIER in co-op's Server Setup writes its choice here. |
 | `network.stun_servers` | Google and Cloudflare | `HALO_NET_STUN` | The public STUN servers (`host:port`, with commas between them) that give the internet address of a machine. |
 | `discord.application_id` | the application of the project | `HALO_DISCORD_APPLICATION` | The Discord application for invites. Empty: no Discord. |
+| `menus.style` | `"halo3"` | `HALO_MENU_STYLE` | The menus: `"halo3"`, the Halo 3-style screens (the main menu, the campaign lobby and its pickers, the multiplayer lobby, its server browser, Create Game, code and password screens, the pause screen, the settings panel on the Vita) over the same animated Halo ring (`port/vita/app0/menus/halo3`, which need the Halo PC files as OpenCE's screens do). Read each time a screen opens. |
+| `menus.scenes` | `true` | `HALO_MENU_SCENES` | With the Halo 3 menus, a camera of its own behind each lobby (the campaign, multiplayer and Forge lobbies, their `scene=` in `port/vita/app0/menus/halo3`: one of ui.map's camera points, our numbers written into it), the main menu the ring's own flight; `0` or `false` keeps the ring's flight behind every screen. |
+| `menus.player_models` | `false` | `HALO_PLAYER_MODELS` | Player models from your Halo Custom Edition maps (CUSTOMIZATION's MODEL, `port/linux/game/player_models.c`). Off in 1.1.1 until Halo 2's models come: every player is the Spartan, no MODEL rows, the maps folder not looked through for models, a saved choice in `t:\player_models.txt` ignored (kept); `1` or `true` turns them on (testing). |
 | `update.auto` | `true` | `HALO_UPDATE_AUTO` | `true`: at start-up, the game looks for a new version. Refer to "Updates". `false`: the game does not look. |
 | `debug.update_answer` | `""` | `HALO_UPDATE_ANSWER` | The answer to the update question, for automatic tests: `yes`, `no` or `never`. Empty: the game asks. |
 | `debug.exit_after` | `0.0` | `HALO_EXIT_AFTER` | The game stops after this number of seconds. `0`: never. |
+| (none) | | `HALO_MENUS_DUMP` | A screen's tag path (`ui\shell\main_menu\main_menu`): its widget tree as ui.map has it is logged when it opens (types, places, pictures, text, data inputs, what each button runs and opens, children). What a screen of the menus' XML standing for it must do. |
+| (none, not in release builds) | | `HALO_TEST_BROWSER_GAMES` | `N`: N made-up games after the server browser's own (not joinable), for the browser's tests. |
+| (none, not in release builds) | | `HALO_TEST_BROWSER_PC` | `1`: with `HALO_TEST_BROWSER_GAMES`, every second made-up game a PC game and every third, from the third, with a password (both platforms' badges, the password screen). |
+| (none, not in release builds) | | `HALO_TEST_TAPS` | `ms:x,y ...`: taps (the pointer there and a click, as the Vita's touch screen's) at those places of the menus' 640x480, that many milliseconds after the menus first ask. |
+| (none, not in release builds) | | `HALO_TEST_BUTTON_GLYPHS` | `g,g,...`: with the PlayStation's or the keyboard's icons (`display.button_icons`), the glyphs of the game's buttons 0, 1, 2 ... in place of the layout's, by number (`VITA_GLYPH_*` of `port/vita/include/vita_controls.h`, or `HALO_GLYPH_KEY_FIRST` + a `halo_key` of `port/linux/include/halo_button_icons.h`: `64` is SPACE's keycap), so a screen's few icons can show the others (L, START, the D-pad, the wider keycaps ...). |
+| (none, not in release builds) | | `HALO_TEST_GAMEPAD_TYPE` | `playstation`: the scripted pad's presses (`HALO_TEST_PAD`, `@aim pad`) are a PlayStation pad's for `display.button_icons` `"auto"`; else an Xbox pad's. A `kb` step of `HALO_TEST_PAD` is a key pressed. |
 | `debug.screenshot_directory`, `debug.screenshot_every` | `""`, `0` | `HALO_SCREENSHOT_DIR`, `HALO_SCREENSHOT_EVERY` | The game writes each Nth frame to this folder as a BMP file. |
 | `debug.hidden_window`, `debug.null_renderer` | `false` | `HALO_HIDDEN_WINDOW`, `HALO_NULL_RENDERER` | `true`: no visible window, or no graphics. |
 | `debug.gpu_stats`, `debug.gpu_trace_frame`, `debug.gpu_trace_constants`, `debug.gpu_dump_shaders`, `debug.texture_dump_directory`, `debug.texture_log`, `debug.gl_debug`, `debug.texture_no_cache` | off | `HALO_GPU_STATS`, `HALO_GPU_TRACE`, `HALO_GPU_TRACE_CONSTANTS`, `HALO_GPU_DUMP_SHADERS`, `HALO_TEXTURE_DUMP`, `HALO_TEXTURE_LOG`, `HALO_GL_DEBUG`, `HALO_TEXTURE_NO_CACHE` | Tools to find problems in the graphics: counts for each frame, all the GL state of one frame, the GLSL code, the textures. |
@@ -197,29 +331,24 @@ Mesa. To stop this, set the environment variable `mesa_glthread=false`.
 
 ## Updates
 
-The builds from GitHub Actions (refer to the main [README](../../README.md#download))
-can update themselves. At start-up, the game asks GitHub for the latest
-release. The game does not wait for the answer. If the latest release is not
-newer, the game does nothing.
+This project's releases (`github.com/BirchWoodGod/halo-ce-vita/releases`,
+tagged `v<version>`) carry the PC build as `halo-ce-vita-<version>-pc-linux.tar.gz`
+and `halo-ce-vita-<version>-pc-windows.zip` (made by `tools/package_pc.py`),
+beside the Vita's `halo-ce-vita-<version>-vita.vpk`. To update, download the
+file for your platform and unpack it over the old folder: `config.toml`,
+the game data and the saves stay.
 
-If the latest release is newer, the game asks: "Do you want to update?"
+The PC build does not look for updates by itself (nothing asks the network
+unless the player does) and never replaces itself: watch the releases page.
+An update check run by the tests (`@update`) names the file for this
+platform in `halo.log` (`update: ... is available ...:
+halo-ce-vita-<version>-pc-linux.tar.gz from ...`).
 
-- Select "Yes" to update. The game downloads the release for this platform,
-  replaces its files and starts the new version. The old files get the
-  extension `.old`. The new version deletes them.
-- Select "No" to continue. The game asks again at the next start.
-- Select "Do not ask again", then "Yes", to stop the questions. The game
-  writes `auto = false` in the `[update]` section of `config.toml`. To get
-  the questions again, set `auto = true`.
-
-The game downloads through HTTPS. It examines the certificate of the server
-against the certificate authorities of the system: on Linux, the bundle of
-the distribution (`src/posix_update.c`, with Mbed TLS); on Windows, the
-certificate store of Windows (WinHTTP). The folder of the executable must
-let the game write to it.
-
-Builds that you make yourself have no build number. They do not look for
-updates.
+The upstream port's self-updater (`src/updater.c`: `update.auto`, the
+question "Do you want to update?") follows the upstream port's numbered
+builds (`build-<number>` releases of `cybersecurity/halo-ce-universal`).
+Only the upstream repository's CI gives a build its number
+(`tools/ci_build.py`); this project's builds have none, so they never ask.
 
 ## Frame rate
 
@@ -492,6 +621,7 @@ Other changes are in `#ifdef HALO_LINUX`. All the native ports define
 | `cseries/errors.c` | `debug.txt` stays open between lines. |
 | `networking/`, `game/`, `interface/`, `bungie_net/network/` and the pools of objects, effects and sounds | The system link limits and the memory for them. |
 | `game/`, `objects/`, `units/`, `networking/` | The distributed netcode. Refer to `NETCODE.md`. |
+| `units/units.c`, `objects/damage.c`, `game/game_time.c`, `objects/objects.c` | A body that dies, and the blow that killed it, are told to `game/ragdolls.c`, which steps the dead bodies' ragdolls after each game tick and lets them go on a new map (`display.ragdolls`). The ragdolls' poses reach the render through `game/render_interpolation.c`'s copies of the tick's poses. |
 | `render/render_objects.c`, `objects/objects.c` | In first person, your own body is drawn from the waist down with the pose `game/first_person_legs.c` makes (`display.first_person_legs`, from OpenCE); the waist it found and the mesh `game/object_mesh.c` read are forgotten on a new map. |
 
 The x86 inline assembly of the game has C replacements in

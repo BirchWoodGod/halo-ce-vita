@@ -1,0 +1,312 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style main menu (Menu style Halo 3): it stands for the Xbox's
+main menu (ui\shell\main_menu\main_menu) and does what that one does - its
+handlers copied from ui.map's (HALO_MENUS_DUMP) - laid out as Halo 3's: the
+column lower left, START SOLO GAME on top, Settings on Start, the title at the
+right, over the same animated Halo ring (main menu intialize, ring_loop). The
+art is this folder's own (tools/halo3_menu_art.py). -->
+<menus root="h3/main/screen" replaces="ui\shell\main_menu\main_menu">
+	<!-- the Halo 3 menus' own fonts (tools/halo3_menu_art.py, Saira Semi Condensed, SIL OFL) -->
+	<font name="h3/font_title" file="halo3/font_title.bin"/>
+	<font name="h3/font_item" file="halo3/font_item.bin"/>
+	<font name="h3/font_small" file="halo3/font_small.bin"/>
+	<bitmap name="h3/haze">
+		<frame png="halo3/haze.png" width="64" height="64"/>
+	</bitmap>
+	<bitmap name="h3/column">
+		<frame png="halo3/column.png" width="64" height="64"/>
+	</bitmap>
+	<!-- (the list's panel: Halo 3's see-through navy, more opaque toward the bottom) -->
+	<bitmap name="h3/menu_column">
+		<frame png="halo3/menu_column.png" width="64" height="64"/>
+	</bitmap>
+	<bitmap name="h3/item">
+		<frame png="halo3/item_off.png" width="128" height="16"/>
+		<frame png="halo3/item_on.png" width="128" height="16"/>
+	</bitmap>
+	<bitmap name="h3/rule">
+		<frame png="halo3/rule.png" width="128" height="2"/>
+	</bitmap>
+	<!-- (the owner's HALO CE VITA logo, 512x128 drawn whole into the title's widget: sharp on
+	the Vita's 960x544 interface layer) -->
+	<bitmap name="h3/title" fit="widget">
+		<frame png="halo3/title_halo.png" width="512" height="128"/>
+	</bitmap>
+	<!-- (the nameplate in the profile's primary colour: frame 0 none - Halo 3's green -, then the
+	game's eighteen colours in its order, as the swatches, then the platform's 24 (player_cosmetics.h):
+	menu_functions.c h3_nameplate_update) -->
+	<bitmap name="h3/nameplate">
+		<frame png="halo3/nameplate.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_00.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_01.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_02.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_03.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_04.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_05.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_06.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_07.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_08.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_09.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_10.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_11.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_12.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_13.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_14.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_15.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_16.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_17.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_18.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_19.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_20.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_21.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_22.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_23.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_24.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_25.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_26.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_27.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_28.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_29.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_30.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_31.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_32.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_33.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_34.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_35.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_36.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_37.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_38.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_39.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_40.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_41.png" width="256" height="16"/>
+	</bitmap>
+	<bitmap name="h3/server_plate">
+		<frame png="halo3/server_plate.png" width="256" height="16"/>
+	</bitmap>
+	<bitmap name="h3/glyph_start">
+		<frame png="halo3/glyph_start.png" width="16" height="16"/>
+	</bitmap>
+	<strings name="h3/main_items">
+		<string text="START SOLO GAME"/>
+		<string text="CAMPAIGN"/>
+		<string text="MULTIPLAYER"/>
+		<string text="FORGE"/>
+		<string text="Settings"/>
+		<string text="1 Player"/>
+		<string text="ONLINE NOW"/>
+		<string text="FILE SHARE"/>
+		<!-- (8: FORGE's "coming later" words, kept for the indices after it) -->
+		<string text="Build your own maps with anything from\nany map. It comes in a later update."/>
+		<string text="Save your maps and games and share them\nwith friends. It comes in a later update."/>
+		<string text="Back"/>
+		<string text="CUSTOMIZATION"/>
+		<string text="MOD MANAGER"/>
+		<string text="FRIENDS"/>
+	</strings>
+
+	<!-- the items (no START SOLO GAME: the owner's, CAMPAIGN does it): CAMPAIGN opens the
+	campaign's profile screen, the Xbox's "load campaign" (the Halo 3 SELECT PROFILE stands for it,
+	halo3/profiles.xml, and makes the first profile there: not the Xbox's "new game if no plyr
+	profiles", which typed it on the Xbox's keyboard); MULTIPLAYER the Xbox's multiplayer screen
+	(OpenCE's stands for it, with the server browser); FORGE its lobby (halo3/forge_lobby.xml); FILE
+	SHARE the files this PS Vita keeps (halo3/fileshare.xml: map variants); MOD MANAGER the player's
+	custom maps and mods (halo3/mods.xml: off and on, details, delete), beside FILE SHARE, where
+	Halo 3 keeps the player's content; CUSTOMIZATION the player profiles' settings, the Xbox's (the
+	Halo 3 CUSTOMIZATION stands for them, halo3/customize.xml) -->
+	<widget name="h3/main/campaign" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="1">
+		<on event="a start" open="ui\shell\main_menu\load_campaign_player_profile" label="load_campaign"/>
+	</widget>
+	<widget name="h3/main/multiplayer" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="2">
+		<on event="a start" open="ui\shell\main_menu\multiplayer_type_select\multiplayer_type_select_screen" label="multiplayer"/>
+	</widget>
+	<widget name="h3/main/forge" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="3">
+		<on event="a start" open="h3/forge/lobby"/>
+	</widget>
+	<widget name="h3/main/fileshare" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="7">
+		<on event="a start" run="port fileshare enter" open="h3/fileshare/screen"/>
+	</widget>
+	<widget name="h3/main/mods" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="12">
+		<on event="a start" run="port h3 mods init" open="h3/mods/screen"/>
+	</widget>
+	<widget name="h3/main/customization" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="11">
+		<on event="a start" open="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen" label="settings"/>
+	</widget>
+	<!-- (FRIENDS: the friends list, halo3/friends.xml: codes, requests, presence, Join, Invite) -->
+	<widget name="h3/main/friends" type="text" width="190" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/main_items" string_index="13">
+		<on event="a start" open="h3/friends/screen"/>
+	</widget>
+	<widget name="h3/main/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/main/campaign" x="0" y="0"/>
+		<child widget="h3/main/multiplayer" x="0" y="20"/>
+		<child widget="h3/main/forge" x="0" y="40"/>
+		<child widget="h3/main/fileshare" x="0" y="60"/>
+		<child widget="h3/main/mods" x="0" y="80"/>
+		<child widget="h3/main/customization" x="0" y="100"/>
+		<child widget="h3/main/friends" x="0" y="120"/>
+	</widget>
+
+	<widget name="h3/main/haze" left="0" top="0" width="640" height="480" bitmap="h3/haze"/>
+	<widget name="h3/main/column" left="8" top="266" width="190" height="214" bitmap="h3/menu_column"/>
+	<widget name="h3/main/rule1" left="8" top="290" width="190" height="2" bitmap="h3/rule"/>
+	<widget name="h3/main/rule2" left="8" top="440" width="190" height="2" bitmap="h3/rule"/>
+	<widget name="h3/main/start_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_start"/>
+	<widget name="h3/main/settings" type="text" left="36" top="445" width="150" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="0" text_y="2" string_list="h3/main_items" string_index="4"/>
+	<!-- (Halo 3's place and size: the right half, the logo half the 640 columns wide - 38% of a
+	16:9 screen -, its top level with the column's first row; under the nameplates and the live
+	servers) -->
+	<widget name="h3/main/title" left="289" top="255" width="340" height="85" bitmap="h3/title"/>
+	<!-- (PC: "Halo MCC not found ..." when the game looked for the player's Halo: The Master Chief
+	Collection and found none, port h3 content notice, xbox_files.c; empty when found, set, and on
+	the PS Vita) -->
+	<widget name="h3/main/content_notice" type="text" left="289" top="440" width="340" height="34" font="h3/font_small" color="#FFC5D0DD" text_x="0" text_y="0">
+		<data input="port h3 content notice"/>
+	</widget>
+	<!-- ("1 Player", "3 Players": the player and the party's members, said by port h3 party plates) -->
+	<widget name="h3/main/players" type="text" left="380" top="20" width="200" height="16" font="h3/font_small" color="#FFEEF2F6" text_x="0" text_y="0"/>
+	<widget name="h3/main/nameplate" type="text" left="380" top="38" width="256" height="16" bitmap="h3/nameplate" font="h3/font_small" color="#FF10220A" text_x="22" text_y="0">
+		<data input="port h3 nameplate"/>
+	</widget>
+
+	<!-- the party, Halo 3's way (the owner: "when they join your party it should be another
+	nameplate added"): each member a nameplate of its own under the player's, the longest-standing
+	first, LEADER at the right of the leader's (the player's own too when it leads); added as they
+	join, gone as they leave, hidden out of a party and where the player's nameplate is (a live
+	lobby's players in its place). The members' plates are the nameplate's own green (members tell
+	no colour). The lobbies (multiplayer, campaign, Forge) and the main menu, whose live servers
+	move down under the last plate: menu_functions.c h3_party_plates_update -->
+	<widget name="h3/main/party_self_tag" type="text" left="548" top="38" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right"/>
+	<widget name="h3/main/party_name_1" type="text" left="402" top="56" width="146" height="16" font="h3/font_small" color="#FF10220A"/>
+	<widget name="h3/main/party_tag_1" type="text" left="548" top="56" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right"/>
+	<widget name="h3/main/party_plate_1" left="380" top="56" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="h3/main/party_name_1"/>
+		<child widget="h3/main/party_tag_1"/>
+	</widget>
+	<widget name="h3/main/party_name_2" type="text" left="402" top="74" width="146" height="16" font="h3/font_small" color="#FF10220A"/>
+	<widget name="h3/main/party_tag_2" type="text" left="548" top="74" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right"/>
+	<widget name="h3/main/party_plate_2" left="380" top="74" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="h3/main/party_name_2"/>
+		<child widget="h3/main/party_tag_2"/>
+	</widget>
+	<widget name="h3/main/party_name_3" type="text" left="402" top="92" width="146" height="16" font="h3/font_small" color="#FF10220A"/>
+	<widget name="h3/main/party_tag_3" type="text" left="548" top="92" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right"/>
+	<widget name="h3/main/party_plate_3" left="380" top="92" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="h3/main/party_name_3"/>
+		<child widget="h3/main/party_tag_3"/>
+	</widget>
+	<widget name="h3/main/party_name_4" type="text" left="402" top="110" width="146" height="16" font="h3/font_small" color="#FF10220A"/>
+	<widget name="h3/main/party_tag_4" type="text" left="548" top="110" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right"/>
+	<widget name="h3/main/party_plate_4" left="380" top="110" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="h3/main/party_name_4"/>
+		<child widget="h3/main/party_tag_4"/>
+	</widget>
+	<widget name="h3/main/party_name_5" type="text" left="402" top="128" width="146" height="16" font="h3/font_small" color="#FF10220A"/>
+	<widget name="h3/main/party_tag_5" type="text" left="548" top="128" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right"/>
+	<widget name="h3/main/party_plate_5" left="380" top="128" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="h3/main/party_name_5"/>
+		<child widget="h3/main/party_tag_5"/>
+	</widget>
+	<widget name="h3/main/party_name_6" type="text" left="402" top="146" width="146" height="16" font="h3/font_small" color="#FF10220A"/>
+	<widget name="h3/main/party_tag_6" type="text" left="548" top="146" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right"/>
+	<widget name="h3/main/party_plate_6" left="380" top="146" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="h3/main/party_name_6"/>
+		<child widget="h3/main/party_tag_6"/>
+	</widget>
+	<widget name="h3/main/party_name_7" type="text" left="402" top="164" width="146" height="16" font="h3/font_small" color="#FF10220A"/>
+	<widget name="h3/main/party_tag_7" type="text" left="548" top="164" width="84" height="16" font="h3/font_small" color="#FF10220A" align="right"/>
+	<widget name="h3/main/party_plate_7" left="380" top="164" width="256" height="16" bitmap="h3/nameplate">
+		<child widget="h3/main/party_name_7"/>
+		<child widget="h3/main/party_tag_7"/>
+	</widget>
+	<widget name="h3/main/party_plates">
+		<data input="port h3 party plates"/>
+		<child widget="h3/main/party_self_tag"/>
+		<child widget="h3/main/party_plate_1"/>
+		<child widget="h3/main/party_plate_2"/>
+		<child widget="h3/main/party_plate_3"/>
+		<child widget="h3/main/party_plate_4"/>
+		<child widget="h3/main/party_plate_5"/>
+		<child widget="h3/main/party_plate_6"/>
+		<child widget="h3/main/party_plate_7"/>
+	</widget>
+
+	<!-- the live servers (port h3 servers: the three with the most players, hidden with none) -->
+	<widget name="h3/main/servers_label" type="text" left="380" top="62" width="256" height="16" font="h3/font_small" color="#FF9FB6CC" text_x="0" text_y="1" string_list="h3/main_items" string_index="6"/>
+	<widget name="h3/main/server_1_name" type="text" left="380" top="80" width="196" height="16" font="h3/font_small" color="#FFEEF2F6" text_x="22" text_y="1"/>
+	<widget name="h3/main/server_1_count" type="text" left="576" top="80" width="56" height="16" font="h3/font_small" color="#FFDDE6F0" align="right" text_y="1"/>
+	<widget name="h3/main/server_1" left="380" top="80" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/main/server_1_name"/>
+		<child widget="h3/main/server_1_count"/>
+	</widget>
+	<widget name="h3/main/server_2_name" type="text" left="380" top="98" width="196" height="16" font="h3/font_small" color="#FFEEF2F6" text_x="22" text_y="1"/>
+	<widget name="h3/main/server_2_count" type="text" left="576" top="98" width="56" height="16" font="h3/font_small" color="#FFDDE6F0" align="right" text_y="1"/>
+	<widget name="h3/main/server_2" left="380" top="98" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/main/server_2_name"/>
+		<child widget="h3/main/server_2_count"/>
+	</widget>
+	<widget name="h3/main/server_3_name" type="text" left="380" top="116" width="196" height="16" font="h3/font_small" color="#FFEEF2F6" text_x="22" text_y="1"/>
+	<widget name="h3/main/server_3_count" type="text" left="576" top="116" width="56" height="16" font="h3/font_small" color="#FFDDE6F0" align="right" text_y="1"/>
+	<widget name="h3/main/server_3" left="380" top="116" width="256" height="16" bitmap="h3/server_plate">
+		<child widget="h3/main/server_3_name"/>
+		<child widget="h3/main/server_3_count"/>
+	</widget>
+	<widget name="h3/main/servers">
+		<data input="port h3 servers"/>
+		<child widget="h3/main/servers_label"/>
+		<child widget="h3/main/server_1"/>
+		<child widget="h3/main/server_2"/>
+		<child widget="h3/main/server_3"/>
+	</widget>
+
+	<!-- the "coming later" panel for FILE SHARE: Halo 3's dialog, over the haze (FORGE opens its
+	lobby, halo3/forge_lobby.xml) -->
+	<bitmap name="h3/panel">
+		<frame png="halo3/panel.png" width="64" height="64"/>
+	</bitmap>
+	<bitmap name="h3/strip">
+		<frame png="halo3/strip.png" width="64" height="16"/>
+	</bitmap>
+	<bitmap name="h3/glyph_circle">
+		<frame png="halo3/glyph_circle.png" width="16" height="16"/>
+	</bitmap>
+	<widget name="h3/soon/panel" left="120" top="150" width="400" height="160" bitmap="h3/panel"/>
+	<widget name="h3/soon/strip" left="120" top="290" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/soon/rule" left="120" top="180" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/soon/b_butn" left="132" top="292" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/soon/back" type="text" left="152" top="291" width="120" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/soon/fileshare_title" type="text" left="132" top="156" width="376" height="22" font="h3/font_title" color="#FFF2F6FA" string_list="h3/main_items" string_index="7"/>
+	<widget name="h3/soon/fileshare_text" type="text" left="132" top="194" width="376" height="80" font="h3/font_small" color="#FFCFD9E3" string_list="h3/main_items" string_index="9"/>
+	<widget name="h3/soon/fileshare" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/soon/panel"/>
+		<child widget="h3/soon/rule"/>
+		<child widget="h3/soon/strip"/>
+		<child widget="h3/soon/fileshare_title"/>
+		<child widget="h3/soon/fileshare_text"/>
+		<child widget="h3/soon/b_butn"/>
+		<child widget="h3/soon/back"/>
+	</widget>
+
+	<!-- (scene="ring": behind the main menu the ring's own flight, ui.map's ring_loop, woken
+	again after a lobby's camera: menu_functions.c h3 scenes) -->
+	<widget name="h3/main/screen" flags="pass_unhandled_to_focused_child" scene="ring">
+		<on event="created" run="main menu intialize" label="ring_loop"/>
+		<on event="created" run="port h3 servers on"/>
+		<on event="created" run="port h3 scene"/>
+		<on event="deleted" run="port h3 servers off"/>
+		<on event="b back" run="NULL"/>
+		<on event="start" run="port settings panel" open="ui\shell\main_menu\settings_select\player_setup\player_profile_select_screen" label="settings"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/main/column"/>
+		<child widget="h3/main/rule2"/>
+		<child widget="h3/main/start_butn"/>
+		<child widget="h3/main/settings"/>
+		<child widget="h3/main/title"/>
+		<child widget="h3/main/content_notice"/>
+		<child widget="h3/main/players"/>
+		<child widget="h3/main/nameplate"/>
+		<child widget="h3/main/party_plates"/>
+		<child widget="h3/main/servers"/>
+		<child widget="h3/main/list" x="8" y="268"/>
+	</widget>
+</menus>

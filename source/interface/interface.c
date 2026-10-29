@@ -106,6 +106,8 @@ symbols in this file:
 #include "units/units.h"
 #ifdef HALO_LINUX
 #include "latency_meter.h"
+#include "game_chat.h"
+#include "pc_text_entry_overlay.h"
 #endif
 
 /* ---------- constants */
@@ -481,6 +483,21 @@ void interface_draw_fullscreen_overlays(
 	/* port: a network game's round trip to the host
 	(port/linux/game/latency_meter.c) */
 	latency_meter_draw();
+	/* port: the in-game chat's lines and its quick chat wheel, the
+	party's lines among them (port/linux/game/game_chat.c) */
+	game_chat_draw();
+#ifndef HALO_VITA
+	/* port: the PC build's text box, over all of it
+	(port/linux/game/pc_text_entry_overlay.c) */
+	pc_text_entry_overlay_draw();
+#endif
+	/* port: the Online menus' fade between their backdrop's spots, over
+	everything (port/linux/game/menu_functions.c) */
+	{
+		extern void menu_functions_fade_draw(void);
+
+		menu_functions_fade_draw();
+	}
 #endif
 	main_framerate_render();
 	render_debug_profile();
@@ -850,6 +867,13 @@ void interface_draw_screen(
 		rasterizer_screen_effect(NULL);
 	}
 
+#ifdef HALO_LINUX
+	/* (port) the 3D picture is done, its screen effect too (the scope's
+	zoom and mask, the night vision, a cinematic's filter: they read the
+	picture back): the HUD and what follows at the display's resolution
+	(rasterizer_xbox.c rasterizer_interface_begin) */
+	rasterizer_interface_begin();
+#endif
 	hud_draw_screen();
 	game_engine_post_rasterize();
 

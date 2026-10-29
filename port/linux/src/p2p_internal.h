@@ -51,18 +51,24 @@ code or public game never reaches a Vita's game, nor a Vita's a PC's */
 #define P2P_SIGNAL_PREFIX "hceu"
 #endif
 
-/* ... and on the crossplay wire (network_wire.h: OpenCE's, which a Vita
-speaks with Crossplay on) OpenCE's: the wire's, P2P_WIRE_SIGNAL_PREFIX,
-chosen at run time (the switch is read once, at the network's start) */
+/* ... and on the crossplay wire (network_wire.h: OpenCE's, which a game
+hosted or joined on that wire speaks) OpenCE's. Each game signals on its
+own wire's (P2P_WIRE_PREFIX: 0 the legacy wire, 1 the crossplay wire); the
+server browser reads both (p2p_wire_count: a build that plays as a Vita) */
 #define P2P_CROSSPLAY_SIGNAL_PREFIX "hceu"
-#define P2P_WIRE_SIGNAL_PREFIX (network_wire_crossplay() ? P2P_CROSSPLAY_SIGNAL_PREFIX : P2P_SIGNAL_PREFIX)
+#define P2P_WIRE_PREFIX(crossplay) ((crossplay) ? P2P_CROSSPLAY_SIGNAL_PREFIX : P2P_SIGNAL_PREFIX)
 
-/* the prefix of a public game's slot (a key hash in hex follows), and the
-topic of queries (p2p_lobby.c): the wire's (pointers, not literals) */
-#define P2P_LOBBY_SLOT_PREFIX \
-	(network_wire_crossplay() ? P2P_CROSSPLAY_SIGNAL_PREFIX "/3/lobby/s/" : P2P_SIGNAL_PREFIX "/3/lobby/s/")
-#define P2P_LOBBY_QUERY_TOPIC \
-	(network_wire_crossplay() ? P2P_CROSSPLAY_SIGNAL_PREFIX "/3/lobby/q" : P2P_SIGNAL_PREFIX "/3/lobby/q")
+/* the prefix of a public game's slot on a wire (a key hash in hex
+follows), and the topic of its queries (p2p_lobby.c) */
+#define P2P_LOBBY_SLOT_PREFIX(crossplay) \
+	((crossplay) ? P2P_CROSSPLAY_SIGNAL_PREFIX "/3/lobby/s/" : P2P_SIGNAL_PREFIX "/3/lobby/s/")
+#define P2P_LOBBY_QUERY_TOPIC(crossplay) \
+	((crossplay) ? P2P_CROSSPLAY_SIGNAL_PREFIX "/3/lobby/q" : P2P_SIGNAL_PREFIX "/3/lobby/q")
+/* the wires this build signals and browses on: 2 (the legacy wire and the
+crossplay one) where the crossplay wire is available (network_wire.h), else
+1 (the legacy wire alone: the dedicated server, ad hoc play, a build that
+does not play as a Vita) */
+#define p2p_wire_count() (network_wire_crossplay_available() ? 2 : 1)
 
 /* internet play's state (p2p.c), which the game's threads and the p2p
 thread share */
@@ -144,11 +150,16 @@ int p2p_session_retired(const unsigned char *secret);
 /* an invite that arrived on the p2p thread (from Discord, or another copy
 of the game) */
 void p2p_invite_received(const char *text);
-/* the invite link a code being looked up led to (p2p_signal.c) */
-void p2p_code_found(const char *text);
+/* the invite link a code being looked up led to (p2p_signal.c), and the
+wire its host's game plays (its record says: 0 legacy, 1 crossplay) */
+void p2p_code_found(const char *text, int crossplay);
 /* an invite link joined, as p2p_join_invite does, under p2p_lock (the
-server browser's, p2p_lobby.c) */
-int p2p_join_invite_locked(const char *text);
+server browser's, p2p_lobby.c), its host's game on that wire (0 legacy, 1
+crossplay, -1 not known: asked on both) */
+int p2p_join_invite_locked(const char *text, int crossplay);
+/* the wire of the game being joined through signalling, once its host
+answered on it (p2p_signal.c) */
+void p2p_join_wire_known(int crossplay);
 /* the line p2p_status shows (and logs); under p2p_lock */
 void p2p_set_status(const char *format, ...);
 /* a new invite (token) for the game hosted, if its invite was listed in the
@@ -164,9 +175,11 @@ void p2p_signal_start(void);
 void p2p_signal_select_sets(int *read, int *read_count, int *write, int *write_count, int maximum_count);
 /* services the sockets and timers; called from the p2p thread each pass */
 void p2p_signal_update(const int *read, int read_count, const int *write, int write_count);
-/* hosting: listen for joiners who hold this token, and keep the invite
-under the code ("ABCD-EFGH"; NULL for none) */
-void p2p_signal_host(const unsigned char *token, const char *code);
+/* hosting: listen for joiners who hold this token, on the game's wire (0
+legacy, 1 crossplay), and keep the invite under the code ("ABCD-EFGH"; NULL
+for none: codes are this build's own, looked up on the legacy wire's topics
+whatever the game's wire, their record saying which it is) */
+void p2p_signal_host(const unsigned char *token, const char *code, int crossplay);
 void p2p_signal_stop_hosting(void);
 /* looking up a code's eight characters (no dash): its invite comes back
 through p2p_code_found; with host (an identifier; NULL for any), only a
@@ -176,8 +189,10 @@ void p2p_signal_stop_lookup(void);
 /* joining: ask the host whose public key has this hash (p2p_key_hash),
 holding this token, until it answers (or p2p_signal_stop_joining); each call
 asks anew, with a new nonce (as after the session with the host ended
-before the tunnel reached it: the host makes one session of a request) */
-void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token);
+before the tunnel reached it: the host makes one session of a request). On
+the wire of its game (0 legacy, 1 crossplay), or -1 not known (an invite
+link: both asked, and the one the host answers on kept, p2p_join_wire_known) */
+void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token, int crossplay);
 void p2p_signal_stop_joining(void);
 /* whether any broker is connected */
 int p2p_signal_connected(void);
@@ -188,18 +203,26 @@ one entry a line, "#" starting a comment. 0 if the file could not be read
 (text is then empty) */
 int p2p_list_setting(const char *override_setting, const char *file_setting, char *text, size_t size);
 /* the server browser's topics: the own slot and the queries (a listed
-game), and every slot (browsing) */
-void p2p_signal_lobby_topics(int listed, int browsing);
+game, on its wire: listed_crossplay), and every slot of each wire
+(browsing) */
+void p2p_signal_lobby_topics(int listed, int listed_crossplay, int browsing);
 /* publishes a listing to the own slot on every broker, retained, and again
 on each broker that connects later; closing: a tombstone, after which the
 slot is cleared and nothing is published again */
 void p2p_signal_lobby_publish(const unsigned char *listing, int size, int closing);
 /* asks the hosts to publish again */
 void p2p_signal_lobby_query(void);
+/* friends' queue published on every ready broker now, whatever their
+buckets (internet play stopping, the game exiting) */
+void p2p_signal_friends_flush(void);
 /* the game is quitting: the tombstone published (p2p_signal_lobby_publish)
 and the slot cleared on every ready broker now, whatever their buckets, and
 the connections closed cleanly */
 void p2p_signal_lobby_quit(void);
+/* internet play stopping: the lobby quit as above, every broker's
+connection closed and nothing hosted, joined, looked up or browsed (what
+lasts the run kept); under p2p_lock */
+void p2p_signal_stop(void);
 /* the player just asked for the brokers (opened the server browser,
 refreshed it, hosted, looked up a code): a broker waiting to try again after
 failing tries now (at most once each P2P_SIGNAL_KICK_INTERVAL ms) */
@@ -241,6 +264,9 @@ void p2p_adhoc_start(unsigned short tunnel_port);
 /* offers the group's machines to p2p.c as peers; the p2p thread's, each
 pass, under p2p_lock */
 void p2p_adhoc_update(void);
+/* stops the bridge: its threads ended, its relays and the group's port
+closed (p2p_shutdown; not under p2p_lock) */
+void p2p_adhoc_stop(void);
 
 /* ---------- p2p_crypto.c */
 
@@ -310,8 +336,9 @@ enum
 /* the key of a password (Argon2id: P2P_PASSWORD_KEY_SIZE bytes), for the
 host whose Ed25519 key salt is (P2P_KEY_SIZE bytes): it takes half a second
 on a Vita, so that guessing passwords at a listing takes long. 0 if there
-was no memory for it (the key is then random: nothing opens with it) */
-int p2p_password_key(const char *password, const unsigned char *salt, unsigned char *key);
+was no memory for it (the key is then random: nothing opens with it). Of a
+wire's game: the passes are the wire's (crossplay: OpenCE's three) */
+int p2p_password_key(const char *password, const unsigned char *salt, unsigned char *key, int crossplay);
 /* a token (P2P_TOKEN_SIZE bytes) sealed with a password's key, bound to the
 host's Ed25519 key (P2P_SEALED_TOKEN_SIZE bytes); and opened: 0 if the key
 is not the one it was sealed with (a wrong password), or it was altered */
@@ -319,6 +346,21 @@ void p2p_seal_token(const unsigned char *key, const unsigned char *signing_key, 
 	unsigned char *sealed);
 int p2p_unseal_token(const unsigned char *key, const unsigned char *signing_key, const unsigned char *sealed,
 	unsigned char *token);
+
+/* a friend identity's backup (p2p_friends_backup.inc): the key of its
+password (Argon2id of `blocks` KiB and `passes` passes, P2P_PASSWORD_KEY_SIZE
+bytes; 0 if there was no memory for it); its contents sealed with
+XChaCha20-Poly1305 (a 24-byte nonce; sealed: the ciphertext, size bytes,
+then the 16-byte tag) bound to additional data, and opened (0: the key is
+not the one it was sealed with - a wrong password - or it was altered;
+nothing is written to plaintext then); a secret wiped */
+int p2p_backup_key(const char *password, int password_size, const unsigned char *salt, int salt_size,
+	unsigned long blocks, unsigned long passes, unsigned char *key);
+void p2p_backup_seal(const unsigned char *key, const unsigned char *nonce, const void *additional,
+	int additional_size, const void *plaintext, int size, unsigned char *sealed);
+int p2p_backup_open(const unsigned char *key, const unsigned char *nonce, const void *additional,
+	int additional_size, const unsigned char *sealed, int size, unsigned char *plaintext);
+void p2p_wipe(void *secret, int size);
 
 /* ---------- p2p_lobby.c: public games' listings */
 
@@ -346,9 +388,18 @@ struct p2p_listing
 	char map[P2P_LISTING_MAP_SIZE + 1];
 	char gametype[P2P_LISTING_GAMETYPE_SIZE + 1];
 	unsigned char player_count, maximum_player_count, engine_type;
+	/* of the players, a dedicated server's bots (its listing's stamp) */
+	unsigned char bot_count;
 	unsigned char open, in_progress, has_teams, pc_map, coop;
 	/* a dedicated server's (no player of its own) */
 	unsigned char dedicated;
+	/* its wire (heard on its topics: network_wire.h), whether a Vita hosts
+	it (the legacy wire's always; the crossplay wire's by its listing's
+	bit), and what hosts it (crossplay_guard.h's CROSSPLAY_PLATFORM_*) */
+	unsigned char crossplay, vita_host, platform;
+	/* this project's marks of its host (crossplay_guard.h's CROSSPLAY_HOST_*:
+	the PC build; Vitas only), from its listing's stamp */
+	unsigned char marks;
 	/* joining it failed this run */
 	unsigned char failed;
 	/* milliseconds, -1 if not known */
@@ -362,6 +413,16 @@ struct p2p_listing
 	unsigned char locked;
 	unsigned char signing_key[P2P_KEY_SIZE];
 	unsigned char sealed_token[P2P_SEALED_TOKEN_SIZE];
+	/* the network version its listing announces; and whether it is one this
+	build does not join on its wire (p2p_lobby_other_entries: shown, never
+	joined - no invite, no token kept) */
+	unsigned short version;
+	unsigned char other_version;
+	/* (a crossplay listing of OpenCE's network version 37 on) the game's
+	kind, its stamp's first byte: an OpenCE game type's number in the low
+	seven bits (1 SWAT, 2 Infection, 3 Gun Game), Hardcore in bit 7; 0 a
+	stock game (ChupathingyCE 251bba5c, GPL) */
+	unsigned char kind;
 };
 
 /* a copy of the public games found, in the order shown (the most players
@@ -391,16 +452,117 @@ int p2p_lobby_hosting_status_locked(char *text, int size);
 (p2p_lobby_reach_brokers): the p2p thread starts signalling */
 int p2p_lobby_brokers_wanted(void);
 int p2p_lobby_browsing(void);
-/* a message on a slot (its key hash in hex) through a broker; retained: the
-slot's retained copy, sent on subscribing */
-void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, int size, int retained);
-/* a query was heard */
-void p2p_lobby_query_heard(void);
+/* whether listings wait for their signatures' checks (under p2p_lock): the
+p2p thread's passes LOOP_INTERVAL apart until none do */
+int p2p_lobby_pending(void);
+/* a message on a slot of a wire (its key hash in hex) through a broker;
+retained: the slot's retained copy, sent on subscribing */
+void p2p_lobby_slot_heard(int crossplay, const char *hash_text, const unsigned char *payload, int size, int retained);
+/* a query was heard on a wire's topic */
+void p2p_lobby_query_heard(int crossplay);
 /* the game is quitting: a listed game's tombstone, and its slot cleared,
 written to the brokers at once; under p2p_lock */
 void p2p_lobby_quit(void);
-/* a key hash's slot */
-void p2p_lobby_slot_topic(const unsigned char *key_hash, char *topic, int size);
+/* internet play stopping: the lobby quit as above, the browsing and a join
+from the browser ended (the settings and the games that failed this run
+kept); under p2p_lock */
+void p2p_lobby_stop(void);
+/* a key hash's slot on a wire */
+void p2p_lobby_slot_topic(int crossplay, const unsigned char *key_hash, char *topic, int size);
+
+/* ---------- p2p_friends.c: friends (p2p_friends.h)
+
+The p2p thread calls p2p_friends_update each pass without p2p_lock (its
+work is crypto); p2p_signal.c calls the rest with p2p_lock held. Friends'
+own lock is taken after p2p_lock, never before it. */
+
+/* the topics heard: a friend code's inbox (requests) and a key's mailbox */
+enum
+{
+	P2P_FRIENDS_INBOX,
+	P2P_FRIENDS_MAILBOX,
+};
+
+/* internet play's side as friends need it, gathered under p2p_lock each
+pass (p2p.c, p2p_lobby_friends_view) */
+struct p2p_friends_host
+{
+	/* internet play runs (network.online; not ad hoc play) */
+	int online;
+	/* the wire (network_wire.h) of the game hosted or joined (a friend's
+	presence and invites carry it; a game of either wire is joined on its
+	own), and whether a PC hosts it (a PC's game joined) */
+	int crossplay;
+	int pc_host;
+	/* (hosting) this project's marks of the game (network_wire.h): its host
+	is the PC build; it takes Vitas only */
+	int host_pc_build, vitas_only;
+	/* hosting for the internet: its invite (the host's key hash and the
+	token), and as the server browser has it - listed (public), a password
+	(set, or its key being worked out), open, its players and most */
+	int hosting;
+	unsigned char key_hash[P2P_KEY_HASH_SIZE];
+	unsigned char token[P2P_TOKEN_SIZE];
+	int listed, locked, open, players, maximum;
+	/* (not hosting) joined another's game through internet play - its host
+	reached as the invite, a code or the server browser led - with that
+	invite, and whether the game is a locked one (listed with a password:
+	its invite is never passed on, the party's follow included) */
+	int joined;
+	unsigned char joined_hash[P2P_KEY_HASH_SIZE];
+	unsigned char joined_token[P2P_TOKEN_SIZE];
+	int joined_locked;
+	/* (hosting a game with a password) its token sealed with the password's
+	key, and the host's Ed25519 key: what a friend's presence carries, so
+	that a friend opens the game with the password (has_sealed: ready) */
+	int has_sealed;
+	unsigned char signing_key[P2P_KEY_SIZE];
+	unsigned char sealed_token[P2P_SEALED_TOKEN_SIZE];
+};
+void p2p_friends_update(const struct p2p_friends_host *host);
+/* whether friends want the brokers (internet play runs, friends are on) */
+int p2p_friends_wanted(void);
+/* the topics to subscribe ("" for none) */
+void p2p_friends_topics(char *inbox, char *mailbox, int size);
+/* a message heard on one (queued: p2p_friends_update reads it) */
+void p2p_friends_heard(int which, const unsigned char *payload, int size);
+/* the outgoing queue: the index-th message (its serial, topic, payload and
+the brokers it went through, bit n broker n): its size, or -1 past the end;
+sent through a broker; the messages that went through every ready broker
+(or are old) let go. The payload's room: P2P_FRIENDS_PAYLOAD_ROOM bytes,
+which every message fits (p2p_friends.c checks it as it builds) */
+enum
+{
+	P2P_FRIENDS_PAYLOAD_ROOM = 512,
+};
+int p2p_friends_outgoing(int index, unsigned long *serial, char *topic, int topic_size, unsigned char *payload,
+	int *sent_mask);
+void p2p_friends_outgoing_sent(unsigned long serial, int broker);
+void p2p_friends_outgoing_settle(int ready_mask);
+/* the game's players' friend cards over the tunnel (p2p.c's packet type
+7): one heard from a peer (its virtual address; from_host: the host this
+machine joined), queued; the ones to send (the index-th: its peer, 0 the
+host; its size, -1 past the end), then let go */
+void p2p_friends_tunnel_heard(unsigned long address, int from_host, const unsigned char *bytes, int size);
+int p2p_friends_tunnel_outgoing(int index, unsigned long *address, unsigned char *bytes, int capacity);
+void p2p_friends_tunnel_sent(void);
+/* internet play stopping (quitting: the game exiting, nothing more sent
+after): an offline presence queued for the last publishes */
+void p2p_friends_stopping(int quitting);
+/* (p2p_lobby.c) the hosted game as the server browser has it, into host's
+listed, locked, open, players and maximum; under p2p_lock */
+void p2p_lobby_friends_view(struct p2p_friends_host *host);
+/* (p2p_lobby.c) the hosted game's token sealed with its password's key, for
+friends (their presence: they open it with the password), and the host's
+Ed25519 key: 0 if the game has no password, or its key is not ready (made
+for the game's wire); under p2p_lock */
+int p2p_lobby_password_seal(const unsigned char *token, unsigned char *signing_key, unsigned char *sealed);
+/* (p2p_lobby.c) whether a host's game is locked: listed with a password, or
+joined from the browser with one; under p2p_lock */
+int p2p_lobby_host_locked(const unsigned char *key_hash);
+/* (p2p_lobby.c) a map's title as the lists show it ("Blood Gulch"; a Halo
+PC map or one not the Xbox's: its own name) */
+const char *p2p_lobby_map_title(const char *map, int pc_map);
 
 /* ---------- p2p_resolver_cache.c: the last good address of each name
 internet play looks up (no locks: p2p.c calls these under p2p_lock) */

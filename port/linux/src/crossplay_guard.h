@@ -2,7 +2,7 @@
 CROSSPLAY_GUARD.H
 
 The client's guardrails on the crossplay wire (docs/crossplay.md 6, task
-T11): what a Vita with Crossplay on (network_wire.h) makes of a PC game
+T11), and the browsers' tags: what a Vita (network_wire.h) makes of a PC game
 (OpenCE, ChupathingyCE, DamnationCE) before it joins, from the server
 browser's listing or a LAN advertisement, and again on the host's settings
 record. Pure: no game, no network; the browsers (menu_functions.c, the
@@ -83,6 +83,91 @@ void crossplay_guard_forget(void);
 /* the answer for automated runs, HALO_CROSSPLAY_LARGE_ANSWER (yes or no):
 1, 0, or -1 when it is not set (the player is asked) */
 int crossplay_guard_test_answer(void);
+
+/* ---------- the browsers' tags (the owner, Oct 19 2026: every row says
+whether a Vita hosts the game, or which PC build): what hosts a game, as its
+listing or advertisement tells it */
+enum crossplay_guard_platform
+{
+	/* this build's: a game on the legacy Vita wire (a Vita's, or our
+	dedicated server's), or a Vita's game on the crossplay wire (its
+	advertisement's or listing's Vita host bit, network_wire.h) */
+	CROSSPLAY_PLATFORM_VITA,
+	/* a PC build of the OpenCE family whose build is not told */
+	CROSSPLAY_PLATFORM_PC,
+	/* OpenCE (a crossplay host's advertisement with none of the others'
+	marks: OpenCE's, or a fork that adds none) */
+	CROSSPLAY_PLATFORM_OPENCE,
+	/* ChupathingyCE: its Delta bit in an advertisement (0x04), or its
+	dedicated server's listing bit (128: its own, OpenCE has no dedicated
+	server and DamnationCE's servers list on halo.milenko.org alone) */
+	CROSSPLAY_PLATFORM_CHUPA,
+	/* DamnationCE: nothing on the wire tells its hosts from OpenCE's today
+	(its 7be58b2b is 26, refused); kept for when something does */
+	CROSSPLAY_PLATFORM_DAMNATION,
+	NUMBER_OF_CROSSPLAY_PLATFORMS,
+};
+
+/* the platform of an advertised game: on the crossplay wire (crossplay:
+the version is one it joins) by its flags (flags: the advertisement's flags
+byte; 0x04 is ChupathingyCE's Delta bit from a host of up to 38, OpenCE's
+dedicated server from one of 39 on: version, docs/opence-net39-spec.md 2.1);
+a PC host of a version neither wire joins (other_version: an older or newer
+PC build) is PC */
+int crossplay_guard_platform_of_advertisement(int crossplay, int other_version, unsigned int version, int flags);
+/* whether an advertised crossplay game of that version says it is a
+dedicated server's (OpenCE 39's 0x04): a label alone, the host's word */
+int crossplay_guard_advertised_dedicated(int crossplay, unsigned int version, int flags);
+/* ... of a listed game: the legacy wire's listings are the Vitas'; on the
+crossplay wire a Vita's says so (vita_host), a dedicated server's by
+ChupathingyCE's bit (128) is ChupathingyCE's (above), one by OpenCE 39's
+(0x20: opence_dedicated) OpenCE's, the rest PC */
+int crossplay_guard_platform_of_listing(int crossplay, int vita_host, int dedicated, int opence_dedicated);
+/* the tag a browser row shows for a platform (short, printable ASCII, the
+same in every language: names): VITA, PC, OPENCE, CHUPA, DAMNATION */
+const char *crossplay_guard_tag(int platform);
+/* a row's whole badge: the tag, " SERVER" for a dedicated server's game,
+"+PC" for a Vita's game PC players can join too (the crossplay wire's),
+then crossplay_guard_badge_suffix's for a PC game's verdict (Experimental;
+none for a Vita's game, which is never large: the Vitas' 16) */
+void crossplay_guard_row_badge(char *badge, int size, int platform, int crossplay, int dedicated, int verdict);
+/* the line about a game's tag in words, for the lobbies and the panel
+("Hosted on a Vita", "Hosted on a Vita: PC players can join",
+"Hosted on PC (OpenCE)", translated) */
+const char *crossplay_guard_platform_line(int platform, int crossplay);
+
+/* ---------- this project's own marks of a host (network_wire.h: the
+listing's stamp, the advertisement's flags, a friend's presence), which
+older builds send none of: a host with none is a Vita's, taking everyone it
+used to. What another machine says: best effort, for the tags and a polite
+refusal, never a security line */
+enum
+{
+	/* the host is this project's PC build (Linux, Windows): tagged VITA
+	(PC), shown with the PC games (the browsers' PC filter and group) */
+	CROSSPLAY_HOST_PC_BUILD = 1,
+	/* its game takes Vitas only (Who can join): the PC build is refused */
+	CROSSPLAY_HOST_VITAS_ONLY = 2,
+};
+/* the tag of a host with those marks: "VITA (PC)" for the PC build's,
+else crossplay_guard_tag's */
+const char *crossplay_guard_host_tag(int platform, int marks);
+/* crossplay_guard_row_badge with the marks: the tag (VITA (PC)), and, to a
+viewer that is the PC build (viewer_pc), " VITAS ONLY" after a game it
+cannot join */
+void crossplay_guard_host_badge(char *badge, int size, int platform, int marks, int crossplay, int dedicated,
+	int verdict, int viewer_pc);
+/* whether a host with those marks is a Vita (a VITA platform, not the PC
+build): the browsers' Vita filter and group */
+int crossplay_guard_vita_game(int platform, int marks);
+/* crossplay_guard_platform_line with the marks ("Hosted on a PC (Halo CE
+Vita)") */
+const char *crossplay_guard_host_line(int platform, int marks, int crossplay);
+/* whether a viewer that is the PC build cannot join a game with those
+marks: Vitas only, on the legacy wire (crossplay 0) */
+int crossplay_guard_vitas_only(int marks, int crossplay, int viewer_pc);
+/* the refusal's text (translated) */
+const char *crossplay_guard_vitas_only_text(void);
 
 /* the browser's badge for a game's host (short, translated): on the
 crossplay wire "PC" or "PC SERVER" (a dedicated server's), on the legacy

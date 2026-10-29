@@ -26,6 +26,9 @@ enum particle_flags
 	_particle_datum_dont_draw_first_person_bit,
 	_particle_datum_dont_draw_third_person_bit,
 	_particle_datum_attached_to_local_player_bit,
+	/* (port) made for the menus' scene (particles_new_ignore_players_pvs): drawn
+	whatever the player's particle render divisor (HALO_PARTICLE_RENDER_DIVISOR) */
+	_particle_datum_menu_scene_bit,
 	NUMBER_OF_PARTICLE_FLAGS,
 };
 
@@ -178,6 +181,10 @@ void particles_disconnect_from_structure_bsp(
 	void);
 void particles_reconnect_to_structure_bsp(
 	void);
+#ifdef HALO_LINUX
+/* (port) the menus' scene's own particles: particles.c */
+extern boolean particles_new_ignore_players_pvs;
+#endif
 void particle_new(
 	struct new_particle_data const *data);
 void particles_update(

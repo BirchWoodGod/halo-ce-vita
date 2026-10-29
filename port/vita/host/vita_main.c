@@ -14,6 +14,7 @@ ux0:data/haloce-vita/log.txt (stderr).
 #include <psp2/kernel/clib.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/kernel/error.h>
 #include <psp2/appmgr.h>
 #include <psp2/kernel/sysmem.h>
 #include <psp2/io/dirent.h>
@@ -77,7 +78,8 @@ static int thread_trampoline(SceSize size, void *argument)
 	return 0;
 }
 
-int vita_host_thread_start_priority(const char *name, void (*function)(void *), void *argument, int core, int priority)
+int vita_host_thread_start_stack(const char *name, void (*function)(void *), void *argument, int core, int priority,
+	int stack_size)
 {
 	struct thread_start start;
 	SceUID thread;
@@ -85,12 +87,17 @@ int vita_host_thread_start_priority(const char *name, void (*function)(void *), 
 
 	start.function = function;
 	start.argument = argument;
-	thread = sceKernelCreateThread(name, thread_trampoline, priority, 1024 * 1024, 0,
+	thread = sceKernelCreateThread(name, thread_trampoline, priority, stack_size, 0,
 		core >= 0 && core < 3 ? masks[core] : 0, NULL);
 	if (thread < 0)
 		return -1;
 	sceKernelStartThread(thread, sizeof(start), &start);
 	return 0;
+}
+
+int vita_host_thread_start_priority(const char *name, void (*function)(void *), void *argument, int core, int priority)
+{
+	return vita_host_thread_start_stack(name, function, argument, core, priority, 1024 * 1024);
 }
 
 int vita_host_thread_start(const char *name, void (*function)(void *), void *argument, int core)
@@ -101,6 +108,50 @@ int vita_host_thread_start(const char *name, void (*function)(void *), void *arg
 void vita_host_sleep_us(unsigned long microseconds)
 {
 	sceKernelDelayThread((SceUInt)microseconds);
+}
+
+/* (vita_host.h) a kernel semaphore: no pthread data needed, so any thread
+may wait on it */
+#define WAKE_MAXIMUM 8
+
+int vita_host_wake_create(const char *name)
+{
+	return sceKernelCreateSema(name, 0, 0, WAKE_MAXIMUM, NULL);
+}
+
+int vita_host_wake_wait(int id, unsigned long timeout_us)
+{
+	SceUInt timeout = (SceUInt)timeout_us;
+	int result = sceKernelWaitSema(id, 1, timeout_us ? &timeout : NULL);
+
+	if (result == (int)SCE_KERNEL_ERROR_WAIT_TIMEOUT)
+		return 1;
+	return result < 0 ? result : 0;
+}
+
+int vita_host_wake_poll(int id)
+{
+	return sceKernelPollSema(id, 1) < 0;
+}
+
+void vita_host_wake_delete(int id)
+{
+	if (id >= 0)
+		sceKernelDeleteSema(id);
+}
+
+void vita_host_wake_signal(int id)
+{
+	/* (past the most it refuses: the waiter has a signal already) */
+	sceKernelSignalSema(id, 1);
+}
+
+/* the calling thread's priority (64-191, the lower the sooner): the Ogg
+Vorbis decoder below every other thread (custom_edition_sounds.c) */
+void vita_host_thread_priority_set(int priority)
+{
+	if (priority >= 64 && priority <= 191)
+		sceKernelChangeThreadPriority(sceKernelGetThreadId(), priority);
 }
 
 void vita_host_pin_current_thread(int core)
@@ -145,6 +196,11 @@ when the program's data segment crosses a megabyte; the contiguous
 allocator lays its blocks out where v1.0 put them all the same
 (port/linux/src/xbox_memory.c, VITA_LAYOUT_TOP). */
 static void io_bench(void);
+
+int vita_host_memory_window_made(void)
+{
+	return log_thread_allowed;
+}
 
 void *vita_host_arena(unsigned long *size)
 {
@@ -653,6 +709,8 @@ static void heartbeat_thread(void *unused)
 			if (!idle_minutes || now - vita_host_last_input_us < (unsigned long long)idle_minutes * 60000000ULL)
 				sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
 		}
+		/* the battery's drain in halo.log (vita_clocks.c) */
+		vita_host_battery_log();
 		if (!write_beats)
 			continue;
 		file = sceIoOpen(VITA_DATA_DIRECTORY "/heartbeat.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
@@ -682,21 +740,28 @@ static void tripwire_thread(void *argument)
 	*(volatile int *)48 = 0;
 }
 
+/* (frame_timing.c) progress the game thread waits on: a pack's read at a
+map's load, a map's copy into the cache partition */
+extern volatile unsigned long halo_progress_counter;
+
 static void watchdog_thread(void *unused)
 {
-	unsigned long last = 0, same = 0;
+	unsigned long last = 0, same = 0, last_progress = 0;
 
 	(void)unused;
 	for (;;)
 	{
-		unsigned long now;
+		unsigned long now, progress;
 
 		sceKernelDelayThread(1000000);
 		now = halo_present_counter;
+		progress = halo_progress_counter;
 		if (now < 10)
 			continue;
-		same = now == last ? same + 1 : 0;
+		/* (no present, but reads moving: a long load, not a hang) */
+		same = now == last && progress == last_progress ? same + 1 : 0;
 		last = now;
+		last_progress = progress;
 		if (same >= 8)
 		{
 			/* 8 s without a present: logged, and HALO_HANG_CRASH=1 makes it
@@ -714,6 +779,51 @@ static void watchdog_thread(void *unused)
 	}
 }
 
+/* ---------- thread-local storage
+
+The game's __thread variables (the file layer's background copy and its
+stop, GetLastError, the APC queues, the scene packs' worker flags) are
+vitasdk GCC's emulated TLS: libgcc's __emutls_get_address keeps one value
+per thread only when it takes the threads as running, __gthread_active_p,
+which is a weak reference to pthread_cancel - and a weak reference pulls
+nothing out of libpthread.a. Nothing called pthread_cancel, so through
+insider.17 every __thread variable was ONE for the whole game: the map
+copy's thread marked itself a background one with a stop
+(platform_file_background_begin) for every thread, and once a copy was
+asked to stop - a host choosing another map while the menus' copy ran -
+every read and write of every thread ended at once with 0 bytes, until
+the next copy began, which never did: Ben's Battle Creek "cut short (0
+bytes)" (his 21 MB file), the game types that "could not be read", the
+Forge packs' builds stopping at 0%, then Blood Gulch and the main menu's
+ui.map "damaged" - the game stuck (Oct 2026). The strong reference here
+links pthread_cancel, and the check below says in the log that each
+thread has its own. */
+volatile void *halo_tls_pthread_cancel;
+static __thread int tls_probe;
+
+static void *tls_probe_thread(void *unused)
+{
+	(void)unused;
+	tls_probe = 2;
+	return NULL;
+}
+
+static void tls_check(void)
+{
+	pthread_t thread;
+
+	halo_tls_pthread_cancel = (void *)pthread_cancel;
+	tls_probe = 1;
+	if (pthread_create(&thread, NULL, tls_probe_thread, NULL) != 0)
+	{
+		vita_host_log("threads: thread-local storage not checked (no thread)");
+		return;
+	}
+	pthread_join(thread, NULL);
+	vita_host_log(tls_probe == 1 ? "threads: thread-local storage: each thread its own" :
+		"threads: thread-local storage SHARED by every thread: file calls, errors and copies will cross threads");
+}
+
 static int game_thread(SceSize arguments_size, void *arguments_data)
 {
 	static char *arguments[] = { "halo", NULL };
@@ -721,6 +831,7 @@ static int game_thread(SceSize arguments_size, void *arguments_data)
 	(void)arguments_size;
 	(void)arguments_data;
 	vita_host_thread_watch("game");
+	tls_check();
 	/* (above the game's threads, which spin at the default priority
 	while they wait on each other: at their priority it never ran) */
 	{
@@ -768,18 +879,9 @@ int main(int argc, char **argv)
 	/* the port's text in the Vita's language, from here on (lang.c; the
 	settings' Language row's choice is applied when they are loaded) */
 	vita_settings_language_init();
-	/* the clocks the game needs as floors: raised to them, never lowered
-	from more (a 500 MHz profile of PSVshell or another overclocking plugin
-	stays; 444/222/222/166 are the system's highest otherwise) - from
-	Bruno Santana's modified build */
-	if (scePowerGetArmClockFrequency() < 444)
-		scePowerSetArmClockFrequency(444);
-	if (scePowerGetBusClockFrequency() < 222)
-		scePowerSetBusClockFrequency(222);
-	if (scePowerGetGpuClockFrequency() < 222)
-		scePowerSetGpuClockFrequency(222);
-	if (scePowerGetGpuXbarClockFrequency() < 166)
-		scePowerSetGpuXbarClockFrequency(166);
+	/* the clocks the game needs as floors, raised to (vita_clocks.c: the
+	ones found are noted, the floors of the lower clocks in the menus) */
+	vita_host_clocks_start();
 
 	sceIoMkdir(VITA_DEFAULT_DATA_ROOT, 0777);
 	setenv("HALO_DATA_ROOT", VITA_DEFAULT_DATA_ROOT, 0);

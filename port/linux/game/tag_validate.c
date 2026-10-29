@@ -42,6 +42,7 @@ data and which the game takes as models (tag_schema_custom_edition_groups).
 #include "cseries.h"
 #include "cache/physical_memory_map.h"
 #include "tag_schema.h"
+#include "tag_relocate.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -242,6 +243,21 @@ static struct
 
 static char const tag_validate_empty_name[] = "";
 
+/* (port) a check on the scene packs' builder's thread (tag_validate_custom_
+edition_tags_isolated): its messages go to the log alone, never through the
+game's error(), which is the game thread's */
+static boolean tag_validate_log_only = FALSE;
+
+void platform_log(char const *format, ...);
+
+static void validation_report(char const *message)
+{
+	if (tag_validate_log_only)
+		platform_log("%s", message);
+	else
+		tag_validate_report(message);
+}
+
 /* ---------- prototypes */
 
 static void validate_element(struct tag_validation *validation, byte *base,
@@ -364,7 +380,7 @@ static void validation_message(
 	snprintf(message + length, sizeof(message) - length, " ");
 	length = strlen(message);
 	vsnprintf(message + length, sizeof(message) - length, format, arguments);
-	tag_validate_report(message);
+	validation_report(message);
 }
 
 /* whether size bytes at address lie in the region being checked */
@@ -1129,7 +1145,7 @@ static boolean definition_fits(
 
 			snprintf(message, sizeof(message), "the tag schema '%s' has its field '%s' at %ld..%ld, past its %ld bytes",
 				definition->name, field->name, field->offset, end, definition->size);
-			tag_validate_report(message);
+			validation_report(message);
 			return FALSE;
 		}
 		if ((field->type == _tag_schema_struct || field->type == _tag_schema_block) &&
@@ -1145,7 +1161,7 @@ static boolean definition_fits(
 			snprintf(message, sizeof(message), "the tag schema '%s' has its structure '%s' of %ld bytes in %d",
 				definition->name, field->name, ((struct tag_schema_definition const *)field->definition)->size,
 				field->size);
-			tag_validate_report(message);
+			validation_report(message);
 			return FALSE;
 		}
 	}
@@ -1180,6 +1196,11 @@ static boolean schemas_fit(
 }
 
 /* a tag of the table through a pass of its group's schema, if it has one */
+/* (port) whether a pack may hold a structure bsp and a scenario: the menus'
+backdrop's (menu_backdrop.c, scene_pack.c's backdrop recipes; set only
+around its pack's check: tag_validate_pack_allow_structure) */
+static boolean tag_validate_pack_structure_allowed;
+
 static void validate_instance(
 	struct tag_validation *validation,
 	struct tag_validate_instance *instance,
@@ -1298,8 +1319,9 @@ static boolean validate_tag_table(
 			instance->parent_group_tags[0] = parent_group_tags[0];
 			instance->parent_group_tags[1] = parent_group_tags[1];
 		}
-		/* (a structure bsp's root is where it loads, set as it does) */
-		if (instance->group_tag == STRUCTURE_BSP_GROUP_TAG)
+		/* (a structure bsp's root is where it loads, set as it does; but a
+		menu backdrop pack's, which is in the pack: checked as its tags are) */
+		if (instance->group_tag == STRUCTURE_BSP_GROUP_TAG && !tag_validate_pack_structure_allowed)
 		{
 			instance->base_address = NULL;
 			continue;
@@ -1481,6 +1503,19 @@ static boolean validate_structure_bsp_in(
 	return !validation.refused;
 }
 
+/* (port) the tag cache's bytes after the map's tags that are not free (the
+scene packs': scene_packs.c), which a structure bsp's check does not take for
+its scratch */
+static unsigned long tag_validate_reserved_after_tags;
+
+void tag_validate_reserve_after_tags(
+	unsigned long bytes)
+{
+	tag_validate_reserved_after_tags = bytes;
+
+	return;
+}
+
 /* (port) the platform's clock (port/linux/src/posix_profile.c, the Vita's
 host), for the check's time in the log */
 unsigned long long vita_host_time_us(void);
@@ -1500,7 +1535,7 @@ static void validation_timed(
 		tag_validate_globals.map_name, what, tag_count, bytes / 1024, passed ? "passed" : "refused",
 		(double)(vita_host_time_us() - started_us) / 1000.0, corrections,
 		tag_validate_claims.scratch ? "" : " (its claims in the heap)");
-	tag_validate_report(message);
+	validation_report(message);
 
 	return;
 }
@@ -1508,7 +1543,7 @@ static void validation_timed(
 /* (port) the claims' bits are this check's own (claims_acquire): in the tag
 cache's free part past what is checked when there is room, otherwise the
 heap's */
-boolean tag_validate_tags(
+static boolean tag_validate_tags_unlocked(
 	void *tag_header,
 	long tag_data_size,
 	long file_length,
@@ -1535,7 +1570,7 @@ boolean tag_validate_tags(
 	return result;
 }
 
-boolean tag_validate_custom_edition_tags(
+static boolean tag_validate_custom_edition_tags_unlocked(
 	void *tag_header,
 	long loaded_size,
 	unsigned long tag_cache_size,
@@ -1574,7 +1609,7 @@ boolean tag_validate_custom_edition_tags(
 	return result;
 }
 
-boolean tag_validate_structure_bsp(
+static boolean tag_validate_structure_bsp_unlocked(
 	long tag_index,
 	void *base,
 	long size)
@@ -1595,10 +1630,11 @@ boolean tag_validate_structure_bsp(
 	tag_validate_globals.out_of_memory = FALSE;
 
 	/* (a bsp loads to the top of the tag cache, after the tags: the free
-	part is between them, or after the bsp) */
+	part is between them, or after the bsp; (port) past the scene packs'
+	bytes after the tags: scene_packs.c) */
 	if (in_tag_cache)
 	{
-		byte *tags_end = tags + tag_validate_globals.tag_data_size;
+		byte *tags_end = tags + tag_validate_globals.tag_data_size + tag_validate_reserved_after_tags;
 		byte *cache_end = tags + tag_validate_globals.tag_cache_size;
 
 		if (bsp >= tags_end && bsp - tags_end >= cache_end - (bsp + size))
@@ -1626,6 +1662,119 @@ boolean tag_validate_structure_bsp(
 	validation_timed("structure bsp", 1, (unsigned long)size, started, tag_validate_globals.corrections - corrections,
 		result);
 	claims_release();
+
+	return result;
+}
+
+void tag_validate_pack_allow_structure(
+	boolean allowed)
+{
+	tag_validate_pack_structure_allowed = allowed;
+}
+
+/* (port) a scene pack's tags (port/linux/game/scene_pack.c): laid out as a
+map's tag data, moved to where they are (tag_relocate.c), checked as a map's
+are with the pack as the region, its pixels and samples in its own file
+range, and nothing more trusted: a tag header whose scenario is none, every
+tag of a group the schema knows, none a scenario, structure bsp or globals.
+The map's check (its globals: the structure bsps' loads go on from them) is
+kept as it was */
+static boolean validate_pack_tags_in(
+	void *tag_header,
+	long size,
+	unsigned long file_offset,
+	unsigned long file_size,
+	char const *name)
+{
+	struct tag_validate_header *header = tag_header;
+	struct tag_validation validation;
+	long absolute_index;
+
+	validation_begin(&validation, tag_header, size, (unsigned long)size, FALSE, name);
+	/* (and none at the start: the bitmaps' groups' offset, to which the
+	texture cache adds each bitmap's own, which is the pack's) */
+	tag_validate_globals.file_ranges[0].offset = file_offset;
+	tag_validate_globals.file_ranges[0].size = file_size;
+	tag_validate_globals.file_ranges[1].offset = 0;
+	tag_validate_globals.file_ranges[1].size = 0;
+	tag_validate_globals.file_range_count = 2;
+	if (!schemas_fit())
+	{
+		tag_validate_refuse(&validation, "cannot be checked: a tag schema is wrong");
+		return FALSE;
+	}
+	if (size < (long)sizeof(*header) || header->signature != TAG_HEADER_SIGNATURE ||
+		header->scenario_tag_index != NONE ||
+		header->tag_count <= 0 || header->tag_count > UNSIGNED_SHORT_MAX ||
+		(unsigned long)header->tag_count > (unsigned long)size / sizeof(struct tag_validate_instance) ||
+		!region_contains(&validation, header->instances, header->tag_count * sizeof(struct tag_validate_instance)))
+	{
+		tag_validate_refuse(&validation, "has a damaged tag header");
+		return FALSE;
+	}
+	for (absolute_index = 0; absolute_index < header->tag_count; absolute_index++)
+	{
+		unsigned long group_tag = header->instances[absolute_index].group_tag;
+		struct tag_schema_group const *group = schema_group_get(group_tag);
+		char text[5];
+
+		validation.tag_index = header->instances[absolute_index].tag_index;
+		if (!group || !group->definition ||
+			((group_tag == 'scnr' || group_tag == STRUCTURE_BSP_GROUP_TAG) && !tag_validate_pack_structure_allowed) ||
+			group_tag == 'matg')
+		{
+			tag_validate_refuse(&validation, "has a tag of the group '%s', which a pack may not have",
+				tag_to_text(group_tag, text));
+			return FALSE;
+		}
+	}
+	if (!claim(header, sizeof(*header)) ||
+		!claim(header->instances, header->tag_count * sizeof(struct tag_validate_instance)) ||
+		!validate_buffers(&validation, header->vertex_buffers, header->vertex_buffer_count,
+			header->index_buffers, header->index_buffer_count))
+	{
+		if (!validation.refused)
+			tag_validate_refuse(&validation, "has a damaged tag header");
+		return FALSE;
+	}
+
+	return validate_tag_table(&validation, header->instances, header->tag_count);
+}
+
+static boolean tag_validate_pack_tags_unlocked(
+	void *tag_header,
+	long size,
+	unsigned long file_offset,
+	unsigned long file_size,
+	char const *name,
+	long *corrections)
+{
+	byte *tags = tag_header;
+	unsigned long long started = vita_host_time_us();
+	/* (the map's check, as it was, for its structure bsps) */
+	unsigned char saved[sizeof(tag_validate_globals)];
+	boolean result;
+
+	memcpy(saved, &tag_validate_globals, sizeof(tag_validate_globals));
+	if (corrections)
+		*corrections = 0;
+	if (!tags || size < 0 || size > TAG_CACHE_SIZE ||
+		!claims_acquire(tags, (unsigned long)size, NULL, NULL))
+	{
+		struct tag_validation validation;
+
+		validation_begin(&validation, tag_header, size, (unsigned long)(size < 0 ? 0 : size), FALSE, name);
+		tag_validate_refuse_for_memory(&validation);
+		memcpy(&tag_validate_globals, saved, sizeof(tag_validate_globals));
+		return FALSE;
+	}
+	result = validate_pack_tags_in(tag_header, size, file_offset, file_size, name);
+	validation_timed("pack tags", ((struct tag_validate_header *)tag_header)->tag_count, (unsigned long)size,
+		started, tag_validate_globals.corrections, result);
+	if (corrections)
+		*corrections = tag_validate_globals.corrections;
+	claims_release();
+	memcpy(&tag_validate_globals, saved, sizeof(tag_validate_globals));
 
 	return result;
 }
@@ -1782,7 +1931,7 @@ void tag_validate_correct(
 
 		snprintf(message, sizeof(message), "the map '%s' has more corrections, not logged",
 			tag_validate_globals.map_name);
-		tag_validate_report(message);
+		validation_report(message);
 	}
 
 	return;
@@ -1824,6 +1973,24 @@ boolean tag_validate_custom_edition(
 	(void)validation;
 
 	return tag_validate_globals.custom_edition;
+}
+
+/* (port) a Halo: CE Anniversary map's structure bsps' vertices are in its
+file, not its bsps (custom_edition_cache.c says so while one is loaded) */
+static boolean structure_vertices_in_file;
+
+void tag_validate_structure_vertices_in_file(
+	boolean in_file)
+{
+	structure_vertices_in_file = in_file;
+
+	return;
+}
+
+boolean tag_validate_structure_vertices_are_in_file(
+	struct tag_validation *validation)
+{
+	return tag_validate_custom_edition(validation) && structure_vertices_in_file;
 }
 
 boolean tag_validate_contains(
@@ -1879,4 +2046,102 @@ void *tag_validate_index_buffer_data(
 	void const *buffer)
 {
 	return buffer_data(validation->index_buffers, validation->index_buffer_count, buffer);
+}
+
+boolean tag_validate_tags(
+	void *tag_header,
+	long tag_data_size,
+	long file_length,
+	char const *map_name)
+{
+	boolean result;
+
+	halo_tag_walk_lock();
+	result = tag_validate_tags_unlocked(tag_header, tag_data_size, file_length, map_name);
+	halo_tag_walk_unlock();
+
+	return result;
+}
+
+boolean tag_validate_custom_edition_tags(
+	void *tag_header,
+	long loaded_size,
+	unsigned long tag_cache_size,
+	struct tag_validate_file_range const *file_ranges,
+	short file_range_count,
+	char const *map_name)
+{
+	boolean result;
+
+	halo_tag_walk_lock();
+	result = tag_validate_custom_edition_tags_unlocked(tag_header, loaded_size, tag_cache_size, file_ranges, file_range_count, map_name);
+	halo_tag_walk_unlock();
+
+	return result;
+}
+
+boolean tag_validate_structure_bsp(
+	long tag_index,
+	void *base,
+	long size)
+{
+	boolean result;
+
+	halo_tag_walk_lock();
+	result = tag_validate_structure_bsp_unlocked(tag_index, base, size);
+	halo_tag_walk_unlock();
+
+	return result;
+}
+
+boolean tag_validate_pack_tags(
+	void *tag_header,
+	long size,
+	unsigned long file_offset,
+	unsigned long file_size,
+	char const *name,
+	long *corrections)
+{
+	boolean result;
+
+	halo_tag_walk_lock();
+	result = tag_validate_pack_tags_unlocked(tag_header, size, file_offset, file_size, name, corrections);
+	halo_tag_walk_unlock();
+
+	return result;
+}
+
+/* (port) a Custom Edition map's tags checked as tag_validate_custom_edition_
+tags checks them, for the scene packs' builder (port/linux/game/
+scene_pack_ce.c) on its own thread: under the walks' lock, the map's check
+(its globals, for its structure bsps) kept as it was, no loading screen's
+frames; the corrections it made (if not NULL) */
+boolean tag_validate_custom_edition_tags_isolated(
+	void *tag_header,
+	long loaded_size,
+	unsigned long tag_cache_size,
+	struct tag_validate_file_range const *file_ranges,
+	short file_range_count,
+	char const *map_name,
+	long *corrections)
+{
+	unsigned char saved[sizeof(tag_validate_globals)];
+	void (*saved_progress)(void);
+	boolean result;
+
+	halo_tag_walk_lock();
+	memcpy(saved, &tag_validate_globals, sizeof(tag_validate_globals));
+	saved_progress = tag_validate_progress;
+	tag_validate_progress = NULL;
+	tag_validate_log_only = TRUE;
+	result = tag_validate_custom_edition_tags_unlocked(tag_header, loaded_size, tag_cache_size, file_ranges,
+		file_range_count, map_name);
+	if (corrections)
+		*corrections = tag_validate_globals.corrections;
+	memcpy(&tag_validate_globals, saved, sizeof(tag_validate_globals));
+	tag_validate_progress = saved_progress;
+	tag_validate_log_only = FALSE;
+	halo_tag_walk_unlock();
+
+	return result;
 }

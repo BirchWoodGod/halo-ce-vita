@@ -145,6 +145,9 @@ symbols in this file:
 #include "text/text_group.h"
 #include "text/unicode.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#ifdef HALO_LINUX
+#include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
+#endif
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -550,19 +553,22 @@ static void render_state_bitmap(
 	real_rectangle2d const *clip = NULL;
 	real scale;
 	point2d point;
-#ifdef HALO_VITA
+#ifdef HALO_BUTTON_GLYPHS
 	/* (port) the Vita's button icons, PlayStation's (hud_draw.c): a button
-	icon shows the Vita button its Xbox button is on, a word in the font or
-	drawn in the sprite's place in the colour of the Xbox face button there */
+	icon shows the Vita button its Xbox button is on, drawn in the sprite's
+	place (the Halo 3 menus' icon, at the alpha of the Xbox icon there) or
+	a word in the font */
 	struct icon_hud_element_definition const *button_icons = hud_globals->messaging.button_icons.address;
 	long button_icon_count = hud_globals->messaging.button_icons.count;
 	short glyph = icon >= button_icons && icon < button_icons + button_icon_count ?
 		hud_vita_button_glyph((short)(icon - button_icons)) : NONE;
-	short face_icon = hud_vita_glyph_face_icon(glyph);
+	boolean glyph_drawn = hud_vita_glyph_drawn(glyph);
+	/* (the glyph's colours are its own: the alpha is the Xbox icon's) */
+	pixel32 glyph_color = TEST_FLAG(icon->flags, _hud_icon_use_color_bit) ? icon->color : color;
 
-	if (hud_vita_glyph_text(glyph))
+	if (hud_vita_glyph_word(glyph))
 	{
-		render_state_text(bounds, cursor_bounds, hud_vita_glyph_text(glyph), FALSE);
+		render_state_text(bounds, cursor_bounds, hud_vita_glyph_word(glyph), FALSE);
 		return;
 	}
 #endif
@@ -579,17 +585,66 @@ static void render_state_bitmap(
 		(struct bitmap_data *)bitmap, FALSE, TRUE))
 	{
 		scale = local_player_count() > 1 ? 0.75f : 1.0f;
+#ifdef HALO_LINUX
+		/* port: Halo: CE Anniversary's icons, their offsets made for MCC's
+		canvas twice the Xbox's and their bitmap four times the Xbox's with
+		Halo PC's half HUD scale, drawn at the Xbox's size and spaced as the
+		Xbox's are (hud_draw.c hud_mcc_bitmap_scale) */
+		if (custom_edition_cache_hud_mcc_canvas())
+		{
+			real canvas_scale = scale * hud_mcc_bitmap_scale(NONE, TRUE);
+			real bitmap_scale = scale * hud_mcc_bitmap_scale(bitmap_group_index, TRUE);
+
+			point.x = (short)(icon->offset.x * canvas_scale + cursor_bounds->x0);
+			point.y = (short)(cursor_bounds->y1 - icon->offset.y * canvas_scale);
+#ifdef HALO_BUTTON_GLYPHS
+			if (!glyph_drawn || !hud_vita_glyph_draw(
+				glyph,
+				bitmap,
+				_hud_corner_bottom_left,
+				&point,
+				clip,
+				bitmap_scale,
+				glyph_color))
+#endif
+			hud_draw_bitmap_direct(
+				bitmap,
+				_hud_corner_bottom_left,
+				&point,
+				clip,
+				bitmap_scale,
+				0.0f,
+				TEST_FLAG(icon->flags, _hud_icon_use_color_bit) ? icon->color : color,
+				FALSE);
+			if (TEST_FLAG(icon->flags, _hud_icon_absolute_width_bit))
+				cursor_bounds->x0 = (short)(icon->width_offset * canvas_scale + point.x);
+			else
+			{
+				cursor_bounds->x0 = (short)(
+					(clip ? clip->x1 - clip->x0 : 1.0f) * bitmap_placed_width(bitmap) * bitmap_scale +
+					icon->width_offset * canvas_scale + point.x);
+			}
+#ifdef HALO_KEY_GLYPHS
+			if (glyph_drawn)
+			{
+				cursor_bounds->x0 += (short)hud_vita_glyph_flow_extra(
+					glyph, bitmap, _hud_corner_bottom_left, clip, bitmap_scale);
+			}
+#endif
+			return;
+		}
+#endif
 		point.x = (short)(icon->offset.x * scale + cursor_bounds->x0);
 		point.y = (short)(cursor_bounds->y1 - icon->offset.y * scale);
-#ifdef HALO_VITA
-		if (face_icon == NONE || face_icon >= button_icon_count || !hud_vita_glyph_draw(
+#ifdef HALO_BUTTON_GLYPHS
+		if (!glyph_drawn || !hud_vita_glyph_draw(
 			glyph,
 			bitmap,
 			_hud_corner_bottom_left,
 			&point,
 			clip,
 			scale,
-			TEST_FLAG(button_icons[face_icon].flags, _hud_icon_use_color_bit) ? button_icons[face_icon].color : color))
+			glyph_color))
 #endif
 		hud_draw_bitmap_direct(
 			bitmap,
@@ -612,6 +667,11 @@ static void render_state_bitmap(
 			cursor_bounds->x0 = (short)(
 				(bitmap_placed_width(bitmap) + icon->width_offset) * scale + point.x);
 		}
+#ifdef HALO_KEY_GLYPHS
+		/* (port) a wider keycap (SPACE ...): the text after it moved on */
+		if (glyph_drawn)
+			cursor_bounds->x0 += (short)hud_vita_glyph_flow_extra(glyph, bitmap, _hud_corner_bottom_left, clip, scale);
+#endif
 	}
 
 	return;
@@ -1777,7 +1837,14 @@ void hud_messaging_update(
 									&hud_globals->messaging.button_icons,
 									icon_index,
 									struct icon_hud_element_definition);
-								if (TEST_FLAG(icon->flags, _hud_icon_use_text_bit))
+								/* (port) an icon that is a word (the D-pad's, "D-pad
+								up") is the Vita's button with the Button icons
+								PlayStation, drawn or a word (render_state_bitmap) */
+								if (TEST_FLAG(icon->flags, _hud_icon_use_text_bit)
+#ifdef HALO_BUTTON_GLYPHS
+									&& !hud_vita_button_glyph(icon_index)
+#endif
+									)
 								{
 									real_argb_color text_color;
 									wchar_t const *icon_text;

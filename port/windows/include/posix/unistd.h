@@ -40,5 +40,7 @@ ssize_t pwrite(int descriptor, const void *buffer, size_t count, off_t offset);
 slashes (port/linux/src/xbox_files.c finds the data folder from it) */
 ssize_t readlink(const char *path, char *buffer, size_t size);
 int pause(void);
+/* the C runtime's _commit: the file's data written through to the disk */
+#define fsync _commit
 
 #endif

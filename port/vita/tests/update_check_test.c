@@ -68,6 +68,13 @@ static void test_versions(void)
 	check(update_is_newer("1.1.0-rc.2", "1.1.0-rc.1") && !update_is_newer("1.1.0-beta.9", "1.1.0-rc.1"),
 		"rc.2 after rc.1, any beta before an rc");
 	check(!update_is_newer("1.1.0-beta.3", "1.1.0-beta.3"), "same is not newer");
+	/* port: the insider builds come before the public betas (the owner's
+	naming, Oct 18 2026: 1.1.1-insider.8, then 1.1.1-beta.1) */
+	check(update_is_newer("1.1.1-beta.1", "1.1.1-insider.8"), "beta.1 newer than insider.8");
+	check(update_is_newer("1.1.1-insider.9", "1.1.1-insider.8"), "insider.9 newer than insider.8");
+	check(update_is_newer("1.1.1-rc.1", "1.1.1-insider.12") && update_is_newer("1.1.1", "1.1.1-insider.12"),
+		"an rc and the release newer than any insider");
+	check(update_is_newer("1.1.1-insider.1", "1.1.0"), "1.1.1-insider.1 newer than 1.1.0");
 	check(!update_is_newer("1.0.3", "1.1.0-beta.3"), "1.0.3 older than 1.1.0-beta.3");
 	check(!update_is_newer("garbage", "1.0.0") && !update_is_newer("1.0.0", "garbage"), "not versions: never newer");
 	{

@@ -115,6 +115,8 @@
 		<on event="y" run="port browser sort"/>
 		<on event="left_trigger" run="port browser page up"/>
 		<on event="right_trigger" run="port browser page down"/>
+		<on event="left stick_left" run="port browser filter previous"/>
+		<on event="right stick_right" run="port browser filter next"/>
 		<child widget="browser/row_1" x="10" y="102"/>
 		<child widget="browser/row_2" x="10" y="119"/>
 		<child widget="browser/row_3" x="10" y="136"/>

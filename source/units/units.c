@@ -862,6 +862,9 @@ typedef char game_globals_falling_damage_size_check[
 typedef char game_globals_flaming_death_offset_check[
 	offsetof(struct game_globals_falling_damage, flaming_death_damage_effect) == 0x6C ? 1 : -1];
 
+/* (port) port/linux/game/menu_scene_objects.c */
+boolean menu_scene_objects_posed(long unit_index);
+
 /* ---------- prototypes */
 
 void player_died(
@@ -2246,7 +2249,8 @@ boolean unit_add_grenade_to_inventory(
 		error(_error_silent, "### ERROR %s has grenade type %d; it can't be picked up",
 			tag_get_name(equipment->definition_index), equipment_definition->equipment.grenade_type);
 	}
-	if (grenade &&
+	/* port: an Infection zombie takes no grenades (port/linux/game/infection.c) */
+	if (grenade && !infection_unit_refuses_grenades(unit_index) &&
 		VALID_INDEX(equipment_definition->equipment.grenade_type, NUMBER_OF_UNIT_GRENADE_TYPES) &&
 		unit->unit.grenade_counts[equipment_definition->equipment.grenade_type] <
 			grenade->maximum_count)
@@ -2880,6 +2884,15 @@ void unit_died(
 		}
 
 		unit->unit.time_of_death = game_time_get();
+#ifdef HALO_LINUX
+		/* port: the body may go limp, a ragdoll's pose drawn for it from
+		the next tick (port/linux/game/ragdolls.c; only the picture) */
+		{
+			void ragdolls_unit_died(long unit_index);
+
+			ragdolls_unit_died(unit_index);
+		}
+#endif
 	}
 
 	unit->unit.flags &= ~(
@@ -5492,9 +5505,14 @@ boolean unit_update(
 	}
 	else if (!TEST_FLAG(unit->unit.flags, _unit_actively_controlled_bit))
 	{
+		/* (port) a Halo 3 menu's character keeps the aim and look its scene
+		gives it (menu_scene_objects.c): no player or AI controls it */
+		if (!menu_scene_objects_posed(unit_index))
+		{
 		unit->unit.desired_looking_vector = unit->object.forward;
 		unit->unit.desired_aiming_vector = unit->object.forward;
 		unit->unit.desired_facing_vector = unit->object.forward;
+		}
 		unit->unit.throttle = *global_zero_vector3d;
 		unit->unit.control_flags = 0;
 	}
@@ -5859,6 +5877,12 @@ boolean unit_update(
 			real angle = angle_between_vectors3d(&unit->unit.aiming_vector, &last_aiming_vector);
 			real change = angle / (unit_definition->unit.aiming_velocity_maximum/TICKS_PER_SECOND);
 				
+#ifdef HALO_LINUX
+			/* port: a unit with no aiming speed (a Halo 2 unit's, as made:
+			0/0) or a NaN aim changes nothing - the byte's cast was undefined */
+			if (!(change >= 0.f))
+				change = 0.f;
+#endif
 			unit->unit.aiming_change = (byte)(PIN(change, 0.f, 1.f) * 255.f);
 		}
 
@@ -10228,6 +10252,10 @@ short unit_update_animation(
 	struct unit_seat *seat;
 	real_vector3d exit_velocity;
 	real_matrix4x3 old_world_matrix;
+#ifdef HALO_LINUX
+	boolean scene_looped = FALSE;
+	extern boolean menu_scene_objects_loops(long object_index);
+#endif
 
 	unit = unit_get(unit_index);
 	unit_definition = unit_definition_get(unit->definition_index);
@@ -10448,6 +10476,23 @@ short unit_update_animation(
 				--unit->object.animation.state.frame_index;
 				break;
 
+#ifdef HALO_LINUX
+			case _unit_state_user_animation:
+				/* port: a menu scene's character (the lobbies' Spartans,
+				port/linux/game/menu_scene_objects.c) plays its animation
+				again from the start in this tick, at once: it was started
+				again by the menus' update once per frame, and a frame of
+				several ticks (a Vita frame that ran long) ran it to its end
+				first, the unit stood in its idle pose for that frame: it
+				twitched */
+				if (menu_scene_objects_loops(unit_index))
+				{
+					unit->object.animation.state.frame_index = 0;
+					scene_looped = TRUE;
+				}
+				break;
+#endif
+
 			case _unit_state_entering_seat:
 				parent_unit = unit_get(unit->object.parent_object_index);
 				parent_definition = unit_definition_get(parent_unit->definition_index);
@@ -10469,7 +10514,11 @@ short unit_update_animation(
 				break;
 			}
 
-			if (!unit_animation_state_loops(&unit->unit.animation))
+			if (!unit_animation_state_loops(&unit->unit.animation)
+#ifdef HALO_LINUX
+				&& !scene_looped
+#endif
+				)
 			{
 				apply_state = TRUE;
 			}

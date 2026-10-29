@@ -23,7 +23,63 @@ enum
 	difficulty, where Y hosts co-op: coop_menu.c), with the main menu
 	behind it: the Play page's Host co-op campaign */
 	SYSTEM_LINK_REQUEST_CAMPAIGN,
+	/* a Forge game (the panel's Forge page, for the Halo CE menus too):
+	halo_forge_request_map's map, halo_forge_request_variant's map variant
+	("" none), started as the Forge lobby's START FORGE starts it, at the
+	main menu (forge.c forge_game_start) */
+	SYSTEM_LINK_REQUEST_FORGE,
 };
+
+/* (SYSTEM_LINK_REQUEST_FORGE, halo_forge_request_network) a network Forge
+game: hosted on the connection the game runs, its lobby (the game's) next */
+/* (the settings panel) nonzero while this machine hosts a network Forge
+game: never listed online, its Visibility row hidden (forge_net.inc) */
+extern volatile int halo_forge_net_hosting;
+/* (SYSTEM_LINK_REQUEST_FORGE) a map variant's file name's room */
+#define HALO_FORGE_VARIANT_SIZE 40
+
+/* the other machines' players of the network game this machine hosts, for
+the settings panel's Players page (its KICK and BAN: the game's side,
+port/linux/game/network_anticheat.c), published by the main loop twice a
+second: halo_host_players_count -1 while it hosts none, the serial odd
+while they are written; the names ASCII, ended */
+enum
+{
+	HALO_HOST_PLAYERS_MAXIMUM = 16,
+	HALO_HOST_PLAYER_NAME_SIZE = 16,
+};
+extern volatile int halo_host_players_serial;
+extern volatile int halo_host_players_count;
+extern volatile int halo_host_players_machines[HALO_HOST_PLAYERS_MAXIMUM];
+extern char halo_host_players_names[HALO_HOST_PLAYERS_MAXIMUM][HALO_HOST_PLAYER_NAME_SIZE];
+/* ... the machines kept out for the session (its bans, the anti-cheat
+limit's), and whether the anti-cheat limit drops machines */
+extern volatile int halo_host_session_bans;
+/* the panel's request: HALO_HOST_PLAYER_* << 8 | the player's machine (0:
+none), answered in halo_host_player_answer (HALO_HOST_ANSWER_*) and set
+back to 0 */
+enum
+{
+	HALO_HOST_PLAYER_KICK = 1,
+	/* (dropped and kept out while this machine runs) */
+	HALO_HOST_PLAYER_BAN,
+	/* (and in bans.txt: for good) */
+	HALO_HOST_PLAYER_BAN_ALWAYS,
+	/* (the session's bans let go; no machine) */
+	HALO_HOST_PLAYER_CLEAR_BANS,
+	/* (port: a bot more, or fewer, in the game hosted: the host's add_bot
+	and drop_bot, network_server_manager.c; no machine) */
+	HALO_HOST_PLAYER_ADD_BOT,
+	HALO_HOST_PLAYER_DROP_BOT,
+};
+enum
+{
+	HALO_HOST_ANSWER_NONE,
+	HALO_HOST_ANSWER_DONE,
+	HALO_HOST_ANSWER_GONE,
+};
+extern volatile int halo_host_player_request;
+extern volatile int halo_host_player_answer;
 
 enum
 {
@@ -87,8 +143,10 @@ game fills halo_text_input_title, _text (the text to start from),
 _maximum and _password and sets halo_text_input_state to REQUESTED; the
 Vita's host opens the system's keyboard on it (vita_ime.c), the game
 getting no buttons meanwhile, and answers DONE (the text typed in
-halo_text_input_text, printable ASCII) or CANCELLED. Elsewhere the game
-answers itself (HALO_TEST_TEXT_INPUT) */
+halo_text_input_text, printable ASCII) or CANCELLED. Elsewhere the PC
+build's text box answers the same way (pc_text_entry.h: the keyboard, or an
+on-screen keyboard for a gamepad); a test build's HALO_TEST_TEXT_INPUT
+answers in its place */
 enum
 {
 	HALO_TEXT_INPUT_IDLE,
@@ -96,10 +154,20 @@ enum
 	HALO_TEXT_INPUT_OPEN,
 	HALO_TEXT_INPUT_DONE,
 	HALO_TEXT_INPUT_CANCELLED,
-	HALO_TEXT_INPUT_SIZE = 64,
+	HALO_TEXT_INPUT_SIZE = 128,
 };
 
 extern volatile int halo_text_input_state;
+/* nonzero when the game's menus ask for the settings panel (the Halo 3 main
+menu's Start, "port settings panel"; the Halo 3 multiplayer pause's PARTY,
+its Party page; the offline Multiplayer screens' A, the Multiplayer tab): the Vita's host opens it and clears it */
+enum
+{
+	HALO_SETTINGS_PANEL_OPEN = 1,
+	HALO_SETTINGS_PANEL_PARTY = 2,
+	HALO_SETTINGS_PANEL_MULTIPLAYER = 3,
+};
+extern volatile int halo_settings_panel_request;
 extern char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
 extern char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
 extern int halo_text_input_maximum;
@@ -113,5 +181,67 @@ extern volatile int halo_pc_menus_state;
 extern volatile int halo_system_link_request;
 extern volatile int halo_system_link_answer;
 extern volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
+
+/* the connection the game plays over (port/linux/game/network_connection.c):
+the settings panel's Connection (HALO_VITA_NETWORK), which the Halo 3
+lobbies' NETWORK sets too, switched live at the menus. The game publishes
+what it runs (halo_network_connection: HALO_NETWORK_*, -1 before its first
+frame) and how it goes (halo_network_phase), which the panel shows as its
+own (running_network) */
+enum
+{
+	HALO_NETWORK_WIFI,
+	HALO_NETWORK_ADHOC,
+	HALO_NETWORK_ONLINE,
+};
+
+enum
+{
+	/* set up (Online: a broker reached) */
+	HALO_NETWORK_PHASE_READY,
+	/* Online: internet play started, no broker reached yet */
+	HALO_NETWORK_PHASE_CONNECTING,
+	/* the setting changed; the switch waits for the menus with no network
+	game */
+	HALO_NETWORK_PHASE_WAITING,
+	/* Online: no broker reached (the setting went back to Same Wi-Fi) */
+	HALO_NETWORK_PHASE_FAILED,
+};
+
+extern volatile int halo_network_connection;
+extern volatile int halo_network_phase;
+
+/* ad hoc play's group (network_connection.c, menu_functions.c: the lobbies'
+AD HOC and AD HOC CO-OP). halo_adhoc_request: the game sets it, the Vita's
+host takes it and sets it back to HALO_ADHOC_REQUEST_NONE -
+- JOIN: the ad hoc room's group joined through the system's dialog, in the
+  settings panel's room and dialog way, as the panel's Host and Join do
+  before System Link (with the connection Ad hoc, outside a group);
+- LEAVE: the group left (the connection left Ad hoc: the Vita's Wi-Fi back).
+halo_adhoc_group: the host's word on the group, every frame. Elsewhere (no
+Vita host) the game answers itself (system_link_shortcut.c: an emulated
+group, HALO_NET_ADHOC_EMULATE, is in it from the start; HALO_ADHOC_TEST,
+test builds, answers a join) */
+enum
+{
+	HALO_ADHOC_REQUEST_NONE,
+	HALO_ADHOC_REQUEST_JOIN,
+	HALO_ADHOC_REQUEST_LEAVE,
+};
+
+enum
+{
+	/* the connection is not Ad hoc */
+	HALO_ADHOC_GROUP_OFF = -2,
+	/* the system's dialog did not join one (cancelled, or failed) */
+	HALO_ADHOC_GROUP_FAILED = -1,
+	HALO_ADHOC_GROUP_NONE = 0,
+	/* the system's dialog is up */
+	HALO_ADHOC_GROUP_JOINING = 1,
+	HALO_ADHOC_GROUP_IN = 2,
+};
+
+extern volatile int halo_adhoc_request;
+extern volatile int halo_adhoc_group;
 
 #endif

@@ -15,6 +15,7 @@ against the SDK prototype it replaces.
 types (select, fd_set, timeval, ...) are then moved out of glibc's way while
 the SDK headers are read, exactly as game code sees them. */
 #include <pthread.h>
+#include "halo_cond.h"
 #include <stdlib.h>
 #include <sys/select.h>
 #include <sys/time.h>
@@ -65,7 +66,7 @@ struct platform_handle
 	unsigned long signature;
 	long type;
 	pthread_mutex_t lock;
-	pthread_cond_t condition;
+	halo_cond_t condition;
 	BOOL signaled;
 	BOOL manual_reset;
 	/* mutexes */
@@ -97,7 +98,25 @@ long platform_run_apcs(void);
 host path below the data root. Components are matched case-insensitively
 against what exists on disk, as the Xbox file system is case-insensitive. */
 void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size);
+/* (debug) HALO_TRACE_FILES's level, and a file call said at level 2
+(msvc_crt.c) */
+int platform_file_trace_level(void);
+void platform_file_trace(const char *what, int descriptor, const char *path, long long offset, unsigned long bytes);
+/* (port) TRUE (said in the log) for a host path of the player's own game
+files in the maps folder - Halo PC's resource maps, ui.map, the campaign's
+levels - which nothing may write, truncate, move or delete */
+int platform_host_path_write_protected(const char *host_path);
 const char *platform_data_root(void);
+/* reads name, whole, from the folder that holds the Xbox directory
+xbox_directory (d:\ the data root, d:\maps the maps folder, wherever
+HALO_MAPS_ROOT puts it): the one place the port reads a file above the data
+root, as platform_translate_path drops "..". Returns the bytes (*size of
+them; given back with platform_read_file_free, not the game's free) or NULL
+when there is no such file or it is larger than maximum_size; *host_path
+(when not NULL) gets the path tried */
+void *platform_read_file_in_parent_folder(const char *xbox_directory, const char *name, long maximum_size,
+	long *size, char *host_path, unsigned long host_path_size);
+void platform_read_file_free(void *bytes);
 /* on the desktop, when the data root has no maps folder: offers to copy it
 out of an Xbox disc image into destination (sdl_platform.c), and quits if
 the player declines; nonzero once destination has one */
@@ -144,6 +163,35 @@ halo_linux_source_fixups.h). */
 void *halo_custom_edition_tag_cache(void);
 /* Whether Halo Custom Edition maps may run (HALO_CUSTOM_EDITION). */
 int halo_custom_edition_enabled(void);
+/* Whether a mod's Halo: CE Anniversary maps in the mods folder may be listed
+and played, offline (HALO_MCC_MODS, experimental; needs PC maps on). */
+int halo_mcc_mods_enabled(void);
+/* (port) Whether there is a Halo content folder (paths.content,
+HALO_CONTENT_ROOT, or the one found: the player's own Halo: The Master
+Chief Collection folder) with Halo CE (halo1) maps, whose campaign and
+multiplayer maps are then listed and played beside the Xbox's
+(port/linux/game/mcc_content.c); without one the Xbox maps alone, as
+before. Never on the dedicated server. */
+int halo_content_library_found(void);
+/* (port) The Halo content folder (xbox_files.c: paths.content, the Vita's
+data root's mcc, Steam's libraries), which the game names d:\mcc\: its host
+path into `out` (`out_size` bytes; empty when none) and TRUE when found;
+looked for once, and again after platform_mcc_root_forget when none was.
+platform_xbox_path_write_refused: TRUE (and the error set, logged) for an
+Xbox path in it, which nothing may write, make, move or delete. */
+int platform_mcc_root(char *out, unsigned long out_size);
+void platform_mcc_root_forget(void);
+/* (port, PC) What the main menu says when paths.content is "auto" and no
+Halo MCC was found ("Halo MCC not found: set its folder in config.toml
+..."; `short_form` the build number corner's few words), translated; NULL
+when found, set otherwise, or on the PS Vita. */
+const char *platform_mcc_menu_notice(int short_form);
+int platform_host_path_is_mcc(const char *host_path);
+int platform_xbox_path_write_refused(const char *xbox_path);
+/* (port) The Halo PC resource map <name>.map (bitmaps, loc, sounds): the maps
+folder's, else the Halo content folder's halo1\maps\custom_edition\; its
+Xbox-style path into `path`, TRUE when a file is there (xbox_files.c) */
+int platform_halo_pc_resource_map(const char *maps_directory, const char *name, char *path, unsigned long path_size);
 /* A Custom Edition map's tag cache of `bytes`: the window above when it is
 reserved, else memory of its own (the Vita, which cannot have the window),
 whose tags are then moved there (custom_edition_cache.c); NULL when there is

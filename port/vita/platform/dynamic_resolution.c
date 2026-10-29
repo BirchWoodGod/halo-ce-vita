@@ -27,7 +27,22 @@ void dynres_controller_limits(struct dynres_controller *controller, int floor, i
 	controller->floor = floor;
 	controller->ceiling = ceiling;
 	controller->budget_ms = budget_ms > 1.0f ? budget_ms : 1000.0f / 30.0f;
-	controller->level = dynres_clamp(controller->level, floor, ceiling);
+	if (controller->fight_floor >= floor)
+		controller->fight_floor = 0;
+	controller->level = dynres_clamp(controller->level, controller->under_floor && controller->fight_floor ?
+		controller->fight_floor : floor, ceiling);
+}
+
+void dynres_controller_fight_floor(struct dynres_controller *controller, int fight_floor)
+{
+	controller->fight_floor = fight_floor > 0 && fight_floor < controller->floor ? fight_floor : 0;
+	if (!controller->fight_floor)
+	{
+		controller->under_floor = 0;
+		controller->fight_ms = 0.0f;
+		if (controller->level < controller->floor)
+			controller->level = controller->floor;
+	}
 }
 
 void dynres_controller_start(struct dynres_controller *controller, int floor, int ceiling, float budget_ms,
@@ -41,6 +56,9 @@ void dynres_controller_start(struct dynres_controller *controller, int floor, in
 	controller->changes = 0;
 	controller->smoothed_gpu_ms = 0.0f;
 	controller->smoothed_level = 0;
+	controller->fight_floor = 0;
+	controller->fight_ms = 0.0f;
+	controller->under_floor = 0;
 	dynres_controller_limits(controller, floor, ceiling, budget_ms);
 }
 
@@ -82,17 +100,35 @@ int dynres_controller_frame(struct dynres_controller *controller, float gpu_ms, 
 		controller->slow_frames++;
 	else
 		controller->slow_frames = 0;
+	/* (the fight floor: the time at the floor over the budget; back at
+	the floor from under it, the floor holds again) */
+	if (controller->under_floor && level >= controller->floor)
+	{
+		controller->under_floor = 0;
+		controller->fight_ms = 0.0f;
+	}
+	if (controller->fight_floor && !controller->under_floor && level <= controller->floor)
+	{
+		if (gpu_ms > budget * DYNRES_HIGH && tail_ms >= gpu_ms * 0.2f)
+			controller->fight_ms += interval_ms;
+		else if ((controller->fight_ms -= interval_ms) < 0.0f)
+			controller->fight_ms = 0.0f;
+		if (controller->fight_ms >= DYNRES_FIGHT_MS)
+			controller->under_floor = 1;
+	}
 	if (controller->slow_frames >= DYNRES_SLOW_FRAMES)
 	{
+		int floor = controller->under_floor ? controller->fight_floor : controller->floor;
+
 		controller->slow_frames = 0;
 		controller->headroom_ms = 0.0f;
-		if (level > controller->floor)
+		if (level > floor)
 		{
 			/* as many steps as the pixels say (the GPU time taken as
 			theirs), 1 to DYNRES_MAXIMUM_DROP */
 			int next = level - 1;
 
-			while (next > controller->floor && level - next < DYNRES_MAXIMUM_DROP &&
+			while (next > floor && level - next < DYNRES_MAXIMUM_DROP &&
 				gpu_ms * (float)next * (float)next / ((float)level * (float)level) > budget * DYNRES_AIM)
 				next--;
 			controller->failed_level = level;

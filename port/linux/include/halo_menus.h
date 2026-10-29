@@ -45,6 +45,10 @@ struct halo_menu_bitmap
 {
 	char const *name;
 	char const *resource;
+	/* fit="widget": each frame drawn whole into its widget's bounds,
+	scaled (a picture of more pixels than the 640x480 screen gives it, so
+	sharp on the Vita's 960x544 interface layer), not 1:1 from its top left */
+	char const *fit;
 	/* its frames: frame_count from first_frame in the frames */
 	long first_frame, frame_count;
 	char const *file;
@@ -114,6 +118,36 @@ struct halo_menu_widget
 	char const *name, *type, *controller, *flags, *bitmap, *text, *strings, *values, *setting, *font, *color,
 		*align, *description, *string_list, *list_flags, *text_flags, *header_bitmap, *footer_bitmap,
 		*header_bounds, *footer_bounds;
+	/* (a Halo 3 screen) the camera behind it: scene="ring" (ui.map's own
+	loop, ring_loop) or scene="<ui.map's camera point> [x y z yaw pitch
+	[ticks]]" (menu_functions.c h3 scenes) */
+	char const *scene;
+	/* (a Halo 3 screen with a scene) what stands in it:
+	scene_object="<pack>[:<tag>] [<distance> <right> <up> <facing>]
+	[<option>=<value> ...] [; ...]" (menu_scene_objects.c; the packs:
+	scene_packs.c) */
+	char const *scene_object;
+	/* (Menu style Halo CE's additions) extends="<ui.map widget path>": the
+	widget is a copy of the map's look (its text, bounds, children), with
+	what the element gives in place of the map's: bitmap, flags, font,
+	color, align, text or string_list (string_index with it) and
+	width/height; its <child> elements after the map's own, or in their
+	place with drop="children"; its <on> and <data> its own (never the
+	map's: they would run as ours, menu_tags.c). classic_patch="true" (with
+	extends): the map's widget itself is this one while Menu style is Halo
+	CE (menu_tags.c swaps the tag's definition as each screen opens), the
+	map's own while it is Halo 3 - an Xbox screen keeps its name, history,
+	look and events (drop="handlers inputs" leaves those out), with the rows
+	the port adds; still the map's widget, it runs none of the port's
+	functions (ui_widget_function_denied): those go on widgets of ours */
+	char const *extends, *drop, *classic_patch;
+	/* (an Online screen) its camera when the live backdrop is behind the
+	menus (menu_backdrop.c): backdrop="<ui.map's camera point> x y z yaw
+	pitch [ticks [fov]]" in the backdrop level's world, as scene= says it;
+	and who stands there then, backdrop_object= as scene_object= (none
+	yet: the lobbies' characters are for later) */
+	char const *backdrop;
+	char const *backdrop_object;
 	long x, y, left, top, width, height, text_x, text_y, auto_close, auto_close_fade, string_index;
 	long has_width, has_height;
 	/* indices in their arrays, or HALO_MENU_NONE */
@@ -122,6 +156,28 @@ struct halo_menu_widget
 	long line;
 };
 
+/* a font of the menus' own (<font name=... file=...>): a file of the menus
+folder that tools/halo3_menu_art.py writes (its characters' sizes and
+places, and their 8-bit pixels), made a font tag of the game's
+(menu_tags.c) that a widget's font= names */
+struct halo_menu_font
+{
+	char const *name, *path;
+	/* (port) sharp="<pixels per unit>:<file> ...": the same font drawn at
+	more texels per unit, one chosen for the display (menu_tags.c
+	font_build; the text drawn texel for pixel: draw_string.c); NULL none */
+	char const *sharp;
+	char const *file;
+	long line;
+};
+/* a screen of the Halo 3 set (menus/halo3): its root widget, and the Xbox
+screen it stands for while Menu style is Halo 3 (<menus root=... replaces=...>) */
+struct halo_menu_screen
+{
+	char const *root, *replaces;
+	char const *file;
+	long line;
+};
 struct halo_menus
 {
 	struct halo_menu_bitmap *bitmaps;
@@ -145,21 +201,87 @@ struct halo_menus
 	struct halo_menu_replace *replaces;
 	long replace_count;
 	/* the screen that stands for the Xbox's Multiplayer screen:
-	<menus root="..."> (the last given) */
+	<menus root="..."> (the last given without replaces=) */
 	char const *root;
+	/* the Halo 3 set's screens (<menus root= replaces=>) */
+	struct halo_menu_screen *screens;
+	long screen_count;
+	/* the menus' own fonts (<font>) */
+	struct halo_menu_font *fonts;
+	long font_count;
 };
 
 /* the menus, read from the files (once; the same each call after); NULL if
 there are none, or a file has an error (logged) */
 struct halo_menus const *halo_menus_load(void);
+/* the Menu style (HALO_MENU_STYLE, menus.style): 1 for the Halo 3-style
+screens (menus/halo3), 0 for Halo CE's own; read again each call, so a
+change in the settings panel takes at the next screen */
+int halo_menu_style_halo3(void);
+/* 1 for Menu style Online (HALO_MENU_STYLE "online"): the Halo 3 set's flows
+(halo_menu_style_halo3 is 1 for it too), with menus/online's screens - an
+online/<name> widget opens in place of h3/<name> - for those it has */
+int halo_menu_style_online(void);
+/* 1 for Menu style Classic+ (HALO_MENU_STYLE "classic"): the Xbox screens
+with the port's rows (menus/classic) and the port's screens in their look */
+int halo_menu_style_classic_plus(void);
+/* 1 for Menu style Classic (HALO_MENU_STYLE "original"): the Xbox screens
+as they shipped - no rows of the port's, the game's own carnage report and
+scoreboard, the Xbox Multiplayer screen; the settings panel has the rest */
+int halo_menu_style_original(void);
+/* (the renderer: d3d8_gl.c, d3d8_gxm.c) the display's pixels per unit of the
+640x480 interface, where the menus are drawn (the Vita's 960x544: 1.13) */
+float halo_ui_pixel_scale(void);
 /* the same begun on a thread of its own (once), which halo_menus_load waits
 for */
 void halo_menus_preload(void);
+/* the menus a level's map gets (ingame.txt: the Halo 3 pause screen), read
+the first time one loads; NULL when there are none or they have a problem */
+struct halo_menus const *halo_menus_load_ingame(void);
 /* a file of the menus folder (a frame's PNG), read whole, NULL if it cannot
 be read; halo_menus_file_free lets it go (the platform layer's heap, not
 the game's) */
 unsigned char *halo_menus_file_read(char const *path, unsigned long *size);
 void halo_menus_file_free(unsigned char *data);
+/* (port) the scenes in the Halo 3 menus' lobbies
+(port/linux/game/menu_scene_objects.c): the screen's scene_object= (NULL:
+none) in front of its camera (menu_functions.c, at a frame's top), and the
+update that makes, holds and deletes its objects (main.c, before the tick) */
+void menu_scene_objects_want(char const *screen, char const *objects, int has_camera, float x, float y, float z,
+	float yaw, float pitch);
+void menu_scene_objects_update(void);
+/* (port) whether the scene asked for stands settled - made, its poses
+taken (or none to make, or it cannot be) - for a network game's lobby,
+which stops the main menu's ticks (the Halo 3 live lobby opens once it is:
+menu_functions.c h3_live). A scene not made by then is none while the
+network game lasts: all of it or none */
+int menu_scene_objects_settled(void);
+/* (port) the Customization screen's live preview: the menu_spartan pack's
+Spartan in the menu scene open now (camera NULL) or in front of the camera
+"<ui.map camera point> [x y z yaw pitch]" (degrees, as scene=), placed
+"<distance> <right> <up> <facing>" (NULL: 1.6 0.45 -0.35 15), in Halo CE's
+multiplayer colour color_index (0 to 17; NONE: the active profile's).
+FALSE if there is no scene or the arguments are not ones. It appears once its
+pack is loaded (built from the player's multiplayer maps the first time),
+and never if it cannot be. _color recolours it live; _hide removes it. Safe
+from a widget's event */
+int menu_scene_spartan_show(char const *camera, char const *placement, short color_index);
+/* (port) the preview's character: the scene pack of a player model from a
+Custom Edition map (player_models.c's pm_<hash>), NULL for the menu
+Spartan's (menu_spartan); held in the menu Spartan's rifle. The one
+standing there is made again as the new pack loads. Its pack's state, how far
+its build is and why it failed (scene_packs_status) */
+void menu_scene_spartan_model(char const *pack);
+short menu_scene_spartan_state(long *progress, char *why, long why_size);
+void menu_scene_spartan_color(short color_index);
+void menu_scene_spartan_hide(void);
+/* (port) whether the preview's Spartan stands there now (made: its pack
+loaded), so that a screen keeps its fallback until it does */
+int menu_scene_spartan_shown(void);
+/* (port) a file of the scene packs' recipes folder (app0:packs/ on the
+Vita; elsewhere HALO_PACKS_FOLDER, else the packs folder beside the menus
+folder), as halo_menus_file_read reads the menus': scene_packs.c */
+unsigned char *halo_packs_file_read(char const *path, unsigned long *size);
 /* text as UTF-16, its terminator included, "\n" written as the game's line
 breaks ("\r\n"): the number of characters written (at most capacity) */
 long halo_menus_utf16(char const *utf8, unsigned short *out, long capacity);

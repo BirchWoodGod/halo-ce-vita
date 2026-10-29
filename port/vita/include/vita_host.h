@@ -38,6 +38,12 @@ int vita_host_thread_start(const char *name, void (*function)(void *), void *arg
 /* the same at a priority (64..191, lower runs first); core -1: any core */
 int vita_host_thread_start_priority(const char *name, void (*function)(void *), void *argument, int core,
 	int priority);
+/* the same with a stack of that many bytes (the others' are 1 MB) */
+int vita_host_thread_start_stack(const char *name, void (*function)(void *), void *argument, int core,
+	int priority, int stack_size);
+/* nonzero once the memory window is made (vita_host_arena): nothing - no
+thread, no memory block, no growth of the C heap - may be made before it */
+int vita_host_memory_window_made(void);
 
 /* ---------- the fourth core (port/vita/host/vita_fourth_core.c) */
 
@@ -51,6 +57,9 @@ halo.log says which, naming it `role` */
 int vita_host_fourth_core_join(const char *role, int level);
 /* the same whatever the setting (HALO_AUDIO_CORE=3) */
 int vita_host_fourth_core_move(const char *role);
+/* the calling thread, moved to the fourth core, off it to cores 0-2
+(aside) or back: 1 when its mask changed (the sound mixer during a load) */
+int vita_host_fourth_core_step_aside(int aside);
 /* the calling thread's run time logged with the frame timing, as `role` */
 void vita_host_thread_watch(const char *role);
 /* with each frame-timing line: the watched threads' and the cores' times */
@@ -67,6 +76,41 @@ unsigned long long vita_host_time_us(void);
 
 /* the calling thread asleep for this long */
 void vita_host_sleep_us(unsigned long microseconds);
+
+/* ---------- a thread woken by another (d3d8_gxm.c's worker and game
+waits): a counting semaphore, a kernel one on the Vita - safe on any thread,
+sceKernelCreateThread's too, which have no pthread data for
+pthread_cond_wait (vita_settings.c save_wake) - and a POSIX one in the
+harness (vgxm_null.c) */
+
+/* a semaphore at 0: its id, or negative when none could be made */
+int vita_host_wake_create(const char *name);
+/* one signal taken, waited for up to timeout_us (0: for ever): 0 when
+taken, 1 when the time ran out, negative on an error */
+int vita_host_wake_wait(int id, unsigned long timeout_us);
+/* one signal taken if one is waiting: 0 taken, 1 none */
+int vita_host_wake_poll(int id);
+/* one signal given (none past the semaphore's most, 8: a waiter is woken
+by any) */
+void vita_host_wake_signal(int id);
+/* the semaphore deleted (halo_cond.h's, as a condition variable goes) */
+void vita_host_wake_delete(int id);
+
+/* ---------- the clocks (port/vita/host/vita_clocks.c) */
+
+/* the clocks a level asks for: play's (main's, the top), a loading
+screen's (the GPU's lowered, the CPU's kept: the load is CPU work), idle's
+(menus and pause: all lowered); never below the clocks found at start */
+#define VITA_CLOCKS_PLAY 0
+#define VITA_CLOCKS_LOADING 1
+#define VITA_CLOCKS_IDLE 2
+/* (main, at start) the clocks found noted, play's set */
+void vita_host_clocks_start(void);
+/* the clocks of that level set, if they are not already */
+void vita_host_clocks_set(int level);
+/* (the heartbeat thread) the battery's charge in halo.log once a minute,
+when HALO_BATTERY_LOG asks (unset: in a pre-release build) */
+void vita_host_battery_log(void);
 
 /* ---------- movies (port/vita/host/vita_movie.c): the Vita's video player
 for the game's Bink movies, from H.264 copies */
@@ -137,6 +181,13 @@ struct vita_host_pad
 };
 
 void vita_host_pad_read(struct vita_host_pad *pad);
+/* the front screen's fingers of the last vita_host_pad_read (the screen's
+pixels), for the menus' pointer; how many */
+struct vita_touch_contact;
+int vita_host_front_touches(struct vita_touch_contact *out, int maximum);
+/* (vita_settings.c) whether the settings panel is open: the menus' pointer
+then rests */
+int vita_settings_panel_open(void);
 /* the gyroscope's line on the settings panel's Gyro settings page: the rates now
 (degrees a second), whether the bias was learnt */
 void vita_gyro_status(char *text, int size);
@@ -145,6 +196,9 @@ void vita_gyro_status(char *text, int size);
 int vita_settings_input(const struct vita_host_pad *pad);
 /* the panel's settings.txt and the release defaults into the environment */
 void vita_settings_load(void);
+/* waits until settings.txt has the last change (its writer's thread,
+vita_settings.c): before the game restarts */
+void vita_settings_save_wait(void);
 void vita_settings_message(const char *title, const char *text);
 /* the language files read (app0:lang) and the Vita's system language
 chosen for the port's text, before anything is shown (lang.c) */

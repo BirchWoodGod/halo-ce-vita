@@ -440,9 +440,11 @@ int update_download_fetch(const struct update_download_config *config, const cha
 		}
 	}
 
-	/* halo.vpk, to the signed size at most */
+	/* the VPK the manifest names (halo-ce-vita-<version>-vita.vpk, or
+	halo.vpk: update_manifest_check took only those), to the signed size at
+	most */
 	download.stage = UPDATE_STAGE_DOWNLOAD;
-	code = download_asset(config, version, UPDATE_ASSET_VPK, part, manifest.size, manifest.size, &download, why,
+	code = download_asset(config, version, manifest.file, part, manifest.size, manifest.size, &download, why,
 		sizeof(why));
 	if (code < 0)
 	{
@@ -471,7 +473,7 @@ int update_download_fetch(const struct update_download_config *config, const cha
 		snprintf(error, (size_t)error_size, "cannot rename the download to %s", target);
 		goto failed;
 	}
-	log_line(config, "%s matches its signed SHA-512", UPDATE_ASSET_VPK);
+	log_line(config, "%s matches its signed SHA-512", manifest.file);
 
 keep:
 	/* the manifest and signature that vouch for it, beside it */

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Halo CE: the Xbox's main menu with the port's rows (classic_patch: the map's list
+     itself while the style is Halo CE; Halo 3's main menu is menus/halo3/main.xml). CAMPAIGN,
+     MULTIPLAYER and SETTINGS are the game's own rows, as they are; FORGE, FRIENDS, FILE SHARE and MOD
+     MANAGER under them are words drawn in their look (tools/classic_menu_art.py: 256 x 32, frame 0
+     not focused, 1 focused, as the game's column list shows them), in the language chosen
+     (classic/<lang>/, menu_tags.c "{lang}"). The seven 32 pixels apart from the Xbox's first row's
+     place (its three were 36 apart: as little closer as fits above the screen's bottom) -->
+<menus>
+	<bitmap name="ce/main/forge_art">
+		<frame png="classic/{lang}/main_forge_0.png" width="256" height="64"/>
+		<frame png="classic/{lang}/main_forge_1.png" width="256" height="64"/>
+	</bitmap>
+	<bitmap name="ce/main/friends_art">
+		<frame png="classic/{lang}/main_friends_0.png" width="256" height="64"/>
+		<frame png="classic/{lang}/main_friends_1.png" width="256" height="64"/>
+	</bitmap>
+	<bitmap name="ce/main/fileshare_art">
+		<frame png="classic/{lang}/main_fileshare_0.png" width="256" height="64"/>
+		<frame png="classic/{lang}/main_fileshare_1.png" width="256" height="64"/>
+	</bitmap>
+	<bitmap name="ce/main/mods_art">
+		<frame png="classic/{lang}/main_mods_0.png" width="256" height="64"/>
+		<frame png="classic/{lang}/main_mods_1.png" width="256" height="64"/>
+	</bitmap>
+	<widget name="ce/main/forge" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="ce/main/forge_art">
+		<on event="a start" open="h3/forge/lobby"/>
+	</widget>
+	<widget name="ce/main/friends" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="ce/main/friends_art">
+		<on event="a start" open="h3/friends/screen"/>
+	</widget>
+	<widget name="ce/main/fileshare" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="ce/main/fileshare_art">
+		<on event="a start" run="port fileshare enter" open="ce/fileshare/screen"/>
+	</widget>
+	<widget name="ce/main/mods" extends="ui\shell\main_menu\main_menu_item_settings" bitmap="ce/main/mods_art">
+		<on event="a start" run="port h3 mods init" open="ce/mods/screen"/>
+	</widget>
+	<widget name="ce/main/list" extends="ui\shell\main_menu\main_menu_select_list" classic_patch="true" drop="children">
+		<on event="start" run="port settings panel"/>
+		<child widget="ui\shell\main_menu\main_menu_item_load_camp" x="194" y="247"/>
+		<child widget="ui\shell\main_menu\main_menu_item_multiplayer" x="192" y="279"/>
+		<child widget="ui\shell\main_menu\main_menu_item_settings" x="192" y="311"/>
+		<child widget="ce/main/forge" x="192" y="343"/>
+		<child widget="ce/main/friends" x="192" y="375"/>
+		<child widget="ce/main/fileshare" x="192" y="407"/>
+		<child widget="ce/main/mods" x="192" y="439"/>
+	</widget>
+</menus>

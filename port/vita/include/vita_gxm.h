@@ -299,6 +299,27 @@ unsigned long vgxm_visibility_count(int buffer, unsigned long slot);
 /* ends the frame's scenes, shows the colour target (the game's back
 buffer, width x height of it) on the display and starts the next frame */
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height);
+/* the frame's interface begins (d3d8_gxm.c, Sharp interface): the colour
+target (the back buffer) is scaled up to the display now, as vgxm_present
+would, and until the present the draws and clears into it go to the
+display instead, at the display's resolution - their viewports and clips
+mapped from the target's size asked for to the picture's place on the
+display, with no depth or stencil buffer (their tests off). Once a frame;
+vgxm_present then only adds the overlay */
+void vgxm_interface_begin(unsigned long color_target);
+/* the movies' frames (d3d8_gxm.c halo_d3d_movie_*): bytes of memory the
+GPU reads as it is - uncached user RAM, or CDRAM (cdram_first: CDRAM
+tried first) - mapped for it, *kind naming which; NULL when there is none.
+One block at a time: a new one frees the last, as vgxm_movie_memory_free
+does (the GPU idle). vgxm_movie_present (the worker, before vgxm_present):
+the frame to draw over the picture at the next present, width x height
+X8R8G8B8 texels (pitch bytes apart, a multiple of 32) at pixels in that
+memory, over rect (left, top, right, bottom as fractions of the picture
+on the display), with the built-in blit programs */
+void *vgxm_movie_memory(unsigned long bytes, int cdram_first, const char **kind);
+void vgxm_movie_memory_free(void);
+void vgxm_movie_present(const void *pixels, unsigned long width, unsigned long height, unsigned long pitch,
+	const float rect[4]);
 /* waits until the GPU has finished every frame presented so far (any
 thread; the frames' scenes all end with the present's notification) */
 void vgxm_wait_gpu_idle(void);
@@ -311,13 +332,17 @@ first, 1 while there is one. gpu_ms is from the later of the submission's
 start and the previous frame's finish to the frame's finish, tail_ms from
 the later of its last scene's submission and that finish (most of gpu_ms
 when the GPU is the wall), interval_ms from the previous frame's finish;
-scale is the render rectangle it was drawn at. None on the null renderer */
+scale is the render rectangle it was drawn at, tag what vgxm_frame_tag
+said before its present (the GPU census's window: d3d8_gxm.c). None on the
+null renderer (but HALO_NULL_GPU_US_PER_DRAW's stand-in) */
 struct vgxm_gpu_frame
 {
 	unsigned long frame;
 	float gpu_ms, tail_ms, interval_ms, scale;
+	unsigned long tag;
 };
 void vgxm_frame_submit_begin(void);
+void vgxm_frame_tag(unsigned long tag);
 int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame);
 
 /* a line of the renderer's cache sizes (shaders, linked programs,

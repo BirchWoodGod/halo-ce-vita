@@ -19,6 +19,7 @@ ever written.
 #include "tomlc17.h"
 #ifdef HALO_NOT_DESKTOP
 #include "posix.h"
+#include <unistd.h>
 #endif
 
 #include <SDL3/SDL.h>
@@ -107,6 +108,32 @@ static const struct config_setting config_settings[] =
 	{ "display.first_person_legs", _config_boolean, "true", "HALO_FIRST_PERSON_LEGS", _environment_value, _platform_all,
 		"Your own legs in first person, seen looking down: your body as others\n"
 		"see it, drawn from the waist down, moving as it moves." },
+	/* (port/linux/game/field_of_view.c; the Vita's settings panel's Field
+	of view row, Video > Screen. Live) */
+	{ "display.field_of_view", _config_integer, "70", "HALO_FIELD_OF_VIEW", _environment_value, _platform_all,
+		"The field of view in Halo's degrees: 70 is the original view, larger\n"
+		"shows more at the sides (Halo PC's; 50 to 120). Zoomed views and the\n"
+		"first-person weapon stay as they were. Wider means more to draw." },
+	/* (halo_brightness_curve below; applied in the final pass that puts the
+	3D picture on the display: vita_gxm.c blit, d3d8_gl.c's present. The
+	Vita's settings panel's Brightness row, Video > Screen. Live) */
+	{ "display.brightness", _config_integer, "5", "HALO_BRIGHTNESS", _environment_value, _platform_all,
+		"Brightness of the 3D picture, 0 to 10: 5 is the picture as the game\n"
+		"draws it, higher lifts the darks and the midtones, lower deepens\n"
+		"them (the interface is not changed). Costs no frame time." },
+	/* (port/linux/game/ragdolls.c; the Vita's settings panel's Ragdolls
+	row, Graphics > Detail. Live) */
+	{ "display.ragdolls", _config_boolean, "true", "HALO_RAGDOLLS", _environment_value, _platform_all,
+		"Dead bodies fall limp, thrown by the blow that killed them, and come\n"
+		"to rest where they land; only the picture changes." },
+	/* (port/linux/src/button_glyphs.c, port/linux/include/halo_button_icons.h;
+	the Vita keeps its own Button icons, its settings panel's. Live through
+	the variable) */
+	{ "display.button_icons", _config_string, "\"auto\"", "HALO_BUTTON_ICONS", _environment_value, _platform_desktop,
+		"The button icons of the prompts and the menus: \"auto\" shows the\n"
+		"keyboard and mouse's keys while you play with them and a gamepad's\n"
+		"buttons once you use one (a PlayStation pad's, its own);\n"
+		"\"keyboard\", \"xbox\" or \"playstation\" always shows those." },
 	/* (port/linux/game/particle_budget.c; the Vita's settings panel's
 	Particles row, Reduced in all three of its profiles) */
 	{ "graphics.particles", _config_string, "\"full\"", "HALO_PARTICLE_BUDGET", _environment_value, _platform_all,
@@ -123,6 +150,53 @@ static const struct config_setting config_settings[] =
 		"How far the view turns for the mouse's movement." },
 	{ "input.invert_mouse", _config_boolean, "false", "HALO_MOUSE_INVERT", _environment_set_is_true, _platform_desktop,
 		"Moving the mouse forward looks down." },
+	/* (xinput_sdl.c; the menus' KEYBOARD & MOUSE page sets it, live) */
+	{ "input.raw_mouse", _config_boolean, "true", "HALO_MOUSE_RAW", _environment_value, _platform_desktop,
+		"Aim with the mouse's own motion (raw input), without the system's\n"
+		"pointer speed and acceleration; false uses them, as the desktop does." },
+
+	/* the keyboard and mouse's bindings (port/linux/include/
+	halo_key_bindings.h: key_bindings.c's defaults are these, Halo MCC's, and
+	run_key_bindings_test.sh checks they agree; the menus' KEYBOARD & MOUSE
+	page writes them; read again when written) */
+	{ "controls.keyboard.move_forward", _config_string, "\"W\"", "HALO_KEY_MOVE_FORWARD", _environment_value,
+		_platform_desktop,
+		"Each action's keys, mouse buttons (\"Mouse Left\", \"Mouse 4\") or wheel\n"
+		"(\"Wheel\", \"Wheel Up\"), several separated by commas, named by where\n"
+		"the key is on a US keyboard (SDL's names); \"\" for none. KEYBOARD &\n"
+		"MOUSE in the menus changes them. Escape always pauses.\n"
+		"Walk forward." },
+	{ "controls.keyboard.move_backward", _config_string, "\"S\"", "HALO_KEY_MOVE_BACKWARD", _environment_value,
+		_platform_desktop, "Walk backward." },
+	{ "controls.keyboard.strafe_left", _config_string, "\"A\"", "HALO_KEY_STRAFE_LEFT", _environment_value,
+		_platform_desktop, "Step left." },
+	{ "controls.keyboard.strafe_right", _config_string, "\"D\"", "HALO_KEY_STRAFE_RIGHT", _environment_value,
+		_platform_desktop, "Step right." },
+	{ "controls.keyboard.jump", _config_string, "\"Space\"", "HALO_KEY_JUMP", _environment_value, _platform_desktop,
+		"Jump." },
+	{ "controls.keyboard.crouch", _config_string, "\"Left Ctrl, C\"", "HALO_KEY_CROUCH", _environment_value,
+		_platform_desktop, "Crouch, held (walking too)." },
+	{ "controls.keyboard.fire", _config_string, "\"Mouse Left\"", "HALO_KEY_FIRE", _environment_value,
+		_platform_desktop, "Fire." },
+	{ "controls.keyboard.zoom", _config_string, "\"Mouse Right, Z\"", "HALO_KEY_ZOOM", _environment_value,
+		_platform_desktop, "Zoom a scoped weapon." },
+	{ "controls.keyboard.throw_grenade", _config_string, "\"G\"", "HALO_KEY_THROW_GRENADE", _environment_value,
+		_platform_desktop, "Throw a grenade." },
+	{ "controls.keyboard.melee", _config_string, "\"F, Mouse 4\"", "HALO_KEY_MELEE", _environment_value,
+		_platform_desktop, "Melee." },
+	{ "controls.keyboard.reload", _config_string, "\"R\"", "HALO_KEY_RELOAD", _environment_value, _platform_desktop,
+		"Reload." },
+	{ "controls.keyboard.switch_weapon", _config_string, "\"Tab, Wheel\"", "HALO_KEY_SWITCH_WEAPON", _environment_value,
+		_platform_desktop, "Switch weapons." },
+	{ "controls.keyboard.switch_grenade", _config_string, "\"H, Mouse Middle\"", "HALO_KEY_SWITCH_GRENADE",
+		_environment_value, _platform_desktop, "Switch grenades." },
+	{ "controls.keyboard.action", _config_string, "\"E\"", "HALO_KEY_ACTION", _environment_value, _platform_desktop,
+		"The action: get in or out of a vehicle, pick up (held: swap weapons),\n"
+		"press a switch. It never reloads (reload does), as on Halo PC." },
+	{ "controls.keyboard.flashlight", _config_string, "\"Q\"", "HALO_KEY_FLASHLIGHT", _environment_value,
+		_platform_desktop, "The flashlight." },
+	{ "controls.keyboard.scoreboard", _config_string, "\"Backspace\"", "HALO_KEY_SCOREBOARD", _environment_value,
+		_platform_desktop, "Show the scores, held." },
 
 	{ "game.console_log", _config_string, "\"important\"", "HALO_CONSOLE_LOG", _environment_value, _platform_all,
 		"What the game's console shows on screen of what it logs: \"important\"\n"
@@ -134,6 +208,17 @@ static const struct config_setting config_settings[] =
 		"Experimental: Halo Custom Edition (PC) maps in the maps folder are offered in\n"
 		"the multiplayer map list and run (docs/custom_edition_caches.md). Modded Xbox\n"
 		"maps need no setting." },
+	{ "game.mcc_mods", _config_boolean, "false", "HALO_MCC_MODS", _environment_set_is_true, _platform_all,
+		"Experimental: a Halo: The Master Chief Collection campaign mod's Halo: CE\n"
+		"Anniversary maps in the data folder's mods folder are offered after the\n"
+		"campaign's levels and played alone, offline (docs/mcc_cea_maps.md). Needs\n"
+		"game.custom_edition. Never on any network." },
+	{ "game.pc_map_vehicles", _config_string, "\"xbox\"", "HALO_PC_MAP_VEHICLES", _environment_value, _platform_all,
+		"A Custom Edition map's vehicles in a game of this machine's alone (split\n"
+		"screen or offline, with or without bots): \"xbox\" the Warthogs, Ghosts and\n"
+		"Scorpions it places; \"pc\" every vehicle it places, as Halo PC does\n"
+		"(Banshees, Rocket Warthogs, gun turrets); \"all\" every one it allows in\n"
+		"the game type too (Blood Gulch's Banshees). Network games keep \"xbox\"." },
 
 	{ "game.language", _config_string, "\"\"", "HALO_LANGUAGE", _environment_value, _platform_all,
 		"The language the game asks the Xbox for: \"ja\", \"de\", \"fr\", \"es\" or \"it\";\n"
@@ -148,7 +233,25 @@ static const struct config_setting config_settings[] =
 	{ "paths.saves", _config_string, "\"\"", "HALO_SAVE_ROOT", _environment_value, _platform_desktop,
 		"Where saved games and profiles go; empty for the usual place\n"
 		"(~/.local/share/halo-linux, or %APPDATA%\\halo on Windows)." },
+	/* (port/linux/game/mcc_content.c, docs/mcc_cea_maps.md; the Vita's
+	settings panel's Halo content folder, Multiplayer > Modded maps) */
+	{ "paths.content", _config_string, "\"auto\"", "HALO_CONTENT_ROOT", _environment_value, _platform_all,
+		"The Halo MCC folder (the Halo content folder): your own Halo: The Master\n"
+		"Chief Collection's folder (the one holding halo1), whose maps are listed\n"
+		"with the others and played; you need no Xbox files with it. \"auto\" (or\n"
+		"empty) finds it: Steam's libraries (on Linux also Flatpak's and Snap's\n"
+		"Steam; on Windows the registry and the Xbox app's XboxGames folders), on\n"
+		"the PS Vita ux0:data/haloce-vita/mcc. A folder: MCC's, its halo1 or\n"
+		"halo1/maps, or a Steam library (on a PC a folder that is gone is looked\n"
+		"for as with \"auto\"). \"none\": no MCC, the Xbox maps alone. The log\n"
+		"says what was found. Only read, never written." },
 
+	{ "paths.menu_source", _config_string, "\"\"", "HALO_MENU_SOURCE", _environment_value, _platform_all,
+		"Where the menus' map (ui.map) comes from: empty or \"auto\" uses the Xbox's\n"
+		"ui.map in the maps folder when there is one, else MCC's own\n"
+		"halo1/maps/ui.map from the Halo content folder (paths.content); \"xbox\"\n"
+		"only the Xbox's; \"mcc\" MCC's even when the Xbox's is there. MCC's menu\n"
+		"file is Halo PC's menus: some menu screens are not supported with it yet." },
 	{ "network.address", _config_string, "\"\"", "HALO_NET_ADDRESS", _environment_value, _platform_all,
 		"This machine's IPv4 address for system link, for a machine on several\n"
 		"networks; empty chooses one." },
@@ -188,8 +291,8 @@ static const struct config_setting config_settings[] =
 		"invite find each other (its messages are encrypted) and the server\n"
 		"browser's listings go, beside this file unless a full path (on the\n"
 		"Vita, the one in the game's package): one host:port on each line, up\n"
-		"to 4. Updates replace brokers.txt: keep a list of your own under\n"
-		"another name." },
+		"to 4 (with network.crossplay_brokers_file's, 6 in all). Updates\n"
+		"replace brokers.txt: keep a list of your own under another name." },
 	{ "network.crossplay_brokers_file", _config_string,
 #ifdef HALO_VITA
 		"\"app0:brokers_crossplay.txt\"",
@@ -197,9 +300,9 @@ static const struct config_setting config_settings[] =
 		"\"brokers_crossplay.txt\"",
 #endif
 		"HALO_NET_CROSSPLAY_BROKERS_FILE", _environment_value, _platform_all,
-		"With network.crossplay on, the brokers' file in place of\n"
-		"network.brokers_file's: OpenCE's list, where the PC hosts list their\n"
-		"games (the same format)." },
+		"OpenCE's brokers' file, where the PC hosts list their games (the same\n"
+		"format): the brokers used are those of network.brokers_file and of\n"
+		"this, each once, up to 6." },
 	{ "network.signalling_brokers", _config_string, "\"\"", "HALO_NET_BROKERS", _environment_value, _platform_all,
 		"Comma-separated host:port brokers in place of network.brokers_file's\n"
 		"(the automated tests' own); empty for the file's." },
@@ -273,7 +376,8 @@ static const struct config_setting config_settings[] =
 		"Ad hoc play: system link with the machines of this machine's ad hoc\n"
 		"group (the Vita's wireless group without a router, joined from its\n"
 		"settings panel), carried as internet play carries it, with or without\n"
-		"network.online; nothing goes to the internet." },
+		"network.online; nothing goes to the internet. The PS Vitas' own: a PC\n"
+		"build ignores it and plays System Link." },
 	{ "network.host_public", _config_boolean, "true", "HALO_NET_HOST_PUBLIC", _environment_value, _platform_all,
 		"Whether a game this machine hosts for internet play is public (listed in\n"
 		"everyone's server browser: anyone can find and join it) or, false,\n"
@@ -285,6 +389,27 @@ static const struct config_setting config_settings[] =
 		"its code or invite link): its own, which network.host_public (the\n"
 		"other games') never changes. X on the waiting screen of co-op hosted\n"
 		"from the campaign's menus writes its choice here (OpenCE's setting)." },
+	/* (port/linux/src/p2p_flame.inc; CUSTOMIZATION's and the settings
+	panel's Flaming helmet row, shown to listed testers alone. The next game
+	joined) */
+	{ "player.flaming_helmet", _config_boolean, "true", "HALO_FLAMING_HELMET", _environment_value, _platform_all,
+		"(testers on the owner's signed tester list) The tester's blue flaming\n"
+		"helmet, which the other players' games show once they have checked\n"
+		"your signed proof. Takes effect in the next game joined." },
+	{ "friends.enabled", _config_boolean, "true", "HALO_FRIENDS", _environment_value, _platform_all,
+		"Friends (port/linux/src/p2p_friends.c): this machine's friend code, friend\n"
+		"requests, friends' presence, joining and inviting them, through the\n"
+		"signalling brokers while internet play runs. False: none of it." },
+	{ "friends.appear_offline", _config_boolean, "false", "HALO_FRIENDS_APPEAR_OFFLINE", _environment_value,
+		_platform_all,
+		"Appear offline to friends: nothing about this machine is sent to them\n"
+		"(they see it offline); their presence, requests and invites still\n"
+		"arrive. The settings panel's Friends page and the FRIENDS screen set it." },
+	{ "friends.join", _config_boolean, "true", "HALO_FRIENDS_JOIN", _environment_value, _platform_all,
+		"Whether friends can join this machine's game in one press, public or\n"
+		"private, with room (the join goes to each friend alone, sealed; never\n"
+		"to a stranger or a blocked player); a game with a password asks them\n"
+		"for it, unless its host invited them." },
 	{ "network.public_lobby", _config_boolean, "true", "HALO_NET_PUBLIC_LOBBY", _environment_value, _platform_all,
 		"The server browser: public games are listed through the signalling\n"
 		"brokers, and the settings panel's Browse public games shows them.\n"
@@ -296,14 +421,89 @@ static const struct config_setting config_settings[] =
 		"Vita's settings panel (Multiplayer, Play, Lobby name) sets it." },
 	{ "network.max_players", _config_integer, "0", "HALO_NET_MAX_PLAYERS", _environment_value, _platform_all,
 		"The most players a game this machine hosts takes (2 to the build's\n"
-		"maximum; 0 for the build's maximum). A co-op game takes\n"
+		"maximum; 0 for the Xbox's 16). A co-op game takes\n"
 		"network.coop_players. The Vita's settings panel (Multiplayer, Play,\n"
 		"Max players) sets it." },
+	{ "menus.style", _config_string, "\"online\"", "HALO_MENU_STYLE", _environment_value, _platform_all,
+		"The menus: \"original\" (Classic: Halo CE's own, as they shipped),\n"
+		"\"classic\" (Classic+: Halo CE's own with the port's rows and screens),\n"
+		"\"halo3\" (Halo 3-style screens\n"
+		"over the same animated Halo ring: port/vita/app0/menus/halo3) or \"online\"\n"
+		"(shown as ElDewrito: the Halo 3 screens' flows, port/vita/app0/menus/online's look\n"
+		"for the screens it has). Read each\n"
+		"time a screen opens. The Vita's settings panel (Game, Menus, Menu\n"
+		"style) sets it." },
+	{ "menus.carnage_report", _config_string, "\"halo3\"", "HALO_CARNAGE_REPORT", _environment_value, _platform_all,
+		"With the Halo 3 menus, the report at a multiplayer game's end: \"halo3\"\n"
+		"(Halo 3's CARNAGE REPORT: port/vita/app0/menus/halo3/carnage.xml) or\n"
+		"\"classic\" (the game's own). Menu style Halo CE has its own\n"
+		"menus.classic_carnage_report. The Vita's settings panel (Game, Menus,\n"
+		"Carnage report) sets it." },
+	{ "menus.scoreboard", _config_string, "\"halo3\"", "HALO_SCOREBOARD", _environment_value, _platform_all,
+		"With the Halo 3 menus, the scores while Back is held in a multiplayer\n"
+		"game: \"halo3\" (Halo 3's scoreboard: port/vita/app0/menus/halo3/\n"
+		"scoreboard.xml) or \"classic\" (the game's own). Menu style Halo CE has\n"
+		"its own menus.classic_scoreboard. The Vita's settings panel (Game,\n"
+		"Menus, Scoreboard) sets it." },
+	{ "menus.classic_carnage_report", _config_string, "\"classic\"", "HALO_CLASSIC_CARNAGE_REPORT", _environment_value, _platform_all,
+		"With Menu style Halo CE, the report at a multiplayer game's end:\n"
+		"\"classic\" (the game's own, the default) or \"halo3\" (Halo 3's\n"
+		"CARNAGE REPORT, as menus.carnage_report with the Halo 3 menus). The\n"
+		"Vita's settings panel (Game, Menus, Carnage report) sets it." },
+	{ "menus.classic_scoreboard", _config_string, "\"classic\"", "HALO_CLASSIC_SCOREBOARD", _environment_value, _platform_all,
+		"With Menu style Halo CE, the scores while Back is held in a\n"
+		"multiplayer game: \"classic\" (the game's own, the default) or \"halo3\"\n"
+		"(Halo 3's scoreboard, with its player options: mute, add friend,\n"
+		"kick). The Vita's settings panel (Game, Menus, Scoreboard) sets it." },
+	{ "menus.scenes", _config_boolean, "true", "HALO_MENU_SCENES", _environment_value, _platform_all,
+		"With the Halo 3 menus, a camera of its own behind each lobby (the\n"
+		"campaign, multiplayer and Forge lobbies: their scene= in\n"
+		"port/vita/app0/menus/halo3), the main menu the ring's own flight;\n"
+		"false keeps the ring's flight behind every screen." },
+	{ "menus.backdrop", _config_boolean, "true", "HALO_MENU_BACKDROP", _environment_value, _platform_all,
+		"With Menu style ElDewrito (\"online\"), the campaign level Halo (a30) behind the menus,\n"
+		"a still camera at a spot of it for each screen (port/linux/game/\n"
+		"menu_backdrop.c), made once from the player's own a30.map into\n"
+		"t:\\packs; false (or no a30.map) keeps the ring. The Vita's settings\n"
+		"panel (Game, Menus, Live backdrop) sets it." },
+	{ "menus.player_models", _config_boolean, "false", "HALO_PLAYER_MODELS", _environment_value, _platform_all,
+		"Player models from your Halo Custom Edition maps (CUSTOMIZATION's\n"
+		"MODEL, port/linux/game/player_models.c). Off in 1.1.1 until Halo 2's\n"
+		"models come: every player is the Spartan; true turns them on (testing)." },
+	{ "menus.backdrop_music", _config_string, "\"30\"", "HALO_MENU_MUSIC", _environment_value, _platform_all,
+		"With the live backdrop behind the menus (ElDewrito), the menu music's\n"
+		"level in percent (100, 70, 50, 40, 30, 20, 0; 30 the default), so that the level's own ambience -\n"
+		"its wind, birds, insects, the waterfall - comes through under it. The\n"
+		"Vita's settings panel (Sound, Menu music) sets it." },
+	{ "infection.players_per_zombie", _config_integer, "8", "HALO_INFECTION_ZOMBIES", _environment_value, _platform_all,
+		"Infection (port/linux/game/infection.c), the game's own Infection game\n"
+		"type as this machine hosts it: one first zombie for each this many\n"
+		"players (2 to 16). The Vita's settings panel (Multiplayer, Infection)\n"
+		"sets it." },
+	{ "infection.zombie_speed", _config_integer, "115", "HALO_INFECTION_SPEED", _environment_value, _platform_all,
+		"Infection: the zombies' speed, a percentage of a player's (100 to 150)." },
+	{ "infection.time_limit", _config_integer, "6", "HALO_INFECTION_TIME", _environment_value, _platform_all,
+		"Infection: minutes until the humans left win (0 for none, to 30)." },
+	{ "infection.zombie_respawn", _config_integer, "3", "HALO_INFECTION_RESPAWN", _environment_value, _platform_all,
+		"Infection: seconds before a dead zombie comes back (3 to 15)." },
+	{ "infection.zombie_shields", _config_integer, "0", "HALO_INFECTION_SHIELDS", _environment_value, _platform_all,
+		"Infection: 1, the zombies have shields as players do; 0, none (the\n"
+		"default)." },
+	{ "infection.zombie_tough", _config_integer, "0", "HALO_INFECTION_TOUGH", _environment_value, _platform_all,
+		"Infection: 1, the zombies take half the damage a player does; 0, as a\n"
+		"player." },
 	{ "bots.count", _config_integer, "0", "HALO_BOTS", _environment_value, _platform_all,
 		"Computer players (bots) in a local (split screen) multiplayer game:\n"
 		"0 to 15 join its lobby with the players, as far as the game has room.\n"
 		"Not in system link or internet games. The Vita's settings panel\n"
 		"(Multiplayer, Bots) sets it." },
+	{ "bots.online", _config_string, "\"full\"", "HALO_BOTS_ONLINE", _environment_value, _platform_all,
+		"A multiplayer game this machine hosts Online (Internet, not Same\n"
+		"Wi-Fi, System Link or ad hoc) is filled with bots up to its most players\n"
+		"less one, so a slot is always free; a bot leaves for each player who\n"
+		"joins (a party's members on one team): \"full\" (the default), \"off\",\n"
+		"or the most bots (1 to 15). The Vita's settings panel (Multiplayer,\n"
+		"Online bots) and the Halo 3 lobby's GAME OPTIONS set it." },
 	{ "bots.skill", _config_string, "\"normal\"", "HALO_BOT_SKILL", _environment_value, _platform_all,
 		"How well the bots play: \"easy\", \"normal\", \"heroic\" or \"legendary\"\n"
 		"(how soon they react, how well they aim, how far they see)." },
@@ -344,10 +544,37 @@ static const struct config_setting config_settings[] =
 		"to download it (in a game joined from the public lobby, with a warning:\n"
 		"its host is a stranger), \"private\" asks except in public lobby games,\n"
 		"\"never\" never offers one." },
+	{ "network.browser_filter", _config_string, "\"all\"", "HALO_NET_BROWSER_FILTER", _environment_value, _platform_all,
+		"The games the server browsers list: \"all\" (the default: the Vitas'\n"
+		"and OpenCE's, PC hosts and servers running OpenCE, ChupathingyCE or\n"
+		"DamnationCE, side by side, each tagged), \"vita\" (games a Vita\n"
+		"hosts) or \"pc\" (PC hosts' and servers'). Joining a game speaks its\n"
+		"own protocol whatever this says (docs/crossplay.md)." },
+	{ "network.who_can_join", _config_string, "\"\"", "HALO_NET_WHO_CAN_JOIN", _environment_value, _platform_all,
+		"Who can join the games this machine hosts: \"vita\" (Vita: Vitas, on\n"
+		"the Vitas' own protocol: the PC build of this port is refused),\n"
+		"\"vita_pc\" (Vita PC: PS Vitas and Halo CE Vita on PC), \"everyone\"\n"
+		"(also OpenCE players on PC, on OpenCE's protocol at its network\n"
+		"version 32, listed in both browsers). Empty: a Vita's default, Vita;\n"
+		"the PC build's and the dedicated server's, Vita PC (the PC build\n"
+		"offers no Vita, and takes \"vita\" as Vita PC). Taken as a game is\n"
+		"hosted; never everyone in ad hoc play. Best effort: a modified\n"
+		"client can say it is a Vita (docs/crossplay.md)." },
+	{ "network.host_crossplay", _config_boolean, "false", "HALO_NET_HOST_CROSSPLAY", _environment_value, _platform_all,
+		"Retired (Oct 20 2026) for network.who_can_join: read only when that\n"
+		"is empty, true as \"everyone\" (what was \"Vitas and PC\")." },
+	{ "network.block_mouse_aim_assist", _config_boolean, "false", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", _environment_value,
+		_platform_all,
+		"In a game this machine hosts for everyone (Who can join: EVERYONE):\n"
+		"true tells the OpenCE players' builds to turn off the aim assist\n"
+		"(magnetism) they may have turned on for a mouse; false (the default)\n"
+		"leaves it to each player, as OpenCE's hosts do. Controllers, touch\n"
+		"and the Vita keep theirs. Read live while the game runs." },
 	{ "network.crossplay", _config_boolean, "false", "HALO_CROSSPLAY", _environment_value, _platform_all,
-		"Play OpenCE's games (PC hosts and servers running OpenCE,\n"
-		"ChupathingyCE or DamnationCE) instead of Vitas' (docs/crossplay.md).\n"
-		"Off, the default, plays Vita to Vita as betas 1-4 do." },
+		"Retired (Oct 19 2026): there is no switch, every game speaks its own\n"
+		"protocol. Read only to keep a player's choice: true, with\n"
+		"network.browser_filter left at \"all\", lists PC games only, as the\n"
+		"switch's On did." },
 	{ "network.remote_lod", _config_string, "\"auto\"", "HALO_NET_REMOTE_LOD", _environment_value, _platform_all,
 		"In a game this machine joined, another player out of view (on foot,\n"
 		"not shooting, throwing, meleeing, reloading, jumping or acting) updated\n"
@@ -355,10 +582,48 @@ static const struct config_setting config_settings[] =
 		"animation, footsteps and weapon run at half rate until seen. \"auto\",\n"
 		"the default, in games of more than 16 players (only crossplay's PC games\n"
 		"are that large); \"1\" always; \"0\" never." },
+	{ "network.anticheat", _config_boolean, "true", "HALO_NET_ANTICHEAT", _environment_value, _platform_all,
+		"A host drops a client machine that keeps sending what only a modified\n"
+		"game sends (hits harder than their weapon, through walls, of an empty\n"
+		"weapon; moves the host refuses for seconds on end), keeps it out of\n"
+		"its games for network.anticheat_ban_minutes and logs it to\n"
+		"cheaters.txt. Off: refused all the same, counted and logged, never\n"
+		"dropped (port/linux/NETCODE.md, \"A modified client\")." },
+	{ "network.anticheat_kick_score", _config_integer, "100", "HALO_NET_ANTICHEAT_KICK_SCORE", _environment_value,
+		_platform_all,
+		"The score past which a client machine is dropped: each refusal adds\n"
+		"its kind's weight (network.anticheat_weights), and the score falls by\n"
+		"network.anticheat_decay a second." },
+	{ "network.anticheat_decay", _config_integer, "4", "HALO_NET_ANTICHEAT_DECAY", _environment_value, _platform_all,
+		"How much a client machine's anti-cheat score falls a second." },
+	{ "network.anticheat_ban_minutes", _config_integer, "10", "HALO_NET_ANTICHEAT_BAN_MINUTES", _environment_value,
+		_platform_all,
+		"How long a machine the anti-cheat limit dropped is kept out of this\n"
+		"host's games, its code and invites too (minutes; 0 none, 1440 at\n"
+		"most)." },
+	{ "network.anticheat_weights", _config_string, "\"\"", "HALO_NET_ANTICHEAT_WEIGHTS", _environment_value,
+		_platform_all,
+		"Each refusal's weight, comma-separated, in this order (empty keeps\n"
+		"each default): a forged hit (25), a hit of a weapon not held (10),\n"
+		"through a wall (6), of an empty weapon (4), of a part far from the\n"
+		"shot (6), a hit refused as a poor link's can be (0), hits past the\n"
+		"weapon's rate (0.25), moves refused for seconds on end (10, a second),\n"
+		"through walls (1), a vehicle's moves refused (10, a second), Forge\n"
+		"requests malformed (2, once a tick)." },
 	{ "network.latency_meter", _config_boolean, "true", "HALO_LATENCY_METER", _environment_value, _platform_all,
 		"Show the round trip to the host in a network game, in milliseconds,\n"
 		"at the screen's top right (the host: its slowest player's), and\n"
 		"\"Connection problem\" when the host has sent nothing for two seconds." },
+	{ "network.chat", _config_boolean, "true", "HALO_CHAT", _environment_value, _platform_all,
+		"The in-game chat (port/linux/game/game_chat.c): lines to everyone, the team\n"
+		"or the party, from the quick chat wheel (Back + D-pad left in play; F1 +\n"
+		"Left on the keyboard) or typed. false: no chat shown over the game and none\n"
+		"sent from it." },
+	{ "network.chat_filter", _config_boolean, "true", "HALO_CHAT_FILTER", _environment_value, _platform_all,
+		"The chat's slur filter: slurs and hate speech in other players' lines\n"
+		"(PC players' too) shown as ****, however they are spelled, and a player\n"
+		"it catches three times in five minutes muted here. It changes only what\n"
+		"this player sees (port/vita/app0/chat/filter.txt)." },
 	{ "network.player_name", _config_string, "\"\"", "HALO_NET_PLAYER_NAME", _environment_value, _platform_all,
 		"The name a player goes by in network games when their profile has none\n"
 		"(the default profiles); the Vita's user name on the Vita; empty for\n"
@@ -381,6 +646,10 @@ static const struct config_setting config_settings[] =
 		"Seconds after hosting that an automated test game starts." },
 	{ "debug.network_test_kill", _config_real, "0.0", "HALO_NETWORK_TEST_KILL", _environment_value, _platform_all,
 		"Every this many seconds an automated test host kills its last player; 0 never." },
+	{ "debug.network_test_end", _config_real, "0.0", "HALO_NETWORK_TEST_END", _environment_value, _platform_all,
+		"This many seconds into an automated test game its host ends it, as a\n"
+		"time limit does (the carnage report's tests: run_menus_test.sh h3carnage);\n"
+		"0 never." },
 	{ "debug.network_test_shoot", _config_real, "0.0", "HALO_NETWORK_TEST_SHOOT", _environment_value, _platform_all,
 		"Every this many seconds each automated test player hits the next with\n"
 		"their weapon; 0 never." },
@@ -419,6 +688,11 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"A file (in the data folder) an automated test host writes its internet\n"
 		"play invite link to once it hosts; empty none." },
+	{ "debug.network_test_leave_lobby", _config_real, "0.0", "HALO_NETWORK_TEST_LEAVE_LOBBY", _environment_value,
+		_platform_all,
+		"Seconds after an automated test's joining machine joins its host's\n"
+		"lobby that it leaves it (as Back does), precaches another map, and\n"
+		"joins again, once; 0 never." },
 	{ "debug.network_test_join_file", _config_string, "\"\"", "HALO_NETWORK_TEST_JOIN_FILE", _environment_value,
 		_platform_all,
 		"A file (in the data folder) an automated test's joining machine waits for\n"
@@ -536,6 +810,17 @@ static void config_path(char *path, size_t size)
 #else
 	/* the executable's folder, with its separator */
 	const char *base = SDL_GetBasePath();
+#ifndef HALO_RELEASE
+	/* (tests only) HALO_TEST_CONFIG: a config.toml of the test's own, not
+	the one beside the harness (run_pc_controls_test.sh) */
+	const char *test = getenv("HALO_TEST_CONFIG");
+
+	if (test && *test)
+	{
+		snprintf(path, size, "%s", test);
+		return;
+	}
+#endif
 
 	snprintf(path, size, "%sconfig.toml", base ? base : "");
 #endif
@@ -600,16 +885,35 @@ static char *config_read_file(const char *path, size_t *size)
 #endif
 }
 
+/* a file written whole or not at all (Oct 21 2026: a Vita whose game
+stopped mid-write must start again): into path.new, flushed to the card,
+then put in place - the Vita's rename does not write over a file, so the
+old one goes first; a start that finds only path.new takes it
+(config_file_settle) */
 static int config_write_file_length(const char *path, const char *text, size_t length)
 {
 #ifdef HALO_NOT_DESKTOP
-	FILE *file = fopen(path, "wb");
+	char temporary[1100];
+	FILE *file;
 	int written;
 
+	if (snprintf(temporary, sizeof(temporary), "%s.new", path) >= (int)sizeof(temporary))
+		return 0;
+	remove(temporary);
+	file = fopen(temporary, "wb");
 	if (!file)
 		return 0;
-	written = fwrite(text, 1, length, file) == length;
-	return fclose(file) == 0 && written;
+	written = fwrite(text, 1, length, file) == length && fflush(file) == 0;
+	if (written)
+		fsync(fileno(file));
+	written = fclose(file) == 0 && written;
+	if (!written)
+	{
+		remove(temporary);
+		return 0;
+	}
+	remove(path);
+	return rename(temporary, path) == 0;
 #else
 	return SDL_SaveFile(path, text, length);
 #endif
@@ -634,6 +938,22 @@ static int config_file_exists(const char *path)
 	return posix_stat(path, &information) == 0;
 #else
 	return SDL_GetPathInfo(path, NULL);
+#endif
+}
+
+/* (a start after a write stopped between taking the old file away and
+putting the new one in place: the new one, whole - config_write_file_length
+removes the old one only once the new one is on the card) */
+static void config_file_settle(const char *path)
+{
+#ifdef HALO_NOT_DESKTOP
+	char temporary[1100];
+
+	if (snprintf(temporary, sizeof(temporary), "%s.new", path) < (int)sizeof(temporary) &&
+		!config_file_exists(path) && config_file_exists(temporary) && rename(temporary, path) == 0)
+		platform_log("settings: %s put in place from %s (a write the game did not finish)", path, temporary);
+#else
+	(void)path;
 #endif
 }
 
@@ -695,7 +1015,7 @@ static char *config_copy(const char *text, size_t length)
 default */
 static void config_append_setting(struct config_text *text, const struct config_setting *setting)
 {
-	const char *dot = strchr(setting->name, '.');
+	const char *dot = strrchr(setting->name, '.');
 	const char *line;
 	char buffer[256];
 
@@ -731,13 +1051,16 @@ static void config_append_setting(struct config_text *text, const struct config_
 }
 
 /* whether the setting other is in name's section ("network" of
-"network.online") */
+"network.online"; a section is all before the last dot) */
 static int config_same_section(const char *name, const char *other)
 {
-	const char *dot = strchr(name, '.');
+	const char *dot = strrchr(name, '.');
+	const char *other_dot = strrchr(other, '.');
 	size_t length = dot ? (size_t)(dot - name) : strlen(name);
 
-	return !strncmp(name, other, length) && other[length] == '.';
+	/* (the section is all before the last dot: "controls.keyboard" of
+	"controls.keyboard.fire", which is not "controls"'s) */
+	return other_dot && (size_t)(other_dot - other) == length && !strncmp(name, other, length);
 }
 
 /* the file with every setting of this build at its default: each section
@@ -767,7 +1090,7 @@ static char *config_default_text(void)
 	for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
 	{
 		const struct config_setting *setting = &config_settings[index];
-		const char *dot = strchr(setting->name, '.');
+		const char *dot = strrchr(setting->name, '.');
 		char buffer[64];
 		size_t other;
 
@@ -867,11 +1190,11 @@ static char *config_add_missing(const char *text, toml_datum_t table)
 	for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
 	{
 		const struct config_setting *setting = &config_settings[index];
-		const char *dot = strchr(setting->name, '.');
+		const char *dot = strrchr(setting->name, '.');
 		const char *current = result ? result : text;
 		struct config_text block = { NULL, 0, 0 };
 		struct config_text updated = { NULL, 0, 0 };
-		char section[40], header[48];
+		char section[64], header[72];
 		const char *line;
 		const char *insert = NULL;
 
@@ -884,7 +1207,7 @@ static char *config_add_missing(const char *text, toml_datum_t table)
 		{
 			const char *start = line;
 			size_t length = strcspn(line, "\n");
-			char name[40];
+			char name[64];
 			int opens = config_line_section(line, line + length, name, sizeof(name));
 
 			while (*start == ' ' || *start == '\t')
@@ -939,7 +1262,7 @@ line added after the section's last (a new section at the end when there
 is none). NULL when out of memory or name is no "section.key" */
 static char *config_text_set(const char *text, const char *name, const char *value)
 {
-	const char *dot = strchr(name, '.');
+	const char *dot = strrchr(name, '.');
 	char section[64], current[64], line_text[1024];
 	struct config_text out = { NULL, 0, 0 };
 	const char *line;
@@ -1014,7 +1337,7 @@ was kept beside it as config.toml.broken. */
 it, the first), or NULL */
 static char *config_text_value(const char *text, const char *name)
 {
-	const char *dot = strchr(name, '.');
+	const char *dot = strrchr(name, '.');
 	char section[64], current[64];
 	const char *line;
 	int in_section = 0, any_section = 0;
@@ -1341,30 +1664,31 @@ static long config_setting_index(const char *name)
 	return -1;
 }
 
-/* keys in the file that are no setting, likely misspelt */
-static void config_report_unknown_keys(toml_datum_t table)
+/* keys in the file that are no setting, likely misspelt; a table in a
+section ([controls.keyboard] in [controls]) looked into with its name */
+static void config_report_unknown_table(toml_datum_t table, const char *prefix)
 {
-	int section_index;
+	int key_index;
 
-	for (section_index = 0; section_index < table.u.tab.size; section_index++)
+	for (key_index = 0; key_index < table.u.tab.size; key_index++)
 	{
-		toml_datum_t section = table.u.tab.value[section_index];
-		int key_index;
+		toml_datum_t value = table.u.tab.value[key_index];
+		char name[128];
 
-		if (section.type != TOML_TABLE)
+		snprintf(name, sizeof(name), "%s%s%s", prefix, *prefix ? "." : "", table.u.tab.key[key_index]);
+		if (value.type == TOML_TABLE && config_setting_index(name) < 0)
 		{
-			platform_log("config.toml line %d: unknown setting %s", section.lineno, table.u.tab.key[section_index]);
+			config_report_unknown_table(value, name);
 			continue;
 		}
-		for (key_index = 0; key_index < section.u.tab.size; key_index++)
-		{
-			char name[128];
-
-			snprintf(name, sizeof(name), "%s.%s", table.u.tab.key[section_index], section.u.tab.key[key_index]);
-			if (config_setting_index(name) < 0)
-				platform_log("config.toml line %d: unknown setting %s", section.u.tab.value[key_index].lineno, name);
-		}
+		if (!*prefix || config_setting_index(name) < 0)
+			platform_log("config.toml line %d: unknown setting %s", value.lineno, name);
 	}
+}
+
+static void config_report_unknown_keys(toml_datum_t table)
+{
+	config_report_unknown_table(table, "");
 }
 
 static void config_load(void)
@@ -1392,6 +1716,7 @@ static void config_load(void)
 	}
 
 	config_path(path, sizeof(path));
+	config_file_settle(path);
 	text = config_read_file(path, &size);
 	if (text)
 	{
@@ -1498,9 +1823,11 @@ static const struct config_value *config_value(const char *name, enum config_typ
 
 /* ---------- writing a setting */
 
-/* sets a boolean setting, for now and in config.toml: its line there is
-changed (or added), the rest of the file kept as it is */
-int config_write_boolean(const char *name, int value)
+/* sets a setting, for now (from value_text, as the environment variable
+would give it) and in config.toml (toml, the value as the file writes it):
+its line there is changed (or added), the rest of the file kept as it is.
+The readers that keep a setting are told (halo_settings_generation) */
+static int config_write_value(const char *name, enum config_type type, const char *value_text, const char *toml)
 {
 	long index = config_setting_index(name);
 	char path[1024], error[200];
@@ -1508,12 +1835,23 @@ int config_write_boolean(const char *name, int value)
 	char *text, *updated = NULL;
 	int succeeded = 0;
 
-	if (index < 0 || config_settings[index].type != _config_boolean || !strchr(name, '.'))
+	if (index < 0 || config_settings[index].type != type || !strchr(name, '.'))
 		return 0;
 	/* (the file read first, as the other settings are) */
-	config_boolean(name);
+	config_value(name, type);
 	pthread_mutex_lock(&config_lock);
-	config_values[index].boolean = value != 0;
+	if (type == _config_string)
+	{
+		/* (the old text kept, not freed: another thread may be reading it,
+		as config_set_override's) */
+		char *copy = strdup(value_text);
+
+		if (copy)
+			config_values[index].string = copy;
+	}
+	else
+		config_set_from_text(&config_values[index], type, value_text);
+	halo_settings_generation++;
 	config_path(path, sizeof(path));
 	text = config_read_file(path, &size);
 	/* (a file gone since the start is written whole again; one there that
@@ -1521,7 +1859,7 @@ int config_write_boolean(const char *name, int value)
 	if (!text && !config_file_exists(path))
 		text = config_default_text();
 	if (text)
-		updated = config_text_set(text, name, value ? "true" : "false");
+		updated = config_text_set(text, name, toml);
 	if (!updated)
 		platform_log("settings: cannot write %s to %s", name, path);
 	/* (never a file that does not read back) */
@@ -1533,6 +1871,64 @@ int config_write_boolean(const char *name, int value)
 	free(updated);
 	free(text);
 	return succeeded;
+}
+
+/* sets a boolean setting, for now and in config.toml: its line there is
+changed (or added), the rest of the file kept as it is */
+int config_write_boolean(const char *name, int value)
+{
+	return config_write_value(name, _config_boolean, value ? "true" : "false", value ? "true" : "false");
+}
+
+/* a string setting, likewise: written as a TOML basic string, its quotes
+and backslashes escaped and anything below a space left out */
+int config_write_string(const char *name, const char *value)
+{
+	char toml[512], clean[256];
+	size_t length = 0, clean_length = 0;
+
+	toml[length++] = '"';
+	for (; value && *value && length + 3 < sizeof(toml) && clean_length + 1 < sizeof(clean); value++)
+	{
+		if ((unsigned char)*value < 0x20 || *value == 0x7f)
+			continue;
+		if (*value == '"' || *value == '\\')
+			toml[length++] = '\\';
+		toml[length++] = *value;
+		clean[clean_length++] = *value;
+	}
+	toml[length++] = '"';
+	toml[length] = 0;
+	clean[clean_length] = 0;
+	return config_write_value(name, _config_string, clean, toml);
+}
+
+/* a real setting, likewise ("1.25") */
+int config_write_real(const char *name, double value)
+{
+	char text[64];
+
+	snprintf(text, sizeof(text), "%.3f", value);
+	return config_write_value(name, _config_real, text, text);
+}
+
+/* a setting's default as text (a string's without its quotes), 1 if the
+setting exists */
+int config_default_text_of(const char *name, char *text, size_t size)
+{
+	long index = config_setting_index(name);
+	const char *value;
+	size_t length;
+
+	if (index < 0 || !size)
+		return 0;
+	value = config_settings[index].default_value;
+	length = strlen(value);
+	if (config_settings[index].type == _config_string && length >= 2)
+		snprintf(text, size, "%.*s", (int)(length - 2), value + 1);
+	else
+		snprintf(text, size, "%s", value);
+	return 1;
 }
 
 /* sets a setting for this run only, from text as its environment variable
@@ -1565,14 +1961,77 @@ int config_set_override(const char *name, const char *text)
 
 /* ---------- public code */
 
+/* Ad hoc play is the PS Vitas' own (their wireless group with no router:
+p2p_adhoc.c); the PC build ("Vita+": network_wire_this_platform's
+NETWORK_PLATFORM_VITA_PC, which this mirrors) has none - the owner, Oct 20
+2026 - and plays System Link in its place. A test build stands in for a
+Vita with HALO_TEST_PLATFORM=vita (the tests' default: test_out.sh) */
+int config_adhoc_offered(void)
+{
+#if defined(HALO_VITA) || defined(HALO_DEDICATED_SERVER)
+	return 1;
+#else
+#ifndef HALO_RELEASE
+	const char *test = getenv("HALO_TEST_PLATFORM");
+
+	if (test && !strcmp(test, "vita"))
+		return 1;
+#endif
+	return 0;
+#endif
+}
+
 int config_boolean(const char *name)
 {
-	return config_value(name, _config_boolean)->boolean;
+	int value = config_value(name, _config_boolean)->boolean;
+
+	/* (network.adhoc on a PC: off, whatever config.toml, the environment or
+	a switch says; said once) */
+	if (value && !strcmp(name, "network.adhoc") && !config_adhoc_offered())
+	{
+		static int said;
+
+		if (!said)
+		{
+			said = 1;
+			platform_log("network: ad hoc play is the PS Vitas' own; this PC plays System Link instead (network.adhoc "
+				"ignored)");
+		}
+		return 0;
+	}
+	return value;
 }
 
 long config_integer(const char *name)
 {
 	return config_value(name, _config_integer)->integer;
+}
+
+/* The brightness setting (display.brightness, HALO_BRIGHTNESS; 0 to 10, 5 the
+picture as drawn) as the strength k of the curve the display's final pass
+applies to the 3D picture: c' = c + k * c * (1 - c), per colour channel.
+k is 0 at 5, -0.75 at 0 and +0.75 at 10; the curve is 0 at black and 1 at
+white and rising for any |k| < 1, so it lifts or deepens the darks and
+midtones and leaves the extremes. The environment first, as the field of
+view: the Vita's settings panel sets the variable, live. */
+float halo_brightness_curve(void)
+{
+	static float curve;
+	static int known;
+	static unsigned long seen;
+
+	if (!known || seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_BRIGHTNESS");
+		long value = setting && *setting ? strtol(setting, NULL, 10) : config_integer("display.brightness");
+
+		if (value < 0 || value > 10)
+			value = 5;
+		curve = (float)(value - 5) * 0.15f;
+		seen = halo_settings_generation;
+		known = 1;
+	}
+	return curve;
 }
 
 double config_real(const char *name)

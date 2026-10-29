@@ -43,6 +43,7 @@ names of the maps' own string lists.
 #include "../src/lang.h"
 
 #include "coop_menu.h"
+#include "network_wire.h"
 
 #include <string.h>
 #include <wchar.h>
@@ -91,6 +92,12 @@ static void coop_menu_string(
 	}
 	text[length] = 0;
 }
+
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+short main_get_solo_level_from_name(char const *name);
 
 void coop_menu_level_name(
 	char const *map_name,
@@ -248,6 +255,15 @@ static void coop_menu_connection(
 		usnprintf(text, count, TW(L"Online"));
 	else
 		usnprintf(text, count, TW(L"System link"));
+	/* (the game's tag: a game PC players can join too, network_wire.h) */
+	if (network_wire_crossplay())
+	{
+		long length = ustrlen(text);
+
+		if (length < count - 1)
+			usnprintf(text + length, count - length, network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC ?
+				L" (VITA (PC)+PC)" : L" (VITA+PC)");
+	}
 	text[count - 1] = 0;
 }
 
@@ -346,7 +362,11 @@ void coop_menu_render(
 		csmemset(machine_name, 0, sizeof(machine_name));
 		network_game_generate_local_machine_name(machine_name);
 #ifdef HALO_PORT_VITA_NETWORK
-		usnprintf(line, NUMBEROF(line), TW(L"This Vita: %ls"), machine_name);
+		/* (the PC build: "This machine") */
+		if (network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC)
+			usnprintf(line, NUMBEROF(line), TW(L"This machine: %ls"), machine_name);
+		else
+			usnprintf(line, NUMBEROF(line), TW(L"This Vita: %ls"), machine_name);
 #else
 		usnprintf(line, NUMBEROF(line), TW(L"This machine: %ls"), machine_name);
 #endif

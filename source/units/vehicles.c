@@ -1765,11 +1765,19 @@ static void create_crashing_effects(
 		vehicle->definition_index);
 	struct physics_definition *physics = physics_definition_get(
 		definition->unit.object.physics.index);
-	struct game_globals_falling_damage *falling_damage = TAG_BLOCK_GET_ELEMENT(
-		&scenario_get_game_globals()->falling_damage, 0, struct game_globals_falling_damage);
+	struct game_globals_falling_damage *falling_damage;
 	real_vector3d delta;
 	real speed;
 
+#ifdef HALO_LINUX
+	/* port: a map whose globals have no falling damage has no crash effects
+	(ui.map: a Halo 3 menu's Warthog as its scene lets it go,
+	menu_scene_objects.c) */
+	if (scenario_get_game_globals()->falling_damage.count < 1)
+		return;
+#endif
+	falling_damage = TAG_BLOCK_GET_ELEMENT(
+		&scenario_get_game_globals()->falling_damage, 0, struct game_globals_falling_damage);
 	if (falling_damage->vehicle_hit_environment_damage_effect.index!=NONE ||
 		definition->crash_sound.index!=NONE)
 	{
@@ -2523,6 +2531,35 @@ boolean vehicle_update(
 		goto animate;
 	}
 
+#ifdef HALO_LINUX
+	/* port: a vehicle in a Halo 3 menu's scene (a Warthog caught mid-jump,
+	port/linux/game/menu_scene_objects.c) is held still as placed: none of
+	its physics run, so nothing of it touches anything (no dust, no skid, no
+	crash, no suspension sound), its wheels hanging as the scene says */
+	{
+		boolean menu_scene_objects_frozen(long object_index, real *suspension);
+		real suspension = 0.f;
+
+		if (menu_scene_objects_frozen(vehicle_index, &suspension))
+		{
+			short suspension_index;
+			byte value = (byte)PIN((long)(suspension * 255.f + 0.5f), 0, 254);
+
+			vehicle->object.angular_velocity.i = 0.0f;
+			vehicle->object.angular_velocity.j = 0.0f;
+			vehicle->object.angular_velocity.k = 0.0f;
+			vehicle->object.translational_velocity.i = 0.0f;
+			vehicle->object.translational_velocity.j = 0.0f;
+			vehicle->object.translational_velocity.k = 0.0f;
+			vehicle->vehicle.speed = 0.0f;
+			vehicle->vehicle.airborne_ticks = 0;
+			for (suspension_index = 0; suspension_index < (short)NUMBEROF(vehicle->vehicle.suspension); suspension_index++)
+				vehicle->vehicle.suspension[suspension_index] = value;
+			goto animate;
+		}
+	}
+#endif
+
 	SET_FLAG(vehicle->vehicle.flags, 2,
 		TEST_FLAG(vehicle->unit.control_flags, _unit_control_crouch_modifier_bit));
 
@@ -2755,7 +2792,12 @@ boolean vehicle_update(
 		(halo_epoch_threaded || ( global_current_collision_user_depth > 1)));
 	if (!halo_epoch_threaded) --global_current_collision_user_depth;
 
-	if (TEST_FLAG(definition->flags, 6))
+	if (TEST_FLAG(definition->flags, 6)
+#ifdef HALO_LINUX
+		/* port: (as create_crashing_effects) */
+		&& scenario_get_game_globals()->falling_damage.count >= 1
+#endif
+		)
 	{
 		struct game_globals_falling_damage *falling_damage = TAG_BLOCK_GET_ELEMENT(
 			&scenario_get_game_globals()->falling_damage, 0, struct game_globals_falling_damage);

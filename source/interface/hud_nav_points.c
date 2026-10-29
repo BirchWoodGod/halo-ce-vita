@@ -127,6 +127,9 @@ symbols in this file:
 #include "scenario/scenario_definitions.h"
 #include "units/units.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#ifdef HALO_LINUX
+#include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
+#endif
 
 /* ---------- constants */
 
@@ -792,6 +795,12 @@ void custom_render_nav_point(
 			1.0f-distance*(1.0f/15.0f),
 			0.7) + 0.5f;
 	}
+#ifdef HALO_LINUX
+	/* port: Halo: CE Anniversary's arrows, twice the Xbox's with Halo PC's
+	half HUD scale, at the Xbox's size (hud_draw.c hud_mcc_bitmap_scale; the
+	distance beside one is placed by it too) */
+	arrow_scale *= hud_mcc_bitmap_scale(hud_globals->waypoint.arrow_bitmap.index, FALSE);
+#endif
 
 	matrix4x3_transform_point(
 		&render.frustum.world_to_view,

@@ -12,7 +12,9 @@ Automated system link sessions for testing the netcode without the menus
   later; with more variants, once a game is over (debug.network_test_score
   makes it short) the next, as the host's button on the scores does
   ("<variant>@<map>" plays that game on another map: a map change;
-  "<variant>+vehicles" the variant with every vehicle the map places); a
+  "<variant>+vehicles" the variant with every vehicle the map places;
+  "saved=<name>" the player's saved game type of that name, the Halo 3
+  game type editor's, its rules logged once the game runs); a
   map with a path is that level (custom_maps\pcgulch: a Custom Edition map
   named as a PC host names it, OpenCE's, for the crossplay wire's map
   checks: port/vita/tests/run_crossplay_maps_test.sh);
@@ -56,19 +58,24 @@ players in loading zones ("@bsp") and kills them ("@kill").
 
 Scripted play for the netcode's parts the bots' wandering does not reach:
 debug.network_test_kill (the host kills the last player every so often),
+debug.network_test_end (the host ends the game that many seconds in, as a
+time limit does: any game type's end, its scores and carnage report),
 debug.network_test_shoot (every so often each machine's player hits the
 next with their weapon's projectile: a client's through its report to the
 host) and debug.network_test_vehicle (the host seats the last player as a
 vehicle's driver that many seconds in, takes them out 15 seconds on, and 5
 seconds later stands them at a vehicle's driver's entrance, where a joining
 machine's player holds the action button, as getting in does)
-and debug.network_test_pickup (the last player stands on a weapon lying
+and debug.network_test_pickup (the last player - the first with
+HALO_NETWORK_TEST_PICKUP_PLAYER=first - stands on a weapon lying
 about that many seconds in, and a joining machine's player holds the action
 button a second later, to pick it up). HALO_NETWORK_TEST_PLAYER_DRIVES
 (seconds; a "local:" game) seats this machine's player as the nearest
 Warthog's driver (one no one drives, within 30 units) that many seconds in, the scripted player letting go of
 everything for 20 seconds (the vehicle stops: the offline bots get in beside
-it, run_bots_test.sh), then driving it about as it walks.
+it, run_bots_test.sh), then driving it about as it walks;
+HALO_NETWORK_TEST_PLAYER_VEHICLE names another (a part of its tag's name:
+"banshee", run_mcc_pc_maps_test.sh), the nearest anywhere on the map.
 
 Called from the main loop every frame (main.c).
 */
@@ -77,6 +84,9 @@ Called from the main loop every frame (main.c).
 #include "cseries/cseries_windows.h"
 #include "main/main.h"
 #include "interface/player_ui.h"
+#include "saved games/player_profile.h"
+#include "saved games/playlist_profile.h"
+#include "saved games/saved_game_files.h"
 #include "interface/ui_widget.h"
 #include "networking/network_game_globals.h"
 #include "networking/network_client_manager.h"
@@ -85,6 +95,7 @@ Called from the main loop every frame (main.c).
 #include "game/game_engine.h"
 #include "game/game_engine_playlist.h"
 #include "game/players.h"
+#include "game/player_control.h"
 #include "objects/objects.h"
 #include "units/units.h"
 #include "units/unit_definitions.h"
@@ -93,11 +104,19 @@ Called from the main loop every frame (main.c).
 #include "items/projectile_definitions.h"
 #include "items/items.h"
 #include "objects/damage.h"
+#include "physics/collisions.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
 #include "tag_files/tag_files.h"
 #include "camera/observer.h"
 #include "cutscene/cinematics.h"
+#include "cache/cache_files.h"
+
+/* debug.network_test_leave_lobby: the map precached once the lobby is left,
+and the client's state in a lobby (network_client_message_handler.c's
+_network_game_client_state_pregame) */
+#define NETWORK_TEST_CLIENT_STATE_PREGAME 2
+#define LEAVE_LOBBY_OTHER_MAP "levels\\test\\bloodgulch\\bloodgulch"
 
 #include <math.h>
 #include <stdarg.h>
@@ -107,15 +126,21 @@ Called from the main loop every frame (main.c).
 
 /* internet play's codes and lobby (port/linux/src/p2p.c) */
 #include "../src/p2p.h"
+#include "../src/p2p_friends.h"
 /* the crossplay guardrails (docs/crossplay.md 6, T11) */
 #include "../src/crossplay_guard.h"
 #include "network_wire.h"
+#include "forge.h"
 
 /* the platform layer's (port/linux/src/port_config.c) */
 const char *config_string(char const *name);
 double config_real(char const *name);
 long config_integer(char const *name);
 void platform_log(char const *format, ...);
+/* menu_functions.c's: a variant's settings, as the Halo 3 game type
+editor's log has them */
+void menu_functions_gametype_rules(struct game_variant const *variant, char *text, int size);
+boolean menu_functions_gametype_file_good(long profile_index);
 /* damage.c's */
 void damage_kill_object_for_player(long object_index, long player_index);
 /* network_distributed.c's */
@@ -127,6 +152,7 @@ void network_damage_statistics(long *sent_reports, long *dealt_reports, long *re
 void network_actors_client_statistics(long *tracked, long *most, long *untracked, long *rejected);
 /* xinput_sdl.c's */
 void test_input_hold_action(int hold);
+void test_input_hold_fire(int hold);
 void test_input_hold_back(int hold);
 void test_input_hold_still(int hold);
 /* game_engine.c's */
@@ -170,6 +196,9 @@ static struct
 	boolean join_file_logged;
 	char map_name[64];
 	char variant_name[64];
+	/* ("saved=<name>": the game time the game's rules were last logged at,
+	so that each game's are logged once) */
+	long rules_logged_time;
 	/* ... the variant of this game, of variant_name's list; and the seconds
 	the last game's scores have been shown */
 	short variant_index;
@@ -190,6 +219,8 @@ static struct
 	real joined_seconds;
 	boolean team_set;
 	real kill_interval;
+	/* debug.network_test_end: the seconds a game lasts (0: its own end) */
+	real end_seconds;
 	/* debug.network_test_kill: the game time of the last scripted kill (0:
 	none yet: the game's start), the game time last seen (a smaller one: the
 	next game), and whether the first player has had this game's grenades */
@@ -211,6 +242,13 @@ static struct
 	game, joined by its listing's id, with the password given) */
 	boolean by_code;
 	boolean code_joined;
+	/* join-friend: a friend's joinable game, joined from their presence
+	(p2p_friends.h); join-invite: a friend's invite, accepted at the menus
+	(friends_game.c, HALO_TEST_FRIENDS_ANSWER), then searched for as a code's
+	host is */
+	boolean by_friend;
+	boolean by_invite;
+	boolean invite_taken;
 	char code[P2P_CODE_SIZE];
 	char lobby_id[P2P_LOBBY_ID_SIZE];
 	char lobby_password[P2P_LOBBY_PASSWORD_SIZE];
@@ -225,6 +263,13 @@ static struct
 	real ingame_seconds;
 	boolean left;
 	boolean rejoined;
+	/* debug.network_test_leave_lobby: a joining machine leaves the host's
+	lobby that many seconds after joining it, as Back does, and precaches
+	another map (as the next lobby's would), then joins again (once): a map
+	copy under way is let go of (cache_copy_end) */
+	real leave_lobby_time;
+	real lobby_seconds;
+	boolean lobby_left;
 	/* debug.network_test_retry: the joins left to try after one that ended
 	before its game began, and the seconds since it ended */
 	long retries;
@@ -296,6 +341,68 @@ static void network_test_variant_by_name(struct game_variant *variant, char cons
 		snprintf(base, sizeof(base), "%.*s", (int)(length - 9), name);
 		name = base;
 	}
+	/* ("forge": a network Forge game, forge.c's variant; the host's game
+made one by network_test_forge once its map is set) */
+	if (!strcmp(name, "forge"))
+	{
+		forge_variant_build(variant);
+		return;
+	}
+	/* ("saved=<name>": the player's saved game type of that name - the
+	Halo 3 game type editor's, z:\saved\playlists -, read as the lobby's
+	GAME reads it; none, Slayer) */
+	if (!strncmp(name, "saved=", 6))
+	{
+		long indices[100];
+		word count = NUMBEROF(indices);
+		word index;
+
+		playlist_profiles_enumerate_available_to_local_player_index(0, &count, indices);
+		for (index = 0; index < count; index++)
+		{
+			wchar_t display[128];
+			char text[128];
+			char same[128];
+			char wanted[128];
+			int length;
+
+			if (indices[index] == NONE || !playlist_profile_get_display_name(indices[index], display))
+				continue;
+			for (length = 0; display[length] && length < (int)sizeof(text) - 1; length++)
+				text[length] = (char)(display[length] < 0x80 ? display[length] : '?');
+			text[length] = 0;
+			/* ('_' for a space: a name in a test's space-split settings) */
+			snprintf(wanted, sizeof(wanted), "%s", name + 6);
+			snprintf(same, sizeof(same), "%s", text);
+			for (length = 0; same[length]; length++)
+			{
+				if (same[length] == ' ')
+					same[length] = '_';
+			}
+			for (length = 0; wanted[length]; length++)
+			{
+				if (wanted[length] == ' ')
+					wanted[length] = '_';
+			}
+			if (_stricmp(same, wanted))
+				continue;
+			/* (a file damaged or edited since: not played, as the lobby's GAME leaves it out) */
+			if (!TEST_FLAG(indices[index], _saved_game_file_index_read_only_bit) &&
+				!menu_functions_gametype_file_good(indices[index]))
+			{
+				platform_log("network test: the saved game type %s is damaged: slayer", text);
+				break;
+			}
+			if (playlist_profile_get(indices[index], variant))
+			{
+				platform_log("network test: the saved game type %s", text);
+				return;
+			}
+		}
+		platform_log("network test: no saved game type %s: slayer", name + 6);
+		build_game_variant_slayer(variant);
+		return;
+	}
 	for (index = 0; index < NUMBEROF(others); index++)
 	{
 		if (!strcmp(name, others[index].name))
@@ -365,6 +472,21 @@ static void network_test_read_settings(
 	{
 		network_test.mode = _network_test_watch;
 	}
+	else if (!strncmp(setting, "join-friend:", 12))
+	{
+		/* (join-friend:<password>: a friend's game with a password, typed) */
+		network_test.mode = _network_test_join;
+		network_test.by_code = TRUE;
+		network_test.by_friend = TRUE;
+		snprintf(network_test.lobby_password, sizeof(network_test.lobby_password), "%s", setting + 12);
+	}
+	else if (!strcmp(setting, "join-friend") || !strcmp(setting, "join-invite"))
+	{
+		network_test.mode = _network_test_join;
+		network_test.by_code = TRUE;
+		network_test.by_friend = setting[5] == 'f';
+		network_test.by_invite = setting[5] == 'i';
+	}
 	else if (!strncmp(setting, "join-public", 11) || !strncmp(setting, "join-code:", 10))
 	{
 		network_test.mode = _network_test_join;
@@ -376,6 +498,7 @@ static void network_test_read_settings(
 	}
 	network_test.start_delay = (real)config_real("debug.network_test_start");
 	network_test.kill_interval = (real)config_real("debug.network_test_kill");
+	network_test.end_seconds = (real)config_real("debug.network_test_end");
 	network_test.shoot_interval = (real)config_real("debug.network_test_shoot");
 	network_test.vehicle_time = (real)config_real("debug.network_test_vehicle");
 	network_test.pickup_time = (real)config_real("debug.network_test_pickup");
@@ -384,6 +507,7 @@ static void network_test_read_settings(
 		config_string("debug.network_test_pickup_weapon"));
 	network_test.score_to_win = (long)config_integer("debug.network_test_score");
 	network_test.rejoin_time = (real)config_real("debug.network_test_rejoin");
+	network_test.leave_lobby_time = (real)config_real("debug.network_test_leave_lobby");
 	network_test.retries = (long)config_integer("debug.network_test_retry");
 	network_test.second_player_time = (real)config_real("debug.network_test_second_player");
 	snprintf(network_test.lobby_name, sizeof(network_test.lobby_name), "%s",
@@ -399,6 +523,36 @@ static void network_test_read_settings(
 
 /* debug.network_test_join_file: whether the test has made it (checked
 twice a second) */
+/* the System Link list as the LAN browsers show it, each game's tag
+(crossplay_guard.h: VITA, VITA+PC, OPENCE, CHUPA, PC) with it, as it
+changes: the tests read it (run_netns_crossplay_test.sh browserboth) */
+static void network_test_log_listed(
+	void)
+{
+	static char said[512];
+	struct network_listed_game listed[16];
+	char line[512];
+	short count = network_game_client_listed_games(listed, (short)NUMBEROF(listed));
+	short index;
+	int length = 0;
+
+	line[0] = 0;
+	for (index = 0; index < count && length < (int)sizeof(line) - 1; index++)
+	{
+		char badge[48];
+
+		crossplay_guard_host_badge(badge, (int)sizeof(badge), listed[index].platform, listed[index].marks,
+			listed[index].crossplay, listed[index].dedicated, CROSSPLAY_GUARD_OK, network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
+		length += snprintf(line + length, sizeof(line) - (size_t)length, "%s[%s] \"%s\"", index ? ", " : "", badge,
+			listed[index].name);
+	}
+	if (count && strcmp(line, said))
+	{
+		snprintf(said, sizeof(said), "%s", line);
+		platform_log("network test: the System Link list: %s", line);
+	}
+}
+
 static boolean network_test_join_file_there(
 	void)
 {
@@ -830,6 +984,24 @@ static void network_test_shoot(
 		if (weapon_index == NONE)
 			continue;
 		weapon = weapon_definition_get(object_get(weapon_index)->definition_index);
+		/* (no shot from a weapon whose first trigger's magazine has no
+		rounds: a player's could not be fired, and the host refuses its
+		hits) */
+		if (weapon->weapon.triggers.count > 0)
+		{
+			struct weapon_trigger_definition *first = TAG_BLOCK_GET_ELEMENT(&weapon->weapon.triggers, 0,
+				struct weapon_trigger_definition);
+			struct weapon_datum *datum = (struct weapon_datum *)object_get(weapon_index);
+
+			if (first->rounds_per_shot > 0 && first->magazine_index >= 0 &&
+				first->magazine_index < weapon->weapon.magazines.count &&
+				first->magazine_index < (short)NUMBEROF(datum->weapon.magazines) &&
+				datum->weapon.magazines[first->magazine_index].rounds_loaded <= 0 &&
+				datum->weapon.magazines[first->magazine_index].rounds_total <= 0)
+			{
+				continue;
+			}
+		}
 		if (weapon->weapon.triggers.count > 0)
 		{
 			trigger = TAG_BLOCK_GET_ELEMENT(&weapon->weapon.triggers, 0, struct weapon_trigger_definition);
@@ -867,8 +1039,28 @@ static void network_test_shoot(
 			if (dx * dx + dy * dy + dz * dz > 1.5f * 1.5f)
 				continue;
 		}
+		/* (a shot that this machine sees no line to - a hill, a wall between -
+		is not one a player could land: not made, so that the host's check of
+		a shot's line of sight, network_damage.c, sees honest shots alone) */
+		if (!melee)
+		{
+			real_point3d eye;
+			real_vector3d line;
+
+			unit_get_camera_position(player->unit_index, &eye);
+			line.i = target_object->object.bounding_sphere_center.x - eye.x;
+			line.j = target_object->object.bounding_sphere_center.y - eye.y;
+			line.k = target_object->object.bounding_sphere_center.z - eye.z;
+			if (collision_test_vector_obstructed(FLAG(_collision_test_front_facing_surfaces_bit) |
+				FLAG(_collision_test_structure_bit), &eye, &line, player->unit_index))
+			{
+				continue;
+			}
+		}
 		/* (a shot reaches no further than its projectile flies, with a margin
 		for how far the target is from where the shot started) */
+		if (melee)
+			;
 		else if (reach > 0.0f)
 		{
 			real dx = target_object->object.position.x - unit->object.position.x;
@@ -896,6 +1088,346 @@ static void network_test_shoot(
 			(long)DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index), (long)(target - (struct player_datum *)player_data->data));
 	}
 }
+
+#ifndef HALO_RELEASE
+/* (test builds) HALO_NETWORK_TEST_AIM=1: this machine's players face the
+nearest other living player and hold the trigger: an honest player who
+fights the whole game, real shots, reloads and ammunition, around corners
+and through the open (the host's checks of their hits must take what hit:
+network_damage.c).
+
+HALO_NETWORK_TEST_CHEAT=<kind>,... (a joiner): a modified client, for the
+host's anti-cheat (network_anticheat.c) to drop and keep out: "damage" its
+hits ten times as hard as its weapon deals, once a second; "wall" its hits
+on the other player wherever they are, through walls and hills, every tick
+it can; "fly" its player held 4 world units above where it would be;
+"ammo" its weapon kept full (the host's copy runs dry) and its shots landed
+at the weapon's own rate (5 a second at most) whenever it sees the other
+player within reach, its trigger pressed for each, as a player firing a
+weapon that never empties would: each such hit, made as an honest shot is
+(network_test_shoot), one the host refuses only as of an empty weapon (with
+the host's HALO_NETWORK_TEST_DRAIN, network_test_drain) */
+static struct
+{
+	boolean read;
+	boolean aim;
+	boolean damage;
+	boolean wall;
+	boolean fly;
+	boolean ammo;
+	boolean ammo_logged;
+	boolean holding;
+	long fly_unit;
+	real_point3d fly_position;
+} network_test_cheat;
+
+/* the nearest other living player's unit to this one (NONE: none) */
+static long network_test_nearest_enemy(
+	long unit_index)
+{
+	struct data_iterator iterator;
+	struct player_datum *player;
+	long nearest = NONE;
+	real best = 0.0f;
+
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		real dx, dy, dz, distance;
+
+		if (player->unit_index == NONE || player->unit_index == unit_index ||
+			TEST_FLAG(object_get(player->unit_index)->object.damage_flags, _object_dead_bit))
+		{
+			continue;
+		}
+		dx = object_get(player->unit_index)->object.position.x - object_get(unit_index)->object.position.x;
+		dy = object_get(player->unit_index)->object.position.y - object_get(unit_index)->object.position.y;
+		dz = object_get(player->unit_index)->object.position.z - object_get(unit_index)->object.position.z;
+		distance = dx * dx + dy * dy + dz * dz;
+		if (nearest == NONE || distance < best)
+		{
+			nearest = player->unit_index;
+			best = distance;
+		}
+	}
+	return nearest;
+}
+
+/* (test builds) HALO_NETWORK_TEST_RAY_BENCH=1: once in a game, the host's
+anti-cheat rays timed where its first player stands (network_anticheat.c,
+NETCODE.md "A modified client"): 2000 of a move's (0.2 world units, the
+map's structure as a shot meets it) and 500 of a shot's (20 world units),
+in microseconds a ray, logged ("network test: rays") */
+static void network_test_ray_bench(
+	void)
+{
+	static boolean done;
+	unsigned long long vita_host_time_us(void);
+	unsigned long collision_flags = FLAG(_collision_test_front_facing_surfaces_bit) |
+		FLAG(_collision_test_ignore_two_sided_surfaces_bit) | FLAG(_collision_test_ignore_invisible_surfaces_bit) |
+		FLAG(_collision_test_ignore_breakable_surfaces_bit) | FLAG(_collision_test_structure_bit);
+	struct data_iterator iterator;
+	struct player_datum *player;
+	long unit_index = NONE;
+	real_point3d center;
+	unsigned long long started, short_us, long_us;
+	long index, obstructed = 0;
+
+	if (done || !getenv("HALO_NETWORK_TEST_RAY_BENCH") || game_time_get() < 10 * TICKS_PER_SECOND)
+		return;
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL && unit_index == NONE)
+		unit_index = player->unit_index;
+	if (unit_index == NONE)
+		return;
+	done = TRUE;
+	center = object_get(unit_index)->object.bounding_sphere_center;
+	started = vita_host_time_us();
+	for (index = 0; index < 2000; index++)
+	{
+		real angle = (real)index * 0.7f;
+		real_vector3d vector;
+
+		vector.i = 0.2f * (real)cos(angle);
+		vector.j = 0.2f * (real)sin(angle);
+		vector.k = 0.02f * (real)sin(angle * 3.0f);
+		obstructed += collision_test_vector_obstructed(collision_flags, &center, &vector, unit_index) != 0;
+	}
+	short_us = vita_host_time_us() - started;
+	started = vita_host_time_us();
+	for (index = 0; index < 500; index++)
+	{
+		real angle = (real)index * 0.7f;
+		real_vector3d vector;
+
+		vector.i = 20.0f * (real)cos(angle);
+		vector.j = 20.0f * (real)sin(angle);
+		vector.k = 1.0f * (real)sin(angle * 3.0f);
+		obstructed += collision_test_vector_obstructed(collision_flags, &center, &vector, unit_index) != 0;
+	}
+	long_us = vita_host_time_us() - started;
+	platform_log("network test: rays: a move's (0.2 wu) %.3f us, a shot's (20 wu) %.3f us; %ld of 2500 obstructed",
+		(double)short_us / 2000.0, (double)long_us / 500.0, obstructed);
+}
+
+/* (each frame in a level) the aim and the cheats */
+static void network_test_aim_and_cheat(
+	void)
+{
+	struct data_iterator iterator;
+	struct player_datum *player;
+	boolean fired = FALSE;
+	boolean ammo_shot = FALSE;
+
+	if (!network_test_cheat.read)
+	{
+		char const *cheats = getenv("HALO_NETWORK_TEST_CHEAT");
+
+		network_test_cheat.read = TRUE;
+		network_test_cheat.aim = getenv("HALO_NETWORK_TEST_AIM") && atoi(getenv("HALO_NETWORK_TEST_AIM"));
+		if (cheats && game_connection() != _game_connection_network_server)
+		{
+			network_test_cheat.damage = strstr(cheats, "damage") != NULL;
+			network_test_cheat.wall = strstr(cheats, "wall") != NULL;
+			network_test_cheat.fly = strstr(cheats, "fly") != NULL;
+			network_test_cheat.ammo = strstr(cheats, "ammo") != NULL;
+			platform_log("network test: playing as a modified client: %s", cheats);
+		}
+		network_test_cheat.fly_unit = NONE;
+	}
+	if (!network_test_cheat.aim && !network_test_cheat.damage && !network_test_cheat.wall && !network_test_cheat.fly &&
+		!network_test_cheat.ammo)
+	{
+		return;
+	}
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		struct unit_datum *unit;
+		long target_index;
+		long weapon_index;
+
+		if (player->local_player_index == NONE || player->unit_index == NONE ||
+			TEST_FLAG(object_get(player->unit_index)->object.damage_flags, _object_dead_bit))
+		{
+			continue;
+		}
+		unit = unit_get(player->unit_index);
+		target_index = network_test_nearest_enemy(player->unit_index);
+		weapon_index = unit->unit.current_weapon_index != NONE ?
+			unit->unit.weapon_object_indices[unit->unit.current_weapon_index] : NONE;
+		if ((network_test_cheat.aim || network_test_cheat.ammo) && target_index != NONE)
+		{
+			real_vector3d facing;
+			real_point3d from, to;
+
+			unit_get_camera_position(player->unit_index, &from);
+			to = object_get(target_index)->object.bounding_sphere_center;
+			facing.i = to.x - from.x;
+			facing.j = to.y - from.y;
+			facing.k = to.z - from.z;
+			/* (not straight up or down: player_control.c's pitch ends at
+			85.5 degrees, and one past it asserted at the next look - a
+			target under the player, hostfuzzjoin) */
+			if (normalize3d(&facing) > 0.0f && facing.k < 0.99f && facing.k > -0.99f)
+				player_control_set_facing(player->local_player_index, &facing);
+			/* (the ammo cheat's trigger: pressed for its shots alone, below,
+			so that a weapon that fires once a press fires each, and the
+			host's copy runs dry) */
+			if (network_test_cheat.aim)
+				fired = TRUE;
+		}
+		/* (a modified client's weapon never empties) */
+		if (network_test_cheat.ammo && weapon_index != NONE)
+		{
+			struct weapon_datum *weapon = (struct weapon_datum *)object_try_and_get_and_verify_type(weapon_index,
+				_object_mask_weapon);
+
+			if (weapon)
+			{
+				struct weapon_definition *definition = weapon_definition_get(weapon->definition_index);
+				real rate = 5.0f;
+				long interval;
+
+				weapon->weapon.magazines[0].rounds_loaded = MAX(weapon->weapon.magazines[0].rounds_loaded, 30);
+				weapon->weapon.age = 0.0f;
+				/* (the trigger's own rate, 5 a second at most: the host's
+				bucket takes twice a weapon's rate, so these are refused only
+				as of an empty weapon) */
+				if (definition->weapon.triggers.count > 0)
+				{
+					struct weapon_trigger_definition *trigger = TAG_BLOCK_GET_ELEMENT(&definition->weapon.triggers, 0,
+						struct weapon_trigger_definition);
+					real most = MAX(trigger->initial_rate_of_fire, trigger->final_rate_of_fire);
+
+					if (most > 0.0f && most < rate)
+						rate = most;
+				}
+				interval = (long)(TICKS_PER_SECOND / rate + 0.999f);
+				if (target_index != NONE && interval > 0 && game_time_get() % interval == 0)
+				{
+					ammo_shot = TRUE;
+					fired = TRUE;
+				}
+				if (!network_test_cheat.ammo_logged)
+				{
+					network_test_cheat.ammo_logged = TRUE;
+					platform_log("network test: the ammo cheat's weapon %s: a shot every %ld ticks",
+						tag_get_name(weapon->definition_index) ? tag_get_name(weapon->definition_index) : "?", interval);
+				}
+			}
+		}
+		/* (held in the air: put back each frame where the host's corrections
+		took it from) */
+		if (network_test_cheat.fly && unit->object.parent_object_index == NONE)
+		{
+			if (network_test_cheat.fly_unit != player->unit_index)
+			{
+				network_test_cheat.fly_unit = player->unit_index;
+				network_test_cheat.fly_position = unit->object.position;
+				network_test_cheat.fly_position.z += 4.0f;
+			}
+			object_set_position(player->unit_index, &network_test_cheat.fly_position, NULL, NULL);
+			unit->object.translational_velocity.k = 0.0f;
+		}
+		/* (hits no honest client reports: through walls, or ten times as hard
+		as the weapon deals) */
+		if ((network_test_cheat.damage && game_time_get() % TICKS_PER_SECOND == 0) ||
+			(network_test_cheat.wall && game_time_get() % 3 == 0))
+		{
+			if (target_index != NONE && weapon_index != NONE)
+			{
+				struct weapon_definition *weapon = weapon_definition_get(object_get(weapon_index)->definition_index);
+				struct weapon_trigger_definition *trigger = weapon->weapon.triggers.count > 0 ?
+					TAG_BLOCK_GET_ELEMENT(&weapon->weapon.triggers, 0, struct weapon_trigger_definition) : NULL;
+				long damage_index = trigger && trigger->projectile.index != NONE ?
+					projectile_definition_get(trigger->projectile.index)->projectile.impact_damage.index : NONE;
+
+				if (damage_index != NONE)
+				{
+					struct damage_data damage;
+					real_vector3d direction;
+
+					damage_data_new(&damage, damage_index);
+					damage.owner_player_index = iterator.datum_index;
+					damage.owner_object_index = player->unit_index;
+					damage.owner_team_index = unit->object.owner_team_index;
+					damage.origin = object_get(target_index)->object.bounding_sphere_center;
+					damage.epicenter = damage.origin;
+					direction.i = damage.origin.x - unit->object.position.x;
+					direction.j = damage.origin.y - unit->object.position.y;
+					direction.k = damage.origin.z - unit->object.position.z;
+					normalize3d(&direction);
+					damage.direction = direction;
+					damage.scale = network_test_cheat.damage && game_time_get() % TICKS_PER_SECOND == 0 ? 10.0f : 1.0f;
+					scenario_location_from_point(&damage.location, &damage.epicenter);
+					object_cause_damage(&damage, target_index, NONE, NONE, NONE, NULL);
+				}
+			}
+		}
+	}
+	if (fired != network_test_cheat.holding)
+	{
+		network_test_cheat.holding = fired;
+		test_input_hold_fire(fired);
+	}
+	/* (the ammo cheat's shots: as the scripted shooter's, seen, within
+	reach) */
+	if (ammo_shot)
+		network_test_shoot();
+}
+
+/* (test builds, the host) HALO_NETWORK_TEST_DRAIN=1: the host's copies of
+its clients' weapons kept dry - no rounds, loaded or not, and a battery
+spent -, as those of a client that has fired them all are; an honest
+client's then fire no more, and a modified client's ("ammo") hits are its
+weapon's that never empties, for the host's empty weapon check
+(network_damage.c distributed_weapon_armed) */
+static void network_test_drain(
+	void)
+{
+	static boolean logged;
+	struct data_iterator iterator;
+	struct player_datum *player;
+
+	if (game_connection() != _game_connection_network_server || !getenv("HALO_NETWORK_TEST_DRAIN") ||
+		!atoi(getenv("HALO_NETWORK_TEST_DRAIN")))
+	{
+		return;
+	}
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		struct unit_datum *unit;
+		short slot;
+
+		if (player->local_player_index != NONE || player->unit_index == NONE)
+			continue;
+		unit = unit_get(player->unit_index);
+		for (slot = 0; slot < MAXIMUM_WEAPONS_PER_UNIT; slot++)
+		{
+			long weapon_index = unit->unit.weapon_object_indices[slot];
+			struct weapon_datum *weapon = weapon_index != NONE ?
+				(struct weapon_datum *)object_try_and_get_and_verify_type(weapon_index, _object_mask_weapon) : NULL;
+			short magazine;
+
+			if (!weapon)
+				continue;
+			for (magazine = 0; magazine < (short)NUMBEROF(weapon->weapon.magazines); magazine++)
+			{
+				weapon->weapon.magazines[magazine].rounds_loaded = 0;
+				weapon->weapon.magazines[magazine].rounds_total = 0;
+			}
+			weapon->weapon.age = 1.0f;
+			if (!logged)
+			{
+				logged = TRUE;
+				platform_log("network test: the host keeps its clients' weapons dry");
+			}
+		}
+	}
+}
+#endif
 
 /* the host seats the last player as the nearest vehicle's driver, or out */
 /* the host brings the players far from the first (on foot) near it, so
@@ -1018,12 +1550,19 @@ static void network_test_vehicle(
 			real distance = distance_squared3d(position, vehicle_position);
 
 			/* (HALO_NETWORK_TEST_PLAYER_DRIVES: a Warthog no one drives, near:
-			not one across the map, at the other team's base) */
-			if (first_player && (unit_get(vehicles.index)->unit.driver_object_index != NONE ||
-				!strstr(tag_get_name(object_get(vehicles.index)->definition_index), "warthog") ||
-				distance > 30.0f * 30.0f))
+			not one across the map, at the other team's base; or the vehicle
+			HALO_NETWORK_TEST_PLAYER_VEHICLE names, anywhere) */
+			if (first_player)
 			{
-				continue;
+				char const *kind = getenv("HALO_NETWORK_TEST_PLAYER_VEHICLE");
+				boolean named = kind && kind[0];
+
+				if (unit_get(vehicles.index)->unit.driver_object_index != NONE ||
+					!strstr(tag_get_name(object_get(vehicles.index)->definition_index), named ? kind : "warthog") ||
+					(!named && distance > 30.0f * 30.0f))
+				{
+					continue;
+				}
 			}
 			if (nearest_index == NONE || distance < nearest_distance)
 			{
@@ -1048,6 +1587,12 @@ static void network_test_vehicle(
 		platform_log("network test: the %s player cannot drive vehicle %lx", first_player ? "first" : "last", nearest_index);
 	}
 }
+
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean unit_get_seat_entrance_point(long unit_index, long parent_unit_index, short seat_index, real_point3d *entrance_point, real_point3d *seat_point, real_point3d *hint_point);
 
 /* both machines stand the last player at the driver's entrance of the
 nearest vehicle no one rides (a joining machine's player then holds the
@@ -1105,18 +1650,41 @@ static void network_test_vehicle_approach(
 	platform_log("network test: no vehicle to get into");
 }
 
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean player_handle_powerup(long player_index, short powerup_type, short duration);
+
 /* the host gives the last player a second weapon, lying about */
-static void network_test_second_weapon(
+/* the player network_test_pickup stands on a weapon: the last, or with
+HALO_NETWORK_TEST_PICKUP_PLAYER=first the first (a local game's own player
+with HALO_BOTS: its HUD shows the prompt, the button icons' screenshots) */
+static struct player_datum *network_test_pickup_player(
 	void)
 {
 	struct data_iterator iterator;
 	struct player_datum *player;
 	struct player_datum *last = NULL;
-	struct object_iterator weapons;
+	char const *which = getenv("HALO_NETWORK_TEST_PICKUP_PLAYER");
 
 	data_iterator_new(&iterator, player_data);
 	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
 		last = player;
+		if (which && !strcmp(which, "first"))
+			break;
+	}
+
+	return last;
+}
+
+static void network_test_second_weapon(
+	void)
+{
+	struct player_datum *last = network_test_pickup_player();
+	struct object_iterator weapons;
+
 	if (!last || last->unit_index == NONE)
 		return;
 	object_iterator_new(&weapons, _object_mask_weapon, 0);
@@ -1145,17 +1713,12 @@ it has it, within a tolerance) */
 static void network_test_pickup(
 	void)
 {
-	struct data_iterator iterator;
-	struct player_datum *player;
-	struct player_datum *last = NULL;
+	struct player_datum *last = network_test_pickup_player();
 	struct object_iterator weapons;
 	long nearest_index = NONE;
 	real nearest_distance = 0.0f;
 	struct unit_datum *unit;
 
-	data_iterator_new(&iterator, player_data);
-	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
-		last = player;
 	if (!last || last->unit_index == NONE)
 		return;
 	unit = unit_get(last->unit_index);
@@ -1193,8 +1756,118 @@ static void network_test_pickup(
 
 		position.z += 0.1f;
 		object_set_position(last->unit_index, &position, NULL, NULL);
-		platform_log("network test: the last player stands on weapon %lx (%lx)", nearest_index,
-			object_get(nearest_index)->definition_index);
+		platform_log("network test: the last player stands on weapon %lx (%lx) at (%.3f %.3f %.3f)", nearest_index,
+			object_get(nearest_index)->definition_index, position.x, position.y, position.z);
+	}
+}
+
+/* (debug: HALO_NETWORK_TEST_PROFILE) the first player profile on the
+memory card made the local player's, as SELECT PROFILE's choice makes it:
+the screens that edit the player's profile in a game (the Halo 3
+multiplayer pause's SETTINGS) have one to edit */
+static void network_test_use_profile(
+	void)
+{
+	long indices[8];
+	word count = (word)NUMBEROF(indices);
+	struct player_profile profile;
+
+	if (!getenv("HALO_NETWORK_TEST_PROFILE") || !atoi(getenv("HALO_NETWORK_TEST_PROFILE")))
+		return;
+	player_profiles_enumerate_available_to_local_player_index(0, &count, indices, FALSE);
+	if (count > 0 && player_profile_get(indices[0], &profile))
+	{
+		player_ui_set_active_player_profile(0, indices[0], &profile);
+		platform_log("network test: the first profile played");
+	}
+	else
+		platform_log("network test: no profile to play");
+}
+
+/* "watch" with debug.network_test_score, this machine hosting the game its
+menus made (the Halo 3 live lobby's tests): a short game as a host's own -
+its kills (debug.network_test_kill), that score winning, and after the
+scores a while the game back in its lobby */
+static boolean network_test_watch_short_game(void)
+{
+	return network_test.mode == _network_test_watch && network_test.score_to_win > 0 &&
+		global_network_game_server_get() != NULL;
+}
+
+void first_person_weapon_trace_state(short local_player_index, long *weapon_index, short *state, boolean *visible);
+unsigned long system_milliseconds(void);
+
+/* HALO_NETWORK_TEST_SPAWN_TRACE=1: each frame a player's unit, its first
+weapon, the weapon in hand (and for this machine's first player its
+first-person weapon) changes, the tick and the time: how long after a spawn
+the weapon is in the player's hands, here and on the host */
+static void network_test_trace_spawns(
+	void)
+{
+	static int enabled = -1;
+	static struct
+	{
+		long unit_index, weapon_index, current, desired, first_person_weapon;
+		short first_person_state;
+		boolean first_person_visible;
+		unsigned long spawn_time;
+		long spawn_tick;
+	} last[64];
+	struct data_iterator iterator;
+	struct player_datum *player;
+	long local_player_index = local_player_get_player_index(0);
+
+	if (enabled < 0)
+	{
+		enabled = getenv("HALO_NETWORK_TEST_SPAWN_TRACE") && !strcmp(getenv("HALO_NETWORK_TEST_SPAWN_TRACE"), "1");
+		csmemset(last, 0xFF, sizeof(last));
+	}
+	if (!enabled)
+		return;
+	data_iterator_new(&iterator, player_data);
+	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index);
+		struct unit_datum *unit = player->unit_index != NONE ? (struct unit_datum *)object_try_and_get_and_verify_type(player->unit_index, _object_mask_unit) : NULL;
+		long weapon_index = unit ? unit->unit.weapon_object_indices[0] : NONE;
+		long current = unit ? unit->unit.current_weapon_index : NONE;
+		long desired = unit ? unit->unit.desired_weapon_index : NONE;
+		long first_person_weapon = NONE;
+		short first_person_state = NONE;
+		boolean first_person_visible = FALSE;
+		boolean local = iterator.datum_index == local_player_index;
+
+		if (absolute_index < 0 || absolute_index >= 64)
+			continue;
+		if (local)
+			first_person_weapon_trace_state(0, &first_person_weapon, &first_person_state, &first_person_visible);
+		if (last[absolute_index].unit_index == (unit ? player->unit_index : NONE) &&
+			last[absolute_index].weapon_index == weapon_index && last[absolute_index].current == current &&
+			last[absolute_index].desired == desired && last[absolute_index].first_person_weapon == first_person_weapon &&
+			last[absolute_index].first_person_state == first_person_state &&
+			(last[absolute_index].first_person_visible ? TRUE : FALSE) == (first_person_visible ? TRUE : FALSE))
+		{
+			continue;
+		}
+		if (unit && last[absolute_index].unit_index != player->unit_index)
+		{
+			last[absolute_index].spawn_time = system_milliseconds();
+			last[absolute_index].spawn_tick = game_time_get();
+		}
+		last[absolute_index].unit_index = unit ? player->unit_index : NONE;
+		last[absolute_index].weapon_index = weapon_index;
+		last[absolute_index].current = current;
+		last[absolute_index].desired = desired;
+		last[absolute_index].first_person_weapon = first_person_weapon;
+		last[absolute_index].first_person_state = first_person_state;
+		last[absolute_index].first_person_visible = first_person_visible;
+		platform_log("spawn trace: tick %ld ms %lu player %ld%s unit %lx weapon %lx current %ld desired %ld"
+			" fp %lx state %d visible %d | %ld ticks %lu ms since its unit",
+			game_time_get(), system_milliseconds(), absolute_index, local ? " (local)" : "",
+			unit ? player->unit_index : NONE, weapon_index, current, desired,
+			first_person_weapon, (int)first_person_state, first_person_visible ? 1 : 0,
+			unit ? game_time_get() - last[absolute_index].spawn_tick : -1L,
+			unit ? system_milliseconds() - last[absolute_index].spawn_time : 0UL);
 	}
 }
 
@@ -1211,9 +1884,38 @@ void network_test_update(
 	game's time starts over) */
 	if (game_in_progress() && game_time_get() < network_test.logged_time)
 		network_test.logged_time = 0;
+	if (game_in_progress() && !main_menu_loaded)
+		network_test_trace_spawns();
+#ifndef HALO_RELEASE
+	if (game_in_progress() && !main_menu_loaded)
+	{
+		network_test_aim_and_cheat();
+		network_test_drain();
+		network_test_ray_bench();
+	}
+#endif
 	if (game_in_progress() && !main_menu_loaded && game_time_get() - network_test.logged_time >= TICKS_PER_SECOND)
 	{
 		network_test.logged_time = game_time_get();
+		/* (a saved game type played - or HALO_NETWORK_TEST_RULES=1: a
+		joiner's, the host's game type as it came -: the rules the game
+		plays by, its engine's variant, logged once a game) */
+		if (game_engine_running() && (!strncmp(network_test.variant_name, "saved=", 6) ||
+			(getenv("HALO_NETWORK_TEST_RULES") && !strcmp(getenv("HALO_NETWORK_TEST_RULES"), "1"))) &&
+			(network_test.rules_logged_time == 0 || game_time_get() < network_test.rules_logged_time))
+		{
+			char rules[512];
+
+			network_test.rules_logged_time = MAX(game_time_get(), 1);
+			menu_functions_gametype_rules(game_engine_get_variant(), rules, sizeof(rules));
+			platform_log("network test: the game plays by: %s", rules);
+		}
+		if (network_test_watch_short_game() && game_engine_running() &&
+			game_engine_get_variant()->universal_variant.score_to_win != network_test.score_to_win)
+		{
+			game_engine_get_variant()->universal_variant.score_to_win = network_test.score_to_win;
+			platform_log("network test: the menus' game played to %ld", network_test.score_to_win);
+		}
 		network_test_log_players();
 		network_test_log_items();
 		if (network_test.shoot_interval > 0.0f &&
@@ -1303,14 +2005,15 @@ void network_test_update(
 		its point back; three of those in a game and the first game of
 		run_netns_online_test.sh code outlasted the run, its map change never
 		reached, about one run in five.) */
-		if (network_test.mode == _network_test_host && network_test.kill_interval > 0.0f && game_time_get() <
-			network_test.kill_seen_time)
+		if ((network_test.mode == _network_test_host || network_test_watch_short_game()) &&
+			network_test.kill_interval > 0.0f && game_time_get() < network_test.kill_seen_time)
 		{
 			network_test.kill_time = 0;
 			network_test.kill_grenades_given = FALSE;
 		}
 		network_test.kill_seen_time = game_time_get();
-		if (network_test.mode == _network_test_host && network_test.kill_interval > 0.0f &&
+		if ((network_test.mode == _network_test_host || network_test_watch_short_game()) &&
+			network_test.kill_interval > 0.0f &&
 			game_time_get() - network_test.kill_time >= MAX(1, (long)(network_test.kill_interval * TICKS_PER_SECOND)))
 		{
 			struct data_iterator iterator;
@@ -1369,6 +2072,14 @@ void network_test_update(
 		}
 	}
 
+	/* debug.network_test_end: the host ends the game, as a time limit does */
+	if (network_test.mode == _network_test_host && network_test.started && network_test.end_seconds > 0.0f &&
+		game_engine_running() && !main_menu_loaded && game_engine_can_score() &&
+		game_time_get() >= (long)(network_test.end_seconds * TICKS_PER_SECOND))
+	{
+		platform_log("network test: the game ended at %.0f s (debug.network_test_end)", network_test.end_seconds);
+		game_engine_end_game();
+	}
 	/* the next game of the list: once the scores have been shown a while,
 	the host's button (the bots may press it first) */
 	if (network_test.mode == _network_test_host && network_test.started && game_engine_running() &&
@@ -1383,6 +2094,18 @@ void network_test_update(
 				network_test.postgame_seconds = 0.0f;
 				network_game_server_reset_to_pregame(global_network_game_server_get());
 			}
+		}
+	}
+	/* (watch, the menus' short game: the scores a while, then its lobby) */
+	if (network_test_watch_short_game() && game_engine_running() && !main_menu_loaded && !game_engine_can_score() &&
+		game_engine_showing_postgame())
+	{
+		network_test.postgame_seconds += seconds;
+		if (network_test.postgame_seconds >= 3.0f)
+		{
+			network_test.postgame_seconds = 0.0f;
+			platform_log("network test: the menus' game over: back to its lobby");
+			network_game_server_reset_to_pregame(global_network_game_server_get());
 		}
 	}
 	/* co-op: a level won ends the round (the server's postgame, with no
@@ -1413,12 +2136,15 @@ void network_test_update(
 	first half of every interval of a game, as a player looking at the
 	scores does (issue #36: a crash with it open online), and let go
 	outside a game and on its carnage report (where Back leaves for the
-	menus) */
+	menus), nor while a screen of the player's is up (the Halo 3 scoreboard
+	opened, a pause: Back is the screen's then) */
 	if (network_test.scores_interval > 0.0f)
 	{
+		struct widget_instance *ui_widget_port_active_screen(short local_player_index);
 		long interval = MAX(2, (long)(network_test.scores_interval * TICKS_PER_SECOND));
 		boolean hold = game_in_progress() && game_engine_running() && !main_menu_loaded &&
-			!game_engine_force_single_screen() && game_time_get() % interval < interval / 2;
+			!game_engine_force_single_screen() && game_time_get() % interval < interval / 2 &&
+			!ui_widget_port_active_screen(0);
 
 		if (hold != network_test.scores_held)
 		{
@@ -1437,6 +2163,32 @@ void network_test_update(
 				platform_log("network test: scoreboard pings so far: %ld rows with another machine's player's ping, %ld with \"-\"",
 					other_pings, unknown_pings);
 			}
+		}
+	}
+	/* debug.network_test_leave_lobby: leave the lobby before the game, as
+	Back does, precache another map, and join again */
+	if (network_test.mode == _network_test_join && network_test.leave_lobby_time > 0.0f && !network_test.lobby_left &&
+		network_test.joined && global_network_game_client_get() &&
+		network_game_client_get_state(global_network_game_client_get(), NULL) == NETWORK_TEST_CLIENT_STATE_PREGAME)
+	{
+		network_test.lobby_seconds += seconds;
+		if (network_test.lobby_seconds >= network_test.leave_lobby_time)
+		{
+			network_test.lobby_left = TRUE;
+			platform_log("network test: leaving the lobby%s", cache_files_precache_in_progress() ? " in a map copy" : "");
+			ui_widgets_close_all();
+			dispose_global_network_game_server();
+			dispose_global_network_game_client();
+			main_set_multiplayer_map_name(LEAVE_LOBBY_OTHER_MAP);
+			platform_log("network test: left the lobby; precaching %s", LEAVE_LOBBY_OTHER_MAP);
+			network_test.set_up = FALSE;
+			network_test.joined = FALSE;
+			network_test.player_added = FALSE;
+			network_test.team_set = FALSE;
+			network_test.code_joined = FALSE;
+			network_test.lobby_join_asked = FALSE;
+			network_test.lobby_id[0] = 0;
+			network_test.joined_seconds = 0.0f;
 		}
 	}
 	/* debug.network_test_rejoin: leave the game, as quitting from the pause
@@ -1596,6 +2348,7 @@ void network_test_update(
 		if (!network_test.set_up)
 		{
 			network_test.set_up = TRUE;
+			network_test_use_profile();
 			main_set_multiplayer_map_name(network_test.map_name);
 			if (network_test.local)
 			{
@@ -1682,6 +2435,39 @@ void network_test_update(
 				network_game_server_change_game_variant(global_network_game_server_get(), &variant);
 				network_test_variant_options(&variant);
 				network_test.map_set = TRUE;
+				/* ("forge": the hosted game a network Forge game of the map,
+				HALO_NETWORK_TEST_FORGE_VARIANT its map variant) */
+				{
+					char variant_name[64];
+
+					network_test_variant(network_test.variant_index, variant_name, sizeof(variant_name));
+					if (!strcmp(variant_name, "forge"))
+					{
+						char why[160];
+						char const *variant_file = getenv("HALO_NETWORK_TEST_FORGE_VARIANT");
+
+						if (!forge_net_host_begin(path, variant_file, why, (int)sizeof(why)))
+							platform_log("network test: the Forge game could not be hosted: %s", why);
+					}
+					/* (HALO_NETWORK_TEST_MAP_VARIANT: the game plays that map
+					variant of the map, as the multiplayer lobby's MAP has it:
+					a "host:" game's joiners given its layout, a "local:" one's
+					placed here) */
+					else if (getenv("HALO_NETWORK_TEST_MAP_VARIANT") && getenv("HALO_NETWORK_TEST_MAP_VARIANT")[0])
+					{
+						char why[160];
+						char const *variant_file = getenv("HALO_NETWORK_TEST_MAP_VARIANT");
+						boolean played = network_test.local ? forge_play_local_request(path, variant_file, why, (int)sizeof(why)) :
+							forge_play_host_begin(path, variant_file, why, (int)sizeof(why));
+
+						platform_log("network test: the map variant %s %s%s", variant_file, played ? "is played" :
+							"could not be played: ", played ? "" : why);
+					}
+					else
+					{
+						forge_net_host_end();
+					}
+				}
 			}
 			else if (network_test.map_set && network_test.map_path[0] && global_network_game_server_get() &&
 				network_test.setup_seconds - network_test.map_checked_seconds >= 1.0f &&
@@ -1706,9 +2492,21 @@ void network_test_update(
 		}
 		break;
 	case _network_test_join:
+		/* (join-invite: at the menus until the invite's host is reached) */
+		if (network_test.by_invite && !network_test.invite_taken)
+		{
+			unsigned char host[6];
+
+			if (!main_menu_loaded || !p2p_joined_host(host, FALSE))
+				break;
+			network_test.invite_taken = TRUE;
+			network_test.code_joined = TRUE;
+			platform_log("network test: the friend's invite accepted and its host reached; searching");
+		}
 		if (!network_test.set_up)
 		{
 			network_test.set_up = TRUE;
+			network_test_use_profile();
 			dispose_global_network_game_client();
 			dispose_global_network_game_server();
 			if (create_global_network_game_client())
@@ -1725,17 +2523,69 @@ void network_test_update(
 		{
 			/* the server browser's first game (once a second), or the code given */
 			network_test.browse_seconds += seconds;
-			if (!network_test.code[0] && network_test.browse_seconds >= 1.0f)
+			/* (join-friend: the first friend whose game is joinable, once a second) */
+			if (network_test.by_friend)
+			{
+				if (network_test.browse_seconds >= 1.0f)
+				{
+					struct p2p_friend_entry entries[P2P_FRIEND_ENTRIES_MAXIMUM];
+					int count = p2p_friends_list(entries, P2P_FRIEND_ENTRIES_MAXIMUM), index;
+
+					network_test.browse_seconds = 0.0f;
+					for (index = 0; index < count; index++)
+					{
+						int outcome;
+
+						if (entries[index].kind != P2P_FRIEND_KIND_FRIEND || !entries[index].joinable)
+							continue;
+						outcome = p2p_friends_act(entries[index].id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_JOIN);
+						platform_log("network test: joining friend %s (%s): %s", entries[index].name, entries[index].activity,
+							p2p_friends_outcome_text(outcome));
+						/* (a game with a password: asked for it, the test's typed) */
+						if (outcome == P2P_FRIENDS_PASSWORD && network_test.lobby_password[0])
+						{
+							outcome = p2p_friends_join_password(entries[index].id, network_test.lobby_password);
+							platform_log("network test: the friend's game's password typed: %s",
+								p2p_friends_outcome_text(outcome));
+						}
+						network_test.code_joined = outcome == P2P_FRIENDS_DONE;
+						break;
+					}
+				}
+			}
+			else if (!network_test.code[0] && network_test.browse_seconds >= 1.0f)
 			{
 				struct p2p_lobby_entry entry;
 				int index;
 
 				network_test.browse_seconds = 0.0f;
 				p2p_lobby_browse(TRUE);
+				/* (every row the browser shows, once each as it changes: its tag
+				and badges, as the browsers draw them - the tests read them:
+				run_netns_crossplay_test.sh browserboth) */
+				for (index = 0; p2p_lobby_entry(index, &entry); index++)
+				{
+					static char said[16][P2P_LOBBY_ID_SIZE + 64];
+					char line[P2P_LOBBY_ID_SIZE + 64];
+					int slot;
+
+					snprintf(line, sizeof(line), "%s %s %s", entry.id, entry.tag, entry.badge);
+					for (slot = 0; slot < 16 && strcmp(said[slot], line); slot++)
+						;
+					if (slot < 16)
+						continue;
+					memmove(said[1], said[0], sizeof(said[0]) * 15);
+					snprintf(said[0], sizeof(said[0]), "%s", line);
+					platform_log("network test: browser row [%s] \"%s\" (%d/%d, %s, %s)", entry.badge, entry.name,
+						entry.players, entry.maximum, entry.map, entry.crossplay ? "crossplay wire" : "the Vitas' wire");
+				}
 				for (index = 0; !network_test.lobby_id[0] && p2p_lobby_entry(index, &entry); index++)
 				{
 					if (entry.compatible && !entry.own &&
-						(!network_test.lobby_name[0] || !strcmp(entry.name, network_test.lobby_name)))
+						(!network_test.lobby_name[0] || !strcmp(entry.name, network_test.lobby_name) ||
+						/* ("tag:<tag>": the first game of that tag, crossplay_guard.h's -
+						a PC host's name is its own: run_netns_crossplay_test.sh) */
+						(!strncmp(network_test.lobby_name, "tag:", 4) && !strcmp(entry.tag, network_test.lobby_name + 4))))
 					{
 						platform_log("network test: the public games list \"%s\"%s%s%s%s: %s; %s", entry.name,
 							entry.locked ? " [pw]" : "", entry.dedicated ? " [dedicated]" : "",
@@ -1743,7 +2593,7 @@ void network_test_update(
 						/* (as the browsers do, crossplay_guard.h: a large or co-op
 						PC game asked about once, the answer
 						HALO_CROSSPLAY_LARGE_ANSWER's) */
-						if (network_wire_crossplay() && (entry.experimental || entry.coop) &&
+						if (entry.platform != CROSSPLAY_PLATFORM_VITA && (entry.experimental || entry.coop) &&
 							crossplay_guard_answered(entry.name, system_milliseconds()) < 0)
 						{
 							int answer = crossplay_guard_test_answer();
@@ -1753,7 +2603,7 @@ void network_test_update(
 								answer > 0 ? "join anyway" : "no");
 							crossplay_guard_answer(entry.name, answer > 0, system_milliseconds());
 						}
-						if (network_wire_crossplay() && (entry.experimental || entry.coop) &&
+						if (entry.platform != CROSSPLAY_PLATFORM_VITA && (entry.experimental || entry.coop) &&
 							crossplay_guard_answered(entry.name, system_milliseconds()) == 0)
 						{
 							continue;
@@ -1804,8 +2654,8 @@ void network_test_update(
 		}
 		/* (debug.network_test_join_file: not before the test makes it) */
 		else if (!network_test.joined && network_test.join_file[0] && !network_test_join_file_there())
-			;
-		else if (!network_test.joined && network_game_client_join_first_available_game())
+			network_test_log_listed();
+		else if (!network_test.joined && (network_test_log_listed(), network_game_client_join_first_available_game()))
 		{
 			network_test.joined = TRUE;
 			ui_widgets_close_all();

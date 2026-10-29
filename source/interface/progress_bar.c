@@ -350,6 +350,7 @@ extern unsigned long current_time;
 
 boolean progress_bar_rendering_enabled= TRUE;
 
+#ifndef HALO_LINUX
 /* the compressed monk chant played behind the loading screen */
 byte compressed_monk_tone[18396]=
 {
@@ -1504,6 +1505,7 @@ byte compressed_monk_tone[18396]=
 	0xa1,0x39,0x39,0xa0,0x42,0x54,0x14,0x26,0x44,0x22,0x53,0x31,0x23,0x32,0x23,0x42,
 	0x02,0x33,0x04,0x10,0x29,0x96,0x1a,0xb2,0x69,0x99,0x12,0x0b,
 };
+#endif
 
 real delta_z= 5.f;
 real num_layers= 40.f;
@@ -1525,13 +1527,19 @@ decodes it into texture0 with tgaLoadImageData's intensity-to-colour formula,
 and its progress_bar_initialize is empty. The picture is Bungie's data, so
 the port carries none of it: progress_bar_initialize reads it from the
 player's own retail executable, at its place on the disc (d:\default.xbe,
-the data root) or next to the maps folder. Without that file the picture
-stays black and the screen is the blur alone. */
+the data root), above the data root or next to the maps folder. Without
+that file the picture stays black and the screen is the blur alone.
+The monk chant behind the screen (compressed_monk_tone: 18396 bytes of Xbox
+ADPCM at 0x00217178, four voices at four pitches swelling as the bar fills)
+is Bungie's data as well and comes from the same executable; without it
+the screen is silent. */
 enum
 {
 	RETAIL_LOADING_IMAGE_WIDTH= 320,
 	RETAIL_LOADING_IMAGE_HEIGHT= 240,
-	RETAIL_LOADING_IMAGE_MAXIMUM_SIZE= 0x20000
+	RETAIL_LOADING_IMAGE_MAXIMUM_SIZE= 0x20000,
+	/* far larger than any retail executable (2.4 MB) */
+	RETAIL_XBE_MAXIMUM_SIZE= 0x1000000
 };
 
 static struct
@@ -1539,6 +1547,19 @@ static struct
 	long size;
 	unsigned char *runs;
 } retail_loading_image;
+
+enum
+{
+	RETAIL_LOADING_TONE_BLOCK_SIZE= 36, /* one Xbox ADPCM block, mono */
+	RETAIL_LOADING_TONE_MINIMUM_SIZE= 16*RETAIL_LOADING_TONE_BLOCK_SIZE,
+	RETAIL_LOADING_TONE_MAXIMUM_SIZE= 0x10000
+};
+
+static struct
+{
+	long size;
+	unsigned char *bytes;
+} retail_loading_tone;
 
 void platform_log(const char *format, ...);
 
@@ -1636,46 +1657,170 @@ static boolean retail_find_loading_image(
 	return FALSE;
 }
 
+/* finds the monk chant through the code that plays it: the retail
+progress_bar_make_stuff_ready gives each of its four buffers the chant with
+	push size
+	push compressed_monk_tone
+	push eax
+	call IDirectSoundBuffer_SetBufferData
+and loops all of it a few instructions on (push size, push 0: the loop
+region); it must be whole mono Xbox ADPCM blocks, each one's step index
+inside the table */
+static boolean retail_find_loading_tone(
+	unsigned char const *xbe,
+	long xbe_size)
+{
+	long index;
+
+	if (xbe_size<0x178 || memcmp(xbe, "XBEH", 4))
+		return FALSE;
+	for (index= 0; index + 30<=xbe_size; index++)
+	{
+		unsigned char const *code= xbe + index;
+		unsigned long size;
+		long tone_offset;
+		long loop_index;
+		boolean loops= FALSE;
+
+		if (code[0]!=0x68 || code[5]!=0x68 || code[10]!=0x50 || code[11]!=0xe8)
+			continue;
+		size= retail_read_long(code + 1);
+		if (size<RETAIL_LOADING_TONE_MINIMUM_SIZE || size>RETAIL_LOADING_TONE_MAXIMUM_SIZE ||
+			size%RETAIL_LOADING_TONE_BLOCK_SIZE)
+		{
+			continue;
+		}
+		for (loop_index= 16; loop_index<=24 && index + loop_index + 7<=xbe_size; loop_index++)
+		{
+			unsigned char const *loop= code + loop_index;
+
+			if (loop[0]==0x68 && retail_read_long(loop + 1)==size && loop[5]==0x6a && loop[6]==0x00)
+				loops= TRUE;
+		}
+		tone_offset= retail_xbe_offset(xbe, xbe_size, retail_read_long(code + 6), size);
+		if (loops && tone_offset>=0)
+		{
+			unsigned long block;
+
+			for (block= 0; block<size/RETAIL_LOADING_TONE_BLOCK_SIZE; block++)
+			{
+				if (xbe[tone_offset + block*RETAIL_LOADING_TONE_BLOCK_SIZE + 2]>88)
+					break;
+			}
+			if (block==size/RETAIL_LOADING_TONE_BLOCK_SIZE)
+			{
+				retail_loading_tone.bytes= malloc(size);
+				if (!retail_loading_tone.bytes)
+					return FALSE;
+				memcpy(retail_loading_tone.bytes, xbe + tone_offset, size);
+				retail_loading_tone.size= (long)size;
+				return TRUE;
+			}
+		}
+	}
+
+	return FALSE;
+}
+
+void *platform_read_file_in_parent_folder(const char *xbox_directory, const char *name, long maximum_size,
+	long *size, char *host_path, unsigned long host_path_size);
+void platform_read_file_free(void *bytes);
+void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size);
+
 static void retail_load_loading_image(
 	void)
 {
-	static char const *const paths[]=
+	/* the executable is looked for in the data root (d:\default.xbe, its
+	place on the disc), then in the folder that holds the maps folder
+	(HALO_MAPS_ROOT: the Vita's ux0:data/haloce-vita/maps, or the copy of
+	the game Xita's installer keeps in ux0:data/xita/haloce), then in the
+	folder above the data root (the Vita's data root is
+	ux0:data/haloce-vita/data: the game's own folder, where its installer and
+	the README put it). The last two are read with
+	platform_read_file_in_parent_folder: the game's paths never leave the
+	data root (platform_translate_path drops "..", since 61d518c5e; the
+	d:\..\default.xbe looked for until then was the data root's again, and
+	the picture stayed black on the Vita) */
+	static char const *const folders[]=
 	{
-		"d:\\default.xbe",
-		/* next to the maps folder (HALO_MAPS_ROOT: the copy of the game
-		Xita's installer keeps in ux0:data/xita/haloce on the Vita) */
-		"d:\\maps\\..\\default.xbe",
-		/* above the data root (the Vita's is ux0:data/haloce-vita/data:
-		the game's own folder, where the README has it copied) */
-		"d:\\..\\default.xbe",
+		"d:\\maps",
+		"d:\\",
 	};
-	long path_index;
+	static boolean looked;
+	long folder_index;
+	char path[1024];
+	char data_root_path[1024];
 
-	if (retail_loading_image.runs)
+	if (looked)
 		return;
-	for (path_index= 0; path_index<NUMBEROF(paths) && !retail_loading_image.runs; path_index++)
+	looked= TRUE;
+	platform_translate_path("d:\\default.xbe", data_root_path, sizeof(data_root_path));
+	if (!retail_loading_image.runs)
 	{
-		FILE *file= fopen(paths[path_index], "rb");
+		/* the data root itself, through the game's own paths */
+		FILE *file= fopen("d:\\default.xbe", "rb");
+		long size= -1;
 
 		if (file)
 		{
-			long size= -1;
 			unsigned char *xbe= NULL;
 
 			if (!fseek(file, 0, SEEK_END))
 				size= ftell(file);
-			if (size>0 && !fseek(file, 0, SEEK_SET))
+			if (size>0 && size<=RETAIL_XBE_MAXIMUM_SIZE && !fseek(file, 0, SEEK_SET))
 				xbe= malloc(size);
-			if (xbe && fread(xbe, 1, size, file)==(size_t)size && retail_find_loading_image(xbe, size))
-				platform_log("loading screen: the retail picture from %s", paths[path_index]);
+			if (xbe && fread(xbe, 1, size, file)==(size_t)size)
+			{
+				if (retail_find_loading_image(xbe, size))
+				{
+					platform_log("loading screen: the retail picture from d:\\default.xbe");
+					if (retail_find_loading_tone(xbe, size))
+						platform_log("loading screen: the retail chant (%ld bytes) from d:\\default.xbe", retail_loading_tone.size);
+				}
+				else
+				{
+					platform_log("loading screen: d:\\default.xbe (%ld bytes) has no loading picture", size);
+				}
+			}
 			free(xbe);
 			fclose(file);
+		}
+	}
+	for (folder_index= 0; folder_index<NUMBEROF(folders) && !retail_loading_image.runs; folder_index++)
+	{
+		long size= 0;
+		unsigned char *xbe= platform_read_file_in_parent_folder(folders[folder_index], "default.xbe",
+			RETAIL_XBE_MAXIMUM_SIZE, &size, path, sizeof(path));
+
+		/* (the maps folder's own, in the data root: read already) */
+		if (xbe && !strcmp(path, data_root_path))
+		{
+			platform_read_file_free(xbe);
+			xbe= NULL;
+		}
+		if (xbe)
+		{
+			if (retail_find_loading_image(xbe, size))
+			{
+				platform_log("loading screen: the retail picture from %s", path);
+				if (retail_find_loading_tone(xbe, size))
+					platform_log("loading screen: the retail chant (%ld bytes) from %s", retail_loading_tone.size, path);
+			}
+			else
+			{
+				platform_log("loading screen: %s (%ld bytes) has no loading picture", path, size);
+			}
+			platform_read_file_free(xbe);
 		}
 	}
 	if (!retail_loading_image.runs)
 	{
 		platform_log("loading screen: no retail default.xbe with the loading picture in the data root, "
 			"above it or next to the maps folder; the picture stays black");
+	}
+	else if (!retail_loading_tone.bytes)
+	{
+		platform_log("loading screen: no chant in the retail default.xbe; the screen is silent");
 	}
 
 	return;
@@ -2647,6 +2792,19 @@ static void progress_bar_make_stuff_ready(
 	buffer_description.dwBufferBytes= 0;
 	buffer_description.lpwfxFormat= &wave_format.wfx;
 
+#ifdef HALO_LINUX
+	/* (port) the chant is the player's executable's (retail_load_loading_image);
+	without it, no voices (and the frame below is captured as without
+	DirectSound) */
+	for (sound_index= 0; sound_index<NUMBER_OF_PROGRESS_BAR_SOUNDS && retail_loading_tone.bytes; sound_index++)
+	{
+		if (DirectSoundCreateBuffer(&buffer_description, &progress_bar_globals.sounds[sound_index])<0)
+			return;
+		IDirectSoundBuffer_SetBufferData(progress_bar_globals.sounds[sound_index], retail_loading_tone.bytes,
+			retail_loading_tone.size);
+		IDirectSoundBuffer_SetLoopRegion(progress_bar_globals.sounds[sound_index], 0,
+			retail_loading_tone.size);
+#else
 	for (sound_index= 0; sound_index<NUMBER_OF_PROGRESS_BAR_SOUNDS; sound_index++)
 	{
 		if (DirectSoundCreateBuffer(&buffer_description, &progress_bar_globals.sounds[sound_index])<0)
@@ -2655,15 +2813,23 @@ static void progress_bar_make_stuff_ready(
 			sizeof(compressed_monk_tone));
 		IDirectSoundBuffer_SetLoopRegion(progress_bar_globals.sounds[sound_index], 0,
 			sizeof(compressed_monk_tone));
+#endif
 		IDirectSoundBuffer_SetCurrentPosition(progress_bar_globals.sounds[sound_index], 0);
 		IDirectSoundBuffer_SetVolume(progress_bar_globals.sounds[sound_index], -5000);
 		IDirectSoundBuffer_Play(progress_bar_globals.sounds[sound_index], 0, 0, DSBPLAY_LOOPING);
 	}
 
+#ifdef HALO_LINUX
+	platform_log("loading screen: up, %s, %s", retail_loading_image.runs ? "the retail picture" : "black (no picture)",
+		progress_bar_globals.sounds[0] ? "the chant playing" : "silent (no chant)");
+	if (progress_bar_globals.sounds[0])
+#endif
+	{
 	IDirectSoundBuffer_SetPitch(progress_bar_globals.sounds[0], -4681);
 	IDirectSoundBuffer_SetPitch(progress_bar_globals.sounds[1], -6386);
 	IDirectSoundBuffer_SetPitch(progress_bar_globals.sounds[2], -3999);
 	IDirectSoundBuffer_SetPitch(progress_bar_globals.sounds[3], -8773);
+	}
 
 	if (progress_bar_mode.capture_frame)
 	{

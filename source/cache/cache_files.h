@@ -135,11 +135,20 @@ void cache_files_dispose(
 void cache_files_precache_set_priority(
 	boolean blocking);
 
+#ifdef HALO_LINUX
+boolean cache_files_precache_deferred(char const *map_name);
+#endif
 boolean cache_files_precache_in_progress(
 	void);
 
 boolean cache_files_precache_is_copying_map(
 	char const *map_name);
+#ifdef HALO_LINUX
+boolean cache_files_precache_copy_progress(
+	char *map_name,
+	long map_name_size,
+	real *progress);
+#endif
 boolean cache_files_precache_map_loaded(
 	char const *map_name);
 
@@ -204,11 +213,22 @@ boolean cache_files_xbox_map_problem(
 	char const *map_name,
 	char *why,
 	long why_size);
+/* (the same, and `unreadable` TRUE when the file is whole but did not read
+just now: a passing failure, not the file's verdict) */
+boolean cache_files_xbox_map_problem_read(
+	char const *map_name,
+	char *why,
+	long why_size,
+	boolean *unreadable);
 /* port: why the last precache of `map_name` failed, for the player */
 void cache_files_precache_failure_describe(
 	char const *map_name,
 	char *why,
 	long why_size);
+/* port: whether the failure it described last was the map file's own (cut
+short, damaged, another map's), not a passing one */
+boolean cache_files_precache_failure_the_file(
+	void);
 /* port: a map that could not be precached (cache_files.c): said, and the
 game goes back to the menu or a joiner leaves its game, rather than a
 damaged disc. FALSE for the menus' own map, which has no menu to go back

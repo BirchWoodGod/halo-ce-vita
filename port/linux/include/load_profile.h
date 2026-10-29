@@ -29,6 +29,7 @@ enum
 	_halo_load_cache_wait,
 	_halo_load_sound_cache_wait,
 	_halo_load_texture_cache_wait,
+	_halo_load_custom_read_lock_wait,
 	_halo_load_persistent_after_load,
 	_halo_load_file_game_thread,
 	_halo_load_file_other,
@@ -44,6 +45,12 @@ void halo_load_profile_file_call(unsigned long long started_us, const char *call
 	unsigned long long bytes);
 /* the frame's parts so far, for the frame-hitch line (main.c): "texture
 cache wait 468.3 ms (24x) | ..."; 0 when there are none */
+/* (platform_translate_path) a file's path looked for on disk: on the game
+thread, counted - each is a directory read per folder of the path, and on
+the Vita a wait for the memory card. The frame-hitch line says how many a
+frame made; (debug, the tests) HALO_TEST_PATH_LOOKUPS=N logs the game
+thread's count every N frames ("path-lookups: ...") */
+void halo_load_profile_path_lookup(void);
 int halo_load_profile_describe(char *line, int size);
 /* the game thread, once a frame */
 void halo_load_profile_frame_end(void);

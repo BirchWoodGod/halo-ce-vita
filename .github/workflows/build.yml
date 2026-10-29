@@ -16,8 +16,11 @@ name: Build
 # - artifacts are kept for three days.
 #
 # (The upstream port also published every green build of main as a GitHub
-# release; this repository's releases are the Vita builds alone, published
-# by hand, so that job and its Discord notice are left out.)
+# release; this repository's releases are published by hand, so that job and
+# its Discord notice are left out. The release's PC files are the Package
+# steps' artifacts, halo-ce-vita-<version>-pc-linux.tar.gz and
+# halo-ce-vita-<version>-pc-windows.zip, uploaded beside the Vita's
+# halo-ce-vita-<version>-vita.vpk: tools/release/README.md.)
 on:
   push:
     paths-ignore:
@@ -78,8 +81,19 @@ jobs:
       - name: Translations
         run: sh port/vita/tests/run_lang_test.sh
 
+      # the release's file, halo-ce-vita-<version>-pc-linux.tar.gz, from the
+      # release build (tools/package_pc.py; the 32-bit SDL3 is Arch's)
+      - name: Package
+        run: python tools/package_pc.py linux --sdl /usr/lib32
+
       - name: Compile cache
         run: ccache --show-stats
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: halo-ce-vita-pc-linux
+          path: dist/halo-ce-vita-*-pc-linux.tar.gz
+          retention-days: 3
 
       - uses: actions/upload-artifact@v4
         with:
@@ -209,8 +223,19 @@ jobs:
       - name: Release
         run: python tools/ci_build.py windows release
 
+      # the release's file, halo-ce-vita-<version>-pc-windows.zip, from the
+      # release build (tools/package_pc.py)
+      - name: Package
+        run: python tools/package_pc.py windows
+
       - name: Compile cache
         run: ccache --show-stats
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: halo-ce-vita-pc-windows
+          path: dist/halo-ce-vita-*-pc-windows.zip
+          retention-days: 3
 
       - uses: actions/upload-artifact@v4
         with:

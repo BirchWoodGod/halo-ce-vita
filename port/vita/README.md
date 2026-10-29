@@ -19,12 +19,12 @@ Combat Evolved for the Xbox.
 
 ## Installing
 
-1. Install `halo.vpk` with VitaShell. The bubble is called **Halo CE**
+1. Install the release's VPK (`halo-ce-vita-<version>-vita.vpk`; `build/vita/halo.vpk` when you build it) with VitaShell. The bubble is called **Halo CE**
    (title ID `HCEV00001`).
 2. Copy the Xbox game's maps to `ux0:data/haloce-vita/maps/` (the whole
    `maps` folder), and the disc's `default.xbe` to `ux0:data/haloce-vita/`:
-   the loading screen takes its picture from the executable, and stays dark
-   without it. (A copy that [Xita](https://github.com/Xita-Project/xita)'s installer put in
+   the loading screen takes its picture and its rising hum from the
+   executable, and stays dark and silent without it. (A copy that [Xita](https://github.com/Xita-Project/xita)'s installer put in
    `ux0:data/xita/haloce/maps/` is used if that folder is missing, with the
    `default.xbe` next to it.)
 3. Start the game. The first load of each map takes a while: the game
@@ -35,7 +35,7 @@ The game keeps its files in `ux0:data/haloce-vita/`:
 | Path | What |
 | --- | --- |
 | `maps/` | the Xbox maps |
-| `default.xbe` | the Xbox executable (the loading screen's picture) |
+| `default.xbe` | the Xbox executable (the loading screen's picture and hum) |
 | `data/` | settings (`config.toml`), `init.txt`, the game's log (`debug.txt`) |
 | `saves/` | profiles and saved games |
 | `movies/` | the movies as MP4 (optional) |
@@ -74,6 +74,14 @@ macroblock (640x360 decodes to 640x368) are cut by the picture size in the
 file. `HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without
 one; `HALO_MOVIE_DUMP=n` writes the n-th frame as the decoder gave it
 (`movie_nv12.raw`) and as converted (`movie_rgb.raw`).
+
+The renderer draws a movie's frames itself, at the display's resolution,
+from memory of its own (uncached user RAM), with programs every build
+ships. `HALO_MOVIE_PATH` in `env.txt` picks another way for a test: `cdram`
+(the same frames in video memory) or `legacy` (the game's own texture and
+quad, as up to 1.1.1-insider.11: its GPU program is not in `shaders.pak`,
+so without the shader compiler the picture is black). `halo.log` says which
+way each movie went (`movie: path ...`).
 
 ## Controls
 
@@ -157,6 +165,63 @@ second about x, y, z while the step is held, in place of the sensor;
 same all the time, and `HALO_GYRO_LOG=1` logs the yaw and pitch the game
 took (debug).
 
+## Party and party chat
+
+A party is up to eight friends who play together (`port/linux/src/p2p_party.h`):
+the leader invites friends (Halo 3 menus: FRIENDS, Triangle on a friend,
+INVITE TO PARTY, or a player's options on the PLAYERS screen; original menus:
+the settings panel's Multiplayer > Friends > Party). When the leader hosts a
+game the party joins its lobby by itself; when the leader joins another's
+game the party follows through that game's own join (a password game is never
+followed; a member who cannot get in is told why and stays in the party).
+In the menus **Select + D-pad left** opens the panel's Party page at once, for
+party chat: Send a message (the system's keyboard) and Quick chat (left and
+right choose a phrase, Cross sends it); in play it opens the in-game chat's
+quick chat wheel, whose PARTY channel is the same chat (below). Messages show
+at the bottom left in play and on the Halo 3 PARTY screen (FRIENDS' PARTY
+row: Square quick chat, Triangle type). Everything goes through the friends'
+channel, sealed for the party's members alone; muting a member hides their
+chat on this Vita only.
+
+## In-game chat
+
+In a network game (and in any game with a party), **Select + D-pad left**
+opens the quick chat wheel at the right of the screen (a PC's pad: Back +
+D-pad left; its keyboard: F1 + Left): **up and down** choose a phrase (Need
+backup!, Enemy spotted!, Flag taken!, Our flag is taken!, Follow me, On my
+way, Cover me, Nice shot!, Thanks!, Sorry!, Yes, No, GG) or *Type a
+message...*, **left and right** or **L and R** the channel (ALL, TEAM,
+PARTY), **Cross** sends, **Triangle** types a line on the system keyboard (63
+characters; the party's 120), **Circle** closes. The game sees no buttons
+while the wheel is open (the sticks still move and look). Lines show at the
+bottom left above the motion tracker, the name in its team's colour,
+`[Team]`, `[Party]` and `[Vehicle]` marked, and fade after eight seconds as
+Halo PC's; with the wheel open the last twelve are all shown, and holding
+the combo shows them alone. A phrase goes to the others as its English and
+shows in each player's language.
+
+The chat is OpenCE's text chat on the wire (`port/linux/game/game_chat_protocol.h`),
+so players of OpenCE's PC builds (since Oct 17 2026, network version 32) and
+the Vitas read each other's lines, in a Vita's game or a PC's; an older PC
+build or a Vita of before 1.1.1-insider.22 drops the lines, and the chat says
+its host has none. The host relays each line to the players who hear it (a
+team's to the team), five at once and one each 1.5 s from a machine at most,
+links refused; it never changes a line. What each player sees, their own
+machine decides:
+
+- **Chat filter** (Multiplayer > Vita and PC > Chat; on by default): slurs and
+  hate speech in other players' lines and names, PC players' too, masked as
+  `****` however they are spelled (leet, spaces, dots, repeated letters),
+  whole-word where the word is also part of others (Scunthorpe). A player it
+  catches three times in five minutes is muted on this Vita. Turning it off
+  changes only what this player sees. The words are
+  `app0:chat/filter.txt` (OpenCE's review of Surge AI's profanity list, its
+  slurs alone; `tools/chat_filter_words.py`).
+- **Mute**: the Chat page's players (Cross), or MUTE CHAT on the Halo 3
+  PLAYERS screen (Triangle with the scoreboard up): their lines hidden on this
+  Vita, by name; they are never told.
+- **Chat** (On/Off): Off shows no chat over the game and sends none.
+
 ## Settings panel
 
 Press **Select + D-pad down** (or hold **Select + Start** for about a second), in play or in the menus. **L and
@@ -182,7 +247,7 @@ of `settings.txt`: a file from an older version loads as it is.
 | FPS counter | Off | the game's own frame counter, bottom right |
 | Screen > | 16:9, Smooth | Aspect ratio, Upscale filter |
 | First person > | | First-person legs, Smooth weapon motion |
-| Detail > | | Model detail to Particle density (most of them set by the Profile) |
+| Detail > | | Model detail to Ragdolls (most of them set by the Profile) |
 | Performance > | | Scenery updates, Object lighting, AI think rate, Fourth core helpers |
 
 Graphics, **Screen**:
@@ -191,6 +256,7 @@ Graphics, **Screen**:
 | --- | --- | --- |
 | Aspect ratio | 16:9 | 4:3: the Xbox's framing, with black bars (applies at once) |
 | Upscale filter | Smooth | Sharp: crisp pixels |
+| Brightness | 5 | 0 to 10 (HALO_BRIGHTNESS, display.brightness in config.toml): 5 is the picture as the game draws it, higher lifts the darks and midtones, lower deepens them; a curve on the 3D picture in the blit to the display, no pass of its own (applies at once) |
 
 Graphics, **First person**:
 
@@ -212,6 +278,7 @@ Graphics, **Detail**:
 | Tiny decals | Shown | Skipped: bullet holes and marks under 2 pixels across are not made. In no profile yet: being tried |
 | Particles (P) | Reduced | the particles a fight's shots, impacts and explosions make (applies at once). Full (the Xbox's), Reduced (every profile's), Low: an effect's big bursts cut (the assault rifle's 20-40 sparks at an impact on metal: 10-16, Low 5-9; a single flash or a puff or two kept), sparks, smoke, dust and casings gone sooner (a life over 0.7 s: half the rest, Low a quarter), the counts cut further with several hundred live, and a particle too small to be seen at its distance from the camera not made (Low: nor one well behind the camera); in multiplayer a spark or puff out of view goes after a sixth of a second (Low: a tenth) instead of half a second. Muzzle flashes, your own weapon's, cutscenes', scripts' and a map's ambient effects (fires, steam, waterfalls) kept whole. Fewer made, unlike Particle density's fewer drawn: the game's own work in a big fight drops (below) |
 | Particle density (P) | Full | Half, Third, Quarter: that share of the smoke, sparks and debris drawn (each particle drawn or not for its whole life; your own weapon's and the effects on weapons, units and vehicles all drawn) |
+| Ragdolls | On | a character killed falls limp, thrown by the blow that killed it (a grenade throws its arms and legs apart), and comes to rest on the ground, steps or rocks where it lands, instead of its death animation's last pose laid on the ground (applies at once; the idea from jojoxdk's Halo 1 MCC Box3D Physics Mod). Only the picture changes: hit boxes, checkpoints and the network are as before, and each player's Vita simulates its own. Four fall at once at most and twelve are kept; one at rest costs nothing more. Off: the bodies as the Xbox lays them |
 
 Graphics, **Performance**:
 
@@ -232,8 +299,8 @@ Graphics, **Performance**:
 | Crouch | Toggle | the left stick click (crouch): a press crouches and the next stands (Hold: crouch while held), from its Vita button or a touch zone |
 | Gyro aiming | Off | turning the Vita aims, with the right stick: On, While zoomed, While holding (the Gyro button) |
 | Rear touch guard | Normal | the rear zones ignore a touch that starts near the pad's edges (where the hands holding the Vita rest) and count once held: Off (no border, 0.1 s), Light, Normal (96 px, 0.25 s), Strong (144 px, 0.4 s) |
-| Button layout > | As shipped | Button icons (Xbox; PlayStation: below), then A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick click, Right stick click, Back: the Vita button of each in play (Cross, Circle, Square, Triangle, D-pad left, D-pad right, L, R, D-pad down, D-pad up, Select as shipped; None: no button; the help line says what Halo does with it); a Vita button on two Xbox buttons presses both. The row says Custom once one is moved |
-| Touch zones > | Off | Touch top left, top right, left edge, right edge, Rear touch left, right: the Xbox button each zone presses (A, B, X, Y, Black, White, Left trigger, Right trigger, Left stick (click), Right stick (click) or Back). The row says how many are on |
+| Button layout > | As shipped | Button icons (Xbox; PlayStation: below), then A (jump), B (melee), X (reload, action), Y (switch weapon), Black (grenade type), White (flashlight), Left trigger (grenade), Right trigger (fire), Left stick (crouch), Right stick (zoom), Back (scoreboard): the Vita button of each in play (Cross, Circle, Square, Triangle, D-pad left, D-pad right, L, R, D-pad down, D-pad up, Select as shipped; None: no button; the help line says what Halo does with it); a Vita button on two Xbox buttons presses both. The row says Custom once one is moved |
+| Touch zones > | Off | Touch top left, top right, left edge, right edge, Rear touch left, right: the Xbox button each zone presses, named with what it does in play where that fits (A (jump), B (melee), X (reload, action), Y (switch weapon), Black (grenade type), White (flashlight), Left trigger, Right trigger, Left stick (crouch), Right stick (zoom) or Back (scoreboard)): zoom on the rear pad is Right stick (zoom). The row says how many are on |
 | Gyro settings > | | Gyro button (L: While holding aims while held; in play it then does nothing else), Gyro sensitivity (1.5x; 0.5x-3x, 1x turns the view as far as the Vita turns, less while zoomed), Gyro vertical (Normal: tilt the top edge towards you to look up; Inverted), Gyro turning (Turn (yaw), or Tilt (roll) it like a wheel) |
 | Advanced > | | Stick deadzone (Off; raise it if the sticks drift), Reset controls (look, crouch, deadzone, buttons and touch zones as shipped; gyro aiming, its settings, Button icons and Show dev settings stay), Show dev settings (Off; shows the Dev tab), Update channel (below; Reset controls keeps it too) |
 
@@ -285,23 +352,31 @@ and draft flags looked at; the request carries the User-Agent
 "HaloCEVita/<version>" and nothing else about the player or the Vita.
 
 **Button icons** (`HALO_BUTTON_ICONS`, xbox or playstation; live, kept by
-Reset controls): with PlayStation each of the game's button icons - the
-HUD's prompts (`source/interface/hud_messaging.c`), the icons in the menus'
-and the HUD's text and the menus' button hints (`ui_widget.c`) - shows the
+Reset controls; the default, Xbox, is `VITA_BUTTON_ICONS_DEFAULT` in
+`port/vita/include/vita_controls.h`, the one place it is set): with
+PlayStation each of the game's button icons - the HUD's prompts
+(`source/interface/hud_messaging.c`), the icons in the menus' and the HUD's
+text, the menus' button hints and the pause menu (`ui_widget.c`) - shows the
 Vita button its Xbox button is on now (`vita_button_glyph` in
 `port/vita/host/vita_controls.c`): in play the Button layout's, else the
 first touch zone set to it; in the menus the fixed layout (A Cross, B
-Circle, X Square, Y Triangle, the triggers L and R, Back Select). Cross,
-Circle, Square and Triangle are drawn in code (`source/interface/hud_draw.c`:
-two strokes, a ring, a square, a triangle, of the game's own white bitmap),
-centred in the Xbox icon's sprite and as tall as its button, in the
-PlayStation's own colours (Cross blue, Circle red, Square pink, Triangle
-green); L, R, START, SELECT, the D-pad ("D-pad down") and the
-touch zones ("rear touch left") are words in the game's font. An Xbox
-button on no Vita button and no zone keeps its Xbox icon; so do the
-sticks' icons (move, look). The settings panel keeps the Xbox controller's
-names (A, B, X, Y, Black, White ...) with either setting: the Button icons
-change the game's icons only.
+Circle, X Square, Y Triangle, the triggers L and R, the D-pad, Start, Back
+Select). They are the Halo 3 menus' own icons (`source/interface/hud_draw.c`):
+a dark round button with the symbol in the menus' colours (Cross blue,
+Circle red, Square pink, Triangle green), L and R on a dark tab, START,
+SELECT and the D-pad's directions on the round button too, drawn by
+`tools/halo3_menu_art.py` into `app0:menus/halo3/glyph_atlas.png` (twice the
+menus' size; read the first time one is drawn) and drawn centred in the
+Xbox icon's sprite and as tall as it, at its alpha. Without that picture
+Cross, Circle, Square and Triangle are drawn in code (two strokes, a ring, a
+square, a triangle, of the game's own white bitmap) in the same colours, and
+L, R, START, SELECT and the D-pad are words in the game's font; the touch
+zones are always words ("rear touch left"). An Xbox button on no Vita
+button and no zone keeps its Xbox icon; so do the sticks' icons (move,
+look). The Halo 3 menus show their PlayStation icons with either setting.
+The settings panel keeps the Xbox controller's names (A, B, X, Y, Black,
+White ...) with either setting: the Button icons change the game's icons
+only.
 
 The Touch zones page draws the front screen and the rear pad beside the
 rows: the chosen row's zone blue (dark blue while Off), the zones set to an
@@ -320,6 +395,21 @@ has lain still for a second.
 
 **Multiplayer**: see [Multiplayer](#multiplayer).
 
+Modded maps' first row, **Mod manager**, opens the mod manager (the same as
+the Halo 3 menus' **MOD MANAGER**, on the main menu beside FILE SHARE):
+every custom map of the maps folder and every MCC mod of the mods folder,
+each with its kind, size, On or Off, and whether it passed the game's own
+checks (the cache loader's, the mods folder's: Error when not, the help line
+says why, or what it needs: PC maps on, Halo PC's resource maps, MCC mods
+on). Left and right turn one off or on (a mod: `HALO_MODS_DISABLED` in
+`settings.txt`); an Off one stays on the memory card but is left out of
+every map list, the offline bots' playlist and map sharing, and an Off mod
+out of the Campaign's levels. Cross shows its details (where it came from:
+copied in, or received through map sharing), Square deletes it after asking
+(a mod's whole folder; only inside the maps and mods folders, never through
+a link; never the map being played). The game looks through the folders
+when the page opens and answers it (`port/linux/game/mod_manager.c`).
+
 Multiplayer's **Modded maps** page lists the maps in the maps folder that
 are not the Xbox's own: name, size, kind (**Xbox** for a modded or newly built Xbox map, **CE**
 for a Halo Custom Edition one, **CE+OS** for an OpenSauce `.yelo`, marked
@@ -327,7 +417,12 @@ for a Halo Custom Edition one, **CE+OS** for an OpenSauce `.yelo`, marked
 the folder but is left out of the multiplayer map list (`HALO_MAPS_DISABLED`
 in `settings.txt`; a game on a map you turned off may not be joinable).
 Square deletes a map, with its `.bmp` picture and `.txt` description, after
-asking (not the map being played). **PC maps** (Off by default,
+asking (not the map being played). A map is listed and played under its
+file's name: a copy you renamed (`cursed-bloodgulch.map`, Blood Gulch
+inside) is a map of its own, beside the original, and the Xbox's own
+level stays listed once; a renamed Xbox map is not offered for download to
+joiners (they need the same file), as map sharing knows an Xbox map by the
+name inside it. **PC maps** (Off by default,
 experimental) puts the Custom Edition maps in the map list; the page warns
 when the Custom Edition resource maps they need (`bitmaps.map`,
 `sounds.map`, `loc.map`) are not in the maps folder. A Halo Custom Edition
@@ -759,6 +854,9 @@ Useful ones:
 | `HALO_FRAME_TIMING=300` | a timing line every 300 frames in `halo.log` |
 | `HALO_RENDER_PROFILE=1`, `HALO_TICK_PROFILE=1` | where the frame and the tick go |
 | `HALO_GPU_STATS=1` | draws, uniforms, ring use per frame |
+| `HALO_GPU_CENSUS=N` | (a measuring run: passes flicker) windows of N frames (30-600) take turns leaving out a group of render phases (fog, reflections, lights, decals, effects, objects...); a `gpu-census:` line a round in `halo.log` gives each group's GPU ms on the hardware |
+| `HALO_DYNAMIC_RES_FIGHT_MIN=0.5` | Dynamic resolution's fight floor: a fight the panel's minimum cannot hold 30 FPS in (half a second over the budget there) goes under it, as far as this; unset: one step of the panel's minimums under it (63% -> 50%, 75% -> 63%), `0` none |
+| `HALO_ALPHA_TEST_NEUTRAL=0` | alpha-tested blended draws that write no depth keep their discard (default: a select to the colour their blend leaves the target unchanged with - the same image, no discard: the fog pass) |
 | `HALO_SCREENSHOT_DIR=ux0:data/haloce-vita/shots`, `HALO_SCREENSHOT_EVERY=n` | a BMP every n frames (at 100% resolution) |
 | `HALO_HUD_LOG=1` | each HUD quad's bitmap and rectangle in `halo.log` the first time it is drawn there (`tests/run_hud_layout_test.sh`) |
 | `HALO_MODEL_LOD_LOG=1` | each model's detail level in `halo.log` the first time it draws at it, with the level the Xbox would have chosen (`tests/run_cryo_body_test.sh`) |
@@ -785,6 +883,7 @@ Useful ones:
 | `HALO_DECAL_MIN_PIXELS=n` | decals that would be under n pixels across from every local view are not made (default 0: off) |
 | `HALO_AI_PERCEPTION_LOD=n` | actors farther than n world units from every player refresh their props' status (line of sight) every other tick; player props as before (default 0: off; no longer a row: AI think rate) |
 | `HALO_TICK_HASH_MASK=2` | (Linux harness) the tick hash also leaves out what the render writes into the objects and lights, to compare render settings |
+| `HALO_NO_MOUTH=1` | (debug) no lip sync: the mouths stay shut, so the mixer's timing does not reach game state; for tick-hash comparisons with the tick thread on or on the Vita, on both sides, never for play |
 | `HALO_TIME_CODE=1` | draw the tick count that some cutscene scripts turn on (`time_code_show`) in the top-left corner, as the beta did |
 | `HALO_NET_REMOTE_LOD=auto\|1\|0` | (the Multiplayer row Unseen players: Auto, Reduced, Full) in a multiplayer game you joined, another player out of your view (not drawn in the last 4 frames), on foot and not shooting, throwing, meleeing, reloading, swapping, jumping or pressing action, is updated every other tick: its place still follows the host every tick; its own movement in between, animation, footsteps and weapon run at half rate until you see it. About a sixth to a third less of a 24-player game's tick. `auto` (the default) in games of more than 16 players (only crossplay's PC games are that large), `1` always, `0` never |
 | `HALO_NET_COOP_LEAD_TICKS=n` | a co-op client runs no tick while it is more than n ticks ahead of its host, so it plays at a slow host's pace (default 6; 0 = never); the host's tick counted on from its newest message for as long as that message has waited (a network that holds the host's messages back does not hold the client) |
@@ -799,7 +898,7 @@ Useful ones:
 | `platform/` | built with the game's ABI: the Direct3D device (`d3d8_gxm.c`), the NV2A register combiner and vertex program translators (`nv2a_psh_cg.c`, `nv2a_vsh_cg.c`), texture decoding, Bink |
 | `include/` | the boundary between the two (`vita_host.h`, `vita_gxm.h`) |
 | `null/` | the do-nothing GXM for the Linux test build |
-| `sce_sys/` | LiveArea images |
+| `sce_sys/` | LiveArea images, made from the owner's art (`art/livearea-art.jpg`) by `tools/livearea_art.sh` |
 | `app0/` | files in the VPK beside the eboot: the shipped shaders, the brokers and relays, the PC menus' XML, the translations (`lang/`) |
 
 ## Help wanted

@@ -53,6 +53,20 @@ short network_game_server_last_refusal_code(
 void network_game_server_kick_machine(
 	long machine_index,
 	boolean kept_out);
+#ifdef HALO_LINUX
+/* port (network Forge, port/linux/game/forge_net.inc): a machine dropped
+with that rejection reason, rejoinable; the remote machines joined; a
+message to one of them */
+void network_game_server_port_refuse_machine(
+	long machine_index,
+	word reason);
+short network_game_server_port_joined_machines(
+	long *machine_indices,
+	short maximum);
+boolean network_game_server_port_send_to_machine(
+	long machine_index,
+	void *message);
+#endif
 /* the host's ban command (console.c, hs.c) */
 enum
 {
@@ -68,6 +82,25 @@ struct game_variant_options;
 void network_game_server_port_set_variant_options(
 	struct network_game_server *server,
 	struct game_variant_options const *options);
+/* port: a game hosted from the menus has its map chosen after its server
+starts (the map list next): until network_game_server_change_map_name names
+it, the game is open (friends, a party and the game lists see it joinable)
+and a join that comes is held - its connection kept alive, nothing of the
+game sent - then answered as a lobby's join once the map is chosen, so that
+the joiner precaches the host's choice and never the playlist's first map
+it would otherwise have been told. Nothing new on the wire: every build's
+client waits so (a dedicated server's held joins, network version 18) */
+void network_game_server_port_map_pending(
+	struct network_game_server *server);
+/* port: whether the game is in its lobby (pregame, not starting yet) */
+boolean network_game_server_port_in_lobby(
+	struct network_game_server *server);
+/* port: the Halo 3 live lobby's START GAME: the countdown begun now,
+milliseconds long, once the game can start (FALSE: not yet; it begins as the
+lobby's does once others are in). The game waits for every machine's map */
+boolean network_game_server_port_start_soon(
+	struct network_game_server *server,
+	long milliseconds);
 /* port: co-op server settings: the difficulty, sent to clients, and the
 build's maximum players (Server Setup's player count is for PvP) */
 void network_game_server_port_set_cooperative(

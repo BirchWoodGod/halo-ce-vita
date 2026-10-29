@@ -95,7 +95,9 @@ enum
 {
 	PLAYLIST_PROFILE_CHECKSUM_DATA_SIZE = 104,
 	MAXIMUM_GAME_VARIANT_NAME_LENGTH = 12,
-	NUMBER_OF_DEFAULT_PLAYLIST_PROFILES = 26,
+	/* port: the Xbox's 26, then Infection's (port/linux/game/infection.c:
+	its name and description the port's, text_group.c) */
+	NUMBER_OF_DEFAULT_PLAYLIST_PROFILES = 27,
 };
 
 enum
@@ -117,13 +119,16 @@ struct playlist_profile_data
 };
 #pragma pack(pop)
 
+/* (the Xbox's 0x68 bytes of functions and 0x69 in all, one more function
+since Infection) */
 typedef char verify_playlist_profile_building_functions_size[
 	sizeof(((struct playlist_profile_data *)0)->
-		default_variant_building_functions) == 0x68 ? 1 : -1];
+		default_variant_building_functions) == NUMBER_OF_DEFAULT_PLAYLIST_PROFILES * sizeof(void *) ? 1 : -1];
 typedef char verify_playlist_profile_first_time_offset[
-	offsetof(struct playlist_profile_data, first_time) == 0x68 ? 1 : -1];
+	offsetof(struct playlist_profile_data, first_time) == NUMBER_OF_DEFAULT_PLAYLIST_PROFILES * sizeof(void *) ?
+	1 : -1];
 typedef char verify_playlist_profile_data_size[
-	sizeof(struct playlist_profile_data) == 0x69 ? 1 : -1];
+	sizeof(struct playlist_profile_data) == NUMBER_OF_DEFAULT_PLAYLIST_PROFILES * sizeof(void *) + 1 ? 1 : -1];
 
 struct playlist_profile_write_request
 {
@@ -203,6 +208,8 @@ struct playlist_profile_data playlist_profile_default_data =
 		build_game_variant_team_oddball,
 		build_game_variant_team_king,
 		build_game_variant_team_slayer,
+		/* port: Infection */
+		build_game_variant_infection,
 	},
 	TRUE
 };
@@ -272,8 +279,22 @@ void playlist_profiles_enumerate_available_to_local_player_index(
 {
 	if (playlist_profile_default_data.first_time == TRUE)
 	{
+#ifdef HALO_LINUX
+		/* port: the game's own game types made under the saved game files'
+		mutex: an enumeration on another thread meanwhile (the profiles'
+		for the nameplate, SELECT PROFILE) read the ones made so far
+		(playlist_profile_number_of_default_profiles_on_disk), and, ending
+		after this notified the change, cleared memory_units_dirty: the game
+		type lists then lacked the rest for the whole run (15 to 21 of the
+		26, the Halo 3 GAME TYPES screen's tests) */
+		boolean locked = saved_game_files_take_mutex();
+#endif
 		playlist_profile_create_default_profiles_on_disk();
 		playlist_profile_default_data.first_time = FALSE;
+#ifdef HALO_LINUX
+		if (locked)
+			saved_game_files_release_mutex();
+#endif
 	}
 
 	saved_game_files_enumerate_available_to_local_player_index(
@@ -469,6 +490,42 @@ void playlist_profile_save(
 
 /* ---------- private code */
 
+#ifdef HALO_LINUX
+/* port: whether a game type of the game's own is on disk already as it
+would be written (the same bytes): it is not written again. The Xbox
+remade all 27 on its utility drive at every start; on the Vita's memory
+card that is 27 folders emptied and 27 files written, seconds of writes the
+saved game files' mutex is held for (playlist_profiles_enumerate_available_
+to_local_player_index), and the game's first frames, the intro movie's,
+waited for them (insider.21) */
+static boolean playlist_profile_default_file_same(
+	const char *path,
+	const byte *block,
+	unsigned long size)
+{
+	static byte existing[SAVED_GAME_FILE_BLOCK_SIZE];
+	struct file_reference file;
+	boolean same = FALSE;
+
+	if (size > sizeof(existing) ||
+		!file_reference_create_from_path(&file, path, FALSE) ||
+		!file_exists(&file) ||
+		!file_open(&file, FLAG(_permission_read_bit)))
+	{
+		return FALSE;
+	}
+	if (file_get_eof(&file) == size &&
+		file_read(&file, size, existing) &&
+		!csmemcmp(existing, block, size))
+	{
+		same = TRUE;
+	}
+	file_close(&file);
+
+	return same;
+}
+#endif
+
 static void playlist_profile_create_default_profiles_on_disk(
 	void)
 {
@@ -497,7 +554,14 @@ static void playlist_profile_create_default_profiles_on_disk(
 
 			_snprintf(path, MAXIMUM_FILENAME_LENGTH, "z:\\saved\\playlists\\default_playlist\\%02d", profile_index);
 			path[MAXIMUM_FILENAME_LENGTH] = 0;
+#ifdef HALO_LINUX
+			/* (port: the folder emptied below only when the file is written;
+			the block whole, its bytes past the checksum zero rather than the
+			stack's, so that the same game type is the same file) */
+			csmemset(block, 0, sizeof(block));
+#else
 			directory_create_or_delete_contents(path);
+#endif
 			csstrncat(path, "\\blam.lst", MAXIMUM_FILENAME_LENGTH);
 			path[MAXIMUM_FILENAME_LENGTH] = 0;
 
@@ -520,7 +584,24 @@ static void playlist_profile_create_default_profiles_on_disk(
 				PLAYLIST_PROFILE_CHECKSUM_DATA_SIZE,
 				(XCALCSIG_SIGNATURE *)(block + PLAYLIST_PROFILE_CHECKSUM_DATA_SIZE));
 
+#ifdef HALO_LINUX
+			if (playlist_profile_default_file_same(path, block, sizeof(block)))
+			{
+				file_written = TRUE;
+			}
+			else
+			{
+				char directory[MAXIMUM_FILENAME_LENGTH+1];
+
+				_snprintf(directory, MAXIMUM_FILENAME_LENGTH, "z:\\saved\\playlists\\default_playlist\\%02d", profile_index);
+				directory[MAXIMUM_FILENAME_LENGTH] = 0;
+				directory_create_or_delete_contents(directory);
+			}
+			if (!file_written &&
+				file_reference_create_from_path(&file, path, FALSE) &&
+#else
 			if (file_reference_create_from_path(&file, path, FALSE) &&
+#endif
 				file_create(&file) &&
 				file_open(&file, FLAG(_permission_write_bit)) &&
 				file_set_position(&file, 0))

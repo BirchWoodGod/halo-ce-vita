@@ -1,0 +1,13 @@
+# The Flood for Forge on the multiplayer maps: infection forms, combat forms
+# (human and elite, with their weapons) and carriers, which fight as the
+# campaign's do (on the Flood's team), from the player's own campaign maps
+# (The Library has them all and is the smallest to read; Keyes, Two
+# Betrayals and The Maw too).
+pack flood_ai
+map c20 d20 c40 d40
+tag actv characters\flood_infection\flood_infection
+tag actv characters\floodcarrier\floodcarrier
+tag actv characters\floodcombat elite\floodcombat elite plasma rifle
+tag actv characters\floodcombat elite\floodcombat elite shotgun
+tag actv characters\floodcombat_human\floodcombat_human assault rifle
+tag actv characters\floodcombat_human\floodcombat_human shotgun

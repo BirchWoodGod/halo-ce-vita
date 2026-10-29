@@ -129,10 +129,15 @@ int vita_ime_poll(char *text, int size)
 	ime_log("sceImeDialogTerm", sceImeDialogTerm());
 	ime_open = 0;
 	if (status < 0 || code < 0 || result.button != SCE_IME_DIALOG_BUTTON_ENTER)
+	{
+		memset(ime_input, 0, sizeof(ime_input));
 		return -1;
+	}
 	for (index = 0; ime_input[index] && length < size - 1; index++)
 		if (ime_input[index] >= 0x20 && ime_input[index] <= 0x7E)
 			text[length++] = (char)ime_input[index];
 	text[length] = 0;
+	/* (what was typed - a password, maybe - kept here no longer) */
+	memset(ime_input, 0, sizeof(ime_input));
 	return 1;
 }

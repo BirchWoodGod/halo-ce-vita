@@ -252,6 +252,19 @@ static void touch_start(void)
 
 /* the fingers on both panels (and the script's), in screen pixels: the
 zones they hold this frame; *started is how many came down */
+/* this frame's front fingers, for the menus' pointer (vita_host_front_touches) */
+static struct vita_touch_contact front_touches[SCE_TOUCH_MAX_REPORT];
+static int front_touch_count;
+
+int vita_host_front_touches(struct vita_touch_contact *out, int maximum)
+{
+	int index;
+
+	for (index = 0; index < front_touch_count && index < maximum; index++)
+		out[index] = front_touches[index];
+	return index;
+}
+
 static unsigned int touch_read(unsigned long long now, int *started)
 {
 	struct vita_touch_contact contacts[2 * SCE_TOUCH_MAX_REPORT + VITA_ZONE_COUNT];
@@ -285,6 +298,11 @@ static unsigned int touch_read(unsigned long long now, int *started)
 			contact->y = (data.report[index].y - touch_top[panel]) * VITA_TOUCH_HEIGHT / touch_height[panel];
 		}
 	}
+	/* (the front fingers kept for the menus' pointer) */
+	front_touch_count = 0;
+	for (index = 0; index < count && front_touch_count < SCE_TOUCH_MAX_REPORT; index++)
+		if (contacts[index].panel == VITA_TOUCH_FRONT)
+			front_touches[front_touch_count++] = contacts[index];
 	for (index = 0; index < VITA_ZONE_COUNT; index++)
 		if (pad_script_touch & (1u << index))
 		{
@@ -466,28 +484,66 @@ static void ctrl_sample_from(struct vita_ctrl_sample *sample, const SceCtrlData 
 	sample->ry = data->ry;
 }
 
+/* the samples the system took since the last read (up to a second's: a
+frame of the game can take that long - the live lobby going live, a
+screen's first frame), a button pressed in any of them pressed now, the
+sticks as the newest has them: a tap shorter than the frame it fell in was
+lost when only the newest sample was read (the owner, insider.15: Cross on
+BROWSE GAMES as the lobby went live, a 400 ms frame, did nothing). Each
+port's newest time kept */
+#define CTRL_SAMPLES 64
+static unsigned long long ctrl_newest[1 + VITA_CTRL_PORTS];
+
+static void ctrl_sample_latched(struct vita_ctrl_sample *sample, const SceCtrlData *data, int count, int slot)
+{
+	unsigned int buttons = 0;
+	int index, newest = 0;
+
+	for (index = 1; index < count; index++)
+	{
+		if (data[index].timeStamp > data[newest].timeStamp)
+			newest = index;
+	}
+	for (index = 0; index < count; index++)
+	{
+		if (data[index].timeStamp > ctrl_newest[slot])
+			buttons |= data[index].buttons;
+	}
+	ctrl_sample_from(sample, &data[newest]);
+	sample->buttons = data[newest].buttons | buttons;
+	if (data[newest].timeStamp > ctrl_newest[slot])
+		ctrl_newest[slot] = data[newest].timeStamp;
+}
+
 static int ctrl_read_vita(struct vita_ctrl_sample *sample)
 {
-	SceCtrlData data;
-	int result;
+	SceCtrlData data[CTRL_SAMPLES];
+	int result, index;
 
-	memset(&data, 0, sizeof(data));
-	data.lx = data.ly = data.rx = data.ry = 128;
-	result = sceCtrlPeekBufferPositive(0, &data, 1);
-	ctrl_sample_from(sample, &data);
+	memset(data, 0, sizeof(data));
+	for (index = 0; index < CTRL_SAMPLES; index++)
+		data[index].lx = data[index].ly = data[index].rx = data[index].ry = 128;
+	result = sceCtrlPeekBufferPositive(0, data, CTRL_SAMPLES);
+	if (result > 0)
+		ctrl_sample_latched(sample, data, result > CTRL_SAMPLES ? CTRL_SAMPLES : result, 0);
+	else
+		ctrl_sample_from(sample, &data[0]);
 	return result;
 }
 
 static int ctrl_read_port(int port, struct vita_ctrl_sample *sample)
 {
-	SceCtrlData data;
-	int result;
+	SceCtrlData data[CTRL_SAMPLES];
+	int result, index;
 
-	memset(&data, 0, sizeof(data));
-	data.lx = data.ly = data.rx = data.ry = 128;
-	result = sceCtrlPeekBufferPositive2(port, &data, 1);
-	if (result >= 0)
-		ctrl_sample_from(sample, &data);
+	memset(data, 0, sizeof(data));
+	for (index = 0; index < CTRL_SAMPLES; index++)
+		data[index].lx = data[index].ly = data[index].rx = data[index].ry = 128;
+	result = sceCtrlPeekBufferPositive2(port, data, CTRL_SAMPLES);
+	if (result > 0 && port >= 1 && port <= VITA_CTRL_PORTS)
+		ctrl_sample_latched(sample, data, result > CTRL_SAMPLES ? CTRL_SAMPLES : result, port);
+	else if (result >= 0)
+		ctrl_sample_from(sample, &data[0]);
 	return result;
 }
 

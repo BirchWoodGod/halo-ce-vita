@@ -17,6 +17,9 @@ port/linux/include/stdio.h).
 #include <float.h>
 #include <limits.h>
 #include <math.h>
+#include <pthread.h>
+#include <stdlib.h>
+#include <strings.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -31,12 +34,18 @@ size_t malloc_usable_size(void *pointer);
 
 /* ---------- strings */
 
+/* tolower in the C locale, inline: A-Z only. The game never sets a locale
+(no setlocale in source/ or port/), so this is what tolower did, without a
+call per character (Sierra-III's handoff, 5.3: ~1% of b30's beach on their
+PSP, model_find_marker's binary search among the callers) */
+#define msvc_fold(c) ((c) >= 'A' && (c) <= 'Z' ? (c) + ('a' - 'A') : (c))
+
 int _stricmp(const char *string1, const char *string2)
 {
 	for (;; string1++, string2++)
 	{
-		int c1 = tolower((unsigned char)*string1);
-		int c2 = tolower((unsigned char)*string2);
+		int c1 = msvc_fold((unsigned char)*string1);
+		int c2 = msvc_fold((unsigned char)*string2);
 
 		if (c1 != c2 || !c1)
 			return c1 - c2;
@@ -47,8 +56,8 @@ int _strnicmp(const char *string1, const char *string2, size_t count)
 {
 	for (; count; count--, string1++, string2++)
 	{
-		int c1 = tolower((unsigned char)*string1);
-		int c2 = tolower((unsigned char)*string2);
+		int c1 = msvc_fold((unsigned char)*string1);
+		int c2 = msvc_fold((unsigned char)*string2);
 
 		if (c1 != c2 || !c1)
 			return c1 - c2;
@@ -600,23 +609,128 @@ int halo_linux_printf(const char *format, ...)
 
 /* ---------- files by Xbox path */
 
+unsigned long vita_host_thread_id(void);
+
+/* (HALO_TRACE_FILES=2) the paths of the FILEs open, for the writes' and
+closes' lines */
+static struct
+{
+	FILE *file;
+	char path[256];
+} traced_files[64];
+static pthread_mutex_t traced_files_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void traced_file_set(FILE *file, const char *path)
+{
+	int index, free_slot = -1;
+
+	pthread_mutex_lock(&traced_files_lock);
+	for (index = 0; index < 64; index++)
+	{
+		if (traced_files[index].file == file || (!traced_files[index].file && free_slot < 0))
+		{
+			free_slot = index;
+			if (traced_files[index].file == file)
+				break;
+		}
+	}
+	if (free_slot >= 0)
+	{
+		traced_files[free_slot].file = path ? file : NULL;
+		snprintf(traced_files[free_slot].path, sizeof(traced_files[free_slot].path), "%s", path ? path : "");
+	}
+	pthread_mutex_unlock(&traced_files_lock);
+}
+
+static void traced_file_path(FILE *file, char *path, size_t size)
+{
+	int index;
+
+	snprintf(path, size, "?");
+	pthread_mutex_lock(&traced_files_lock);
+	for (index = 0; index < 64; index++)
+	{
+		if (traced_files[index].file == file)
+		{
+			snprintf(path, size, "%s", traced_files[index].path);
+			break;
+		}
+	}
+	pthread_mutex_unlock(&traced_files_lock);
+}
+
+size_t halo_linux_fwrite(const void *buffer, size_t size, size_t count, FILE *stream)
+{
+	if (platform_file_trace_level() >= 2 && stream)
+	{
+		char path[256];
+
+		traced_file_path(stream, path, sizeof(path));
+		platform_file_trace("fwrite", fileno(stream), path, (long long)ftell(stream), (unsigned long)(size * count));
+	}
+	return fwrite(buffer, size, count, stream);
+}
+
+int halo_linux_fclose(FILE *stream)
+{
+	if (platform_file_trace_level() >= 2 && stream)
+	{
+		char path[256];
+
+		traced_file_path(stream, path, sizeof(path));
+		platform_file_trace("fclose", fileno(stream), path, -1, 0);
+		traced_file_set(stream, NULL);
+	}
+	return fclose(stream);
+}
+
 static const char *translated(const char *path, char *buffer, size_t size)
 {
 	platform_translate_path(path, buffer, size);
 	return buffer;
 }
 
+/* (port) a mode that writes: MCC's folder is only read
+(platform_xbox_path_write_refused) */
+static int mode_writes(const char *mode)
+{
+	return mode && (strchr(mode, 'w') || strchr(mode, 'a') || strchr(mode, '+'));
+}
+
 FILE *halo_linux_fopen(const char *path, const char *mode)
 {
 	char host_path[1024];
+	FILE *file;
 
-	return fopen(translated(path, host_path, sizeof(host_path)), mode);
+	if (mode_writes(mode) && platform_xbox_path_write_refused(path))
+		return NULL;
+	translated(path, host_path, sizeof(host_path));
+	if (mode_writes(mode) && platform_host_path_write_protected(host_path))
+		return NULL;
+	file = fopen(host_path, mode);
+	if (platform_file_trace_level() >= 2)
+	{
+		platform_log("trace: fopen %s \"%s\" (%s): fd %d thread %lx", path, mode, host_path, file ? fileno(file) : -1,
+			vita_host_thread_id());
+		if (file)
+			traced_file_set(file, host_path);
+	}
+	return file;
 }
 
 FILE *halo_linux_freopen(const char *path, const char *mode, FILE *stream)
 {
 	char host_path[1024];
 
+	if (path && mode_writes(mode) && platform_xbox_path_write_refused(path))
+		return NULL;
+	if (path && mode_writes(mode))
+	{
+		char host_check[1024];
+
+		if (platform_host_path_write_protected(translated(path, host_check, sizeof(host_check))))
+			return NULL;
+	}
 	return freopen(path ? translated(path, host_path, sizeof(host_path)) : NULL, mode, stream);
 }
 
@@ -624,15 +738,29 @@ int halo_linux_remove(const char *path)
 {
 	char host_path[1024];
 
-	return remove(translated(path, host_path, sizeof(host_path)));
+	if (platform_xbox_path_write_refused(path))
+		return -1;
+	translated(path, host_path, sizeof(host_path));
+	if (platform_host_path_write_protected(host_path))
+		return -1;
+	if (platform_file_trace_level() >= 2)
+		platform_file_trace("remove", -1, host_path, -1, 0);
+	return remove(host_path);
 }
 
 int halo_linux_rename(const char *old_path, const char *new_path)
 {
 	char host_old_path[1024], host_new_path[1024];
 
-	return rename(translated(old_path, host_old_path, sizeof(host_old_path)),
-		translated(new_path, host_new_path, sizeof(host_new_path)));
+	if (platform_xbox_path_write_refused(old_path) || platform_xbox_path_write_refused(new_path))
+		return -1;
+	translated(old_path, host_old_path, sizeof(host_old_path));
+	translated(new_path, host_new_path, sizeof(host_new_path));
+	if (platform_host_path_write_protected(host_old_path) || platform_host_path_write_protected(host_new_path))
+		return -1;
+	if (platform_file_trace_level() >= 2)
+		platform_log("trace: rename %s -> %s thread %lx", host_old_path, host_new_path, vita_host_thread_id());
+	return rename(host_old_path, host_new_path);
 }
 
 int halo_linux_open(const char *path, int flags, ...)
@@ -648,13 +776,27 @@ int halo_linux_open(const char *path, int flags, ...)
 		mode = va_arg(arguments, int);
 		va_end(arguments);
 	}
-	return open(translated(path, host_path, sizeof(host_path)), flags | O_CLOEXEC, mode ? mode : 0644);
+	if ((flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC)) && platform_xbox_path_write_refused(path))
+		return -1;
+	translated(path, host_path, sizeof(host_path));
+	if ((flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC)) && platform_host_path_write_protected(host_path))
+		return -1;
+	{
+		int descriptor = open(host_path, flags | O_CLOEXEC, mode ? mode : 0644);
+
+		if (platform_file_trace_level() >= 2)
+			platform_log("trace: open %s flags %x: fd %d thread %lx", host_path, (unsigned)flags, descriptor,
+				vita_host_thread_id());
+		return descriptor;
+	}
 }
 
 int _mkdir(const char *path)
 {
 	char host_path[1024];
 
+	if (platform_xbox_path_write_refused(path))
+		return -1;
 	return posix_make_directory(translated(path, host_path, sizeof(host_path)));
 }
 
@@ -662,6 +804,8 @@ int _rmdir(const char *path)
 {
 	char host_path[1024];
 
+	if (platform_xbox_path_write_refused(path))
+		return -1;
 	return rmdir(translated(path, host_path, sizeof(host_path)));
 }
 

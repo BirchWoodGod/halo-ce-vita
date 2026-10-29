@@ -95,6 +95,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		return 0;
 	mode = (data[0] & 0x3F) % 3;
 	test_crossplay = (data[0] & 0x40) != 0;
+	/* (heard on that wire's topics; the hosted game on it too) */
+	test_heard = test_crossplay;
 	flags = data[1];
 	data += 2;
 	size -= 2;
@@ -120,7 +122,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
 			payload[0] = 'H';
 			payload[1] = 'L';
-			unsigned int version = test_crossplay ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION;
+			/* (on the crossplay wire half of them a listing of OpenCE's 39,
+			whose flags' 0x20 is its dedicated server: by the first byte's
+			lowest bit, which the tag then overwrites) */
+			unsigned int version = !test_crossplay ? HALO_PORT_NETWORK_VERSION :
+				(data[0] & 1) ? HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION : HALO_PORT_CROSSPLAY_NETWORK_VERSION;
 
 			payload[2] = test_crossplay ? LISTING_FORMAT_CROSSPLAY : LISTING_FORMAT;
 			payload[3] = (unsigned char)(version >> 8);
@@ -153,11 +159,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	if (flags & 0x40)
 	{
 		pthread_mutex_lock(&p2p_lock);
-		p2p_lobby_query_heard();
+		p2p_lobby_query_heard(test_crossplay);
 		pthread_mutex_unlock(&p2p_lock);
 	}
 	pthread_mutex_lock(&p2p_lock);
-	p2p_lobby_slot_heard(heard_on, payload, payload_size, flags & 1);
+	p2p_lobby_slot_heard(test_heard, heard_on, payload, payload_size, flags & 1);
 	pthread_mutex_unlock(&p2p_lock);
 	lobby_update(NULL, 0, 0);
 	/* everything shown, and the first game joined (an open one at once; a

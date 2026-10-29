@@ -43,14 +43,26 @@ enum xbox_adpcm_rate_mode
 
 /* ---------- structures */
 
+/* (xbox_adpcm_encoder_begin_sink) takes `size` bytes of whole blocks that
+lie at `offset` in the output; 0 stops the output */
+typedef int (*xbox_adpcm_sink_proc)(void *context, uint8_t const *bytes, uint32_t size, uint32_t offset);
+
 /* An output of whole Xbox ADPCM blocks being filled, frame by frame. */
 struct xbox_adpcm_encoder
 {
+	/* the output, or with a sink the staging its pieces are written to */
 	uint8_t *output;
 	uint32_t output_blocks;
 	uint32_t block_bytes;
 	uint32_t blocks_written;
 	int channels;
+	/* (a sink's) the staging's blocks and those written to it not yet
+	given, and whether the sink stopped the output */
+	xbox_adpcm_sink_proc sink;
+	void *sink_context;
+	uint32_t staging_blocks;
+	uint32_t staged_blocks;
+	int stopped;
 	/* the block being filled, and the step index carried between blocks,
 	by channel */
 	short block[XBOX_ADPCM_BLOCK_SAMPLES][XBOX_ADPCM_MAXIMUM_CHANNELS];
@@ -130,11 +142,42 @@ void xbox_adpcm_encoder_warm(
 output it filled, the step index carried and the frames it held (hold)
 written first (unless they warm it); the skip and the warming are left as
 they are. 0 when the output is not usable (none: every frame is then left
-out). */
+out). A sink's encoder continues into the plain output given, not its
+sink. */
 int xbox_adpcm_encoder_continue(
 	struct xbox_adpcm_encoder *encoder,
 	void *output,
 	uint32_t output_bytes);
+
+/* The same, into an output of `output_bytes` given to `sink` through
+`staging` as xbox_adpcm_encoder_begin_sink's (a link of a long sound's
+chain made into the sound cache's block a piece at a time,
+custom_edition_sounds.c). 0 when it is not usable (no sink, or a staging
+of less than a block: every frame is then left out). */
+int xbox_adpcm_encoder_continue_sink(
+	struct xbox_adpcm_encoder *encoder,
+	void *staging,
+	uint32_t staging_bytes,
+	uint32_t output_bytes,
+	xbox_adpcm_sink_proc sink,
+	void *sink_context);
+
+/* Starts filling an output of `output_bytes` (whole blocks of `channels`
+channels are used) that is never in memory whole: its blocks are written
+into `staging` (`staging_bytes`, at least a block's) and given to `sink`
+with their place in the output each time the staging is full, and the rest
+at xbox_adpcm_encoder_finish, silence included, so the sink takes every
+byte of the output once, in order. A sink that returns 0 stops the output:
+the encoder is full, `stopped` is set and the sink is not called again.
+0 when the arguments are not usable. */
+int xbox_adpcm_encoder_begin_sink(
+	struct xbox_adpcm_encoder *encoder,
+	void *staging,
+	uint32_t staging_bytes,
+	uint32_t output_bytes,
+	int channels,
+	xbox_adpcm_sink_proc sink,
+	void *sink_context);
 
 /* One frame: a sample by channel, clamped to 16 bits (left out while
 frames are skipped). */

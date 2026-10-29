@@ -229,6 +229,10 @@ symbols in this file:
 #include "sound/sound_definitions.h"
 #include "units/unit_definitions.h"
 #include "units/units.h"
+#ifdef HALO_LINUX
+/* network_game_globals.c's */
+boolean network_game_distributed_client(void);
+#endif
 
 #ifdef HALO_LINUX
 /* port/linux/game/pal_tags.c's */
@@ -854,7 +858,38 @@ void weapon_delete(
 {
 	if (game_engine_running())
 	{
-		match_assert("c:\\halo\\SOURCE\\items\\weapons.c", 234, !weapon_is_flag(weapon_index));
+#ifdef HALO_LINUX
+		/* port: a client of the distributed netcode deletes a flag or a ball
+		when its host says so (OpenCE's hosts may delete one outright: a
+		release build skips this check, docs/opence-net32-spec.md 9.4): no
+		bug, and the game type's markers at it go with it, the flag's goal
+		and its carrier's (CTF), the ball's (oddball), till the host's next
+		word puts them again. Its carrier let go of it already
+		(network_objects.c's distributed_client_delete) */
+		if (network_game_distributed_client() && weapon_is_flag(weapon_index))
+		{
+			short team_index = weapon_get(weapon_index)->object.owner_team_index;
+
+			error(_error_silent, "network: a flag or ball deleted on the host's word at tick %ld (team %d)",
+				game_time_get(), (int)team_index);
+			if (team_index >= 0 && team_index < 2)
+			{
+				if (game_engine_get_variant()->game_engine_index == game_engine_ctf)
+				{
+					game_engine_clear_goal_position(team_index);
+					game_engine_clear_goal_position((short)(team_index + 2));
+				}
+				else if (game_engine_get_variant()->game_engine_index == game_engine_oddball)
+				{
+					game_engine_clear_goal_position(team_index);
+				}
+			}
+			return;
+		}
+#endif
+		/* port: an Infection zombie's skull is the host's to delete
+		(port/linux/game/infection.c) */
+		match_assert("c:\\halo\\SOURCE\\items\\weapons.c", 234, !weapon_is_flag(weapon_index) || infection_active());
 	}
 
 	return;

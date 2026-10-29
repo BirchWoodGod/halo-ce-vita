@@ -78,12 +78,53 @@ symbols in this file:
 
 /* ---------- constants */
 
+#ifdef HALO_LINUX
+/* (draw_string.c) the units a glyph's texel is while a sharp font's string
+is laid out; 1 otherwise */
+extern real draw_string_texel_size;
+
+/* the leftmost x a string's clip may reach: 0 (the centered 640 columns'
+left), or with Menu style Online the wide screen's left edge, where its
+menus' text sits (ui_widget.c widens their clip) */
+static short rasterizer_text_left_limit(void)
+{
+	extern int halo_menu_style_online(void);
+
+	return halo_menu_style_online() && halo_screen_width() > 640 ? (short)(-(halo_screen_width() - 640) / 2) : 0;
+}
+#endif
+
+#ifdef HALO_LINUX
+/* port: the glyph cache four times the Xbox's. A screen of many different
+strings in the Halo PC fonts (OpenCE's server browser, Menu style Halo CE:
+the owner's photo of insider.10, Oct 18 2026) has more glyphs than 128 by
+128 texels hold, so the cache went round within each frame, every frame; on
+the Vita the texture is read as it was at its first draw of a frame, and
+the glyphs written after it drew nothing: only the first row's name showed,
+each row below one column fewer. Every glyph a screen draws now stays in
+place, and the texture stops changing once they are all in (128 KB). The
+sharp fonts of Menu style Online (draw_string.c) hold their glyphs at the
+display's pixels, up to 3 times as many texels a side: 512 by 256 on the
+Vita (its 1.13, 256 KB), 1024 by 1024 on the desktop (2 MB) */
+enum
+{
+#if defined(HALO_VITA) || defined(__vita__)
+	HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH = 512,
+	HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT = 256,
+#else
+	HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH = 1024,
+	HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT = 1024,
+#endif
+	MAXIMUM_HARDWARE_CHARACTERS = 1024,
+};
+#else
 enum
 {
 	HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH = 128,
 	HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT = 128,
 	MAXIMUM_HARDWARE_CHARACTERS = 256,
 };
+#endif
 
 enum
 {
@@ -336,6 +377,19 @@ rasterizer_draw_character(
 		vertices[1].position.x = vertices[2].position.x = (real)(x0 + dx);
 		vertices[0].position.y = vertices[1].position.y = (real)y0;
 		vertices[2].position.y = vertices[3].position.y = (real)(y0 + dy);
+#ifdef HALO_LINUX
+		/* (a sharp font's string, laid out at its texels: draw_string.c) */
+		if (draw_string_texel_size != 1.0f)
+		{
+			short vertex;
+
+			for (vertex = 0; vertex < NUMBER_OF_VERTICES_PER_QUADRILATERAL; vertex++)
+			{
+				vertices[vertex].position.x *= draw_string_texel_size;
+				vertices[vertex].position.y *= draw_string_texel_size;
+			}
+		}
+#endif
 
 		vertices[0].texture_coordinates.x = vertices[3].texture_coordinates.x = (real)u0;
 		vertices[1].texture_coordinates.x = vertices[2].texture_coordinates.x = (real)(u0 + dx);
@@ -401,7 +455,13 @@ rasterizer_draw_string(
 			{
 				set_rectangle2d(
 					&viewport_bounds,
+#ifdef HALO_LINUX
+					/* (Menu style Online: its menus' text reaches into the
+					wide screen's left margin, x below 0: ui_widget.c) */
+					FLOOR(clip->x0, rasterizer_text_left_limit()),
+#else
 					FLOOR(clip->x0, 0),
+#endif
 					FLOOR(clip->y0, 0),
 					MIN(render.camera.viewport_bounds.x1 - render.camera.viewport_bounds.x0, clip->x1),
 					MIN(render.camera.viewport_bounds.y1 - render.camera.viewport_bounds.y0, clip->y1));
@@ -484,7 +544,13 @@ rasterizer_draw_unicode_string(
 			{
 				set_rectangle2d(
 					&viewport_bounds,
+#ifdef HALO_LINUX
+					/* (Menu style Online: its menus' text reaches into the
+					wide screen's left margin, x below 0: ui_widget.c) */
+					FLOOR(clip->x0, rasterizer_text_left_limit()),
+#else
 					FLOOR(clip->x0, 0),
+#endif
 					FLOOR(clip->y0, 0),
 					MIN(render.camera.viewport_bounds.x1 - render.camera.viewport_bounds.x0, clip->x1),
 					MIN(render.camera.viewport_bounds.y1 - render.camera.viewport_bounds.y0, clip->y1));
@@ -561,6 +627,20 @@ rasterizer_draw_character_with_dropshadow(
 			vertices[1].position.x = vertices[2].position.x = right + x_offset;
 			vertices[0].position.y = vertices[1].position.y = top + y_offset;
 			vertices[2].position.y = vertices[3].position.y = bottom + y_offset;
+#ifdef HALO_LINUX
+			/* (a sharp font's string, laid out at its texels: draw_string.c;
+			its shadow a texel down and right, a pixel) */
+			if (draw_string_texel_size != 1.0f)
+			{
+				short vertex;
+
+				for (vertex = 0; vertex < NUMBER_OF_VERTICES_PER_QUADRILATERAL; vertex++)
+				{
+					vertices[vertex].position.x *= draw_string_texel_size;
+					vertices[vertex].position.y *= draw_string_texel_size;
+				}
+			}
+#endif
 
 			vertices[0].texture_coordinates.x = vertices[3].texture_coordinates.x = (real)u0;
 			vertices[1].texture_coordinates.x = vertices[2].texture_coordinates.x = (real)(u0 + dx);
@@ -675,6 +755,24 @@ cache_hardware_format_character(
 
 		if (cell_height + hardware_character_cache.y0 > HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT)
 		{
+#ifdef HALO_LINUX
+			/* port: the cache going round twice within 100 ms is a screen
+			with more glyphs than it holds (said in halo.log at most every
+			10 s; run_menus_test.sh's browserrows looks for it) */
+			{
+				static unsigned long last_wrap, last_said;
+				unsigned long now = system_milliseconds();
+				void platform_log(char const *format, ...);
+
+				if (last_wrap && now - last_wrap < 100 && (!last_said || now - last_said > 10000))
+				{
+					last_said = now | 1;
+					platform_log("text: the glyph cache (%dx%d) goes round every frame: a screen's text has more glyphs than it holds",
+						HARDWARE_CHARACTER_CACHE_BITMAP_WIDTH, HARDWARE_CHARACTER_CACHE_BITMAP_HEIGHT);
+				}
+				last_wrap = now | 1;
+			}
+#endif
 			hardware_character_cache.y0 = 0;
 			hardware_character_cache.x0 = 0;
 			hardware_character_cache.maximum_character_height = 0;

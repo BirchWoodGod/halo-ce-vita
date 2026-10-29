@@ -1,0 +1,871 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style SCOREBOARD (Menu style Halo 3, menus.scoreboard: the settings panel's Game >
+Menus > Scoreboard), in the place of the game's own scores while Back (the Vita's SELECT) is held
+in a multiplayer game - local and split screen, System Link, ad hoc, online, a dedicated server's or
+a PC's (crossplay) -, each player's own in their view. Built into each level's map (ingame.txt):
+pause.xml's fonts and pictures. Held, it is a compact panel at the top of the game, about 45% of
+the width, over the game without being open (the player plays on: menu_functions.c "port h3
+scoreboard", ui_widget.c ui_widget_port_held_screen_show): "Players" and "Score" over a team
+game's teams, each a translucent band of the team's colour with its rank, name and score, its
+players under it in the same colour, or a free for all's players in one translucent list, ranked
+as the game's own scores rank them; a player's row: emblem (the player's colour), name, the tags
+(the host's crown, the party's mark, the tester's small flame - only where the flame itself shows:
+its proof checked here -, BOT on a bot's, the ping's bars: the latency meter's, the host's table
+on a joined machine) and the score; this machine's rows outlined in yellow; the dead and those out
+of lives dimmed; "Hold [Triangle] to activate" under the rows. Triangle (or a tap) while it is
+held opens it as a screen of the player's own (scoreboard/screen, open: wider, with kills, deaths
+and assists; the D-pad, the stick, L and R, a drag on the touch screen scroll it; the selector
+strip under the rows names the player Cross acts on: their options - MUTE CHAT, ADD FRIEND or the
+friend's state, KICK for the game's host alone; Circle closes). Split screen's views have the
+smaller scoreboard_split, held only. The rows are read a few times a second, not every frame. The
+art is this folder's own (tools/halo3_menu_art.py). -->
+<menus>
+	<!-- (a row: none, the cursor's outline, this machine's own players' yellow one - the held
+	view's, narrower, is row_own_n's) -->
+	<bitmap name="h3/scoreboard_row">
+		<frame png="halo3/scoreboard_clear.png" width="256" height="16"/>
+		<frame png="halo3/scoreboard_cursor.png" width="256" height="16"/>
+		<frame png="halo3/scoreboard_own.png" width="256" height="16"/>
+	</bitmap>
+	<bitmap name="h3/scoreboard_own">
+		<frame png="halo3/scoreboard_own.png" width="256" height="16"/>
+	</bitmap>
+	<!-- (the options' rows: none, the cursor's) -->
+	<bitmap name="h3/scoreboard_option">
+		<frame png="halo3/item_off.png" width="128" height="16"/>
+		<frame png="halo3/row_on.png" width="128" height="16"/>
+	</bitmap>
+	<!-- (a team's band, in the team's colour; the rows under it, the same colour more see-through,
+	frame 8 a free for all's) -->
+	<bitmap name="h3/scoreboard_band">
+		<frame png="halo3/scoreboard_band_0.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_band_1.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_band_2.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_band_3.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_band_4.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_band_5.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_band_6.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_band_7.png" width="128" height="16"/>
+	</bitmap>
+	<bitmap name="h3/scoreboard_tint">
+		<frame png="halo3/scoreboard_tint_0.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_tint_1.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_tint_2.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_tint_3.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_tint_4.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_tint_5.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_tint_6.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_tint_7.png" width="128" height="16"/>
+		<frame png="halo3/scoreboard_tint_ffa.png" width="128" height="16"/>
+	</bitmap>
+	<!-- (the emblem: frame 0 the default, then the game's eighteen colours, as the nameplates) -->
+	<bitmap name="h3/scoreboard_emblem">
+		<frame png="halo3/scoreboard_emblem.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_00.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_01.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_02.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_03.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_04.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_05.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_06.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_07.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_08.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_09.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_10.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_11.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_12.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_13.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_14.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_15.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_16.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_17.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_18.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_19.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_20.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_21.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_22.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_23.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_24.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_25.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_26.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_27.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_28.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_29.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_30.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_31.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_32.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_33.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_34.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_35.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_36.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_37.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_38.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_39.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_40.png" width="16" height="16"/>
+		<frame png="halo3/scoreboard_emblem_41.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="h3/scoreboard_selector">
+		<frame png="halo3/scoreboard_selector.png" width="256" height="16"/>
+	</bitmap>
+	<bitmap name="h3/scoreboard_strip">
+		<frame png="halo3/strip.png" width="64" height="16"/>
+	</bitmap>
+	<!-- (frame 0: no ping known; 1 to 4 the bars lit) -->
+	<bitmap name="h3/scoreboard_ping">
+		<frame png="halo3/scoreboard_ping_0.png" width="32" height="16"/>
+		<frame png="halo3/scoreboard_ping_1.png" width="32" height="16"/>
+		<frame png="halo3/scoreboard_ping_2.png" width="32" height="16"/>
+		<frame png="halo3/scoreboard_ping_3.png" width="32" height="16"/>
+		<frame png="halo3/scoreboard_ping_4.png" width="32" height="16"/>
+	</bitmap>
+	<bitmap name="h3/scoreboard_host">
+		<frame png="halo3/scoreboard_host.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="h3/scoreboard_party">
+		<frame png="halo3/scoreboard_party.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="h3/scoreboard_flame">
+		<frame png="halo3/scoreboard_flame.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="h3/scoreboard_bot">
+		<frame png="halo3/scoreboard_bot.png" width="32" height="16"/>
+	</bitmap>
+	<bitmap name="h3/scoreboard_glyph_triangle">
+		<frame png="halo3/glyph_triangle.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="h3/scoreboard_glyph_dpad">
+		<frame png="halo3/glyph_dpad_ud.png" width="16" height="16"/>
+	</bitmap>
+	<strings name="h3/scoreboard_text">
+		<string text="Players"/>
+		<string text="Score"/>
+		<string text="K"/>
+		<string text="D"/>
+		<string text="A"/>
+		<string text="PING"/>
+		<string text="Hold"/>
+		<string text="Close"/>
+		<string text="Scroll"/>
+		<string text="BACK"/>
+		<string text="MUTE CHAT"/>
+		<string text="ADD FRIEND"/>
+		<string text="KICK"/>
+		<string text="Select"/>
+		<string text="to activate"/>
+		<string text="Options"/>
+		<string text="to open"/>
+	</strings>
+
+	<!-- the scoreboard, compact, on the menus' 640x480: the caption (rules; the game type on the map, open), the column names, the rows (eighteen: sixteen players and two team bands), then - put by menu_functions.c under the last row - held: "Hold [Triangle] to activate" or "+N more - Hold [Triangle] to open"; open: the selector, the buttons' line, what was said. The open panel from x=141, the held one (narrower: no kills, deaths, assists) 35 to the right -->
+	<widget name="h3/scoreboard/caption" left="141" top="6" width="358" height="14" bitmap="h3/scoreboard_strip"/>
+	<widget name="h3/scoreboard/caption_n" left="141" top="6" width="288" height="14" bitmap="h3/scoreboard_strip"/>
+	<widget name="h3/scoreboard/title" type="text" left="147" top="6" width="220" height="14" font="h3/font_small" color="#FFF2F6FA"/>
+	<widget name="h3/scoreboard/rules" type="text" left="293" top="6" width="200" height="14" font="h3/font_small" color="#FFCFD9E3" align="right"/>
+	<widget name="h3/scoreboard/rules_n" type="text" left="253" top="6" width="170" height="14" font="h3/font_small" color="#FFCFD9E3" align="right"/>
+	<widget name="h3/scoreboard/header_band" left="141" top="21" width="358" height="14" bitmap="h3/scoreboard_strip"/>
+	<widget name="h3/scoreboard/header_band_n" left="141" top="21" width="288" height="14" bitmap="h3/scoreboard_strip"/>
+	<widget name="h3/scoreboard/header_name" type="text" left="165" top="21" width="150" height="14" font="h3/font_small" color="#FF9FB6CC" string_list="h3/scoreboard_text" string_index="0"/>
+	<widget name="h3/scoreboard/header_score" type="text" left="371" top="21" width="52" height="14" font="h3/font_small" color="#FF9FB6CC" align="right" string_list="h3/scoreboard_text" string_index="1"/>
+	<widget name="h3/scoreboard/header_kills" type="text" left="427" top="21" width="24" height="14" font="h3/font_small" color="#FF9FB6CC" align="center" string_list="h3/scoreboard_text" string_index="2"/>
+	<widget name="h3/scoreboard/header_deaths" type="text" left="451" top="21" width="24" height="14" font="h3/font_small" color="#FF9FB6CC" align="center" string_list="h3/scoreboard_text" string_index="3"/>
+	<widget name="h3/scoreboard/header_assists" type="text" left="475" top="21" width="24" height="14" font="h3/font_small" color="#FF9FB6CC" align="center" string_list="h3/scoreboard_text" string_index="4"/>
+	<widget name="h3/scoreboard/row_band" left="0" top="0" width="358" height="15" bitmap="h3/scoreboard_band"/>
+	<widget name="h3/scoreboard/row_tint" left="0" top="0" width="358" height="15" bitmap="h3/scoreboard_tint"/>
+	<widget name="h3/scoreboard/row_band_n" left="0" top="0" width="288" height="15" bitmap="h3/scoreboard_band"/>
+	<widget name="h3/scoreboard/row_tint_n" left="0" top="0" width="288" height="15" bitmap="h3/scoreboard_tint"/>
+	<widget name="h3/scoreboard/row_own_n" left="0" top="0" width="288" height="15" bitmap="h3/scoreboard_own"/>
+	<widget name="h3/scoreboard/row_rank" type="text" left="0" top="0" width="22" height="15" font="h3/font_small" color="#FFFFFFFF" align="center"/>
+	<widget name="h3/scoreboard/row_team" type="text" left="24" top="0" width="190" height="15" font="h3/font_small" color="#FFFFFFFF"/>
+	<widget name="h3/scoreboard/row_team_score" type="text" left="230" top="0" width="52" height="15" font="h3/font_small" color="#FFFFFFFF" align="right"/>
+	<widget name="h3/scoreboard/row_emblem" left="4" top="1" width="13" height="13" bitmap="h3/scoreboard_emblem"/>
+	<widget name="h3/scoreboard/row_name" type="text" left="24" top="0" width="108" height="15" font="h3/font_small" color="#FFFFFFFF"/>
+	<widget name="h3/scoreboard/row_host" left="134" top="1" width="13" height="13" bitmap="h3/scoreboard_host"/>
+	<widget name="h3/scoreboard/row_party" left="148" top="1" width="13" height="13" bitmap="h3/scoreboard_party"/>
+	<widget name="h3/scoreboard/row_flame" left="162" top="1" width="13" height="13" bitmap="h3/scoreboard_flame"/>
+	<widget name="h3/scoreboard/row_bot" left="186" top="1" width="28" height="13" bitmap="h3/scoreboard_bot"/>
+	<widget name="h3/scoreboard/row_ping" left="186" top="1" width="28" height="13" bitmap="h3/scoreboard_ping"/>
+	<widget name="h3/scoreboard/row_score" type="text" left="230" top="0" width="52" height="15" font="h3/font_small" color="#FFFFFFFF" align="right"/>
+	<widget name="h3/scoreboard/row_kills" type="text" left="286" top="0" width="24" height="15" font="h3/font_small" color="#FFE6ECF2" align="center"/>
+	<widget name="h3/scoreboard/row_deaths" type="text" left="310" top="0" width="24" height="15" font="h3/font_small" color="#FFE6ECF2" align="center"/>
+	<widget name="h3/scoreboard/row_assists" type="text" left="334" top="0" width="24" height="15" font="h3/font_small" color="#FFE6ECF2" align="center"/>
+	<widget name="h3/scoreboard/row_1" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_2" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_3" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_4" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_5" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_6" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_7" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_8" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_9" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_10" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_11" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_12" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_13" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_14" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_15" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_16" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_17" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/row_18" width="358" height="15" bitmap="h3/scoreboard_row">
+		<on event="a" run="port h3 scoreboard act" open="h3/scoreboard/options"/>
+		<child widget="h3/scoreboard/row_band"/>
+		<child widget="h3/scoreboard/row_band_n"/>
+		<child widget="h3/scoreboard/row_tint"/>
+		<child widget="h3/scoreboard/row_tint_n"/>
+		<child widget="h3/scoreboard/row_own_n"/>
+		<child widget="h3/scoreboard/row_rank"/>
+		<child widget="h3/scoreboard/row_team"/>
+		<child widget="h3/scoreboard/row_team_score"/>
+		<child widget="h3/scoreboard/row_emblem"/>
+		<child widget="h3/scoreboard/row_name"/>
+		<child widget="h3/scoreboard/row_host"/>
+		<child widget="h3/scoreboard/row_party"/>
+		<child widget="h3/scoreboard/row_flame"/>
+		<child widget="h3/scoreboard/row_bot"/>
+		<child widget="h3/scoreboard/row_ping"/>
+		<child widget="h3/scoreboard/row_score"/>
+		<child widget="h3/scoreboard/row_kills"/>
+		<child widget="h3/scoreboard/row_deaths"/>
+		<child widget="h3/scoreboard/row_assists"/>
+	</widget>
+	<widget name="h3/scoreboard/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 scoreboard"/>
+		<on event="left_trigger" run="port h3 scoreboard page up"/>
+		<on event="right_trigger" run="port h3 scoreboard page down"/>
+		<child widget="h3/scoreboard/row_1" x="141" y="36"/>
+		<child widget="h3/scoreboard/row_2" x="141" y="51"/>
+		<child widget="h3/scoreboard/row_3" x="141" y="66"/>
+		<child widget="h3/scoreboard/row_4" x="141" y="81"/>
+		<child widget="h3/scoreboard/row_5" x="141" y="96"/>
+		<child widget="h3/scoreboard/row_6" x="141" y="111"/>
+		<child widget="h3/scoreboard/row_7" x="141" y="126"/>
+		<child widget="h3/scoreboard/row_8" x="141" y="141"/>
+		<child widget="h3/scoreboard/row_9" x="141" y="156"/>
+		<child widget="h3/scoreboard/row_10" x="141" y="171"/>
+		<child widget="h3/scoreboard/row_11" x="141" y="186"/>
+		<child widget="h3/scoreboard/row_12" x="141" y="201"/>
+		<child widget="h3/scoreboard/row_13" x="141" y="216"/>
+		<child widget="h3/scoreboard/row_14" x="141" y="231"/>
+		<child widget="h3/scoreboard/row_15" x="141" y="246"/>
+		<child widget="h3/scoreboard/row_16" x="141" y="261"/>
+		<child widget="h3/scoreboard/row_17" x="141" y="276"/>
+		<child widget="h3/scoreboard/row_18" x="141" y="291"/>
+	</widget>
+	<!-- (put under the last row by menu_functions.c: left=0 top=0 here) -->
+	<widget name="h3/scoreboard/scroll" type="text" left="0" top="0" width="90" height="14" font="h3/font_small" color="#FF9FB6CC"/>
+	<widget name="h3/scoreboard/selector" left="0" top="0" width="220" height="15" bitmap="h3/scoreboard_selector"/>
+	<widget name="h3/scoreboard/selector_emblem" left="0" top="0" width="13" height="13" bitmap="h3/scoreboard_emblem"/>
+	<widget name="h3/scoreboard/selector_name" type="text" left="0" top="0" width="170" height="14" font="h3/font_small" color="#FFFFFFFF"/>
+	<widget name="h3/scoreboard/selector_arrows" left="0" top="0" width="13" height="13" bitmap="h3/scoreboard_glyph_dpad"/>
+	<widget name="h3/scoreboard/message" type="text" left="0" top="0" width="262" height="14" font="h3/font_small" color="#FFF0D090"/>
+	<widget name="h3/scoreboard/hold_a" type="text" left="0" top="0" width="70" height="14" font="h3/font_small" color="#FFE6ECF2" string_list="h3/scoreboard_text" string_index="6"/>
+	<widget name="h3/scoreboard/hold_butn" left="0" top="0" width="13" height="13" bitmap="h3/scoreboard_glyph_triangle"/>
+	<widget name="h3/scoreboard/hold_b" type="text" left="0" top="0" width="130" height="14" font="h3/font_small" color="#FFE6ECF2" string_list="h3/scoreboard_text" string_index="14"/>
+	<widget name="h3/scoreboard/more_a" type="text" left="0" top="0" width="200" height="14" font="h3/font_small" color="#FFE6ECF2"/>
+	<widget name="h3/scoreboard/more_b" type="text" left="0" top="0" width="100" height="14" font="h3/font_small" color="#FFE6ECF2" string_list="h3/scoreboard_text" string_index="16"/>
+	<widget name="h3/scoreboard/a_butn" left="0" top="0" width="13" height="13" bitmap="h3/glyph_cross"/>
+	<widget name="h3/scoreboard/a_label" type="text" left="0" top="0" width="80" height="14" font="h3/font_small" color="#FFCFD9E3" string_list="h3/scoreboard_text" string_index="15"/>
+	<widget name="h3/scoreboard/dpad_butn" left="0" top="0" width="13" height="13" bitmap="h3/scoreboard_glyph_dpad"/>
+	<widget name="h3/scoreboard/dpad_label" type="text" left="0" top="0" width="80" height="14" font="h3/font_small" color="#FFCFD9E3" string_list="h3/scoreboard_text" string_index="8"/>
+	<widget name="h3/scoreboard/b_butn" left="0" top="0" width="13" height="13" bitmap="h3/glyph_circle"/>
+	<widget name="h3/scoreboard/b_label" type="text" left="0" top="0" width="80" height="14" font="h3/font_small" color="#FFCFD9E3" string_list="h3/scoreboard_text" string_index="7"/>
+	<widget name="h3/scoreboard/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b" run="port h3 scoreboard close" back="true"/>
+		<child widget="h3/scoreboard/caption"/>
+		<child widget="h3/scoreboard/caption_n"/>
+		<child widget="h3/scoreboard/title"/>
+		<child widget="h3/scoreboard/rules"/>
+		<child widget="h3/scoreboard/rules_n"/>
+		<child widget="h3/scoreboard/header_band"/>
+		<child widget="h3/scoreboard/header_band_n"/>
+		<child widget="h3/scoreboard/header_name"/>
+		<child widget="h3/scoreboard/header_score"/>
+		<child widget="h3/scoreboard/header_kills"/>
+		<child widget="h3/scoreboard/header_deaths"/>
+		<child widget="h3/scoreboard/header_assists"/>
+		<child widget="h3/scoreboard/list"/>
+		<child widget="h3/scoreboard/scroll"/>
+		<child widget="h3/scoreboard/selector"/>
+		<child widget="h3/scoreboard/selector_emblem"/>
+		<child widget="h3/scoreboard/selector_name"/>
+		<child widget="h3/scoreboard/selector_arrows"/>
+		<child widget="h3/scoreboard/message"/>
+		<child widget="h3/scoreboard/hold_a"/>
+		<child widget="h3/scoreboard/hold_butn"/>
+		<child widget="h3/scoreboard/hold_b"/>
+		<child widget="h3/scoreboard/more_a"/>
+		<child widget="h3/scoreboard/more_b"/>
+		<child widget="h3/scoreboard/a_butn"/>
+		<child widget="h3/scoreboard/a_label"/>
+		<child widget="h3/scoreboard/dpad_butn"/>
+		<child widget="h3/scoreboard/dpad_label"/>
+		<child widget="h3/scoreboard/b_butn"/>
+		<child widget="h3/scoreboard/b_label"/>
+	</widget>
+
+	<!-- split screen's: a view a quarter of the screen (320x240, placed in the middle of a wider one), held only: the same rows, smaller, no kills, deaths or assists -->
+	<widget name="h3/scoreboard_split/caption" left="0" top="2" width="320" height="18" bitmap="h3/scoreboard_strip"/>
+	<widget name="h3/scoreboard_split/title" type="text" left="6" top="3" width="190" height="16" font="h3/font_small" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/scoreboard_split/rules" type="text" left="196" top="3" width="118" height="16" font="h3/font_small" color="#FFCFD9E3" align="right" text_y="1"/>
+	<widget name="h3/scoreboard_split/header_band" left="0" top="22" width="320" height="16" bitmap="h3/scoreboard_strip"/>
+	<widget name="h3/scoreboard_split/header_name" type="text" left="22" top="22" width="150" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/scoreboard_text" string_index="0"/>
+	<widget name="h3/scoreboard_split/header_score" type="text" left="252" top="22" width="56" height="16" font="h3/font_small" color="#FF9FB6CC" align="right" string_list="h3/scoreboard_text" string_index="1"/>
+	<widget name="h3/scoreboard_split/row_band" left="0" top="0" width="312" height="16" bitmap="h3/scoreboard_band"/>
+	<widget name="h3/scoreboard_split/row_tint" left="0" top="0" width="312" height="16" bitmap="h3/scoreboard_tint"/>
+	<widget name="h3/scoreboard_split/row_rank" type="text" left="0" top="0" width="18" height="16" font="h3/font_small" color="#FFFFFFFF" align="center"/>
+	<widget name="h3/scoreboard_split/row_team" type="text" left="20" top="0" width="190" height="16" font="h3/font_small" color="#FFFFFFFF"/>
+	<widget name="h3/scoreboard_split/row_team_score" type="text" left="252" top="0" width="56" height="16" font="h3/font_small" color="#FFFFFFFF" align="right"/>
+	<widget name="h3/scoreboard_split/row_emblem" left="3" top="0" width="16" height="16" bitmap="h3/scoreboard_emblem"/>
+	<widget name="h3/scoreboard_split/row_name" type="text" left="22" top="0" width="150" height="16" font="h3/font_small" color="#FFFFFFFF"/>
+	<widget name="h3/scoreboard_split/row_ping" left="214" top="0" width="32" height="16" bitmap="h3/scoreboard_ping"/>
+	<widget name="h3/scoreboard_split/row_bot" left="214" top="0" width="32" height="16" bitmap="h3/scoreboard_bot"/>
+	<widget name="h3/scoreboard_split/row_score" type="text" left="252" top="0" width="56" height="16" font="h3/font_small" color="#FFFFFFFF" align="right"/>
+	<widget name="h3/scoreboard_split/row_1" width="312" height="16" bitmap="h3/scoreboard_row">
+		<child widget="h3/scoreboard_split/row_band"/>
+		<child widget="h3/scoreboard_split/row_tint"/>
+		<child widget="h3/scoreboard_split/row_rank"/>
+		<child widget="h3/scoreboard_split/row_team"/>
+		<child widget="h3/scoreboard_split/row_team_score"/>
+		<child widget="h3/scoreboard_split/row_emblem"/>
+		<child widget="h3/scoreboard_split/row_name"/>
+		<child widget="h3/scoreboard_split/row_ping"/>
+		<child widget="h3/scoreboard_split/row_bot"/>
+		<child widget="h3/scoreboard_split/row_score"/>
+	</widget>
+	<widget name="h3/scoreboard_split/row_2" width="312" height="16" bitmap="h3/scoreboard_row">
+		<child widget="h3/scoreboard_split/row_band"/>
+		<child widget="h3/scoreboard_split/row_tint"/>
+		<child widget="h3/scoreboard_split/row_rank"/>
+		<child widget="h3/scoreboard_split/row_team"/>
+		<child widget="h3/scoreboard_split/row_team_score"/>
+		<child widget="h3/scoreboard_split/row_emblem"/>
+		<child widget="h3/scoreboard_split/row_name"/>
+		<child widget="h3/scoreboard_split/row_ping"/>
+		<child widget="h3/scoreboard_split/row_bot"/>
+		<child widget="h3/scoreboard_split/row_score"/>
+	</widget>
+	<widget name="h3/scoreboard_split/row_3" width="312" height="16" bitmap="h3/scoreboard_row">
+		<child widget="h3/scoreboard_split/row_band"/>
+		<child widget="h3/scoreboard_split/row_tint"/>
+		<child widget="h3/scoreboard_split/row_rank"/>
+		<child widget="h3/scoreboard_split/row_team"/>
+		<child widget="h3/scoreboard_split/row_team_score"/>
+		<child widget="h3/scoreboard_split/row_emblem"/>
+		<child widget="h3/scoreboard_split/row_name"/>
+		<child widget="h3/scoreboard_split/row_ping"/>
+		<child widget="h3/scoreboard_split/row_bot"/>
+		<child widget="h3/scoreboard_split/row_score"/>
+	</widget>
+	<widget name="h3/scoreboard_split/row_4" width="312" height="16" bitmap="h3/scoreboard_row">
+		<child widget="h3/scoreboard_split/row_band"/>
+		<child widget="h3/scoreboard_split/row_tint"/>
+		<child widget="h3/scoreboard_split/row_rank"/>
+		<child widget="h3/scoreboard_split/row_team"/>
+		<child widget="h3/scoreboard_split/row_team_score"/>
+		<child widget="h3/scoreboard_split/row_emblem"/>
+		<child widget="h3/scoreboard_split/row_name"/>
+		<child widget="h3/scoreboard_split/row_ping"/>
+		<child widget="h3/scoreboard_split/row_bot"/>
+		<child widget="h3/scoreboard_split/row_score"/>
+	</widget>
+	<widget name="h3/scoreboard_split/row_5" width="312" height="16" bitmap="h3/scoreboard_row">
+		<child widget="h3/scoreboard_split/row_band"/>
+		<child widget="h3/scoreboard_split/row_tint"/>
+		<child widget="h3/scoreboard_split/row_rank"/>
+		<child widget="h3/scoreboard_split/row_team"/>
+		<child widget="h3/scoreboard_split/row_team_score"/>
+		<child widget="h3/scoreboard_split/row_emblem"/>
+		<child widget="h3/scoreboard_split/row_name"/>
+		<child widget="h3/scoreboard_split/row_ping"/>
+		<child widget="h3/scoreboard_split/row_bot"/>
+		<child widget="h3/scoreboard_split/row_score"/>
+	</widget>
+	<widget name="h3/scoreboard_split/row_6" width="312" height="16" bitmap="h3/scoreboard_row">
+		<child widget="h3/scoreboard_split/row_band"/>
+		<child widget="h3/scoreboard_split/row_tint"/>
+		<child widget="h3/scoreboard_split/row_rank"/>
+		<child widget="h3/scoreboard_split/row_team"/>
+		<child widget="h3/scoreboard_split/row_team_score"/>
+		<child widget="h3/scoreboard_split/row_emblem"/>
+		<child widget="h3/scoreboard_split/row_name"/>
+		<child widget="h3/scoreboard_split/row_ping"/>
+		<child widget="h3/scoreboard_split/row_bot"/>
+		<child widget="h3/scoreboard_split/row_score"/>
+	</widget>
+	<widget name="h3/scoreboard_split/row_7" width="312" height="16" bitmap="h3/scoreboard_row">
+		<child widget="h3/scoreboard_split/row_band"/>
+		<child widget="h3/scoreboard_split/row_tint"/>
+		<child widget="h3/scoreboard_split/row_rank"/>
+		<child widget="h3/scoreboard_split/row_team"/>
+		<child widget="h3/scoreboard_split/row_team_score"/>
+		<child widget="h3/scoreboard_split/row_emblem"/>
+		<child widget="h3/scoreboard_split/row_name"/>
+		<child widget="h3/scoreboard_split/row_ping"/>
+		<child widget="h3/scoreboard_split/row_bot"/>
+		<child widget="h3/scoreboard_split/row_score"/>
+	</widget>
+	<widget name="h3/scoreboard_split/row_8" width="312" height="16" bitmap="h3/scoreboard_row">
+		<child widget="h3/scoreboard_split/row_band"/>
+		<child widget="h3/scoreboard_split/row_tint"/>
+		<child widget="h3/scoreboard_split/row_rank"/>
+		<child widget="h3/scoreboard_split/row_team"/>
+		<child widget="h3/scoreboard_split/row_team_score"/>
+		<child widget="h3/scoreboard_split/row_emblem"/>
+		<child widget="h3/scoreboard_split/row_name"/>
+		<child widget="h3/scoreboard_split/row_ping"/>
+		<child widget="h3/scoreboard_split/row_bot"/>
+		<child widget="h3/scoreboard_split/row_score"/>
+	</widget>
+	<widget name="h3/scoreboard_split/row_9" width="312" height="16" bitmap="h3/scoreboard_row">
+		<child widget="h3/scoreboard_split/row_band"/>
+		<child widget="h3/scoreboard_split/row_tint"/>
+		<child widget="h3/scoreboard_split/row_rank"/>
+		<child widget="h3/scoreboard_split/row_team"/>
+		<child widget="h3/scoreboard_split/row_team_score"/>
+		<child widget="h3/scoreboard_split/row_emblem"/>
+		<child widget="h3/scoreboard_split/row_name"/>
+		<child widget="h3/scoreboard_split/row_ping"/>
+		<child widget="h3/scoreboard_split/row_bot"/>
+		<child widget="h3/scoreboard_split/row_score"/>
+	</widget>
+	<widget name="h3/scoreboard_split/row_10" width="312" height="16" bitmap="h3/scoreboard_row">
+		<child widget="h3/scoreboard_split/row_band"/>
+		<child widget="h3/scoreboard_split/row_tint"/>
+		<child widget="h3/scoreboard_split/row_rank"/>
+		<child widget="h3/scoreboard_split/row_team"/>
+		<child widget="h3/scoreboard_split/row_team_score"/>
+		<child widget="h3/scoreboard_split/row_emblem"/>
+		<child widget="h3/scoreboard_split/row_name"/>
+		<child widget="h3/scoreboard_split/row_ping"/>
+		<child widget="h3/scoreboard_split/row_bot"/>
+		<child widget="h3/scoreboard_split/row_score"/>
+	</widget>
+	<widget name="h3/scoreboard_split/list">
+		<data input="port h3 scoreboard"/>
+		<child widget="h3/scoreboard_split/row_1" x="4" y="40"/>
+		<child widget="h3/scoreboard_split/row_2" x="4" y="56"/>
+		<child widget="h3/scoreboard_split/row_3" x="4" y="72"/>
+		<child widget="h3/scoreboard_split/row_4" x="4" y="88"/>
+		<child widget="h3/scoreboard_split/row_5" x="4" y="104"/>
+		<child widget="h3/scoreboard_split/row_6" x="4" y="120"/>
+		<child widget="h3/scoreboard_split/row_7" x="4" y="136"/>
+		<child widget="h3/scoreboard_split/row_8" x="4" y="152"/>
+		<child widget="h3/scoreboard_split/row_9" x="4" y="168"/>
+		<child widget="h3/scoreboard_split/row_10" x="4" y="184"/>
+	</widget>
+	<widget name="h3/scoreboard_split/scroll" type="text" left="6" top="202" width="308" height="16" font="h3/font_small" color="#FF9FB6CC"/>
+	<widget name="h3/scoreboard_split/screen">
+		<child widget="h3/scoreboard_split/caption"/>
+		<child widget="h3/scoreboard_split/title"/>
+		<child widget="h3/scoreboard_split/rules"/>
+		<child widget="h3/scoreboard_split/header_band"/>
+		<child widget="h3/scoreboard_split/header_name"/>
+		<child widget="h3/scoreboard_split/header_score"/>
+		<child widget="h3/scoreboard_split/list"/>
+		<child widget="h3/scoreboard_split/scroll"/>
+	</widget>
+
+	<!-- a player's options (Cross on their row, the scoreboard open): BACK first; MUTE CHAT (UNMUTE CHAT)
+	and ADD FRIEND (or what the friends list says of them) for another machine's player; KICK for the
+	game's host alone (a dedicated server's players kick no one: its admin does, sv_kick). Circle
+	closes it -->
+	<widget name="h3/scoreboard/options_dim" left="0" top="0" width="640" height="480" bitmap="h3/haze"/>
+	<widget name="h3/scoreboard/options_panel" left="140" top="130" width="360" height="200" bitmap="h3/panel"/>
+	<widget name="h3/scoreboard/options_title" type="text" left="152" top="136" width="336" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/scoreboard/options_rule" left="140" top="164" width="360" height="2" bitmap="h3/rule"/>
+	<widget name="h3/scoreboard/options_text" type="text" left="152" top="170" width="336" height="38" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/scoreboard/option_back" type="text" width="336" height="18" bitmap="h3/scoreboard_option" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/scoreboard_text" string_index="9">
+		<on event="a" back="true"/>
+	</widget>
+	<widget name="h3/scoreboard/option_mute" type="text" width="336" height="18" bitmap="h3/scoreboard_option" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/scoreboard_text" string_index="10">
+		<on event="a" run="port h3 scoreboard option" back="true"/>
+	</widget>
+	<widget name="h3/scoreboard/option_friend" type="text" width="336" height="18" bitmap="h3/scoreboard_option" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/scoreboard_text" string_index="11">
+		<on event="a" run="port h3 scoreboard option" back="true"/>
+	</widget>
+	<widget name="h3/scoreboard/option_kick" type="text" width="336" height="18" bitmap="h3/scoreboard_option" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/scoreboard_text" string_index="12">
+		<on event="a" run="port h3 scoreboard option" back="true"/>
+	</widget>
+	<widget name="h3/scoreboard/options_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 scoreboard options"/>
+		<child widget="h3/scoreboard/option_back" y="0"/>
+		<child widget="h3/scoreboard/option_mute" y="20"/>
+		<child widget="h3/scoreboard/option_friend" y="40"/>
+		<child widget="h3/scoreboard/option_kick" y="60"/>
+	</widget>
+	<widget name="h3/scoreboard/options_strip" left="140" top="310" width="360" height="20" bitmap="h3/strip"/>
+	<widget name="h3/scoreboard/options_a_butn" left="152" top="312" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/scoreboard/options_a_label" type="text" left="172" top="311" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/scoreboard_text" string_index="13"/>
+	<widget name="h3/scoreboard/options_b_butn" left="256" top="312" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/scoreboard/options_b_label" type="text" left="276" top="311" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/scoreboard_text" string_index="7"/>
+	<widget name="h3/scoreboard/options" flags="pass_unhandled_to_focused_child">
+		<on event="b" back="true"/>
+		<child widget="h3/scoreboard/options_dim"/>
+		<child widget="h3/scoreboard/options_panel"/>
+		<child widget="h3/scoreboard/options_title"/>
+		<child widget="h3/scoreboard/options_rule"/>
+		<child widget="h3/scoreboard/options_text"/>
+		<child widget="h3/scoreboard/options_strip"/>
+		<child widget="h3/scoreboard/options_a_butn"/>
+		<child widget="h3/scoreboard/options_a_label"/>
+		<child widget="h3/scoreboard/options_b_butn"/>
+		<child widget="h3/scoreboard/options_b_label"/>
+		<child widget="h3/scoreboard/options_list" x="152" y="214"/>
+	</widget>
+</menus>

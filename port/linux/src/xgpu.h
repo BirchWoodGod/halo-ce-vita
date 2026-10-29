@@ -113,7 +113,10 @@ struct nv2a_pixel_shader_key
 	output becomes o * scale + offset, two rows past the fragment uniforms'
 	second buffer (vita_xgpu.h VITA_FU_BLEND_SCALE, blend_constant.h) */
 	unsigned char blend_fold;
-	unsigned char reserved;
+	/* (Vita) of the raw_coordinates stages, those whose coordinates reach
+	far (halo_d3d_texcoord_extent, d3d8_gxm.c), wrapped into [0, 1) in the
+	program and fetched with the unwrapped coordinates' derivatives */
+	unsigned char wrapped_coordinates;
 	/* (Vita) a volume texture's stage: log2 of its slices and of a slice's
 	width, laid side by side in one 2D texture (vita_textures.c); 0 else */
 	unsigned char volume_slices_log2[4];
@@ -122,7 +125,12 @@ struct nv2a_pixel_shader_key
 	mode: the program returns the border colour, D3DCOLOR, outside the
 	texture) */
 	unsigned char border_mask;
-	unsigned char border_pad[3];
+	/* (Vita) the alpha test without a discard: a fragment failing it
+	returns a colour the draw's blend leaves the target unchanged with -
+	1 zero (ONE or INVSRCALPHA or INVSRCCOLOR destination factor),
+	2 one (a plain multiply) - d3d8_gxm.c alpha_test_neutral; 0 discard */
+	unsigned char alpha_test_neutral;
+	unsigned char border_pad[2];
 	DWORD border_color[4];
 };
 

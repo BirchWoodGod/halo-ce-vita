@@ -35,8 +35,16 @@ structures of them cross to the callers, whatever their ABI.
 
 #include <stddef.h>
 
-/* the assets, the release's download folder and the repository's host */
+/* the assets, the release's download folder and the repository's host. The
+VPK is the release's halo-ce-vita-<version>-vita.vpk (UPDATE_ASSET_VPK_PREFIX
+<version> UPDATE_ASSET_VPK_SUFFIX: update_asset_vpk_name), beside the PC
+builds' halo-ce-vita-<version>-pc-windows.zip and -pc-linux.tar.gz; the
+manifest names which file it signs, and the name of the releases before
+1.1.1, halo.vpk (UPDATE_ASSET_VPK), is taken too, which builds before 1.1.1
+ask for alone (tools/release/README.md) */
 #define UPDATE_ASSET_VPK "halo.vpk"
+#define UPDATE_ASSET_VPK_PREFIX "halo-ce-vita-"
+#define UPDATE_ASSET_VPK_SUFFIX "-vita.vpk"
 #define UPDATE_ASSET_MANIFEST "halo-update.txt"
 #define UPDATE_ASSET_SIGNATURE "halo-update.txt.sig"
 #define UPDATE_DOWNLOAD_BASE "https://github.com/BirchWoodGod/halo-ce-vita/releases/download"
@@ -52,7 +60,7 @@ struct update_manifest
 {
 	char version[64];
 	char title[16];
-	char file[32];
+	char file[96];
 	unsigned long size;
 	unsigned char sha512[64];
 };
@@ -94,6 +102,9 @@ int update_signature_parse(const char *text, size_t size, unsigned char signatur
 	sha512 <128 lowercase hexadecimal digits>\n
 
 (nothing before, between or after): 1, else 0 */
+/* the release's VPK of a version, halo-ce-vita-<version>-vita.vpk, into
+name: 1, else 0 (no room) */
+int update_asset_vpk_name(const char *version, char *name, size_t size);
 int update_manifest_parse(const char *text, size_t size, struct update_manifest *manifest);
 
 /* the whole check of a downloaded manifest and its signature file with the

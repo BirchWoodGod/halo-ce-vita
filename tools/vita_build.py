@@ -19,9 +19,9 @@ from typing import Any, Dict, List, Optional
 
 from .ninja_syntax import Writer
 from .vita_shader_generator_id import SOURCES as SHADER_GENERATOR_NAMES
-from .linux_build import (MBEDTLS_DIR, GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, ZLIB_DIR, ZLIB_SOURCES,
+from .linux_build import (version_defines, MBEDTLS_DIR, GAME_FLAGS, PLATFORM_FLAGS, XDK_INCLUDE, TOML_DIR, KCP_DIR, ZLIB_DIR, ZLIB_SOURCES,
                           ZLIB_DEFINES, MONOCYPHER_DIR, MONOCYPHER_SOURCES, EXPAT_DIR, EXPAT_SOURCES, musl_math_sources,
-                          LIBOGG_INCLUDE, ogg_sound_sources,
+                          LIBOGG_INCLUDE, ogg_sound_sources, PROFILE_USE_FLAGS,
                           MUSL_MATH_DIR, LIBMSPACK_DIR, LIBMSPACK_SOURCES, LIBMSPACK_FLAGS,
                           ANDROID_VARIADIC_PROTOTYPE_FILES, xdk_headers, _quote)
 
@@ -145,9 +145,9 @@ VITA_LIBRARIES = [
 
 
 def vita_update_test_defines(sln: Any) -> List[str]:
-    """configure.py's --vita-update-test-sources, --vita-update-key and
-    --vita-version: the defines of a TEST build of the updater
-    (tools/release/README.md), none for a release"""
+    """configure.py's --vita-update-test-sources and --vita-update-key: the
+    defines of a TEST build of the updater (tools/release/README.md), none
+    for a release (--vita-version is every build's: version_defines)"""
     defines = []
     if getattr(sln, "vita_update_test_sources", False):
         defines.append("-DHALO_UPDATE_TEST_SOURCES=1")
@@ -156,12 +156,22 @@ def vita_update_test_defines(sln: Any) -> List[str]:
         if not re.fullmatch(r"[0-9a-fA-F]{64}", key) or not key.strip("0"):
             raise RuntimeError("--vita-update-key: 64 hexadecimal digits, not all zero")
         defines.append(f'-DHALO_UPDATE_PUBLIC_KEY=\\"{key.lower()}\\"')
-    version = getattr(sln, "vita_version", None)
-    if version:
-        if not re.fullmatch(r"\d{1,3}\.\d{1,3}\.\d{1,3}(-(beta|rc)\.\d{1,3})?", version):
-            raise RuntimeError("--vita-version: x.y.z, x.y.z-beta.n or x.y.z-rc.n")
-        defines.append(f'-DHALO_VITA_VERSION=\\"{version}\\"')
     return defines
+
+
+def vita_pgo_profile(sln: Any) -> Optional[Path]:
+    """configure.py --pgo-profile's profile for the Vita build's clang side,
+    unless --pgo off; none otherwise. There is no Vita profile in pgo/: the
+    Vita cannot write one, and the Linux profiles were recorded from other
+    code (most of a hot file's functions do not match: objects.c 83 of
+    ~130). A profile recorded by the x86 or ARM harness built with clang's
+    front-end instrumentation (-fprofile-instr-generate, whose function
+    hashes follow the source rather than the target's code) fits the Vita's
+    game code: triage/vita-lto-1.1.1.md says how one was made"""
+    explicit = getattr(sln, "port_pgo_profile", None)
+    if not explicit or getattr(sln, "port_pgo", "use") == "off":
+        return None
+    return Path(explicit)
 
 
 def vita_sdk(sln: Any) -> Path:
@@ -201,11 +211,28 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
         depfile="$out.d",
         deps="gcc",
     )
-    # link-time optimisation of the clang side: the game and platform objects
-    # are bitcode, partially linked into one relocatable object by lld
+    # link-time optimisation of the clang side (configure.py --lto full or
+    # thin): the game and platform objects are bitcode, partially linked into
+    # one relocatable object by lld, optimised as one module at -O2 as each
+    # file is without it (and as the Linux builds' links are: -O3 made the
+    # code 31% larger than without LTO against -O2's 17%, on a Cortex-A9 of
+    # 32 KB of instruction cache). lld -r leaves the game's common symbols
+    # (-fcommon: the MSVC ABI's tentative definitions) common, for the final
+    # link to place, yet also writes a COMMON section of their size that no
+    # symbol is in; the final link took that 1.3 MB into .bss besides the
+    # symbols' own room, so it is removed. The decompiled files are built
+    # with -w, and some call functions they never declare: such a call reads
+    # a whole int, where a boolean or short result fills part of the
+    # register. ARM's ABI has the callee widen it, so the Vita reads the
+    # right value, but the x86 harness built with LTO did not (every init.txt
+    # command refused as "playing in another's game"); the calls whose
+    # results are narrower than an int are declared now (clang
+    # -Wimplicit-function-declaration lists the rest: ints, pointers, void)
     n.rule(
         name="vita_lto",
-        command="ld.lld -r -m armelf_linux_eabi --lto-O3 -mllvm -mcpu=cortex-a9 -mllvm -float-abi=hard -mllvm -emulated-tls -o $out @$out.rsp",
+        command=("ld.lld -r -m armelf_linux_eabi --lto-O2 -mllvm -mcpu=cortex-a9 -mllvm -float-abi=hard "
+                 "-mllvm -emulated-tls -o $out @$out.rsp && "
+                 "$vita_sdk_bin/arm-vita-eabi-objcopy --remove-section=COMMON $out"),
         description="VITA LTO $out",
         rspfile="$out.rsp",
         rspfile_content="$in_newline",
@@ -233,19 +260,28 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
     )
 
     lto = getattr(sln, "port_lto", "off") != "off"
+    profile = vita_pgo_profile(sln)
+    if profile:
+        n.comment(f"profile-guided optimisation from {profile} (configure.py --pgo-profile)")
     test_defines = vita_update_test_defines(sln)
     if test_defines:
         n.comment("TEST BUILD of the updater (not for release): " + " ".join(test_defines))
     abi = " ".join(VITA_ABI_FLAGS + [f"--sysroot={_quote(sysroot)}", f"-isystem {_quote(sysroot / 'include')}"] +
                    (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else []) +
-                   (["-flto"] if lto else []) + test_defines)
+                   (["-flto"] if lto else []) +
+                   ([f"-fprofile-use={_quote(profile.resolve())}", *PROFILE_USE_FLAGS] if profile else []) +
+                   test_defines +
+                   # (configure.py --vita-version: the version this build
+                   # says it is, the PC builds' alike)
+                   version_defines(sln))
     port_include = LINUX_DIR / "include"
     vita_include = VITA_DIR / "include"
     sdk_flags = f"-idirafter {XDK_INCLUDE}"
     excluded = set(config.get("exclude_sources", []))
     objects: List[Path] = []
     clang_objects: List[Path] = []
-    implicit = [*xdk_headers(), prefix_header, semantics_header, platform_semantics_header]
+    implicit = [*xdk_headers(), prefix_header, semantics_header, platform_semantics_header] + \
+        ([profile] if profile else [])
 
     def add(source: Path, rule: str, cflags: str, extra: Optional[List[Path]] = None) -> None:
         obj = obj_dir / source.with_suffix(".o")
@@ -330,7 +366,11 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
 
     # the Vita side, with the SDK's ABI
     host_cflags = " ".join(HOST_FLAGS + [f"-I{platform_dir}", f"-I{vita_include}", f"-I{generator_header.parent}",
-                                         f"-I{TLSF_DIR}"] + test_defines)
+                                         f"-I{TLSF_DIR}"] + test_defines +
+                            # (--vita-version reaches the host side too: the
+                            # updater, the settings panel and halo.log say
+                            # the version the game says, not vita_version.h's)
+                            version_defines(sln))
     # (the updater's checks: Monocypher's Ed25519 and SHA-512, built above)
     updater_cflags = " ".join([host_cflags, f"-I{MONOCYPHER_DIR}"])
     for source in sorted((VITA_DIR / "host").glob("*.c")):
@@ -384,8 +424,16 @@ def generate_vita_build(n: Writer, sln: Any) -> None:
            command=f"python3 tools/vita_shader_pack.py --stamp $in --generator-header {generator_header} --output $out",
            description="VITA SHADER PACK $out", restat=True)
     app0_files = []
+    # (the desktop build's own pictures, never read on the Vita: its keyboard
+    # and Xbox button icons, port/linux/include/halo_button_icons.h)
+    desktop_only = {Path("menus/halo3/key_atlas.png"), Path("menus/halo3/xbox_atlas.png")}
+    # (and the Online menus' fonts for the desktop's displays: the Vita draws the 1.133 ones,
+    # tools/online_menu_art.py)
+    desktop_only |= {Path("menus/online") / f"{font}_{scale}.bin"
+                     for font in ("font_header", "font_title", "font_item", "font_small", "font_tab")
+                     for scale in ("1500", "2250", "3000")}
     for asset in sorted((VITA_DIR / "app0").rglob("*")) if (VITA_DIR / "app0").is_dir() else []:
-        if asset.is_file():
+        if asset.is_file() and asset.relative_to(VITA_DIR / "app0") not in desktop_only:
             source = asset
             if asset.name == "shaders.pak":
                 source = BUILD / "app0" / asset.relative_to(VITA_DIR / "app0")

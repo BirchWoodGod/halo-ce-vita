@@ -80,7 +80,7 @@ static void name_ascii(
 campaign's levels whatever it says, or no game engine (the campaign's, as
 OpenCE lists and hosts co-op) but on one of the Xbox's multiplayer levels
 (a PC host between games, or a network test's, sends no engine a moment) */
-static boolean coop_game(
+boolean network_crossplay_guard_coop_game(
 	char const *map_name,
 	long map_name_size,
 	long engine_type)
@@ -110,10 +110,11 @@ boolean network_crossplay_guard_advertisement(
 	int verdict;
 
 	(void)tell;
-	if (!network_wire_crossplay())
+	if (!network_wire_crossplay() || network_wire_host_vita())
 		return TRUE;
 	name_ascii(game_name, ADVERTISED_NAME_LENGTH, name, sizeof(name));
-	verdict = crossplay_guard_judge(coop_game(map_name, map_name_size, engine_type), (int)players, (int)maximum);
+	verdict = crossplay_guard_judge(network_crossplay_guard_coop_game(map_name, map_name_size, engine_type), (int)players,
+		(int)maximum);
 	switch (verdict)
 	{
 	case CROSSPLAY_GUARD_COOP:
@@ -133,7 +134,7 @@ boolean network_crossplay_guard_declined(
 {
 	char name[GAME_NAME_SIZE];
 
-	if (!network_wire_crossplay())
+	if (!network_wire_crossplay() || network_wire_host_vita())
 		return FALSE;
 	name_ascii(game_name, ADVERTISED_NAME_LENGTH, name, sizeof(name));
 	if (crossplay_guard_answered(name, system_milliseconds()) != 0)
@@ -179,8 +180,10 @@ boolean network_crossplay_guard_record(
 	boolean coop;
 	int verdict;
 
-	/* (this machine's own server's game: split screen, bots) */
-	if (!network_wire_crossplay() || !game || global_network_game_server_get())
+	/* (this machine's own server's game: split screen, bots, or a game it
+	hosts; a Vita's game, whose host takes the Vitas' 16 and runs a Vita's
+	co-op: never large, never a PC's co-op) */
+	if (!network_wire_crossplay() || network_wire_host_vita() || !game || global_network_game_server_get())
 		return TRUE;
 	if (network_crossplay_guard.client != client)
 	{
@@ -193,7 +196,7 @@ boolean network_crossplay_guard_record(
 
 		csmemcpy(map, game->map.name, sizeof(map) - 1);
 		map[sizeof(map) - 1] = 0;
-		coop = coop_game(map, sizeof(map), game->variant.game_engine_index);
+		coop = network_crossplay_guard_coop_game(map, sizeof(map), game->variant.game_engine_index);
 		/* (no engine on a map already played here: a PC host between games,
 		ChupathingyCE's; a campaign level stays co-op) */
 		if (coop && network_crossplay_guard.record_seen && !csstrcmp(map, network_crossplay_guard.record_map) &&

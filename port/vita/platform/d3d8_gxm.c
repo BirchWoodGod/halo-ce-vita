@@ -19,6 +19,7 @@ the game gave their surface, as in the OpenGL device.
 #include "dynamic_resolution.h"
 #include "blend_constant.h"
 #include "sdl_platform.h"
+#include "halo_cond.h"
 #include "halo_ui_pointer.h"
 #include "port_config.h"
 
@@ -33,6 +34,7 @@ the game gave their surface, as in the OpenGL device.
 #endif
 #include "vita_compat.h"
 #include "vita_host.h"
+#include "vita_controls.h"
 #include "frame_timing.h"
 
 void d3d8_surface_initialize(D3DSurface *surface, D3DFORMAT format, unsigned long width, unsigned long height);
@@ -61,6 +63,16 @@ static long ui_offset;
 /* the widest the back buffer's memory holds (CreateDevice) */
 static unsigned long screen_allocated_width;
 
+/* (menu_functions.c) the narrowest the screen is drawn while Menu style
+ElDewrito's screens are up: they are laid out over 800 columns (80 each
+side of the 640, as a 16:9 display shows them), and at 4:3 (640) their
+left parts were off the edge; 640 otherwise (a game, the other styles) */
+int halo_menus_minimum_width(void);
+
+/* the columns the menus are drawn when the screen is narrower than they are
+laid out for: the default 16:9's, which they are then exactly as in it */
+#define SCREEN_MENUS_WIDTH 848
+
 static long screen_width_wanted(void)
 {
 	const char *display = getenv("HALO_DISPLAY_WIDTH");
@@ -72,7 +84,10 @@ static long screen_width_wanted(void)
 		width = 640;
 	if (width > 1024)
 		width = 1024;
-	return width & ~1L;
+	width &= ~1L;
+	if (width < halo_menus_minimum_width())
+		width = SCREEN_MENUS_WIDTH;
+	return width;
 }
 
 long halo_screen_width(void)
@@ -83,6 +98,13 @@ long halo_screen_width(void)
 		platform_log("screen: %ldx%d", screen_width, SCREEN_HEIGHT);
 	}
 	return screen_width;
+}
+
+/* the display's pixels per unit of the 640x480 interface: 544 lines for
+480 (vita_gxm.c draws the interface at the display's resolution) */
+float halo_ui_pixel_scale(void)
+{
+	return 544.0f / 480.0f;
 }
 
 void halo_screen_ui_offset(unsigned char centered)
@@ -100,11 +122,140 @@ static void renderer_map_unloaded(void);
 static unsigned long cdram_census_frame(void);
 static void cdram_census(const char *when);
 
+/* ---------- the clocks by what the game is doing
+
+(port; Sierra-III's battery handoff, Oct 21 2026) The game's thread at each
+present asks the host for the clocks the frame needs (vita_host_clocks_set,
+vita_clocks.c): play's, the top, in play - lowering them there would cost
+frames in the fights that already limit the game, and the GPU's would push
+the dynamic resolution down -; a loading screen's (the GPU's lowered, the
+CPU's kept for the load); idle's in the main menu (a local one: no network
+game's lobby) and with the game paused. Down only after a second of such
+frames, up at the first frame of play. Lowered, a frame slower than 30 a
+second 4 times in 16 (a pause over a heavy scene, which the render draws
+whole each frame) takes the clocks back up for the rest of that stretch.
+HALO_CLOCK_GOVERNOR=0, the settings panel's Battery saver in menus: Off,
+keeps play's clocks always (as before). */
+short game_connection(void);
+int halo_main_menu_idle(void);
+unsigned char game_loading_screen_up_here(void);
+unsigned char game_time_initialized(void);
+unsigned char game_time_get_paused(void);
+unsigned char cache_files_precache_in_progress(void);
+
+#define CLOCKS_DOWN_AFTER_US 1000000ull
+#define CLOCKS_LATE_FRAME_US 36700ull
+/* the frames after a change that are not judged late (the change itself,
+and the GPU's frames still queued at the old clocks) */
+#define CLOCKS_SETTLE_FRAMES 3
+
+/* the level the clocks are at (the worker's dynamic resolution reads it),
+and the frames after a rise the dynamic resolution leaves out: the GPU's
+time measured at lower clocks says nothing of play's */
+static volatile int clocks_level;
+static volatile int clocks_dynres_skip;
+
+static int clocks_wanted(void)
+{
+	if (game_loading_screen_up_here())
+		return VITA_CLOCKS_LOADING;
+	if (halo_main_menu_idle())
+		return cache_files_precache_in_progress() ? VITA_CLOCKS_LOADING : VITA_CLOCKS_IDLE;
+	if (game_time_initialized() && game_time_get_paused() && game_connection() == 0)
+		return VITA_CLOCKS_IDLE;
+	return VITA_CLOCKS_PLAY;
+}
+
+static void clocks_set(int level)
+{
+	if (level == clocks_level)
+		return;
+	if (level == VITA_CLOCKS_PLAY)
+		__atomic_store_n(&clocks_dynres_skip, 4, __ATOMIC_RELEASE);
+	__atomic_store_n(&clocks_level, level, __ATOMIC_RELEASE);
+	vita_host_clocks_set(level);
+}
+
+static void clocks_governor(void)
+{
+	extern volatile unsigned long halo_settings_generation;
+	static unsigned long settings_seen = (unsigned long)-1;
+	static int enabled = 1, refused, settle;
+	static unsigned long long last_present, lower_since;
+	static unsigned short late_history;
+	unsigned long generation = __atomic_load_n(&halo_settings_generation, __ATOMIC_ACQUIRE);
+	unsigned long long now = vita_host_time_us(), interval = last_present ? now - last_present : 0;
+	int wanted;
+
+	last_present = now;
+	if (generation != settings_seen)
+	{
+		const char *setting = getenv("HALO_CLOCK_GOVERNOR");
+		int was = enabled;
+
+		settings_seen = generation;
+		enabled = !setting || atoi(setting) != 0;
+		if (enabled != was)
+			platform_log("clocks: battery saver in menus %s", enabled ? "on" : "off");
+	}
+	wanted = enabled ? clocks_wanted() : VITA_CLOCKS_PLAY;
+	/* (play again ends a stretch the clocks were taken back up in) */
+	if (wanted == VITA_CLOCKS_PLAY)
+		refused = 0;
+	if (refused && wanted == VITA_CLOCKS_IDLE)
+		wanted = VITA_CLOCKS_PLAY;
+	/* lowered: the frames judged (a loading screen's are the load's) */
+	if (clocks_level == VITA_CLOCKS_IDLE && wanted == VITA_CLOCKS_IDLE && interval)
+	{
+		if (settle)
+			settle--;
+		else
+		{
+			int count = 0, bit;
+
+			late_history = (unsigned short)((late_history << 1) | (interval > CLOCKS_LATE_FRAME_US));
+			for (bit = 0; bit < 16; bit++)
+				count += (late_history >> bit) & 1;
+			if (count >= 4)
+			{
+				platform_log("clocks: idle frames too slow (%d of the last 16 over %llu ms): play's clocks until play",
+					count, CLOCKS_LATE_FRAME_US / 1000);
+				refused = 1;
+				wanted = VITA_CLOCKS_PLAY;
+			}
+		}
+	}
+	if (wanted < clocks_level)
+	{
+		/* up at once */
+		lower_since = 0;
+		clocks_set(wanted);
+	}
+	else if (wanted > clocks_level)
+	{
+		/* down after a second of it */
+		if (!lower_since)
+			lower_since = now;
+		else if (now - lower_since >= CLOCKS_DOWN_AFTER_US)
+		{
+			lower_since = 0;
+			late_history = 0;
+			settle = CLOCKS_SETTLE_FRAMES;
+			clocks_set(wanted);
+		}
+	}
+	else
+		lower_since = 0;
+}
+
 long halo_screen_commit(void)
 {
 	extern volatile unsigned long halo_settings_generation;
 	static unsigned long settings_seen;
 	static int dynres_configured;
+	/* (a width that could not be made is not asked for again at every frame) */
+	static long width_tried;
+	long wanted;
 	unsigned long generation = __atomic_load_n(&halo_settings_generation, __ATOMIC_ACQUIRE);
 
 	if (!screen_width)
@@ -114,25 +265,53 @@ long halo_screen_commit(void)
 		dynres_configured = 1;
 		dynres_configure();
 	}
-	if (generation != settings_seen || screen_scale_retry)
+	/* (the menus come up, or go: the 4:3 screen widens for ElDewrito's
+	screens and narrows again for a game) */
+	wanted = screen_width_wanted();
+	if (generation != settings_seen || screen_scale_retry || (wanted != screen_width && wanted != width_tried))
 	{
+		width_tried = wanted;
 		settings_seen = generation;
 		screen_settings_apply();
 		dynres_configure();
 	}
 	cdram_wanted_relieve();
+	clocks_governor();
 	return screen_width;
 }
 
 extern int vita_menus_active;
 
-/* (no pointer on the Vita; the menus' state picks the D-pad's meaning,
-port/vita/platform/vita_pad.c) */
+/* the menus' pointer: the front screen (vita_controls.h vita_touch_pointer):
+a finger highlights the item it is on, a tap presses A on it (or the button
+of a screen's key it is on); not while the settings panel is open. The
+menus' state also picks the D-pad's meaning (port/vita/platform/vita_pad.c) */
 int halo_ui_pointer_update(int menus_active, struct halo_ui_pointer *pointer)
 {
-	(void)pointer;
+	static struct vita_touch_pointer touch;
+	struct vita_touch_contact contacts[8];
+	int count, tap, moved;
+	short x, y;
+
 	vita_menus_active = menus_active != 0;
-	return 0;
+	if (!menus_active || vita_settings_panel_open())
+	{
+		memset(&touch, 0, sizeof(touch));
+		return 0;
+	}
+	count = vita_host_front_touches(contacts, 8);
+	if (!vita_touch_pointer(&touch, contacts, count, vita_host_time_us(), (int)halo_screen_width(), &x, &y, &tap,
+		&moved))
+	{
+		return 0;
+	}
+	memset(pointer, 0, sizeof(*pointer));
+	pointer->x = pointer->click_x = x;
+	pointer->y = pointer->click_y = y;
+	pointer->moved = (unsigned char)moved;
+	pointer->left_clicks = (unsigned char)tap;
+	pointer->held = (unsigned char)(touch.down != 0);
+	return 1;
 }
 
 /* ---------- state the XDK header's inline functions read and write */
@@ -313,11 +492,17 @@ struct fragment_entry
 	unsigned long shader;
 	/* as vertex_variant's */
 	char *pending_source;
+	/* (fragment_cache_trim) fragment_clock at its last use */
+	unsigned long last_used;
 };
 
 #define FRAGMENT_BUCKETS 1024
 
 static struct fragment_entry *fragment_buckets[FRAGMENT_BUCKETS];
+/* (fragment_shader_get) the entry found last, the entries, and a count of
+the lookups, which stamps each entry used */
+static struct fragment_entry *fragment_last;
+static unsigned long fragment_count, fragment_clock;
 
 /* ---------- render targets */
 
@@ -469,7 +654,8 @@ static struct gxm_device device;
 
 static struct
 {
-	unsigned long draws, immediate_draws, clears, presents, self_sampled, computed_draws, alpha_tested_draws, dropped_alpha_tests;
+	unsigned long draws, immediate_draws, clears, presents, self_sampled, computed_draws, alpha_tested_draws, dropped_alpha_tests,
+		neutral_alpha_tests;
 	/* blended draws left out for sampling a texture still loading (draw_samples_stand_in) */
 	unsigned long stand_in_draws_left_out;
 	/* draws whose state (key, textures, samplers, render states) equals the previous draw's: what a delta record could skip */
@@ -648,13 +834,29 @@ static BOOL trace_frame(void)
 
 /* ---------- memory the GPU reads where it is: the loaded map */
 
+/* (port) indices the game made once and never rewrites, outside the tag
+cache, in the window the GPU maps: a Custom Edition map's model strips
+(port/linux/game/custom_edition_geometry.c). An Xbox map's strips are in
+its tag cache and drawn where they are; these were copied into the ring
+every draw (Extinction: 240 KB a frame, the Xbox Blood Gulch 15 KB) */
+static unsigned long static_indices_base, static_indices_bytes;
+
+void halo_d3d_static_indices(const void *base, unsigned long bytes)
+{
+	static_indices_base = base ? (unsigned long)base : 0;
+	static_indices_bytes = base ? bytes : 0;
+}
+
 static BOOL memory_is_static(const void *address, unsigned long size)
 {
 	static unsigned long base;
 
 	if (!base)
 		base = (unsigned long)physical_memory_get_tag_cache_base_address();
-	return base && (unsigned long)address >= base && (unsigned long)address + size <= base + TAG_CACHE_SIZE;
+	if (base && (unsigned long)address >= base && (unsigned long)address + size <= base + TAG_CACHE_SIZE)
+		return TRUE;
+	return static_indices_bytes && (unsigned long)address >= static_indices_base &&
+		(unsigned long)address + size <= static_indices_base + static_indices_bytes;
 }
 
 /* bytes in this frame's ring; a full ring drops the draw */
@@ -673,7 +875,7 @@ static void *ring_copy(const void *data, unsigned long size)
 #define VERTICAL_BLANK_NANOSECONDS (1000000000L / 60)
 
 static pthread_mutex_t vertical_blank_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t vertical_blank_condition = PTHREAD_COND_INITIALIZER;
+static halo_cond_t vertical_blank_condition = HALO_COND_INITIALIZER;
 static D3DCALLBACK vertical_blank_callback;
 static unsigned long vertical_blank_count;
 static volatile unsigned int flip_count;
@@ -706,7 +908,7 @@ static void *vertical_blank_thread(void *unused)
 			flip_count++;
 		}
 		callback = vertical_blank_callback;
-		pthread_cond_broadcast(&vertical_blank_condition);
+		halo_cond_broadcast(&vertical_blank_condition);
 		pthread_mutex_unlock(&vertical_blank_lock);
 
 		if (callback)
@@ -756,7 +958,7 @@ void WINAPI D3DDevice_BlockUntilVerticalBlank(void)
 	pthread_mutex_lock(&vertical_blank_lock);
 	count = vertical_blank_count;
 	while (vertical_blank_count == count)
-		pthread_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
+		halo_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
 	pthread_mutex_unlock(&vertical_blank_lock);
 }
 
@@ -1875,6 +2077,58 @@ COMPLEX_RENDER_STATE(RopZCmpAlwaysRead, D3DRS_ROPZCMPALWAYSREAD)
 COMPLEX_RENDER_STATE(RopZRead, D3DRS_ROPZREAD)
 COMPLEX_RENDER_STATE(DoNotCullUncompressed, D3DRS_DONOTCULLUNCOMPRESSED)
 
+/* Far-reaching texture coordinates. The game says how many texels one
+unit of a stage's coordinates spans (halo_d3d_texcoord_extent: the
+environment's detail, micro detail, bump and self-illumination maps,
+rasterizer_xbox_environment.c). a30's ground repeats its detail maps 240
+and 300 times across its one base map (61 440 to 153 600 texels a unit,
+the base coordinates 0..1), its cliffs their micro detail map over base
+coordinates up to 5 (61 440 a unit): on the Vita those surfaces drew as
+coarse blocks of texels and zigzag streaks (a player's 1.1.0 photos, Oct
+21 2026) where the PC filters them smoothly - read as the fraction of so
+large a coordinate being lost before the texture unit (inferred from the
+pictures and the numbers; the harness draws nothing to check it on).
+Blood Gulch's ground (30 720 at most) draws fine; Battle Creek has one
+micro detail map at 61 440. A stage at WRAP_COORDINATES_TEXELS or more
+(HALO_WRAP_TEXELS=n; 0 never) is marked in a stage state of the port's
+own past the Xbox's (D3DTSS_COLORKEYCOLOR is 30, D3DTSS_MAX 32), which
+the materials carry like any other; a marked raw 2D stage with WRAP
+addressing fetches the varying's fraction, with the varying's own
+derivatives so the mip level is the same (nv2a_psh_cg.c). Should the
+device's compiler refuse such a program, the marking stops for the
+session and the draws go back to the plain fetch. */
+#define HALO_TSS_WRAP_COORDINATES 31
+#define WRAP_COORDINATES_TEXELS 32768.0f
+static int wrap_coordinates_refused;
+
+/* (the key builders) whether a stage with these states takes its
+coordinates wrapped */
+static BOOL coordinates_wrapped(const DWORD *stage_state)
+{
+	return stage_state[HALO_TSS_WRAP_COORDINATES] && !wrap_coordinates_refused &&
+		stage_state[D3DTSS_ADDRESSU] == D3DTADDRESS_WRAP && stage_state[D3DTSS_ADDRESSV] == D3DTADDRESS_WRAP;
+}
+
+static void texture_state_store(DWORD stage, unsigned long type, DWORD value);
+
+void halo_d3d_texcoord_extent(long stage, float texels_per_unit)
+{
+	static float threshold = -1.0f;
+
+	if (threshold < 0.0f)
+	{
+		const char *setting = getenv("HALO_WRAP_TEXELS");
+
+		threshold = setting && *setting ? (float)atof(setting) : WRAP_COORDINATES_TEXELS;
+		if (threshold < 0.0f)
+			threshold = 0.0f;
+	}
+	if (stage < 0 || stage >= D3DTSS_MAXSTAGES)
+		return;
+	texture_state_store((DWORD)stage, HALO_TSS_WRAP_COORDINATES,
+		threshold > 0.0f && texels_per_unit >= threshold && !wrap_coordinates_refused);
+}
+
 /* stores a texture stage state, marking the state dirty if it changes */
 static void texture_state_store(DWORD stage, unsigned long type, DWORD value)
 {
@@ -2268,6 +2522,13 @@ static void fragment_entry_resolve(struct fragment_entry *entry)
 		dump_shader(source, "ps", entry->hash);
 	if (!shader)
 		platform_log("pixel shader %08lx does not compile", entry->hash);
+	if (!shader && entry->key.wrapped_coordinates && !wrap_coordinates_refused)
+	{
+		/* (the draws' keys go back to plain fetches from the next record) */
+		wrap_coordinates_refused = 1;
+		platform_log("pixel shader %08lx (wrapped coordinates) does not compile: far-reaching coordinates are fetched "
+			"as they are from now on", entry->hash);
+	}
 	free(source);
 }
 
@@ -2275,14 +2536,16 @@ typedef char pixel_shader_key_size_assert[sizeof(struct nv2a_pixel_shader_key) %
 
 static unsigned long fragment_shader_get(const struct nv2a_pixel_shader_key *key)
 {
-	static struct fragment_entry *last;
+	struct fragment_entry *last = fragment_last;
 	unsigned long hash;
 	struct fragment_entry **bucket;
 	struct fragment_entry *entry;
 	char *source;
 
+	fragment_clock++;
 	if (last && !memcmp(&last->key, key, sizeof(*key)))
 	{
+		last->last_used = fragment_clock;
 		if (last->pending_source)
 			fragment_entry_resolve(last);
 		return last->shader;
@@ -2293,13 +2556,20 @@ static unsigned long fragment_shader_get(const struct nv2a_pixel_shader_key *key
 	{
 		if (entry->hash == hash && !memcmp(&entry->key, key, sizeof(*key)))
 		{
-			last = entry;
+			fragment_last = entry;
+			entry->last_used = fragment_clock;
 			if (entry->pending_source)
 				fragment_entry_resolve(entry);
 			return entry->shader;
 		}
 	}
 	entry = calloc(1, sizeof(*entry));
+	/* (no room: drawn without a program this time, as one that does not
+	compile; asked again at its next draw) */
+	if (!entry)
+		return 0;
+	fragment_count++;
+	entry->last_used = fragment_clock;
 	entry->hash = hash;
 	entry->key = *key;
 	source = nv2a_pixel_shader_to_cg(key);
@@ -2311,8 +2581,72 @@ static unsigned long fragment_shader_get(const struct nv2a_pixel_shader_key *key
 	fragment_entry_resolve(entry);
 	entry->next = *bucket;
 	*bucket = entry;
-	last = entry;
+	fragment_last = entry;
 	return entry->shader;
+}
+
+static int compare_unsigned_longs(const void *a, const void *b)
+{
+	unsigned long x = *(const unsigned long *)a, y = *(const unsigned long *)b;
+
+	return x < y ? -1 : x > y;
+}
+
+/* (renderer_map_unloaded, the worker idle) The pixel shader keys met are
+kept for the session, each the 300-byte key of a program (the program
+itself is the shader cache's, vita_gxm.c, found again by its source): a
+new map's keys added theirs to the C heap for good, ~90 a multiplayer map in
+the harness's bot playlist (851 after nine maps, 27 KB a map change:
+triage/heap-creep-1.1.1.md). Past FRAGMENT_CACHE_CAP of them, those used
+longest ago are freed down to three quarters of it; a key used again makes
+its entry again, its program found in the shader cache (its Cg written
+again, not compiled). HALO_FRAGMENT_CACHE_CAP=n sets the cap (the harness's
+tests make it small) */
+#define FRAGMENT_CACHE_CAP 1024
+
+static void fragment_cache_trim(void)
+{
+	static long cap = -1;
+	unsigned long *stamps, count = 0, bucket, keep, threshold, freed = 0;
+	struct fragment_entry *entry, **link;
+
+	if (cap < 0)
+	{
+		const char *setting = getenv("HALO_FRAGMENT_CACHE_CAP");
+
+		cap = setting && atol(setting) > 0 ? atol(setting) : FRAGMENT_CACHE_CAP;
+	}
+	if (fragment_count <= (unsigned long)cap)
+		return;
+	stamps = malloc(fragment_count * sizeof(*stamps));
+	if (!stamps)
+		return;
+	for (bucket = 0; bucket < FRAGMENT_BUCKETS; bucket++)
+		for (entry = fragment_buckets[bucket]; entry && count < fragment_count; entry = entry->next)
+			stamps[count++] = entry->last_used;
+	keep = (unsigned long)cap * 3 / 4;
+	qsort(stamps, count, sizeof(*stamps), compare_unsigned_longs);
+	/* (those used before the keep-th newest go; one compiling still is kept) */
+	threshold = count > keep ? stamps[count - keep] : 0;
+	free(stamps);
+	for (bucket = 0; bucket < FRAGMENT_BUCKETS; bucket++)
+	{
+		link = &fragment_buckets[bucket];
+		while ((entry = *link) != NULL)
+		{
+			if (entry->last_used < threshold && !entry->pending_source)
+			{
+				*link = entry->next;
+				free(entry);
+				fragment_count--;
+				freed++;
+				continue;
+			}
+			link = &entry->next;
+		}
+	}
+	fragment_last = NULL;
+	platform_log("pixel shaders: %lu keys used longest ago forgotten, %lu kept (cap %ld)", freed, fragment_count, cap);
 }
 
 static unsigned long stage_texture_mode(int stage)
@@ -2334,6 +2668,9 @@ enum
 	_command_draw,
 	_command_clear,
 	_command_present,
+	/* the frame's interface begins (halo_d3d_interface_begin): the back
+	buffer's draws after it go to the display */
+	_command_interface,
 };
 
 /* HALO_RECORD_SPLIT (default on): the device state a draw is made from,
@@ -2555,6 +2892,12 @@ struct render_record
 		{
 			BOOL screenshot;
 			unsigned long frame;
+			/* the movie frame drawn over the picture (halo_d3d_movie_draw):
+			NULL for none */
+			const void *movie_pixels;
+			unsigned short movie_width, movie_height;
+			unsigned long movie_pitch;
+			float movie_rect[4];
 		} present;
 	};
 } __attribute__((aligned(32)));
@@ -2617,15 +2960,239 @@ static void *lasting_alloc(unsigned long bytes, const char *name)
 }
 
 /* a single-producer, single-consumer ring: the game's thread advances the
-head, the worker the tail; neither locks, and a thread with nothing to do
-sleeps briefly rather than being signalled (a signal per draw is a system
-call per draw) */
+head, the worker the tail; neither locks. A thread with nothing to do
+spins a little, then sleeps until the other wakes it (worker_waiter,
+game_waiter) */
 static struct render_record *commands;
 static volatile unsigned long command_head, command_tail;
 static volatile unsigned long frames_requested, frames_presented;
 void vita_host_sleep_us(unsigned long microseconds);
 static int worker_enabled = -1;
-static unsigned long long worker_time, worker_kind_time[3];
+
+/* (port) A thread asleep on another's progress (Sierra-III's handoff, Oct
+21 2026, for the battery: the worker and the game's waits slept 50-100 us
+at a time, waking hundreds of times a frame on a core with nothing to do).
+The sleeper counts itself in `sleepers`, tests once more, then waits on a
+semaphore (vita_host_wake_*: the Vita's kernel one, which any thread may
+wait on - no pthread_cond_wait, which a thread of sceKernelCreateThread's
+cannot use); the publisher, after its publish, looks at `sleepers` and
+signals only when someone sleeps, so the per-record publish stays a fence
+and a load. Either the sleeper's test sees the publish or the publisher
+sees the sleeper (both sides' accesses sequentially consistent); a signal
+the sleeper did not wait for is a spurious wake-up later, and every wait
+tests again in a loop. The waits are timed (HALO_WAIT_TIMEOUT_US, default
+100 ms): one that runs out of time with its work there is a lost wake-up
+unless the publish it saw is one whose signal is on its way (the
+publisher between its publish and its signal: `woken_at`, the publish a
+signal was given for, says which) - counted and logged, none is expected.
+Without a semaphore (none could be made) the waits sleep 50 us at a time,
+as before. */
+/* (the fields the two threads' atomics share are of explicitly aligned
+types, and the structure too: under -fmax-type-align=1 a plain one,
+reached through the waiter's pointer, made __atomic_exchange_n a call to
+vita_stubs.c's generic lock, not atomic with the inline __atomic_add_fetch
+on the same word - a sleeper counted and then cleared unseen, its wake-up
+lost to the 100 ms timeout) */
+typedef volatile int waiter_aligned_int __attribute__((aligned(4)));
+typedef volatile unsigned long waiter_aligned_ulong __attribute__((aligned(4)));
+struct __attribute__((aligned(4))) worker_waiter
+{
+	waiter_aligned_int sleepers;
+	int wake;
+	const char *name;
+	/* the publishes it waits on, counted (command_head, frames_presented),
+	and the count the last signal was given at */
+	unsigned long (*published)(void);
+	waiter_aligned_ulong woken_at;
+	/* sleeps, the ones that ran out of time, the signals that came after
+	the time ran out, the lost wake-ups */
+	unsigned long sleeps, timeouts, late, lost;
+};
+static unsigned long records_published(void);
+static unsigned long frames_published(void);
+static struct worker_waiter worker_waiter = { 0, -1, "the render worker", records_published, 0, 0, 0, 0, 0 };
+static struct worker_waiter game_waiter = { 0, -1, "the game's thread", frames_published, 0, 0, 0, 0, 0 };
+/* the record the worker sleeps before, and the records that wake it at
+once (one past the last present or flushing record committed): others
+wake it only WORKER_WAKE_BATCH at a time, since most wait for the present
+anyway (a signal per record was a system call per draw on the game's core) */
+static volatile unsigned long worker_sleep_from, command_urgent;
+#define WORKER_WAKE_BATCH 64
+
+/* (debug) HALO_WAIT_STATS=1: the waits' counts every 1800 frames
+(wait_stats_report); 2: also every wait that ran out of time */
+static int wait_stats(void)
+{
+	static int level = -1;
+
+	if (level < 0)
+	{
+		const char *setting = getenv("HALO_WAIT_STATS");
+
+		level = setting ? atoi(setting) : 0;
+	}
+	return level;
+}
+
+static unsigned long wait_timeout_us(void)
+{
+	static unsigned long timeout;
+
+	if (!timeout)
+	{
+		const char *setting = getenv("HALO_WAIT_TIMEOUT_US");
+		unsigned long value = setting ? strtoul(setting, NULL, 10) : 0;
+
+		timeout = value >= 1000 ? value : 100000;
+	}
+	return timeout;
+}
+
+static void waiter_initialize(struct worker_waiter *waiter, const char *semaphore_name)
+{
+	waiter->sleepers = 0;
+	waiter->wake = vita_host_wake_create(semaphore_name);
+	if (waiter->wake < 0)
+		platform_log("render worker: no semaphore for %s (%d): its waits poll", waiter->name, waiter->wake);
+}
+
+static unsigned long records_published(void)
+{
+	return __atomic_load_n(&command_head, __ATOMIC_SEQ_CST);
+}
+
+static unsigned long frames_published(void)
+{
+	return __atomic_load_n(&frames_presented, __ATOMIC_SEQ_CST);
+}
+
+/* (after a publish) the sleepers woken */
+static void waiter_wake(struct worker_waiter *waiter)
+{
+	int sleepers;
+
+	/* (the publish before this seen before `sleepers` is read) */
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	if (!__atomic_load_n(&waiter->sleepers, __ATOMIC_RELAXED))
+		return;
+	sleepers = __atomic_exchange_n(&waiter->sleepers, 0, __ATOMIC_SEQ_CST);
+	if (sleepers > 0)
+		__atomic_store_n(&waiter->woken_at, waiter->published(), __ATOMIC_RELEASE);
+	while (sleepers-- > 0)
+		vita_host_wake_signal(waiter->wake);
+}
+
+/* one sleep of a wait whose spin ran out: counted among the sleepers,
+ready(argument) tested once more, then the wake-up waited for; nonzero
+when the wait ran out of time */
+static int waiter_sleep(struct worker_waiter *waiter, int (*ready)(unsigned long), unsigned long argument)
+{
+	int result;
+
+	if (waiter->wake < 0)
+	{
+		vita_host_sleep_us(50);
+		return 0;
+	}
+	__atomic_add_fetch(&waiter->sleepers, 1, __ATOMIC_SEQ_CST);
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	if (ready(argument))
+		return 0;
+	waiter->sleeps++;
+	result = vita_host_wake_wait(waiter->wake, wait_timeout_us());
+	if (result == 1)
+	{
+		/* (the publish count read after the test: the publish the test
+		saw is one of those counted) */
+		int now_ready = ready(argument), late = 0;
+		unsigned long seen = waiter->published();
+
+		waiter->timeouts++;
+		if (now_ready)
+		{
+			/* the signal for the publish seen given meanwhile, or on its
+			way (the publisher between the two: up to 100 ms more), is a
+			wake-up that came late; none, or one for a later publish only,
+			is one lost */
+			int signal = vita_host_wake_poll(waiter->wake) == 0 ? 2 : vita_host_wake_wait(waiter->wake, 100000) == 0;
+			unsigned long woken_at = __atomic_load_n(&waiter->woken_at, __ATOMIC_ACQUIRE);
+
+			late = signal == 2 || (signal && (long)(woken_at - seen) <= 0);
+			if (late)
+				waiter->late++;
+			else if (++waiter->lost <= 8)
+				platform_log("render worker: lost wake-up %lu (%s): the wait ran out with its work there (publish %lu "
+					"seen, the last signal for %lu, %s)", waiter->lost, waiter->name, seen, woken_at,
+					signal ? "a signal came after" : "no signal in 100 ms more");
+		}
+		if (wait_stats() >= 2 && (!now_ready || late))
+			platform_log("render worker: a wait of %s ran out of time (%lu us), %s", waiter->name, wait_timeout_us(),
+				now_ready ? "its signal given meanwhile" : "its work not there yet");
+	}
+	else if (result < 0)
+		vita_host_sleep_us(50);
+	return result == 1;
+}
+
+static void wait_stats_report(void)
+{
+	static unsigned long presents;
+
+	if (!wait_stats() || ++presents % 1800)
+		return;
+	platform_log("waits: the render worker slept %lu times (%lu ran out of time, %lu woken late, %lu lost wake-ups), the "
+		"game's thread %lu (%lu, %lu, %lu)", worker_waiter.sleeps, worker_waiter.timeouts, worker_waiter.late,
+		worker_waiter.lost, game_waiter.sleeps, game_waiter.timeouts, game_waiter.late, game_waiter.lost);
+}
+
+/* the worker's sleep before record `position` ends: enough records, or one
+that wakes it at once */
+static int worker_records_ready(unsigned long position)
+{
+	return __atomic_load_n(&command_head, __ATOMIC_SEQ_CST) - position >= WORKER_WAKE_BATCH ||
+		(long)(__atomic_load_n(&command_urgent, __ATOMIC_SEQ_CST) - position) > 0;
+}
+
+/* (the game's thread, after a record is committed) the worker woken if it
+sleeps and the record is one it wants now */
+static void worker_wake_for_records(void)
+{
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	if (__atomic_load_n(&worker_waiter.sleepers, __ATOMIC_RELAXED) &&
+		worker_records_ready(__atomic_load_n(&worker_sleep_from, __ATOMIC_RELAXED)))
+	{
+		waiter_wake(&worker_waiter);
+	}
+}
+
+/* the game's waits for the worker: until it has presented all but `behind`
+of the frames recorded, or freed room in the ring */
+static int frames_presented_within(unsigned long behind)
+{
+	return __atomic_load_n(&frames_presented, __ATOMIC_SEQ_CST) + behind >= frames_requested;
+}
+
+static int ring_has_room(unsigned long unused)
+{
+	(void)unused;
+	return command_head - __atomic_load_n(&command_tail, __ATOMIC_SEQ_CST) < COMMAND_RING;
+}
+
+/* until frames_presented_within(behind): a short spin, then asleep; the
+worker woken first, should it sleep on records it has not run */
+static void worker_wait_presented(unsigned long behind)
+{
+	unsigned long spins = 0;
+
+	while (!frames_presented_within(behind))
+	{
+		if (++spins < 200)
+			continue;
+		waiter_wake(&worker_waiter);
+		waiter_sleep(&game_waiter, frames_presented_within, behind);
+	}
+}
+static unsigned long long worker_time, worker_kind_time[4];
 static unsigned long blend_histogram[16][16];
 /* the host's hang watchdog (vita_main.c) watches this */
 volatile unsigned long halo_present_counter;
@@ -3092,6 +3659,7 @@ static int worker_texture_bits(struct render_command *command, const struct reco
 	}
 	key->raw_coordinates = 0;
 	key->projective_coordinates = 0;
+	key->wrapped_coordinates = 0;
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
 		unsigned long mode = (rs[D3DRS_PSTEXTUREMODES] >> (5 * stage)) & 0x1f;
@@ -3116,7 +3684,11 @@ static int worker_texture_bits(struct render_command *command, const struct reco
 				if (!description.linear && !description.cube_map)
 				{
 					if (!(program->texcoord_w_mask & (1UL << stage)))
+					{
 						key->raw_coordinates |= (unsigned char)(1U << stage);
+						if (coordinates_wrapped(state->material->texture_state[stage]))
+							key->wrapped_coordinates |= (unsigned char)(1U << stage);
+					}
 					else
 					{
 						key->projective_coordinates |= (unsigned char)(1U << stage);
@@ -3167,6 +3739,78 @@ static void worker_build_frame_end(void)
 {
 	worker_build.state = NULL;
 	worker_build.fragment_valid = FALSE;
+}
+
+/* HALO_ALPHA_TEST_NEUTRAL (default 1; 0 = every kept alpha test a
+discard, as before): an alpha-tested draw that writes neither depth nor
+stencil and counts for no visibility test, whose blend leaves the target as
+it was for some source colour, has its test made a select in place of a
+discard - a failing fragment returns that colour (zero for a blend whose
+destination factor is ONE, INVSRCALPHA or INVSRCCOLOR, as the source's
+factor times zero adds nothing; one for a plain multiply, ZERO/SRCCOLOR or
+DESTCOLOR/ZERO). The image is the same: the discarded fragment changed
+nothing either. A discard costs the tile renderer the whole draw's early
+visibility; the draws this keeps from one are the atmospheric fog's pass
+over the whole structure (ONE/INVSRCALPHA with the test at 0, the fog's
+colour scaled by its density), which the source-alpha rule
+(record_draw) cannot drop, and the like. The constant blend factors
+(blend_constant.h) keep their discard. Returns the key's
+alpha_test_neutral: 0, 1 (zero) or 2 (one). */
+static unsigned char alpha_test_neutral(const struct render_command *command, const struct vgxm_draw *draw)
+{
+	static int enabled = -1;
+	unsigned long source = draw->blend_source, destination = draw->blend_destination;
+	unsigned short segment;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_ALPHA_TEST_NEUTRAL");
+
+		enabled = !(setting && atoi(setting) == 0);
+	}
+	if (!enabled || !command->key.alpha_test_function || command->key.blend_fold || !draw->blend ||
+		draw->depth_write || command->key.count_samples)
+		return 0;
+	if (draw->stencil_test && (draw->stencil_write_mask & 0xff) && (draw->stencil_pass != D3DSTENCILOP_KEEP ||
+		draw->stencil_fail != D3DSTENCILOP_KEEP || draw->stencil_depth_fail != D3DSTENCILOP_KEEP))
+		return 0;
+	if (draw->visibility_index)
+		return 0;
+	for (segment = 0; segment < command->segment_count; segment++)
+	{
+		if (command->segments && command->segments[segment].visibility_index)
+			return 0;
+	}
+	/* (a source factor that is not a constant's) */
+	switch (source)
+	{
+	case D3DBLEND_ZERO:
+	case D3DBLEND_ONE:
+	case D3DBLEND_SRCCOLOR:
+	case D3DBLEND_INVSRCCOLOR:
+	case D3DBLEND_SRCALPHA:
+	case D3DBLEND_INVSRCALPHA:
+	case D3DBLEND_DESTALPHA:
+	case D3DBLEND_INVDESTALPHA:
+	case D3DBLEND_DESTCOLOR:
+	case D3DBLEND_INVDESTCOLOR:
+	case D3DBLEND_SRCALPHASAT:
+		break;
+	default:
+		return 0;
+	}
+	if ((destination == D3DBLEND_ONE || destination == D3DBLEND_INVSRCALPHA || destination == D3DBLEND_INVSRCCOLOR) &&
+		(draw->blend_operation == D3DBLENDOP_ADD || draw->blend_operation == D3DBLENDOP_REVSUBTRACT ||
+			draw->blend_operation == D3DBLENDOP_MAX))
+	{
+		/* (dst * 1 +- src * f with src zero; max(zero, dst)) */
+		return 1;
+	}
+	if (draw->blend_operation == D3DBLENDOP_ADD &&
+		((source == D3DBLEND_ZERO && destination == D3DBLEND_SRCCOLOR) ||
+			(source == D3DBLEND_DESTCOLOR && destination == D3DBLEND_ZERO)))
+		return 2;
+	return 0;
 }
 
 static BOOL worker_build_record(struct render_command *command)
@@ -3351,6 +3995,17 @@ static BOOL worker_build_record(struct render_command *command)
 
 static void fill_stats_draw(const struct render_command *command, const struct vgxm_draw *draw)
 {
+	extern int halo_fill_stats_discard;
+	int stage;
+
+	/* (the draws whose fragment program keeps a discard: the alpha test's,
+	or a stage's alpha kill) */
+	halo_fill_stats_discard = command->key.alpha_test_function && !command->key.alpha_test_neutral;
+	for (stage = 0; stage < 4; stage++)
+	{
+		if (command->key.alpha_kill[stage])
+			halo_fill_stats_discard = 1;
+	}
 	halo_fill_stats_draw(draw, command->program->instructions, command->program->instruction_count,
 		command->program->input_mask, command->immediate ? 0 : command->packed_mask,
 		command->immediate ? 0 : command->color_mask, command->phase,
@@ -3426,6 +4081,176 @@ static void blend_plan_note(const struct vgxm_draw *draw, const struct blend_pla
 		plan->exact ? "" : " (GXM's factors cannot make it: an approximation)");
 }
 
+/* ---------- the GPU census (a measuring tool, never for play)
+
+HALO_GPU_CENSUS=N: the GPU's time of each group of render phases, on the
+hardware. Windows of N frames (30 to 600; 1 = 90) take turns: one with
+every draw, then one with a group's draws left out (the worker skips the
+records of its phases), the next group after the next full window, round
+and round. Each skipping window's mean GPU time (vgxm_gpu_frame_next, the
+dynamic resolution's measure; its first 4 frames left out, the GPU being
+behind) is set against the full window just before it; every full round a
+"gpu-census:" line in halo.log gives each group's saving in ms and as a
+share of the full frame's time. The picture flickers - passes vanish a
+window at a time - so it is for a test run only, with the camera still or
+in a steady fight, the dynamic resolution held (HALO_DYNRES_FORCE) so the
+scale does not move under it. The lightmaps (the depth every later pass
+tests against) are never left out. */
+#define CENSUS_GROUPS 11
+static const char *const census_group_names[CENSUS_GROUPS] = {
+	"all", "fog", "reflections", "structure_diffuse", "lights", "decals", "effects", "transparents", "objects",
+	"sky+weather+detail", "hud+flash" };
+static struct
+{
+	int every;
+	/* (worker) the group skipped in the frame being recorded; each
+	presented frame's group by its number */
+	int active;
+	unsigned long presents;
+	/* the window being summed and its sums; the last full window's mean */
+	unsigned long window;
+	int window_group;
+	double window_sum;
+	unsigned long window_count, window_seen;
+	double baseline_mean;
+	/* the last skipping window, waiting for the full one after it */
+	int pending_group;
+	double pending_mean, pending_before;
+	/* per group: the savings summed, windows, and the baselines */
+	double saving_sum[CENSUS_GROUPS], baseline_sum[CENSUS_GROUPS];
+	unsigned long windows[CENSUS_GROUPS];
+	unsigned long rounds;
+} census = { -1 };
+
+static int census_group_of_phase(int phase)
+{
+	switch (phase)
+	{
+	case 13: return 1;
+	case 33: case 11: return 2;
+	case 8: return 3;
+	case 7: case 9: case 10: case 36: return 4;
+	case 37: case 38: case 39: case 40: return 5;
+	case 15: case 16: case 17: case 42: case 53: return 6;
+	case 3: case 6: return 8;
+	case 1: case 14: case 19: return 9;
+	case 20: case 22: case 29: case 30: case 31: return 10;
+	default:
+		if (phase == 12 || phase == 18 || phase == 35 || (phase >= 41 && phase <= 62))
+			return 7;
+		return 0;
+	}
+}
+
+static int census_skips(int phase)
+{
+	return census.active && census_group_of_phase(phase) == census.active;
+}
+
+static void census_window_done(void)
+{
+	double mean, before;
+	int group;
+
+	if (census.window_count < 4)
+		return;
+	mean = census.window_sum / (double)census.window_count;
+	if (getenv("HALO_GPU_CENSUS_LOG"))
+		platform_log("gpu-census window %lu: %s %.2f ms over %lu frames", census.window,
+			census_group_names[census.window_group], mean, census.window_count);
+	if (census.window_group)
+	{
+		/* (set against the full windows on both sides of it, when the one
+		after is done: the scene's drift cancels) */
+		census.pending_group = census.window_group;
+		census.pending_mean = mean;
+		census.pending_before = census.baseline_mean;
+		return;
+	}
+	group = census.pending_group;
+	census.pending_group = 0;
+	before = census.pending_before;
+	census.baseline_mean = mean;
+	if (!group || before <= 0.0)
+		return;
+	census.saving_sum[group] += (before + mean) / 2.0 - census.pending_mean;
+	census.baseline_sum[group] += (before + mean) / 2.0;
+	census.windows[group]++;
+	if (group == CENSUS_GROUPS - 1)
+	{
+		char line[1024];
+		int length = 0;
+		double baseline = 0.0;
+		unsigned long baselines = 0;
+
+		census.rounds++;
+		for (group = 1; group < CENSUS_GROUPS; group++)
+		{
+			baseline += census.baseline_sum[group];
+			baselines += census.windows[group];
+		}
+		baseline = baselines ? baseline / (double)baselines : 0.0;
+		for (group = 1; group < CENSUS_GROUPS && length < (int)sizeof(line) - 64; group++)
+		{
+			double saving = census.windows[group] ? census.saving_sum[group] / (double)census.windows[group] : 0.0;
+
+			length += snprintf(line + length, sizeof(line) - length, " | %s %.1f ms (%.0f%%)", census_group_names[group],
+				saving, baseline > 0.0 ? 100.0 * saving / baseline : 0.0);
+		}
+		platform_log("gpu-census (%d frames a window, %lu rounds, scale %.0f%%): all drawn %.1f ms%s", census.every,
+			census.rounds, (double)vgxm_render_rect() * 100.0, baseline, line);
+	}
+}
+
+/* (worker) a frame the GPU has finished, by its tag: the window (above 4
+bits) and the group it left out */
+static void census_measured(unsigned long tag, float gpu_ms)
+{
+	unsigned long window = tag >> 4;
+
+	if (census.every <= 0 || gpu_ms <= 0.0f || gpu_ms > 250.0f)
+		return;
+	if (window != census.window)
+	{
+		census_window_done();
+		census.window = window;
+		census.window_group = (int)(tag & 15);
+		census.window_sum = 0.0;
+		census.window_count = 0;
+		census.window_seen = 0;
+	}
+	/* (the window's first frames: the GPU still on the one before) */
+	if (++census.window_seen > 4)
+	{
+		census.window_sum += gpu_ms;
+		census.window_count++;
+	}
+}
+
+/* (worker, after each present) the group the next frame leaves out, and
+its tag */
+static void census_frame_end(void)
+{
+	unsigned long window;
+
+	if (census.every < 0)
+	{
+		const char *setting = getenv("HALO_GPU_CENSUS");
+		int every = setting ? atoi(setting) : 0;
+
+		census.every = every == 1 ? 90 : every < 30 ? 0 : every > 600 ? 600 : every;
+		if (census.every)
+			platform_log("gpu-census: on, %d frames a window: passes left out a window at a time (a measuring run)",
+				census.every);
+	}
+	if (!census.every)
+		return;
+	census.presents++;
+	window = census.presents / (unsigned long)census.every;
+	census.active = (window & 1) ? (int)((window / 2) % (CENSUS_GROUPS - 1)) + 1 : 0;
+	vgxm_frame_tag(window << 4 | (unsigned long)census.active);
+}
+
 static void execute_draw(struct render_command *command)
 {
 	struct vgxm_draw *draw = &command->draw;
@@ -3439,6 +4264,8 @@ static void execute_draw(struct render_command *command)
 
 	unsigned long long profile_from;
 
+	if (census.active && census_skips(command->phase))
+		return;
 	worker_sampled = draw_profile_on() && ++worker_counter % (unsigned long)draw_profile == 0;
 	if (worker_sampled)
 		worker_profile_draws++;
@@ -3484,6 +4311,8 @@ static void execute_draw(struct render_command *command)
 			memcpy(copy[VITA_FU_TEXTURE_SCALE - VITA_FU_A_COUNT + stage], texture_scale[stage], sizeof(float) * 4);
 		draw->fragment_uniforms[1] = copy;
 	}
+	if ((command->key.alpha_test_neutral = alpha_test_neutral(command, draw)) != 0)
+		stats.neutral_alpha_tests++;
 	if (draw->blend)
 		blend_passes = blend_constant_plan(draw->blend_source, draw->blend_destination, draw->blend_operation,
 			draw->color_write, draw->blend_color, &blend_plan);
@@ -3715,6 +4544,7 @@ static void write_screenshot(struct render_target_entry *target);
 static void write_display_screenshot(unsigned long frame);
 int halo_trace_active(void);
 static void dynres_frame_end(void);
+static void census_frame_end(void);
 
 /* a draw record as the render_command execute_draw runs (worker-local,
 hot): the record's parts, and a full record's own */
@@ -3810,6 +4640,18 @@ static void execute_command(struct render_record *command)
 				worker_color_entry->drawn = TRUE;
 		}
 		break;
+	case _command_interface:
+	{
+		/* (the 3D picture to the display, at its scale: the back buffer's
+		draws from here on are drawn there, at the display's resolution -
+		vita_gxm.c vgxm_interface_begin) */
+		struct render_target_entry *back_buffer = command->targets && command->targets->color_valid ?
+			render_target_get(&command->targets->color_surface) : NULL;
+
+		if (back_buffer && !back_buffer->target.depth)
+			vgxm_interface_begin(back_buffer->id);
+		break;
+	}
 	case _command_present:
 	{
 		struct render_target_entry *back_buffer = command->targets->color_valid ? render_target_get(&command->targets->color_surface) : NULL;
@@ -3822,6 +4664,9 @@ static void execute_command(struct render_record *command)
 				write_screenshot(back_buffer);
 			/* (the frame's visibility counts: the game's frame they are of) */
 			vgxm_visibility_frame(command->present.frame);
+			if (command->present.movie_pixels)
+				vgxm_movie_present(command->present.movie_pixels, command->present.movie_width,
+					command->present.movie_height, command->present.movie_pitch, command->present.movie_rect);
 			vgxm_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
 			halo_fill_stats_present(back_buffer->id, back_buffer->target.width, back_buffer->target.height);
 			if (command->present.screenshot)
@@ -3831,6 +4676,8 @@ static void execute_command(struct render_record *command)
 			platform_log("trace: worker presented %lu", command->present.frame);
 		/* (the next frame's render scale, between the two) */
 		dynres_frame_end();
+		if (back_buffer)
+			census_frame_end();
 		render_target_atlas_frame_end();
 		{
 			/* (the census during play: cdram_census) */
@@ -3880,10 +4727,12 @@ static void *render_worker(void *unused)
 
 			while (__atomic_load_n(&command_head, __ATOMIC_ACQUIRE) == command_tail + index)
 			{
-				/* a short spin covers the gap between draws; then sleep */
+				/* a short spin covers the gap between draws; then asleep
+				until the game's thread wakes it (worker_wake_for_records) */
 				if (++spins < 200)
 					continue;
-				vita_host_sleep_us(50);
+				__atomic_store_n(&worker_sleep_from, command_tail + index, __ATOMIC_RELAXED);
+				waiter_sleep(&worker_waiter, worker_records_ready, command_tail + index);
 			}
 			command = &commands[(command_tail + index) % COMMAND_RING];
 			/* (a present, or a record before which what came before is
@@ -3915,6 +4764,7 @@ static void *render_worker(void *unused)
 				execute_command(command);
 				__atomic_store_n(&frames_presented, frames_presented + 1, __ATOMIC_RELEASE);
 				__atomic_store_n(&command_tail, command_tail + index + 1, __ATOMIC_RELEASE);
+				waiter_wake(&game_waiter);
 				index = 0;
 			}
 			else if (command->hoistable && command->wave)
@@ -3954,6 +4804,8 @@ static void worker_start(void)
 		pthread_t thread;
 		pthread_attr_t attributes;
 
+		waiter_initialize(&worker_waiter, "halo render worker");
+		waiter_initialize(&game_waiter, "halo render game");
 		pthread_attr_init(&attributes);
 		pthread_attr_setstacksize(&attributes, 1024 * 1024);
 		if (pthread_create(&thread, &attributes, render_worker, NULL) != 0)
@@ -4351,8 +5203,11 @@ static struct render_record *command_begin(unsigned long kind)
 		return NULL;
 	if (worker_enabled)
 	{
-		while (command_head - __atomic_load_n(&command_tail, __ATOMIC_ACQUIRE) >= COMMAND_RING)
-			vita_host_sleep_us(100);
+		while (!ring_has_room(0))
+		{
+			waiter_wake(&worker_waiter);
+			waiter_sleep(&game_waiter, ring_has_room, 0);
+		}
 	}
 	{
 		/* HALO_NO_SMALL_TARGETS=1: nothing is drawn into the small targets
@@ -4710,7 +5565,12 @@ static void command_commit(struct render_record *command)
 	if (worker_enabled)
 	{
 		small_target_wave(command);
+		/* (a present, or a record before which the frame's records run:
+		the worker woken for it at once) */
+		if (command->kind == _command_present || command->flush_before)
+			__atomic_store_n(&command_urgent, command_head + 1, __ATOMIC_RELAXED);
 		__atomic_store_n(&command_head, command_head + 1, __ATOMIC_RELEASE);
+		worker_wake_for_records();
 	}
 	else
 	{
@@ -4729,10 +5589,16 @@ static void worker_drain(void)
 	if (!worker_enabled)
 		return;
 	unsigned long long waited_from = 0;
+	unsigned long spins = 0;
 
-	while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) + 1 < frames_requested)
+	while (!frames_presented_within(1))
 	{
-		vita_host_sleep_us(50);
+		/* (a short spin, then asleep until the worker's present wakes it,
+		or the wait's time - 100 ms - runs out, for the check below) */
+		if (++spins < 200)
+			continue;
+		waiter_wake(&worker_waiter);
+		waiter_sleep(&game_waiter, frames_presented_within, 1);
 		/* the worker not finishing a frame for 12 s is logged (a first
 		launch compiles every shader on the device, seconds each, and the
 		game thread waits here through it); HALO_HANG_CRASH=1 makes it a
@@ -4771,10 +5637,7 @@ void halo_render_wait_for_gpu(void)
 	unsigned long long started = vita_host_time_us();
 
 	if (worker_enabled > 0)
-	{
-		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
-			vita_host_sleep_us(100);
-	}
+		worker_wait_presented(0);
 	vgxm_wait_gpu_idle();
 	platform_log("structure bsp switch: waited %llu us for the worker and the GPU",
 		(unsigned long long)(vita_host_time_us() - started));
@@ -4994,14 +5857,12 @@ static void renderer_map_unloaded(void)
 	if (!device.created || !device.gpu_ready)
 		return;
 	if (worker_enabled > 0)
-	{
-		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
-			vita_host_sleep_us(100);
-	}
+		worker_wait_presented(0);
 	vgxm_wait_gpu_idle();
 	vita_texture_decodes_quiesce();
 	freed = vita_texture_pool_release();
 	trimmed = vgxm_memory_trim();
+	fragment_cache_trim();
 	/* (screen targets made smaller for want of CDRAM: the full size tried
 	again at the next present, screen_settings_apply) */
 	if (screen_scale_lowered)
@@ -5111,10 +5972,7 @@ static void cdram_wanted_relieve(void)
 		return;
 	relieved_frame = device.frame;
 	if (worker_enabled > 0)
-	{
-		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
-			vita_host_sleep_us(100);
-	}
+		worker_wait_presented(0);
 	vgxm_wait_gpu_idle();
 	freed = cdram_relieve(&dozed);
 	while (vgxm_cdram_free() < wanted + 256 * 1024 && (moved = cdram_relieve_pool()) != 0)
@@ -5173,7 +6031,7 @@ static void screen_settings_apply(void)
 	int restored = TRUE, made_new, lowered_old = FALSE;
 
 	screen_scale_retry = FALSE;
-	if (scale < 0.5f || scale > 1.0f)
+	if (!(scale >= 0.5f && scale <= 1.0f))
 		scale = 1.0f;
 	if (!device.created || !device.gpu_ready)
 		return;
@@ -5202,10 +6060,7 @@ static void screen_settings_apply(void)
 	}
 	started = vita_host_time_us();
 	if (worker_enabled > 0)
-	{
-		while (__atomic_load_n(&frames_presented, __ATOMIC_ACQUIRE) < frames_requested)
-			vita_host_sleep_us(100);
-	}
+		worker_wait_presented(0);
 	vgxm_wait_gpu_idle();
 	/* (a frame's target that found no CDRAM, kept for cdram_wanted_relieve
 	past the change's own refusals) */
@@ -5359,14 +6214,14 @@ most, and a summary every 300 frames. */
 static struct
 {
 	volatile unsigned long generation;
-	int enabled, floor, force, cycle, log;
+	int enabled, floor, fight_floor, force, cycle, log;
 	float budget_ms, sim_ms;
 } dynres_config;
 
 static struct
 {
 	unsigned long generation;
-	int enabled, floor, force, cycle, log;
+	int enabled, floor, fight_floor, force, cycle, log;
 	float budget_ms, sim_ms;
 	struct dynres_controller controller;
 	/* the level the targets are drawn at now (32nds) */
@@ -5385,7 +6240,8 @@ static struct
 
 static int dynres_level_of(float scale)
 {
-	int level = (int)(scale * DYNRES_UNITS + 0.5f);
+	/* (a NaN or a huge number is no level: the full size) */
+	int level = scale >= 0.0f && scale <= 1.0f ? (int)(scale * DYNRES_UNITS + 0.5f) : DYNRES_UNITS;
 
 	return level < 1 ? 1 : level > DYNRES_UNITS ? DYNRES_UNITS : level;
 }
@@ -5397,7 +6253,7 @@ static void dynres_configure(void)
 	const char *force = getenv("HALO_DYNRES_FORCE"), *cycle = getenv("HALO_DYNRES_CYCLE");
 	const char *sim = getenv("HALO_DYNRES_SIM"), *budget = getenv("HALO_DYNRES_BUDGET");
 	const char *cap = getenv("HALO_FRAME_CAP"), *timing = getenv("HALO_FRAME_TIMING");
-	int floor = minimum ? dynres_level_of((float)atof(minimum)) : DYNRES_UNITS / 2;
+	int floor = minimum ? dynres_level_of((float)atof(minimum)) : DYNRES_UNITS / 2, fight_floor;
 	int enabled, forced = force && atoi(force) > 0 ? dynres_level_of(atoi(force) / 100.0f) : 0;
 	float budget_ms = cap && atoi(cap) > 0 ? 1000.0f / (float)atoi(cap) : 1000.0f / 30.0f;
 
@@ -5414,18 +6270,34 @@ static void dynres_configure(void)
 	}
 	if (floor < DYNRES_UNITS / 2)
 		floor = DYNRES_UNITS / 2;
+	/* HALO_DYNAMIC_RES_FIGHT_MIN: the fight floor (dynamic_resolution.h) -
+	a fight the floor cannot hold 30 FPS in goes under it, as far as this,
+	until the GPU has room again: unset, a step of the panel's minimums
+	under the floor (Balanced's 63% -> 50%, Quality's 75% -> 63%; 50% has
+	none); 0 none, as before; else the scale (0.5 at least) */
+	{
+		const char *setting = getenv("HALO_DYNAMIC_RES_FIGHT_MIN");
+
+		fight_floor = !setting ? floor - DYNRES_UNITS / 8 : atof(setting) > 0.0 ? dynres_level_of((float)atof(setting)) : 0;
+		if (fight_floor && fight_floor < DYNRES_UNITS / 2)
+			fight_floor = DYNRES_UNITS / 2;
+		if (fight_floor >= floor)
+			fight_floor = 0;
+	}
 	if (forced && forced < DYNRES_UNITS / 2)
 		forced = DYNRES_UNITS / 2;
 	if (budget && atof(budget) > 1.0)
 		budget_ms = (float)atof(budget);
 	enabled = (scale && !strcmp(scale, "dynamic")) || forced || (cycle && atoi(cycle) > 0);
 	if (enabled != dynres_config.enabled || floor != dynres_config.floor || forced != dynres_config.force ||
-		(enabled && budget_ms != dynres_config.budget_ms))
-		platform_log("dynamic resolution: %s%s (floor %d%%, budget %.1f ms%s%s)", enabled ? "on" : "off",
-			forced ? ", held" : "", floor * 100 / DYNRES_UNITS, (double)budget_ms,
+		fight_floor != dynres_config.fight_floor || (enabled && budget_ms != dynres_config.budget_ms))
+		platform_log("dynamic resolution: %s%s (floor %d%%, fights %d%%, budget %.1f ms%s%s)", enabled ? "on" : "off",
+			forced ? ", held" : "", floor * 100 / DYNRES_UNITS, (fight_floor ? fight_floor : floor) * 100 / DYNRES_UNITS,
+			(double)budget_ms,
 			cycle && atoi(cycle) > 0 ? ", cycling" : "", sim && atof(sim) > 0.0 ? ", GPU simulated" : "");
 	dynres_config.enabled = enabled;
 	dynres_config.floor = floor;
+	dynres_config.fight_floor = fight_floor;
 	dynres_config.force = forced;
 	dynres_config.cycle = cycle && atoi(cycle) > 0 ? atoi(cycle) : 0;
 	dynres_config.sim_ms = sim && atof(sim) > 0.0 ? (float)atof(sim) : 0.0f;
@@ -5521,6 +6393,7 @@ static void dynres_frame_end(void)
 		dynres.generation = generation;
 		dynres.enabled = dynres_config.enabled;
 		dynres.floor = dynres_config.floor;
+		dynres.fight_floor = dynres_config.fight_floor;
 		dynres.force = dynres_config.force;
 		dynres.cycle = dynres_config.cycle;
 		dynres.sim_ms = dynres_config.sim_ms;
@@ -5541,12 +6414,31 @@ static void dynres_frame_end(void)
 	if (!dynres.level)
 		dynres.level = dynres_level_of(vgxm_render_rect());
 	dynres_controller_limits(&dynres.controller, dynres.floor, ceiling, dynres.budget_ms);
+	if (dynres.controller.fight_floor != dynres.fight_floor)
+		dynres_controller_fight_floor(&dynres.controller, dynres.fight_floor);
 	level = dynres.controller.level;
 	dynres.frames++;
-	/* (drained whether on or not: the overlay's GPU line) */
-	while (vgxm_gpu_frame_next(&frame))
-		if (!dynres.sim_ms)
-			level = dynres_measured(frame.gpu_ms, frame.tail_ms, dynres_level_of(frame.scale), frame.interval_ms);
+	/* (drained whether on or not: the overlay's GPU line; not measured
+	while the clocks are lowered, nor in the frames after they rise:
+	clocks_governor) */
+	{
+		int lowered = __atomic_load_n(&clocks_level, __ATOMIC_ACQUIRE) != VITA_CLOCKS_PLAY;
+
+		if (!lowered && __atomic_load_n(&clocks_dynres_skip, __ATOMIC_ACQUIRE) > 0)
+		{
+			__atomic_sub_fetch(&clocks_dynres_skip, 1, __ATOMIC_ACQ_REL);
+			lowered = 1;
+		}
+		while (vgxm_gpu_frame_next(&frame))
+		{
+			/* (the GPU census holds the scale: its windows' times are
+			compared) */
+			if (!dynres.sim_ms && !lowered && census.every <= 0)
+				level = dynres_measured(frame.gpu_ms, frame.tail_ms, dynres_level_of(frame.scale), frame.interval_ms);
+			if (!lowered)
+				census_measured(frame.tag, frame.gpu_ms);
+		}
+	}
 	if (dynres.sim_ms)
 	{
 		/* (debug) a GPU whose time grows with the pixels, 8% noise, its
@@ -6896,7 +7788,11 @@ static struct render_record *record_draw(BOOL immediate)
 				if (!description->linear && !description->cube_map)
 				{
 					if (!(program->texcoord_w_mask & (1UL << stage)))
+					{
 						key->raw_coordinates |= (unsigned char)(1U << stage);
+						if (coordinates_wrapped(state))
+							key->wrapped_coordinates |= (unsigned char)(1U << stage);
+					}
 					else
 					{
 						/* the program writes the coordinate's w: a
@@ -8075,6 +8971,201 @@ void WINAPI D3DDevice_SetVertexDataColor(INT reg, D3DCOLOR color)
 	set_attribute(reg, value[0], value[1], value[2], value[3]);
 }
 
+/* ---------- the movies
+
+bink_vita.c (and the harness's bink_null.c, HALO_TEST_MOVIE) write each
+movie frame into memory of the renderer's own that the GPU reads as it is
+(vita_gxm.c vgxm_movie_memory: user RAM mapped uncached, or CDRAM), a ring
+of up to four frames so that the CPU writes one the GPU is not reading
+(the GPU runs up to two frames behind the worker, a frame behind the
+game). The game's quad over its movie texture is not drawn
+(bink_playback.c): the frame is drawn at the present, over the picture, at
+the display's resolution, by the renderer's built-in blit programs - no
+program of the game's combiners, which a Vita without the shader compiler
+could not make (the movie's fragment program, e038da4e6676a9c4, was not in
+shaders.pak: black with the sound playing, 1.1.0 to 1.1.1-insider.11). */
+#define MOVIE_BUFFERS 4
+
+static struct
+{
+	unsigned char *base;
+	unsigned long width, height, pitch, frame_bytes, count;
+	int cdram_first;
+	/* the frame last written whole (-1: none yet), the one being written */
+	int latest, writing;
+	/* this frame's draw (halo_d3d_movie_draw), for its present */
+	int draw_pending;
+	float rect[4];
+	unsigned long frames, draws;
+} movie = { NULL, 0, 0, 0, 0, 0, 0, -1, -1, 0, { 0 }, 0, 0 };
+
+/* waits for the worker's frames and the GPU (the movie memory let go) */
+static void movie_wait_idle(void)
+{
+	if (worker_enabled > 0)
+		worker_wait_presented(0);
+	vgxm_wait_gpu_idle();
+}
+
+void halo_d3d_movie_release(void)
+{
+	movie.draw_pending = 0;
+	if (!movie.base)
+		return;
+	movie_wait_idle();
+	vgxm_movie_memory_free();
+	platform_log("movie: renderer frames let go (%lu written, %lu drawn)", movie.frames, movie.draws);
+	movie.base = NULL;
+	movie.width = movie.height = movie.count = 0;
+	movie.latest = movie.writing = -1;
+	movie.frames = movie.draws = 0;
+}
+
+void *halo_d3d_movie_buffer(unsigned long width, unsigned long height, long *pitch, int cdram_first)
+{
+	if (!device.gpu_ready || !width || !height || width > 2048 || height > 2048)
+		return NULL;
+	if (!movie.base || movie.width != width || movie.height != height || movie.cdram_first != cdram_first)
+	{
+		unsigned long row = ((width + 7) & ~7ul) * 4, frame_bytes = (row * height + 4095) & ~4095ul, count;
+		const char *kind = "";
+		void *memory = NULL;
+
+		halo_d3d_movie_release();
+		for (count = MOVIE_BUFFERS; count >= 1 && !memory; count--)
+			memory = vgxm_movie_memory(frame_bytes * count, cdram_first, &kind);
+		if (!memory)
+		{
+			static unsigned long logged;
+
+			if (logged++ < 4)
+				platform_log("movie: no memory for the renderer's movie frames (%lux%lu, %lu KB each): the game's texture is drawn",
+					width, height, frame_bytes / 1024);
+			return NULL;
+		}
+		count++;
+		memset(memory, 0, frame_bytes * count);
+		movie.base = memory;
+		movie.width = width;
+		movie.height = height;
+		movie.pitch = row;
+		movie.frame_bytes = frame_bytes;
+		movie.count = count;
+		movie.cdram_first = cdram_first;
+		movie.latest = movie.writing = -1;
+		platform_log("movie: path %s: %lu frames of %lux%lu (rows %lu bytes apart) at %p, in %s mapped for the GPU, drawn at "
+			"the present at the display's resolution by the renderer's blit (HALO_MOVIE_PATH)", cdram_first ? "cdram" : "uncached",
+			count, width, height, row, memory, kind);
+	}
+	movie.writing = (int)((unsigned long)(movie.latest + 1) % movie.count);
+	*pitch = (long)movie.pitch;
+	return movie.base + (unsigned long)movie.writing * movie.frame_bytes;
+}
+
+void halo_d3d_movie_buffer_done(void)
+{
+	if (!movie.base || movie.writing < 0)
+		return;
+	movie.latest = movie.writing;
+	movie.writing = -1;
+	movie.frames++;
+}
+
+int halo_d3d_movie_draw(float left, float top, float right, float bottom)
+{
+	if (!device.gpu_ready || !movie.base || movie.latest < 0)
+		return 0;
+	movie.rect[0] = left;
+	movie.rect[1] = top;
+	movie.rect[2] = right;
+	movie.rect[3] = bottom;
+	movie.draw_pending = 1;
+	return 1;
+}
+
+/* (D3DDevice_Present) the movie frame this frame drew, for the worker */
+static void movie_present_fill(struct render_record *command)
+{
+	command->present.movie_pixels = NULL;
+	if (!movie.draw_pending || !movie.base || movie.latest < 0)
+		return;
+	movie.draw_pending = 0;
+	movie.draws++;
+	command->present.movie_pixels = movie.base + (unsigned long)movie.latest * movie.frame_bytes;
+	command->present.movie_width = (unsigned short)movie.width;
+	command->present.movie_height = (unsigned short)movie.height;
+	command->present.movie_pitch = movie.pitch;
+	memcpy(command->present.movie_rect, movie.rect, sizeof(movie.rect));
+}
+
+/* ---------- Sharp interface
+
+HALO_SHARP_UI (the settings panel's Video row Sharp interface; on unless
+"0"): the frame's interface - the HUD, the menus, the text, the screen
+flashes, the letterbox - is drawn at the display's resolution, 960x544,
+whatever the render scale. The game marks where a window's 3D picture ends
+(rasterizer_xbox.c rasterizer_interface_begin); a record here tells the
+worker, which scales the 3D picture up to the display's size there
+instead of at the present, into the interface layer (a 960x544 target of
+its own, copied to the display at the present), and draws the back
+buffer's draws that follow there; at 100% there is no split (vita_gxm.c
+vgxm_interface_begin). What samples the back buffer after the
+split (the loading screen's blur of the last frame) reads the 3D picture.
+Read again when the panel changes a setting (halo_settings_generation). */
+extern volatile unsigned long halo_settings_generation;
+
+static int sharp_interface_enabled(void)
+{
+	static int enabled = -1;
+	static unsigned long settings_seen;
+
+	if (enabled < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_SHARP_UI");
+		int was = enabled;
+
+		settings_seen = halo_settings_generation;
+		enabled = !setting || !*setting || strcmp(setting, "0") != 0;
+		if (enabled != was)
+			platform_log("Direct3D: Sharp interface %s (HALO_SHARP_UI)", enabled ? "on: the interface at the display's resolution" :
+				"off: the interface at the render scale");
+	}
+	return enabled;
+}
+
+/* (render.c render_backdrop_frame_kept) whether the menu backdrop's 3D
+picture can be kept in the back buffer between frames: the Sharp interface
+draws the Online menus on its own layer (vita_gxm.c interface_full_scale
+splits there at any scale), never into the back buffer */
+int halo_menu_style_online(void);
+int halo_main_menu_loaded(void);
+int halo_d3d_backdrop_reuse_supported(void)
+{
+	return device.gpu_ready && sharp_interface_enabled() && halo_menu_style_online() && halo_main_menu_loaded();
+}
+
+/* (the frame the interface began in: once a frame) */
+static unsigned long interface_frame = (unsigned long)-1;
+
+void halo_d3d_interface_begin(void)
+{
+	struct render_record *command;
+
+	if (!device.gpu_ready || interface_frame == device.frame || !sharp_interface_enabled())
+		return;
+	/* (only while the game draws into the back buffer: the record names it) */
+	if (!device.render_target || device.render_target->Data != device.back_buffer.Data)
+		return;
+	interface_frame = device.frame;
+	command = command_begin(_command_interface);
+	if (!command)
+		return;
+	command->targets = record_targets_current(&device.back_buffer, NULL);
+	if (!command->targets)
+		return;
+	command_commit(command);
+}
+
 /* ---------- clearing */
 
 static void record_clear(unsigned long flags, D3DCOLOR color, float z, DWORD stencil, const long clip[4])
@@ -8308,6 +9399,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			targets->color_surface = device.back_buffer;
 			targets->color_valid = TRUE;
 			command->targets = targets;
+			movie_present_fill(command);
 			command->present.screenshot = screenshot_every > 0 && device.frame && device.frame % (unsigned long)screenshot_every == 0;
 			{
 				/* (debug) HALO_SCREENSHOT_FIRST / _LAST=n: only the frames
@@ -8340,6 +9432,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			command->present.frame = device.frame;
 			frames_requested++;
 			command_commit(command);
+			wait_stats_report();
 		}
 		if (halo_trace_active())
 			platform_log("trace: present %lu drain", device.frame);
@@ -8451,7 +9544,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	{
 		platform_log("frame %lu: %lu draws, %lu immediate, %lu clears, %lu target changes; skipped %lu no program, "
 			"%lu no target, %lu shader; %lu same-state; %lu KB copied (streams %lu, immediate %lu, indices %lu) + %lu KB uniforms, %lu KB direct, %lu KB textures; record %.3f ms/frame, "
-			"worker %.3f ms/frame (draw %.2f clear %.2f present %.2f), wait at present %.2f ms/frame; %lu vertex + %lu fragment uniform snapshots/frame; %s; %lu self-sampled draws/frame, %lu computed-coordinate draws/frame, alpha tests kept %lu dropped %lu per frame",
+			"worker %.3f ms/frame (draw %.2f clear %.2f present %.2f), wait at present %.2f ms/frame; %lu vertex + %lu fragment uniform snapshots/frame; %s; %lu self-sampled draws/frame, %lu computed-coordinate draws/frame, alpha tests kept %lu dropped %lu per frame (%lu kept without a discard)",
 			device.frame, stats.draws / stats.presents, stats.immediate_draws / stats.presents,
 			stats.clears / stats.presents, stats.target_changes / stats.presents, stats.skipped_no_program,
 			stats.skipped_no_target, stats.skipped_shader, stats.same_state_draws / stats.presents,
@@ -8465,7 +9558,8 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 			present_wait_time / 1000.0 / stats.presents,
 			stats.vertex_snapshots / stats.presents, stats.fragment_snapshots / stats.presents, vgxm_counts(),
 			stats.self_sampled / stats.presents, stats.computed_draws / stats.presents,
-			stats.alpha_tested_draws / stats.presents, stats.dropped_alpha_tests / stats.presents);
+			stats.alpha_tested_draws / stats.presents, stats.dropped_alpha_tests / stats.presents,
+			stats.neutral_alpha_tests / stats.presents);
 		{
 			char line[256];
 			int n = 0, source, destination;
@@ -8544,7 +9638,7 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	vertical_blank_start();
 	pthread_mutex_lock(&vertical_blank_lock);
 	while (pending_flips >= 2)
-		pthread_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
+		halo_cond_wait(&vertical_blank_condition, &vertical_blank_lock);
 	pending_flips++;
 	pthread_mutex_unlock(&vertical_blank_lock);
 }

@@ -17,8 +17,11 @@ their Cg; they are never compiled.
 #include "platform.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
+#include "vita_controls.h"
 
+#include <errno.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <stddef.h>
 #include <sched.h>
 #include <stdio.h>
@@ -94,6 +97,110 @@ int vita_host_thread_start_priority(const char *name, void (*function)(void *), 
 	return vita_host_thread_start(name, function, argument, core);
 }
 
+/* (vita_host.h) the Vita's kernel semaphores as POSIX ones */
+#define WAKE_COUNT 1024
+#define WAKE_MAXIMUM 8
+static sem_t wakes[WAKE_COUNT];
+/* the slots taken (halo_cond.h's come and go with the Xbox handles) */
+static unsigned char wake_used[WAKE_COUNT];
+static pthread_mutex_t wake_slots = PTHREAD_MUTEX_INITIALIZER;
+
+int vita_host_wake_create(const char *name)
+{
+	int id;
+
+	(void)name;
+	pthread_mutex_lock(&wake_slots);
+	for (id = 0; id < WAKE_COUNT && wake_used[id]; id++)
+		;
+	if (id < WAKE_COUNT && sem_init(&wakes[id], 0, 0) == 0)
+		wake_used[id] = 1;
+	else
+		id = -1;
+	pthread_mutex_unlock(&wake_slots);
+	return id;
+}
+
+void vita_host_wake_delete(int id)
+{
+	if (id < 0 || id >= WAKE_COUNT)
+		return;
+	pthread_mutex_lock(&wake_slots);
+	if (wake_used[id])
+	{
+		sem_destroy(&wakes[id]);
+		wake_used[id] = 0;
+	}
+	pthread_mutex_unlock(&wake_slots);
+}
+
+int vita_host_wake_wait(int id, unsigned long timeout_us)
+{
+	struct timespec deadline;
+
+	if (id < 0 || id >= WAKE_COUNT)
+		return -1;
+	if (!timeout_us)
+	{
+		while (sem_wait(&wakes[id]) != 0)
+			if (errno != EINTR)
+				return -1;
+		return 0;
+	}
+	clock_gettime(CLOCK_REALTIME, &deadline);
+	deadline.tv_sec += (time_t)(timeout_us / 1000000UL);
+	deadline.tv_nsec += (long)(timeout_us % 1000000UL) * 1000L;
+	if (deadline.tv_nsec >= 1000000000L)
+	{
+		deadline.tv_nsec -= 1000000000L;
+		deadline.tv_sec++;
+	}
+	while (sem_timedwait(&wakes[id], &deadline) != 0)
+	{
+		if (errno == ETIMEDOUT)
+			return 1;
+		if (errno != EINTR)
+			return -1;
+	}
+	return 0;
+}
+
+int vita_host_wake_poll(int id)
+{
+	if (id < 0 || id >= WAKE_COUNT)
+		return 1;
+	return sem_trywait(&wakes[id]) != 0;
+}
+
+void vita_host_wake_signal(int id)
+{
+	int value = 0;
+
+	if (id < 0 || id >= WAKE_COUNT)
+		return;
+	/* (as the Vita's: no more than its most) */
+	if (sem_getvalue(&wakes[id], &value) == 0 && value >= WAKE_MAXIMUM)
+		return;
+	sem_post(&wakes[id]);
+}
+
+/* (vita_host.h) no clocks to set here: the level asked for, logged, for
+the governor's tests (d3d8_gxm.c clocks_governor) */
+void vita_host_clocks_start(void)
+{
+}
+
+void vita_host_clocks_set(int level)
+{
+	static int current;
+	static const char *const names[3] = { "play", "loading", "idle" };
+
+	if (level == current || level < VITA_CLOCKS_PLAY || level > VITA_CLOCKS_IDLE)
+		return;
+	current = level;
+	platform_log("clocks: %s (harness: none set)", names[level]);
+}
+
 void vita_host_cpu_usage(unsigned char busy[4])
 {
 	busy[0] = busy[1] = busy[2] = busy[3] = 255;
@@ -106,6 +213,35 @@ void vita_host_pad_read(struct vita_host_pad *pad)
 {
 	memset(pad, 0, sizeof(*pad));
 	pad->lx = pad->ly = pad->rx = pad->ry = 128;
+}
+
+/* (the menus' touch pointer, d3d8_gxm.c halo_ui_pointer_update: no front
+screen here, no settings panel; vita_controls.c is the Vita's) */
+int vita_settings_panel_open(void)
+{
+	return 0;
+}
+
+int vita_host_front_touches(struct vita_touch_contact *out, int maximum)
+{
+	(void)out;
+	(void)maximum;
+	return 0;
+}
+
+int vita_touch_pointer(struct vita_touch_pointer *pointer, const struct vita_touch_contact *contacts, int count,
+	unsigned long long now_us, int screen_width, short *x, short *y, int *tap, int *moved)
+{
+	(void)pointer;
+	(void)contacts;
+	(void)count;
+	(void)now_us;
+	(void)screen_width;
+	(void)x;
+	(void)y;
+	*tap = 0;
+	*moved = 0;
+	return 0;
 }
 
 /* ---------- the renderer */
@@ -126,6 +262,10 @@ static struct
 	unsigned int target_count;
 	unsigned long draws, clears, presents, scene_draws;
 	unsigned long color_target, depth_target;
+	/* the interface drawn on the display (vgxm_interface_begin): the
+	target whose draws go there until the present */
+	int interface_active, interface_layer;
+	unsigned long interface_source;
 } null;
 
 #define ALIGN(value, alignment) (((value) + (alignment) - 1) & ~((alignment) - 1))
@@ -356,8 +496,20 @@ unsigned long vgxm_shader_get(const char *source, int fragment)
 	return ++null.shader_count;
 }
 
+/* (tests) HALO_NULL_REFUSE=text: a program whose Cg holds the text does
+not compile, as the device's compiler refuses one (run_wrapped_coordinates_test.sh) */
 unsigned long vgxm_shader_request(const char *source, int fragment)
 {
+	static const char *refuse = (const char *)-1;
+
+	if (refuse == (const char *)-1)
+	{
+		refuse = getenv("HALO_NULL_REFUSE");
+		if (refuse && !*refuse)
+			refuse = NULL;
+	}
+	if (refuse && strstr(source, refuse))
+		return 0;
 	return vgxm_shader_get(source, fragment);
 }
 
@@ -491,7 +643,7 @@ float vgxm_render_scale(void)
 		const char *setting = getenv("HALO_RENDER_SCALE");
 
 		null_render_scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f;
-		if (null_render_scale < 0.5f || null_render_scale > 1.0f)
+		if (!(null_render_scale >= 0.5f && null_render_scale <= 1.0f))
 			null_render_scale = 1.0f;
 	}
 	return null_render_scale;
@@ -586,11 +738,55 @@ void vgxm_frame_submit_begin(void)
 {
 }
 
+/* (no GPU to time: d3d8_gxm.c's HALO_DYNRES_SIM stands in for the dynamic
+resolution) HALO_NULL_GPU_US_PER_DRAW=n: a stand-in GPU time of n us a draw
+for each presented frame, numbered as the Vita's, for the GPU census's test
+(HALO_GPU_CENSUS) */
+static struct
+{
+	int us_per_draw;
+	unsigned long frame_draws, tag;
+	unsigned int written, read;
+	struct vgxm_gpu_frame frames[16];
+} null_gpu = { -1 };
+
+static void null_gpu_present(void)
+{
+	if (null_gpu.us_per_draw < 0)
+	{
+		const char *setting = getenv("HALO_NULL_GPU_US_PER_DRAW");
+
+		null_gpu.us_per_draw = setting && atoi(setting) > 0 ? atoi(setting) : 0;
+	}
+	if (null_gpu.us_per_draw)
+	{
+		struct vgxm_gpu_frame *frame = &null_gpu.frames[null_gpu.written % 16];
+
+		memset(frame, 0, sizeof(*frame));
+		frame->frame = (unsigned int)null.presents + 1;
+		frame->gpu_ms = (float)null_gpu.frame_draws * (float)null_gpu.us_per_draw / 1000.0f;
+		frame->tail_ms = frame->gpu_ms;
+		frame->interval_ms = 33.3f;
+		frame->scale = 1.0f;
+		frame->tag = null_gpu.tag;
+		null_gpu.written++;
+		if (null_gpu.written - null_gpu.read > 16)
+			null_gpu.read = null_gpu.written - 16;
+	}
+	null_gpu.frame_draws = 0;
+}
+
+void vgxm_frame_tag(unsigned long tag)
+{
+	null_gpu.tag = tag;
+}
+
 int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame)
 {
-	/* (no GPU to time: d3d8_gxm.c's HALO_DYNRES_SIM stands in) */
-	(void)frame;
-	return 0;
+	if (null_gpu.read == null_gpu.written)
+		return 0;
+	*frame = null_gpu.frames[null_gpu.read++ % 16];
+	return 1;
 }
 
 void vgxm_overlay_dynamic(int dynamic)
@@ -870,7 +1066,19 @@ static struct
 	int texture_scene_since_wait;
 	unsigned int written_serial[MAXIMUM_TARGETS + 1];
 	unsigned long scenes, waits, splits, frames;
+	/* (Sharp interface) the frames that drew their interface on the
+	display, and the display scenes it began again */
+	unsigned long interface_frames, interface_again;
+	/* (vita_gxm.c's interface layer) the frames whose interface went to
+	the layer, to the display buffer, or was not split (100%), and the
+	scenes begun on the display buffer before the present (each one waits
+	for the display's flip, double buffered) and on the layer */
+	unsigned long interface_layer_frames, interface_display_frames, interface_full_frames;
+	unsigned long display_midframe_scenes, layer_scenes;
 } scenes;
+
+/* the display as the interface's target (vita_gxm.c DISPLAY_TARGET) */
+#define DISPLAY_TARGET (MAXIMUM_TARGETS + 1)
 
 static unsigned long scene_target(unsigned long color)
 {
@@ -889,8 +1097,35 @@ static int scene_dependency_needed(unsigned int open_serial)
 
 static void scene_ensure(void)
 {
-	unsigned long wanted = scene_target(null.color_target);
+	/* (the interface's draws into the back buffer: on the display, with
+	no depth buffer - vita_gxm.c vgxm_set_targets) */
+	int to_display = null.interface_active && null.color_target && null.color_target == null.interface_source;
+	unsigned long wanted = to_display ? DISPLAY_TARGET : scene_target(null.color_target);
 
+	if (to_display)
+	{
+		/* (the display scene, as vita_gxm.c display_scene_begin: no
+		dependency set, a wait only for what its draw samples) */
+		if (scenes.in_scene && scenes.scene_color == DISPLAY_TARGET && scenes.scene_draws < 300)
+			goto done;
+		scenes.interface_again++;
+		if (null.interface_layer)
+			scenes.layer_scenes++;
+		else
+			scenes.display_midframe_scenes++;
+		scenes.scene_serial++;
+		if (scene_dependency_needed(0))
+		{
+			scenes.wait_serial = scenes.scene_serial;
+			scenes.texture_scene_since_wait = 0;
+		}
+		scenes.in_scene = 1;
+		scenes.scene_draws = 0;
+		scenes.scene_cell = 0;
+		scenes.scene_color = DISPLAY_TARGET;
+		scenes.scene_depth = 0;
+		goto done;
+	}
 	if (scenes.in_scene && scenes.scene_color == wanted && scenes.scene_depth == null.depth_target)
 	{
 		if (scene_dependency_needed(scenes.scene_serial))
@@ -937,6 +1172,10 @@ static void scenes_present(unsigned long color_target)
 {
 	scenes.in_scene = 0;
 	scenes.presented_target = color_target;
+	if (null.interface_active)
+		scenes.interface_frames++;
+	null.interface_active = 0;
+	null.interface_layer = 0;
 	if (++scenes.frames == 300)
 	{
 		static int enabled = -1;
@@ -944,10 +1183,70 @@ static void scenes_present(unsigned long color_target)
 		if (enabled < 0)
 			enabled = getenv("HALO_GPU_STATS") && atoi(getenv("HALO_GPU_STATS"));
 		if (enabled)
-			platform_log("gxm-null scenes: %.1f scenes/frame (%.1f splits), %.1f scene waits/frame, %.2f scenes begun again to wait/frame",
-				scenes.scenes / 300.0, 0.0, scenes.waits / 300.0, scenes.splits / 300.0);
+			platform_log("gxm-null scenes: %.1f scenes/frame (%.1f splits), %.1f scene waits/frame, %.2f scenes begun again to wait/frame; "
+				"Sharp interface on the display in %lu of 300 frames, %.2f display scenes begun again/frame; "
+				"interface layer %lu, display buffer %lu, 100%% (no split) %lu frames; display buffer scenes before the present "
+				"%.2f/frame, interface layer scenes %.2f/frame",
+				scenes.scenes / 300.0, 0.0, scenes.waits / 300.0, scenes.splits / 300.0, scenes.interface_frames,
+				scenes.interface_frames ? (scenes.interface_again - scenes.interface_frames) / 300.0 : 0.0,
+				scenes.interface_layer_frames, scenes.interface_display_frames, scenes.interface_full_frames,
+				scenes.display_midframe_scenes / 300.0, scenes.layer_scenes / 300.0);
 		scenes.scenes = scenes.waits = scenes.splits = scenes.frames = 0;
+		scenes.interface_frames = scenes.interface_again = 0;
+		scenes.interface_layer_frames = scenes.interface_display_frames = scenes.interface_full_frames = 0;
+		scenes.display_midframe_scenes = scenes.layer_scenes = 0;
 	}
+}
+
+/* (as vita_gxm.c's: the back buffer's draws from here to the present go
+to the interface layer - or the display, HALO_SHARP_UI_LAYER=0 - counted
+in the scene census, the draw hash unchanged; no split at 100%,
+HALO_SHARP_UI_FULL=1 splitting anyway) */
+void vgxm_interface_begin(unsigned long color_target)
+{
+	static int layer_enabled = -1, split_anyway = -1;
+
+	if (!null.ready || null.interface_active || !color_target || color_target > MAXIMUM_TARGETS)
+		return;
+	if (layer_enabled < 0)
+	{
+		const char *setting = getenv("HALO_SHARP_UI_LAYER");
+
+		layer_enabled = !setting || !*setting || atoi(setting) != 0;
+		setting = getenv("HALO_SHARP_UI_FULL");
+		split_anyway = setting && atoi(setting) != 0;
+	}
+	if (!split_anyway && null_targets[color_target].width == null_targets[color_target].asked_width &&
+		vgxm_render_rect() >= 1.0f)
+	{
+		scenes.interface_full_frames++;
+		return;
+	}
+	null.interface_active = 1;
+	null.interface_source = color_target;
+	null.interface_layer = layer_enabled;
+	if (layer_enabled)
+	{
+		scenes.interface_layer_frames++;
+		scenes.layer_scenes++;
+	}
+	else
+	{
+		scenes.interface_display_frames++;
+		scenes.display_midframe_scenes++;
+	}
+	/* (the interface's scene, the picture scaled into it, begun here) */
+	scenes.in_scene = 0;
+	scenes.presented_target = color_target;
+	scenes.scene_serial++;
+	scenes.wait_serial = scenes.scene_serial;
+	scenes.texture_scene_since_wait = 0;
+	scenes.interface_again++;
+	scenes.in_scene = 1;
+	scenes.scene_draws = 0;
+	scenes.scene_cell = 0;
+	scenes.scene_color = DISPLAY_TARGET;
+	scenes.scene_depth = 0;
 }
 
 /* (debug) a name for a target, for HALO_DRAW_HASH=4: the surface and the
@@ -1395,6 +1694,7 @@ void vgxm_draw(const struct vgxm_draw *draw)
 		return;
 	null.draws++;
 	null.scene_draws++;
+	null_gpu.frame_draws++;
 	scene_ensure();
 	if (draw_hash_enabled() && !draw_writes_nothing(draw))
 		draw_hash_add(draw);
@@ -1442,8 +1742,74 @@ void vgxm_wait_gpu_idle(void)
 	/* (no GPU: the draws were done when they were made) */
 }
 
+/* (as vita_gxm.c's: the movies' frames in memory of the renderer's own,
+drawn at the present - logged here with a texel of each frame, so the
+tests see what the GPU would read: HALO_TEST_MOVIE) */
+static struct block movie_memory;
+static struct
+{
+	const void *pixels;
+	unsigned long width, height, pitch;
+	float rect[4];
+	int pending;
+	unsigned long drawn;
+} movie_frame;
+
+void vgxm_movie_memory_free(void)
+{
+	if (!movie_memory.base)
+		return;
+	memory_os_free(&movie_memory);
+	memset(&movie_memory, 0, sizeof(movie_memory));
+	memset(&movie_frame, 0, sizeof(movie_frame));
+}
+
+void *vgxm_movie_memory(unsigned long bytes, int cdram_first, const char **kind)
+{
+	vgxm_movie_memory_free();
+	bytes = (bytes + 4095) & ~4095ul;
+	if (!memory_os_allocate(!cdram_first, (unsigned int)bytes, "movie frames", &movie_memory))
+	{
+		memset(&movie_memory, 0, sizeof(movie_memory));
+		return NULL;
+	}
+	if (kind)
+		*kind = cdram_first ? "CDRAM" : "user RAM, uncached (USER_RW_UNCACHE)";
+	return movie_memory.base;
+}
+
+void vgxm_movie_present(const void *pixels, unsigned long width, unsigned long height, unsigned long pitch,
+	const float rect[4])
+{
+	if (!pixels || !width || !height)
+		return;
+	movie_frame.pixels = pixels;
+	movie_frame.width = width;
+	movie_frame.height = height;
+	movie_frame.pitch = pitch;
+	memcpy(movie_frame.rect, rect, sizeof(movie_frame.rect));
+	movie_frame.pending = 1;
+}
+
+static void movie_draw(void)
+{
+	if (!movie_frame.pending)
+		return;
+	movie_frame.pending = 0;
+	if (movie_frame.drawn++ % 60 == 0)
+	{
+		const unsigned char *row = (const unsigned char *)movie_frame.pixels + movie_frame.height / 3 * movie_frame.pitch;
+		unsigned int texel = *(const unsigned int *)(row + movie_frame.width / 16 * 4);
+
+		platform_log("gxm-null: movie drawn at the present (%lu): %lux%lu from %p over %.3f,%.3f-%.3f,%.3f, texel %08x",
+			movie_frame.drawn, movie_frame.width, movie_frame.height, movie_frame.pixels, movie_frame.rect[0],
+			movie_frame.rect[1], movie_frame.rect[2], movie_frame.rect[3], texel);
+	}
+}
+
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height)
 {
+	movie_draw();
 	(void)color_target;
 	(void)width;
 	(void)height;
@@ -1472,6 +1838,7 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 		draw_hash = 1469598103934665603ull;
 		draw_hash_draws = 0;
 	}
+	null_gpu_present();
 	null.presents++;
 	null.scene_draws = 0;
 	null_worker_index = (null_worker_index + 1) % RING_COUNT;

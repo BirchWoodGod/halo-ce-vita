@@ -201,12 +201,18 @@ symbols in this file:
 #include "networking/network_game_manager.h"
 #include "networking/network_messages.h"
 #include "map_share.h"
+#include "forge.h"
+#include "infection_net.h"
 #include "network_game_record.h"
+#include "flame_net.h"
 #include "network_wire.h"
 #include "net_fuzz_twin.h"
 
 /* port/linux/game/network_distributed.c's */
 void network_distributed_handle_message(long machine_index, word const *message, word size);
+/* the platform layer's message box (a game the host's record plays that this
+build does not) */
+void platform_show_message(char const *title, char const *message);
 
 /* ---------- constants */
 
@@ -454,6 +460,12 @@ static boolean network_game_client_handle_message_server_graceful_game_exit_post
 /* ---------- globals */
 
 /* ---------- public code */
+
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean network_connection_last_read_was_unreliable(void);
 
 boolean network_game_client_handle_message(
 	struct network_game_client *client,
@@ -731,6 +743,59 @@ boolean network_game_client_handle_message(
 						}
 						break;
 
+					/* port: network Forge's hello (port/linux/game/forge_net.inc),
+					the host's alone, and never on the crossplay wire (a PC
+					host has none) */
+					/* port: the game's rules the host's game needs
+					(port/linux/game/infection_net.c), the host's alone, never on
+					the crossplay wire */
+					/* port: the flaming helmet's proofs (port/linux/game/
+					flame_net.c), the host's alone, never on the crossplay wire */
+					case _message_server_flame:
+						if (network_wire_crossplay())
+						{
+							network_event("ignoring a flame message on the crossplay wire");
+						}
+						else if (network_game_client_address_matches_server(client, source_address))
+						{
+							flame_net_client_handle_message(client, message, message_size);
+						}
+						else
+						{
+							network_event("ignoring a flame message from a system that is not the host");
+						}
+						break;
+
+					case _message_server_game_rules:
+						if (network_wire_crossplay())
+						{
+							network_event("ignoring a game rules message on the crossplay wire");
+						}
+						else if (network_game_client_address_matches_server(client, source_address))
+						{
+							game_rules_net_client_handle_message(client, message, message_size);
+						}
+						else
+						{
+							network_event("ignoring a game rules message from a system that is not the host");
+						}
+						break;
+
+					case _message_server_forge:
+						if (network_wire_crossplay())
+						{
+							network_event("ignoring a Forge message on the crossplay wire");
+						}
+						else if (network_game_client_address_matches_server(client, source_address))
+						{
+							forge_net_client_handle_lobby_message(client, message, message_size);
+						}
+						else
+						{
+							network_event("ignoring a Forge message from a system that is not the host");
+						}
+						break;
+
 					default:
 						network_event(
 							"unknown packet type received from system @ address: %s",
@@ -976,7 +1041,9 @@ static boolean network_game_client_handle_message_server_machine_rejected(
 /* the game settings record as its pieces arrive, as the wire sends it (the
 legacy Vita wire's or the crossplay wire's: network_game_record.c); it is
 decoded and applied once the last piece is in */
-static byte network_game_client_settings_staging[HALO_PORT_NETWORK_GAME_SIZE];
+/* (room for a record of OpenCE's network version 35 on, 16 bytes longer:
+network_game_record_wire_size) */
+static byte network_game_client_settings_staging[HALO_PORT_NETWORK_GAME_SIZE + 16];
 static long network_game_client_settings_staging_size = 0;
 static struct network_game network_game_client_settings_record;
 
@@ -985,7 +1052,10 @@ static boolean network_game_client_receive_game_settings_piece(
 	struct message_server_game_settings_update const *piece)
 {
 	boolean result = TRUE;
-	long record_size = network_game_record_size(network_game_record_format_current());
+	/* port: the record's size by the host's version (a crossplay host's 16
+	bytes longer from OpenCE's 35: network_game_record.c) */
+	unsigned int record_version = network_wire_version();
+	long record_size = network_game_record_wire_size(network_game_record_format_current(), record_version);
 
 	if (piece->total_size != record_size ||
 		piece->length > sizeof(piece->data) ||
@@ -1031,10 +1101,13 @@ static boolean network_game_client_receive_game_settings_piece(
 #endif
 				/* port: a record a host sent, checked (a PC host's options
 				and co-op switches on the crossplay wire) */
-				if (!network_game_record_decode(network_game_record_format_current(), network_game_client_settings_staging,
-					piece->total_size, &network_game_client_settings_record, &why))
+				if (!network_game_record_decode_version(network_game_record_format_current(), record_version,
+					network_game_client_settings_staging, piece->total_size, &network_game_client_settings_record, &why))
 				{
 					network_event("refused the host's game settings: %s", why ? why : "");
+					/* (one of OpenCE's own game types: the player told which) */
+					if (why && !strncmp(why, "OpenCE's ", 9) && strstr(why, "game type"))
+						platform_show_message("Can't join this game", why);
 					result = FALSE;
 				}
 				else

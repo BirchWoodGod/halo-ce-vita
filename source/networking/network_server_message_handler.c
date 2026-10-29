@@ -259,10 +259,15 @@ symbols in this file:
 #include "networking/network_game_manager.h"
 #include "networking/network_game_protocol.h"
 #include "networking/network_messages.h"
+#include "flame_net.h"
 #include "networking/network_server_manager_internal.h"
 #include "networking/network_server_message_handler.h"
 #include "text/unicode.h"
 #include "map_share.h"
+#include "forge.h"
+#include "infection_net.h"
+#include "party_net.h"
+#include "dedicated_server.h"
 #include "network_game_record.h"
 #include "network_wire.h"
 #include "main/main.h"
@@ -903,9 +908,10 @@ boolean network_distributed_server_send_to_machine(
 		return FALSE;
 	/* from the game's public datagram endpoint (the one clients send
 	their game updates to) to the client's, at the address its
-	connection comes from (the write swaps the header in place) */
-	network_connection_get_address(connection, &address, NULL);
-	address.port = NETWORK_GAME_CLIENT_PORT;
+	connection comes from (the write swaps the header in place): at the
+	standard client port, or (OpenCE's network version 31) the port its
+	datagrams come from */
+	network_game_server_datagram_destination(server, machine, &address);
 	csmemcpy(buffer, message, size);
 	return network_game_server_write(network_game_server_get_connection(server), buffer, size, &address, 0);
 }
@@ -1387,7 +1393,82 @@ boolean network_game_server_handle_client_message(
 						/* port: map sharing (port/linux/game/map_share.c),
 						from a machine joined to the game (checked above) */
 						case _message_client_map_download:
+							/* port: never on the crossplay wire (network_wire.h): map
+							sharing is this build's own, which no PC machine has, and
+							this build's clients drop a host's on that wire; a type 35
+							from a PC client is not ours to answer (docs/crossplay.md
+							7.4) */
+							if (network_wire_crossplay())
+							{
+								network_event("ignoring a map share request on the crossplay wire");
+								break;
+							}
 							map_share_server_handle_request(
+								server,
+								machine,
+								message,
+								message_buffer_size);
+							break;
+
+						/* port: network Forge's answer to the host's hello
+						(port/linux/game/forge_net.inc), from a machine joined
+						to the game (checked above); never on the crossplay
+						wire, which no Forge game is hosted on */
+						/* port: a joiner's answer to the game's rules
+						(port/linux/game/infection_net.c), from a machine joined
+						to the game (checked above); never on the crossplay wire */
+						/* port: the flaming helmet's proofs (port/linux/game/
+						flame_net.c), from a machine joined to the game (checked
+						above), in any state; never on the crossplay wire */
+						case _message_client_flame:
+							if (network_wire_crossplay())
+							{
+								network_event("ignoring a flame message on the crossplay wire");
+								break;
+							}
+							flame_net_server_handle_message(
+								server,
+								machine,
+								message,
+								message_buffer_size);
+							break;
+
+						case _message_client_game_rules:
+							if (network_wire_crossplay())
+							{
+								network_event("ignoring a game rules answer on the crossplay wire");
+								break;
+							}
+							game_rules_net_server_handle_message(
+								server,
+								machine,
+								message,
+								message_buffer_size);
+							break;
+
+						/* port: a joiner's party's team token (party_net.h),
+						from a machine joined to the game (checked above);
+						never on the crossplay wire */
+						case _message_client_party:
+							if (network_wire_crossplay())
+							{
+								network_event("ignoring a party message on the crossplay wire");
+								break;
+							}
+							party_net_server_handle_message(
+								server,
+								machine,
+								message,
+								message_buffer_size);
+							break;
+
+						case _message_client_forge:
+							if (network_wire_crossplay())
+							{
+								network_event("ignoring a Forge answer on the crossplay wire");
+								break;
+							}
+							forge_net_server_handle_lobby_message(
 								server,
 								machine,
 								message,
@@ -1621,6 +1702,9 @@ boolean network_game_server_handle_datagram(
 
 						network_game_server_client_machine_heard(server, client_machine);
 						network_game_server_get_client_machine(server, client_machine, &machine_index);
+						/* (port: where its datagrams come from, which a game of
+						OpenCE's 31 answers at) */
+						network_game_server_note_datagram_source(server, client_machine, source_address);
 						network_distributed_handle_message(machine_index, message, datagram_size);
 					}
 				}
@@ -1696,6 +1780,16 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 	searches no more */
 	static unsigned long last_advertised_time = 0;
 	unsigned long now = system_milliseconds();
+	/* port: (OpenCE's network version 31) a search from another port than
+	the client port, a second copy's on one computer, is answered at its
+	address and port as well as by the broadcast, which never reaches it;
+	no more than UNICAST_ANSWERS_PER_INTERVAL in an advertisement interval
+	(a search's source can be anyone's: no flood of answers to it) */
+	enum { UNICAST_ANSWERS_PER_INTERVAL = 8 };
+	static unsigned long unicast_window_time = 0;
+	static long unicast_answers = 0;
+	boolean broadcast_due;
+	boolean unicast = FALSE;
 
 	match_assert(
 		"c:\\halo\\SOURCE\\networking\\network_server_message_handler.c",
@@ -1706,7 +1800,22 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 		struct network_game *game = network_game_server_get_game(server);
 
 		/* (the time taken only by a search answered) */
-		if (game && last_advertised_time && now - last_advertised_time < GAME_ADVERTISEMENT_INTERVAL)
+		broadcast_due = !(last_advertised_time && now - last_advertised_time < GAME_ADVERTISEMENT_INTERVAL);
+		if (game && network_wire_v31_rules() && source_address->address.long_words[0] && source_address->port &&
+			source_address->port != NETWORK_GAME_CLIENT_PORT)
+		{
+			if (!unicast_window_time || now - unicast_window_time >= GAME_ADVERTISEMENT_INTERVAL)
+			{
+				unicast_window_time = now ? now : 1;
+				unicast_answers = 0;
+			}
+			if (unicast_answers < UNICAST_ANSWERS_PER_INTERVAL)
+			{
+				unicast_answers++;
+				unicast = TRUE;
+			}
+		}
+		if (game && !broadcast_due && !unicast)
 			return TRUE;
 		if (game)
 		{
@@ -1757,19 +1866,32 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 			/* the native builds' network version and netcode (a client
 			refuses a host of another version, or of the lockstep netcode
 			older builds had: network_client_manager.c) */
-			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET] = (byte)(network_wire_version() & 0xFF);
-			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] = (byte)(network_wire_version() >> 8);
+			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET] =
+				(byte)(network_wire_announced_version(network_wire_crossplay()) & 0xFF);
+			advertisement.reserved[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] =
+				(byte)(network_wire_announced_version(network_wire_crossplay()) >> 8);
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] =
 				HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG;
 			/* (the crossplay wire's (network_wire.h), as OpenCE's hosts make
-			it: a game under way flagged so, nothing of the Vitas'. Only a
-			test's stand-in for a PC host gets here: a Vita hosts no game on
-			that wire, network_wire_hosting_refused) */
+			it: a game under way flagged so; and a Vita's game (one hosted for
+			Vitas and PC) marked as a Vita's, a bit PC builds ignore, so that
+			the Vitas' lists tag it VITA. A test's stand-in for a PC host is
+			not marked) */
 			if (network_wire_crossplay())
 			{
 				if (network_game_server_get_state(server, NULL) != _network_game_server_state_pregame)
 				{
 					advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_IN_PROGRESS_FLAG;
+				}
+				if (network_wire_host_vita())
+				{
+					advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= NETWORK_WIRE_ADVERTISED_VITA_HOST_FLAG;
+					/* (... the PC build's: network_wire.h) */
+					if (network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC)
+					{
+						advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |=
+							NETWORK_WIRE_ADVERTISED_CROSSPLAY_PC_HOST_FLAG;
+					}
 				}
 			}
 			else
@@ -1777,6 +1899,12 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 #ifdef HALO_PORT_VITA_NETWORK
 			/* (Vitas play only Vitas: halo_port_limits.h) */
 			advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= HALO_PORT_ADVERTISED_VITA_FLAG;
+			/* (this project's marks, bits older builds ignore: the host is the
+			PC build; its game takes Vitas only - network_wire.h) */
+			if (network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC)
+				advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= NETWORK_WIRE_ADVERTISED_PC_HOST_FLAG;
+			if (network_wire_host_audience() == NETWORK_AUDIENCE_VITAS)
+				advertisement.reserved[HALO_PORT_ADVERTISED_FLAGS_OFFSET] |= NETWORK_WIRE_ADVERTISED_VITAS_ONLY_FLAG;
 #endif
 			}
 			/* (co-op: the lists show the level and its difficulty; the legacy
@@ -1807,17 +1935,38 @@ static boolean network_game_server_handle_message_client_broadcast_game_search(
 				struct network_connection *connection =
 					network_game_server_get_connection(server);
 
-				last_advertised_time = now ? now : 1;
-				result = network_game_server_write(
-					connection,
-					reply,
-					message_size,
-					&address,
-					0);
-				if (!result)
+				/* (port: the write swaps the header in place, so the answer
+				at a searcher's port goes from a copy of the message as made) */
+				byte copy[NETWORK_MESSAGE_BUFFER_SIZE];
+
+				if (unicast && message_size <= sizeof(copy))
+					csmemcpy(copy, reply, message_size);
+				else
+					unicast = FALSE;
+				if (broadcast_due)
 				{
-					network_event(
-						"network_game_server_write() failed in handle_message_client_broadcast_game_search()");
+					last_advertised_time = now ? now : 1;
+					result = network_game_server_write(
+						connection,
+						reply,
+						message_size,
+						&address,
+						0);
+					if (!result)
+					{
+						network_event(
+							"network_game_server_write() failed in handle_message_client_broadcast_game_search()");
+					}
+				}
+				if (unicast)
+				{
+					struct transport_address searcher = *source_address;
+
+					if (!network_game_server_write(connection, copy, message_size, &searcher, 0))
+					{
+						network_event("the game's advertisement to a search from port %u failed",
+							(unsigned int)searcher.port);
+					}
 				}
 			}
 			else
@@ -1919,15 +2068,34 @@ static boolean network_game_server_handle_message_client_join_game_request(
 	boolean result = TRUE;
 	/* (or a distributed game in progress: network_game_server_accepts_late_joins) */
 	boolean late_join = network_game_server_accepts_late_joins(server);
+#ifdef HALO_LINUX
+	/* (a free slot, or a bot that would leave for this machine) */
+	boolean bots_make_room = FALSE;
+#endif
 
-#ifdef HALO_DEDICATED_SERVER
+#ifdef HALO_LINUX
 	/* port: the dedicated server's game going back to its lobby (over, or
-	the scores): the join held, and answered once the lobby is up, rather
-	than refused or put into a game that is ending */
+	the scores), or a host from the menus choosing its map: the join held,
+	and answered once the lobby is up (the map chosen), rather than refused,
+	put into a game that is ending or told the playlist's first map */
 	if (!network_game_server_client_machine_is_joined_to_game(server, server_client_machine) &&
 		network_game_server_hold_join(server, server_client_machine, message, message_size))
 	{
 		return TRUE;
+	}
+#endif
+#ifdef HALO_LINUX
+	/* port: a game the host's bots fill (a dedicated server's sv_bots_fill,
+	a host's Bots online) has room for a machine joining: a bot's slot, if it
+	has no other. The bot leaves only once the join is checked and about to
+	be accepted (network_game_server_port_join_make_room): a join refused
+	(a bad token, banned, the wrong build...) or a flood of them takes no
+	bot out of the game */
+	if (!network_game_server_client_machine_is_joined_to_game(server, server_client_machine))
+	{
+		bots_make_room = network_game_server_port_bots_could_make_room(server);
+		late_join = network_game_server_get_state(server, NULL) == _network_game_server_state_ingame &&
+			network_game_server_game_is_open(server) && bots_make_room;
 	}
 #endif
 	if (network_game_server_get_state(server, NULL) == _network_game_server_state_pregame || late_join)
@@ -1951,11 +2119,22 @@ static boolean network_game_server_handle_message_client_join_game_request(
 		{
 			struct transport_address source_address;
 			wchar_t machine_name[MAXIMUM_MACHINE_NAME_LENGTH];
+			/* port: the joiner's platform, from its name's last character
+			before the name is cleaned (network_wire.h; none from an older
+			build); a game for Vitas only refuses the PC build. Best effort:
+			what the joiner says */
+			int joiner_platform = network_wire_join_platform_of_mark(
+				(unsigned short)join_game_request.machine_name[NUMBEROF(join_game_request.machine_name) - 1]);
+			boolean vitas_only = network_wire_host_refuses(joiner_platform) != 0;
 			/* port: a lobby with no player slot free (its machines' players
 			fill it) is full: a machine that joined could add none, and held
 			the countdown for ever */
 			boolean full = network_game_server_get_state(server, NULL) == _network_game_server_state_pregame &&
 				!network_game_has_free_player_slot(network_game_server_get_game(server));
+#ifdef HALO_LINUX
+			/* (or a bot's slot to take) */
+			full = full && !bots_make_room;
+#endif
 
 			/* port: its hardware id, as it tells it: hex only (anything else
 			left out), no more than its field; the host logs it, and refuses
@@ -1994,7 +2173,11 @@ static boolean network_game_server_handle_message_client_join_game_request(
 					/* (the Xbox game refused a machine not named in the
 					development kit's d:\hosts.txt: a stray file of that name
 					on a PC refused machines) */
-					if (network_game_server_accept_client_machine_into_game(server, server_client_machine))
+					if (!vitas_only &&
+#ifdef HALO_LINUX
+						network_game_server_port_join_make_room(server, server_client_machine) &&
+#endif
+						network_game_server_accept_client_machine_into_game(server, server_client_machine))
 					{
 						struct message_server_machine_accepted acceptance;
 						struct network_message *reply;
@@ -2018,6 +2201,9 @@ static boolean network_game_server_handle_message_client_join_game_request(
 						if (late_join && client_machine)
 							csmemcpy(client_machine->name, machine_name, sizeof(client_machine->name));
 
+						/* (port: a party token of the machine that had this
+						index before forgotten: party_net.h) */
+						party_net_server_machine_joined(machine_index);
 						acceptance.machine_index = (short)machine_index;
 						acceptance.random_seed = network_game_get_random_seed();
 						reply = create_network_game_message(
@@ -2083,8 +2269,10 @@ static boolean network_game_server_handle_message_client_join_game_request(
 						struct network_message *reply;
 
 						/* port: a banned machine is told so (it was told the
-						game is not open) */
-						rejection.reason = network_game_server_last_refusal_code();
+						game is not open); the PC build, a game for Vitas only */
+						rejection.reason = vitas_only ? _rejection_code_vitas_only : network_game_server_last_refusal_code();
+						if (vitas_only)
+							network_event("refusing the PC build's machine: this game is for Vitas only (Who can join)");
 						network_event(
 							"server failed to accept valid client machine '%s' @%s into the game",
 							join_game_request.machine_name,
@@ -2456,6 +2644,8 @@ static boolean network_game_server_handle_message_client_player_settings_request
 			slot out of the list over the machines), with a name that ends,
 			and on a team of the game's: else the one the host has it on */
 			network_game_server_get_client_machine(server, client_machine, &machine_index);
+			/* (icon_index: the flaming helmet's claim alone, network_server_manager.h) */
+			network_game_server_flame_claim(&player);
 			network_game_server_clean_player_name(server, &player,
 				VALID_INDEX(player.player_list_index, MAXIMUM_NUMBER_OF_PLAYERS) ? player.player_list_index : NONE);
 			if (VALID_INDEX(player.player_list_index, MAXIMUM_NUMBER_OF_PLAYERS) &&

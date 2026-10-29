@@ -44,6 +44,12 @@ each frame's presentation.
 #include "vita_controls.h"
 #include "vita_gxm.h"
 #include "vita_host.h"
+#include "vita_overlay_font.h"
+
+/* Menu style (port/linux/src/menu_files.c, halo_menus.h) */
+int halo_menu_style_halo3(void);
+int halo_menu_style_online(void);
+int halo_main_menu_loaded(void);
 #include "vita_shader_cache.h"
 #include "vita_shader_generator_id.h"
 #include "lang.h"
@@ -244,7 +250,10 @@ static struct
 	unsigned int begin_us, end_us;
 	volatile unsigned int done_us;
 	float scale;
+	unsigned long tag;
 } frame_timing[FRAME_TIMING_SLOTS];
+/* (vgxm_frame_tag: the next present's) */
+static unsigned long frame_tag_next;
 /* the newest frame the callback has stamped, the newest measured, and
 the start of the submission under way (0: the last present's end) */
 static volatile unsigned int frame_timing_done;
@@ -283,6 +292,11 @@ struct target
 	int scale_kind;
 	/* the serial of the last scene that drew into it (0: none yet) */
 	unsigned int written_serial;
+	/* the drawn rectangle as that scene had it (0: rect_width's): a
+	picture kept over frames (render.c's menu backdrop) is scaled up at the
+	size it was drawn at, whatever the dynamic resolution has since made
+	the rectangle (blit) */
+	unsigned int written_width, written_height;
 	struct block memory;
 	SceGxmColorSurface color;
 	SceGxmDepthStencilSurface depth_stencil;
@@ -291,10 +305,17 @@ struct target
 	(its memory, surface and render target object), and where in it the
 	cell lies; 0 for a target of its own */
 	unsigned int atlas, cell_x, cell_y;
+	/* where the target's picture starts, in its pixels: 0 but for the
+	display while the interface draws there (vgxm_interface_begin: the
+	picture's place on the display), its viewports and clips moved by it */
+	float offset_x, offset_y;
 };
 
 #define MAXIMUM_SHADERS 8192
 #define MAXIMUM_TARGETS 256
+/* the display buffer drawn this frame as a target (the slot after the
+targets'), while the interface is drawn there: vgxm_interface_begin */
+#define DISPLAY_TARGET (MAXIMUM_TARGETS + 1)
 
 static unsigned int gxm_scene_count, gxm_scene_splits;
 static unsigned int scene_histogram[128];
@@ -351,8 +372,25 @@ static struct
 
 	struct shader shaders[MAXIMUM_SHADERS];
 	unsigned int shader_count;
-	struct target targets[MAXIMUM_TARGETS];
+	struct target targets[MAXIMUM_TARGETS + 1];
 	unsigned int target_count;
+	/* the interface drawn on the display (vgxm_interface_begin): the
+	target whose draws go there instead until the present, and the display
+	scenes the interface began again (another target drawn between, or a
+	scene's draw limit), for the report */
+	int interface_active;
+	unsigned long interface_source;
+	unsigned int interface_scenes_again;
+	/* the interface layer (interface_layer_ready): a 960x544 target of
+	its own in CDRAM the interface is drawn into, copied to the display at
+	the present; whether this frame's interface is there (else on the
+	display buffer, as before), and the frames of the report drawn each
+	way or not split (100% scale) */
+	struct block interface_memory;
+	SceGxmColorSurface interface_surface;
+	int interface_layer;
+	unsigned int interface_layer_used;
+	unsigned int interface_layer_frames, interface_display_frames, interface_full_frames;
 
 	/* the scene being recorded (an atlas's when the colour target is a
 	cell of it: scene_cell is that cell) */
@@ -378,13 +416,17 @@ static struct
 
 	/* built-in programs */
 	unsigned long clear_vertex, clear_fragment, blit_vertex, blit_fragment;
-	unsigned long overlay_vertex, overlay_fragment;
+	unsigned long overlay_vertex, overlay_fragment, text_vertex, text_fragment;
 	int overlay_enabled, overlay_programs;
 	float overlay_fps, overlay_tick_ms, overlay_render_ms;
 	/* the settings panel's text, written by the game's thread and drawn by
 	the worker: two copies, the index flips when one is complete */
 	char menu_text[2][3072];
 	volatile int menu_index, menu_visible, menu_selected;
+	/* (Menu style Halo 3, read on the game's thread as the text is set) */
+	volatile int menu_halo3;
+	/* (Menu style Online: its panel, online_panel) */
+	volatile int menu_online;
 	/* the frame's scale to the display (HALO_UPSCALE_FILTER): 0 smooth
 	(bilinear), 1 sharp (nearest), both at the display's height; and the
 	picture's rectangle on the display, the rest black (vgxm_present) */
@@ -520,6 +562,23 @@ static const char overlay_fragment_source[] =
 	"	return color;\n"
 	"}\n";
 
+/* the settings panel's Halo 3 text: a character's coverage from the
+fonts' atlas (vita_overlay_font.c), in the vertex's colour */
+static const char text_vertex_source[] =
+	"void main(float2 position, float2 texcoord, float4 color, out float4 out_position : POSITION,\n"
+	"	out float2 out_texcoord : TEXCOORD0, out float4 out_color : COLOR0)\n"
+	"{\n"
+	"	out_position = float4(position, 0.5, 1.0);\n"
+	"	out_texcoord = texcoord;\n"
+	"	out_color = color;\n"
+	"}\n";
+
+static const char text_fragment_source[] =
+	"float4 main(float2 texcoord : TEXCOORD0, float4 color : COLOR0, uniform sampler2D atlas) : COLOR\n"
+	"{\n"
+	"	return float4(color.rgb, color.a * tex2D(atlas, texcoord).a);\n"
+	"}\n";
+
 static const char blit_vertex_source[] =
 	"void main(float2 position, float2 texcoord, out float4 out_position : POSITION,\n"
 	"	out float2 out_texcoord : TEXCOORD0)\n"
@@ -528,11 +587,19 @@ static const char blit_vertex_source[] =
 	"	out_texcoord = texcoord;\n"
 	"}\n";
 
+/* (the brightness curve, c + k * c * (1 - c): halo_brightness_curve,
+port_config.c. k is the first of the uniform buffer 0, 0 for the blits that
+are not the 3D picture. Part of the blit that is made anyway: no pass) */
 static const char blit_fragment_source[] =
-	"float4 main(float2 texcoord : TEXCOORD0, uniform sampler2D source) : COLOR\n"
+	"float4 main(float2 texcoord : TEXCOORD0, uniform sampler2D source, uniform float4 grade[1] : BUFFER[0]) : COLOR\n"
 	"{\n"
-	"	return float4(tex2D(source, texcoord).rgb, 1.0);\n"
+	"	float3 c = tex2D(source, texcoord).rgb;\n"
+	"	return float4(c + grade[0].x * c * (1.0 - c), 1.0);\n"
 	"}\n";
+
+float halo_brightness_curve(void);
+/* the curve the next blit_texture applies (0: none) */
+static float blit_curve;
 
 int vgxm_initialize(void *arena, unsigned long arena_size)
 {
@@ -698,6 +765,8 @@ int vgxm_initialize(void *arena, unsigned long arena_size)
 	gxm.blit_fragment = vgxm_shader_get(blit_fragment_source, 1);
 	gxm.overlay_vertex = vgxm_shader_get(overlay_vertex_source, 0);
 	gxm.overlay_fragment = vgxm_shader_get(overlay_fragment_source, 1);
+	gxm.text_vertex = vgxm_shader_get(text_vertex_source, 0);
+	gxm.text_fragment = vgxm_shader_get(text_fragment_source, 1);
 	{
 		const char *setting = getenv("XV_FPS");
 
@@ -2337,7 +2406,9 @@ static float render_scale_get(void)
 		const char *setting = getenv("HALO_RENDER_SCALE");
 
 		render_scale = setting && strcmp(setting, "dynamic") ? (float)atof(setting) : 1.0f;
-		if (render_scale < 0.5f || render_scale > 1.0f)
+		/* (written so that a NaN is out of range too: never a target size
+		from it) */
+		if (!(render_scale >= 0.5f && render_scale <= 1.0f))
 			render_scale = 1.0f;
 		if (render_scale < 1.0f)
 			log_line("gxm: screen-sized targets at %.0f%% (HALO_RENDER_SCALE)", render_scale * 100.0f);
@@ -2352,7 +2423,7 @@ float vgxm_render_scale(void)
 
 void vgxm_render_scale_set(float scale)
 {
-	if (scale < 0.5f || scale > 1.0f)
+	if (!(scale >= 0.5f && scale <= 1.0f))
 		scale = 1.0f;
 	render_scale = scale;
 }
@@ -2990,6 +3061,13 @@ int vgxm_target_create_chain(unsigned long width, unsigned long height, unsigned
 
 void vgxm_set_targets(unsigned long color, unsigned long depth)
 {
+	/* (the interface's draws into the back buffer go to the display, which
+	has no depth buffer: vgxm_interface_begin) */
+	if (gxm.interface_active && color && color == gxm.interface_source)
+	{
+		color = DISPLAY_TARGET;
+		depth = 0;
+	}
 	gxm.wanted_color = color;
 	gxm.wanted_depth = depth;
 }
@@ -3068,6 +3146,79 @@ static int scene_dependency_needed(unsigned int open_serial)
 	return !open_serial && gxm.texture_scene_since_wait && gxm.wanted_color && gxm.wanted_color == gxm.presented_target;
 }
 
+/* begins a scene on the display buffer this frame is drawn into, for the
+interface (vgxm_interface_begin, and scene_ensure when its draws come back
+to it after another target's): no depth buffer, and no dependency set -
+no later scene waits for the display's, whose fragments wait for its
+buffer to be off the screen. wait: after the scenes before it */
+static int display_scene_begin(int wait)
+{
+	int result = sceGxmBeginScene(gxm.context, wait ? SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY : 0,
+		gxm.display_render_target, NULL, NULL, gxm.display_sync[gxm.back_buffer],
+		&gxm.display_surface[gxm.back_buffer], NULL);
+
+	if (result < 0)
+	{
+		static unsigned int reported;
+
+		if (reported++ < 16)
+			log_line("gxm: cannot begin the interface's display scene: 0x%08x", (unsigned)result);
+		return 0;
+	}
+	gxm.in_scene = 1;
+	gxm.scene_draws = 0;
+	gxm.scene_serial++;
+	if (wait)
+	{
+		gxm.wait_serial = gxm.scene_serial;
+		gxm.texture_scene_since_wait = 0;
+	}
+	gxm.targets[DISPLAY_TARGET - 1].written_serial = gxm.scene_serial;
+	shadow_invalidate();
+	gxm.scene_color = DISPLAY_TARGET;
+	gxm.scene_cell = 0;
+	gxm.scene_depth = 0;
+	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
+	return 1;
+}
+
+/* begins a scene on the interface layer (vgxm_interface_begin, and
+scene_ensure when the interface's draws come back to it): no depth buffer,
+no display buffer - nothing waits for the display - and a dependency set,
+for the present's display scene that copies it. wait: after the scenes
+before it */
+static int interface_scene_begin(int wait)
+{
+	unsigned int flags = (wait ? SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY : 0) |
+		(rtt_sync_enabled() ? SCE_GXM_SCENE_FRAGMENT_SET_DEPENDENCY : 0);
+	int result = sceGxmBeginScene(gxm.context, flags, gxm.display_render_target, NULL, NULL, NULL,
+		&gxm.interface_surface, NULL);
+
+	if (result < 0)
+	{
+		static unsigned int reported;
+
+		if (reported++ < 16)
+			log_line("gxm: cannot begin the interface layer's scene: 0x%08x", (unsigned)result);
+		return 0;
+	}
+	gxm.in_scene = 1;
+	gxm.scene_draws = 0;
+	gxm.scene_serial++;
+	if (wait)
+	{
+		gxm.wait_serial = gxm.scene_serial;
+		gxm.texture_scene_since_wait = 0;
+	}
+	gxm.targets[DISPLAY_TARGET - 1].written_serial = gxm.scene_serial;
+	shadow_invalidate();
+	gxm.scene_color = DISPLAY_TARGET;
+	gxm.scene_cell = 0;
+	gxm.scene_depth = 0;
+	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
+	return 1;
+}
+
 static int scene_ensure(void)
 {
 	struct target *color, *depth;
@@ -3121,6 +3272,14 @@ static int scene_ensure(void)
 		sceGxmEndScene(gxm.context, NULL, NULL);
 		scene_switch_us[gxm.scene_color == 1 ? 0 : 1] += sceKernelGetProcessTimeWide() - before;
 		gxm.in_scene = 0;
+	}
+	if (wanted_scene_color == DISPLAY_TARGET)
+	{
+		/* (the interface's draws back on the display: its scene again,
+		waiting if a draw samples what a scene since drew) */
+		gxm.interface_scenes_again++;
+		return gxm.interface_layer ? interface_scene_begin(scene_dependency_needed(0)) :
+			display_scene_begin(scene_dependency_needed(0));
 	}
 	color = wanted_scene_color ? &gxm.targets[wanted_scene_color - 1] : NULL;
 	depth = gxm.wanted_depth ? &gxm.targets[gxm.wanted_depth - 1] : NULL;
@@ -3200,7 +3359,11 @@ static int scene_ensure(void)
 	if (gxm.wanted_color != gxm.presented_target)
 		gxm.texture_scene_since_wait = 1;
 	if (color)
+	{
 		color->written_serial = gxm.scene_serial;
+		color->written_width = color->rect_width;
+		color->written_height = color->rect_height;
+	}
 	if (depth)
 		depth->written_serial = gxm.scene_serial;
 	{
@@ -3335,21 +3498,32 @@ static void scene_scales(float *scale_x, float *scale_y)
 static void set_clip(const long unscaled[4])
 {
 	const struct target *target = scene_drawn_target();
-	float scale_x, scale_y;
+	float scale_x, scale_y, offset_x = 0.0f, offset_y = 0.0f;
 	long clip[4];
 	long x0, y0, x1, y1;
 
 	scene_scales(&scale_x, &scale_y);
-	if (scale_x != 1.0f || scale_y != 1.0f)
+	if (target && !gxm.scene_cell)
 	{
-		clip[0] = (long)(unscaled[0] * scale_x);
-		clip[1] = (long)(unscaled[1] * scale_y);
-		clip[2] = (long)(unscaled[2] * scale_x + 0.999f);
-		clip[3] = (long)(unscaled[3] * scale_y + 0.999f);
+		offset_x = target->offset_x;
+		offset_y = target->offset_y;
+	}
+	if (scale_x != 1.0f || scale_y != 1.0f || offset_x != 0.0f || offset_y != 0.0f)
+	{
+		clip[0] = (long)(offset_x + unscaled[0] * scale_x);
+		clip[1] = (long)(offset_y + unscaled[1] * scale_y);
+		clip[2] = (long)(offset_x + unscaled[2] * scale_x + 0.999f);
+		clip[3] = (long)(offset_y + unscaled[3] * scale_y + 0.999f);
 		/* (nothing outside the drawn rectangle: a target of the dynamic
-		resolution keeps its memory's size) */
+		resolution keeps its memory's size; the interface on the display,
+		nothing outside the picture - from its offset to rect_width x
+		rect_height there) */
 		if (target && !gxm.scene_cell)
 		{
+			if (clip[0] < (long)offset_x)
+				clip[0] = (long)offset_x;
+			if (clip[1] < (long)offset_y)
+				clip[1] = (long)offset_y;
 			if (clip[2] > (long)target->rect_width)
 				clip[2] = (long)target->rect_width;
 			if (clip[3] > (long)target->rect_height)
@@ -3542,9 +3716,12 @@ void vgxm_draw(const struct vgxm_draw *draw)
 	}
 
 	{
-		SceGxmDepthFunc depth_function = draw->depth_test ? (SceGxmDepthFunc)comparison(draw->depth_function, 22) :
-			SCE_GXM_DEPTH_FUNC_ALWAYS;
-		int depth_write = draw->depth_write ? 1 : 0;
+		/* (the interface on the display has no depth buffer: no depth or
+		stencil test there, vgxm_interface_begin) */
+		int depthless = gxm.scene_color == DISPLAY_TARGET;
+		SceGxmDepthFunc depth_function = draw->depth_test && !depthless ?
+			(SceGxmDepthFunc)comparison(draw->depth_function, 22) : SCE_GXM_DEPTH_FUNC_ALWAYS;
+		int depth_write = draw->depth_write && !depthless ? 1 : 0;
 		unsigned long stencil[7];
 		int cull = draw->cull == D3DCULL_CW ? SCE_GXM_CULL_CW : draw->cull == D3DCULL_CCW ? SCE_GXM_CULL_CCW : SCE_GXM_CULL_NONE;
 		int bias[2];
@@ -3559,7 +3736,7 @@ void vgxm_draw(const struct vgxm_draw *draw)
 			shadow.depth_write = depth_write;
 			sceGxmSetFrontDepthWriteEnable(gxm.context, depth_write ? SCE_GXM_DEPTH_WRITE_ENABLED : SCE_GXM_DEPTH_WRITE_DISABLED);
 		}
-		if (draw->stencil_test)
+		if (draw->stencil_test && !depthless)
 		{
 			stencil[0] = comparison(draw->stencil_function, 25);
 			stencil[1] = stencil_operation(draw->stencil_fail);
@@ -3616,14 +3793,16 @@ void vgxm_draw(const struct vgxm_draw *draw)
 			sceGxmSetFrontDepthBias(gxm.context, bias[0], bias[1]);
 		}
 		{
-			/* (the viewport in the target's pixels: scaled with it) */
+			/* (the viewport in the target's pixels: scaled with it, and moved
+			to the picture on the display for the interface) */
 			float scale_x, scale_y;
 			float viewport[6];
 			long clip[4];
+			const struct target *drawn = gxm.scene_cell ? NULL : scene_drawn_target();
 
 			scene_scales(&scale_x, &scale_y);
-			viewport[0] = draw->viewport_offset[0] * scale_x;
-			viewport[1] = draw->viewport_offset[1] * scale_y;
+			viewport[0] = draw->viewport_offset[0] * scale_x + (drawn ? drawn->offset_x : 0.0f);
+			viewport[1] = draw->viewport_offset[1] * scale_y + (drawn ? drawn->offset_y : 0.0f);
 			viewport[2] = draw->viewport_offset[2];
 			viewport[3] = draw->viewport_scale[0] * scale_x;
 			viewport[4] = draw->viewport_scale[1] * scale_y;
@@ -3697,6 +3876,9 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 		gxm.scene_color ? &gxm.targets[gxm.scene_color - 1] : &gxm.targets[gxm.scene_depth - 1];
 	width = target->width;
 	height = target->height;
+	/* (the interface on the display: no depth buffer) */
+	if (gxm.scene_color == DISPLAY_TARGET)
+		flags &= ~(unsigned long)(D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL);
 	if (flags & D3DCLEAR_TARGET_R) mask |= SCE_GXM_COLOR_MASK_R;
 	if (flags & D3DCLEAR_TARGET_G) mask |= SCE_GXM_COLOR_MASK_G;
 	if (flags & D3DCLEAR_TARGET_B) mask |= SCE_GXM_COLOR_MASK_B;
@@ -3714,14 +3896,18 @@ void vgxm_clear(unsigned long flags, unsigned long color, float depth, unsigned 
 		/* (the clip is in the game's pixels: in a scaled target's, as
 		set_clip has it - a part of a scaled target was cleared at the
 		unscaled place before, and only where that overlapped the clip) */
-		float scale_x = 1.0f, scale_y = 1.0f, x0, x1, y0, y1;
+		float scale_x = 1.0f, scale_y = 1.0f, offset_x = 0.0f, offset_y = 0.0f, x0, x1, y0, y1;
 
 		if (!gxm.scene_cell)
+		{
 			scene_scales(&scale_x, &scale_y);
-		x0 = 2.0f * (float)clip[0] * scale_x / (float)width - 1.0f;
-		x1 = 2.0f * (float)clip[2] * scale_x / (float)width - 1.0f;
-		y0 = 1.0f - 2.0f * (float)clip[1] * scale_y / (float)height;
-		y1 = 1.0f - 2.0f * (float)clip[3] * scale_y / (float)height;
+			offset_x = target->offset_x;
+			offset_y = target->offset_y;
+		}
+		x0 = 2.0f * ((float)clip[0] * scale_x + offset_x) / (float)width - 1.0f;
+		x1 = 2.0f * ((float)clip[2] * scale_x + offset_x) / (float)width - 1.0f;
+		y0 = 1.0f - 2.0f * ((float)clip[1] * scale_y + offset_y) / (float)height;
+		y1 = 1.0f - 2.0f * ((float)clip[3] * scale_y + offset_y) / (float)height;
 		{
 			float corners[4][3] = { { x0, y0, depth }, { x1, y0, depth }, { x0, y1, depth }, { x1, y1, depth } };
 
@@ -3866,14 +4052,10 @@ unsigned long vgxm_visibility_count(int buffer, unsigned long slot)
 
 /* ---------- frames */
 
-static void blit(struct target *source)
+/* the built-in blit's vertex program (position, texcoord), made once */
+static SceGxmVertexProgram *blit_vertex_program(void)
 {
 	static SceGxmVertexProgram *vertex_program;
-	SceGxmFragmentProgram *fragment_program;
-	SceGxmTexture texture;
-	float *vertices;
-	unsigned short *indices;
-	float width, height, x0, x1;
 
 	if (!vertex_program)
 	{
@@ -3896,13 +4078,70 @@ static void blit(struct target *source)
 		stream.stride = 4 * sizeof(float);
 		stream.indexSource = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
 		if (sceGxmShaderPatcherCreateVertexProgram(gxm.patcher, shader->id, attributes, 2, &stream, 1, &vertex_program) < 0)
-			return;
+			return NULL;
 	}
+	return vertex_program;
+}
+
+/* the texture, opaque, over the display's pixels left..left+width,
+top..top+height, with the built-in blit programs (the display scene is
+the current one) */
+static void blit_texture(const SceGxmTexture *texture, float left, float top, float width, float height)
+{
+	SceGxmVertexProgram *vertex_program = blit_vertex_program();
+	SceGxmFragmentProgram *fragment_program;
+	float *vertices, *uniforms;
+	unsigned short *indices;
+	float x0, x1, y0, y1;
+
+	if (!vertex_program)
+		return;
 	fragment_program = fragment_program_get(gxm.blit_fragment, gxm.blit_vertex, NULL);
 	vertices = vgxm_worker_alloc(4 * 4 * sizeof(float), 16);
 	indices = vgxm_worker_alloc(4 * sizeof(unsigned short), 16);
-	if (!fragment_program || !vertices || !indices)
+	uniforms = vgxm_worker_alloc(4 * sizeof(float), 16);
+	if (!fragment_program || !vertices || !indices || !uniforms)
 		return;
+	uniforms[0] = blit_curve;
+	uniforms[1] = uniforms[2] = uniforms[3] = 0.0f;
+	x0 = 2.0f * left / DISPLAY_WIDTH - 1.0f;
+	x1 = 2.0f * (left + width) / DISPLAY_WIDTH - 1.0f;
+	y0 = 1.0f - 2.0f * top / DISPLAY_HEIGHT;
+	y1 = 1.0f - 2.0f * (top + height) / DISPLAY_HEIGHT;
+	{
+		float quad[4][4] = {
+			{ x0, y0, 0.0f, 0.0f }, { x1, y0, 1.0f, 0.0f },
+			{ x0, y1, 0.0f, 1.0f }, { x1, y1, 1.0f, 1.0f },
+		};
+
+		memcpy(vertices, quad, sizeof(quad));
+	}
+	indices[0] = 0; indices[1] = 1; indices[2] = 2; indices[3] = 3;
+	shadow.valid = 0;
+	sceGxmSetVertexProgram(gxm.context, vertex_program);
+	sceGxmSetFragmentProgram(gxm.context, fragment_program);
+	sceGxmSetVertexStream(gxm.context, 0, vertices);
+	sceGxmSetFragmentTexture(gxm.context, 0, texture);
+	sceGxmSetFragmentUniformBuffer(gxm.context, 0, uniforms);
+	sceGxmSetFrontDepthFunc(gxm.context, SCE_GXM_DEPTH_FUNC_ALWAYS);
+	sceGxmSetFrontDepthWriteEnable(gxm.context, SCE_GXM_DEPTH_WRITE_DISABLED);
+	sceGxmSetFrontStencilFunc(gxm.context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP,
+		SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0, 0);
+	sceGxmSetCullMode(gxm.context, SCE_GXM_CULL_NONE);
+	sceGxmSetFrontDepthBias(gxm.context, 0, 0);
+	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
+	sceGxmSetViewport(gxm.context, DISPLAY_WIDTH * 0.5f, DISPLAY_WIDTH * 0.5f, DISPLAY_HEIGHT * 0.5f,
+		-DISPLAY_HEIGHT * 0.5f, 0.0f, 1.0f);
+	sceGxmSetRegionClip(gxm.context, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
+	sceGxmDraw(gxm.context, SCE_GXM_PRIMITIVE_TRIANGLE_STRIP, SCE_GXM_INDEX_FORMAT_U16, indices, 4);
+	gxm.scene_draws++;
+}
+
+static void blit(struct target *source)
+{
+	SceGxmTexture texture;
+	float width, height;
+
 	/* the picture at the display's height, its shape kept (a 4:3 frame,
 	HALO_DISPLAY_WIDTH=640, between black bars); sharp: the same size,
 	sampled nearest rather than bilinear */
@@ -3910,8 +4149,10 @@ static void blit(struct target *source)
 	resolution's rectangle rounds its sides apart) */
 	unsigned int shape_width = source->asked_width ? source->asked_width : source->width;
 	unsigned int shape_height = source->asked_height ? source->asked_height : source->height;
-	unsigned int drawn_width = source->rect_width ? source->rect_width : source->width;
-	unsigned int drawn_height = source->rect_height ? source->rect_height : source->height;
+	unsigned int drawn_width = source->written_width ? source->written_width :
+		source->rect_width ? source->rect_width : source->width;
+	unsigned int drawn_height = source->written_height ? source->written_height :
+		source->rect_height ? source->rect_height : source->height;
 
 	height = (float)DISPLAY_HEIGHT;
 	width = height * (float)shape_width / (float)shape_height;
@@ -3929,19 +4170,6 @@ static void blit(struct target *source)
 	gxm.picture_height = (float)(int)(height + 0.5f);
 	gxm.picture_left = (float)(int)((DISPLAY_WIDTH - gxm.picture_width) / 2.0f);
 	gxm.picture_top = (float)(int)((DISPLAY_HEIGHT - gxm.picture_height) / 2.0f);
-	x0 = 2.0f * gxm.picture_left / DISPLAY_WIDTH - 1.0f;
-	x1 = 2.0f * (gxm.picture_left + gxm.picture_width) / DISPLAY_WIDTH - 1.0f;
-	{
-		float y0 = 1.0f - 2.0f * gxm.picture_top / DISPLAY_HEIGHT;
-		float y1 = 1.0f - 2.0f * (gxm.picture_top + gxm.picture_height) / DISPLAY_HEIGHT;
-		float quad[4][4] = {
-			{ x0, y0, 0.0f, 0.0f }, { x1, y0, 1.0f, 0.0f },
-			{ x0, y1, 0.0f, 1.0f }, { x1, y1, 1.0f, 1.0f },
-		};
-
-		memcpy(vertices, quad, sizeof(quad));
-	}
-	indices[0] = 0; indices[1] = 1; indices[2] = 2; indices[3] = 3;
 	/* (its drawn rectangle: all of it but for the dynamic resolution) */
 	sceGxmTextureInitLinearStrided(&texture, source->memory.base, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB, drawn_width,
 		drawn_height, source->stride * 4);
@@ -3951,23 +4179,118 @@ static void blit(struct target *source)
 		sceGxmTextureSetMinFilter(&texture, filter);
 		sceGxmTextureSetMagFilter(&texture, filter);
 	}
-	shadow.valid = 0;
-	sceGxmSetVertexProgram(gxm.context, vertex_program);
-	sceGxmSetFragmentProgram(gxm.context, fragment_program);
-	sceGxmSetVertexStream(gxm.context, 0, vertices);
-	sceGxmSetFragmentTexture(gxm.context, 0, &texture);
-	sceGxmSetFrontDepthFunc(gxm.context, SCE_GXM_DEPTH_FUNC_ALWAYS);
-	sceGxmSetFrontDepthWriteEnable(gxm.context, SCE_GXM_DEPTH_WRITE_DISABLED);
-	sceGxmSetFrontStencilFunc(gxm.context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP,
-		SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0, 0);
-	sceGxmSetCullMode(gxm.context, SCE_GXM_CULL_NONE);
-	sceGxmSetFrontDepthBias(gxm.context, 0, 0);
-	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
-	sceGxmSetViewport(gxm.context, DISPLAY_WIDTH * 0.5f, DISPLAY_WIDTH * 0.5f, DISPLAY_HEIGHT * 0.5f,
-		-DISPLAY_HEIGHT * 0.5f, 0.0f, 1.0f);
-	sceGxmSetRegionClip(gxm.context, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
-	sceGxmDraw(gxm.context, SCE_GXM_PRIMITIVE_TRIANGLE_STRIP, SCE_GXM_INDEX_FORMAT_U16, indices, 4);
-	gxm.scene_draws++;
+	/* (the 3D picture, and the interface in it when it is not on its own
+	layer: the display's brightness setting) */
+	blit_curve = halo_brightness_curve();
+	blit_texture(&texture, gxm.picture_left, gxm.picture_top, gxm.picture_width, gxm.picture_height);
+	blit_curve = 0.0f;
+}
+
+/* ---------- the movie (d3d8_gxm.c halo_d3d_movie_*)
+
+The movies' frames (bink_vita.c, vita_movie.c's conversion) are written by
+the CPU into memory of the renderer's own that the GPU reads as it is -
+user RAM mapped uncached (as the rings), or CDRAM - and drawn at the
+present over the frame's picture, at the display's resolution, with the
+built-in blit programs (shipped in every build: no program of the game's
+combiners is needed, which a Vita without the shader compiler could not
+make - the movie's own was missing from shaders.pak, the picture black
+while the sound played). */
+static struct block movie_memory;
+static int movie_memory_cdram;
+static struct
+{
+	const void *pixels;
+	unsigned int width, height, pitch;
+	float rect[4];
+	int pending;
+	unsigned long drawn;
+} movie_frame;
+
+void vgxm_movie_memory_free(void)
+{
+	if (!movie_memory.base)
+		return;
+	if (movie_memory_cdram)
+		memory_bytes[_memory_other] -= movie_memory.size;
+	memory_os_free(&movie_memory);
+	memset(&movie_memory, 0, sizeof(movie_memory));
+	memset(&movie_frame, 0, sizeof(movie_frame));
+}
+
+void *vgxm_movie_memory(unsigned long bytes, int cdram_first, const char **kind)
+{
+	int attempt;
+
+	vgxm_movie_memory_free();
+	for (attempt = 0; attempt < 2; attempt++)
+	{
+		int cdram = (attempt == 0) == (cdram_first != 0);
+
+		if (block_allocate(&movie_memory, cdram ? SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW :
+			SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, (unsigned int)bytes, 1, "movie frames"))
+		{
+			movie_memory_cdram = cdram;
+			if (cdram)
+				memory_bytes[_memory_other] += movie_memory.size;
+			if (kind)
+				*kind = cdram ? "CDRAM" : "user RAM, uncached (USER_RW_UNCACHE)";
+			return movie_memory.base;
+		}
+		memset(&movie_memory, 0, sizeof(movie_memory));
+	}
+	return NULL;
+}
+
+void vgxm_movie_present(const void *pixels, unsigned long width, unsigned long height, unsigned long pitch,
+	const float rect[4])
+{
+	if (!pixels || !width || !height)
+		return;
+	movie_frame.pixels = pixels;
+	movie_frame.width = (unsigned int)width;
+	movie_frame.height = (unsigned int)height;
+	movie_frame.pitch = (unsigned int)pitch;
+	memcpy(movie_frame.rect, rect, sizeof(movie_frame.rect));
+	movie_frame.pending = 1;
+}
+
+/* (the present, in the display scene) the movie frame given for it */
+static void movie_draw(void)
+{
+	SceGxmTexture texture;
+	float left = gxm.picture_left, top = gxm.picture_top, width = gxm.picture_width, height = gxm.picture_height;
+	int result;
+
+	if (!movie_frame.pending)
+		return;
+	movie_frame.pending = 0;
+	result = sceGxmTextureInitLinearStrided(&texture, movie_frame.pixels, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ARGB,
+		movie_frame.width, movie_frame.height, movie_frame.pitch);
+	if (result < 0)
+	{
+		static unsigned int logged;
+
+		if (logged++ < 4)
+			log_line("gxm: the movie frame %ux%u (rows %u bytes apart) at %p is no texture: 0x%08x", movie_frame.width,
+				movie_frame.height, movie_frame.pitch, movie_frame.pixels, (unsigned)result);
+		return;
+	}
+	sceGxmTextureSetMinFilter(&texture, SCE_GXM_TEXTURE_FILTER_LINEAR);
+	sceGxmTextureSetMagFilter(&texture, SCE_GXM_TEXTURE_FILTER_LINEAR);
+	if (width <= 0.0f || height <= 0.0f)
+	{
+		left = top = 0.0f;
+		width = DISPLAY_WIDTH;
+		height = DISPLAY_HEIGHT;
+	}
+	blit_texture(&texture, left + movie_frame.rect[0] * width, top + movie_frame.rect[1] * height,
+		(movie_frame.rect[2] - movie_frame.rect[0]) * width, (movie_frame.rect[3] - movie_frame.rect[1]) * height);
+	if (movie_frame.drawn++ == 0)
+		log_line("gxm: the movie drawn at the present: %ux%u from %p (%s), over the display's %.0f,%.0f %.0fx%.0f",
+			movie_frame.width, movie_frame.height, movie_frame.pixels, movie_memory_cdram ? "CDRAM" : "uncached user RAM",
+			left + movie_frame.rect[0] * width, top + movie_frame.rect[1] * height,
+			(movie_frame.rect[2] - movie_frame.rect[0]) * width, (movie_frame.rect[3] - movie_frame.rect[1]) * height);
 }
 
 /* ---------- the overlay (Xita's panel: fps, game and render ms, cores) */
@@ -4116,6 +4439,8 @@ void vgxm_menu_set(const char *text, int selected)
 		strncpy(gxm.menu_text[next], text, sizeof(gxm.menu_text[next]) - 1);
 		gxm.menu_text[next][sizeof(gxm.menu_text[next]) - 1] = 0;
 		gxm.menu_selected = selected;
+		gxm.menu_halo3 = halo_menu_style_halo3();
+		gxm.menu_online = halo_menu_style_online();
 		__atomic_store_n(&gxm.menu_index, next, __ATOMIC_RELEASE);
 		gxm.menu_visible = 1;
 	}
@@ -4291,10 +4616,920 @@ static unsigned int menu_row(struct overlay_vertex *vertices, unsigned int count
 	return count;
 }
 
+/* ---------- the settings panel in the Halo 3 style (Menu style Halo 3:
+docs/superpowers/specs/2026-10-18-halo3-menus-design.md, after Halo 3's and
+Halo Online's settings screens): a black title strip, a navy band with the
+tabs and the rows, an orange bar on the chosen row and its value as
+"< value >", a side panel with the chosen row's name, its value large and
+its help, and a strip of the panel's buttons with their PlayStation
+symbols. Its rectangles go with the overlay's; its text, in the fonts of
+vita_overlay_font.c (app0:menus/halo3/overlay_*.bin), is drawn over them in
+a pass of its own (h3_draw). Without the fonts: the panel as before */
+
+#define H3_ATLAS_WIDTH 512
+#define H3_ATLAS_HEIGHT 512
+#define H3_GLYPHS 4096
+
+/* (0xAABBGGRR, the design's colours) */
+#define H3_DIM 0x60000000u
+#define H3_STRIP 0xE00A0502u
+#define H3_RULE 0x8CCDB4A0u
+#define H3_BAND_TOP 0xED46291Bu
+#define H3_BAND_MIDDLE 0xE0452718u
+#define H3_BAND_BOTTOM 0xE6251006u
+#define H3_BAR 0x8C2878C8u
+#define H3_BAR_FADED 0x1F2878C8u
+#define H3_TAB_LINE 0xF23C8CDCu
+#define H3_TITLE 0xFFF4F4F4u
+#define H3_LABEL 0xFFA8A8A8u
+#define H3_LABEL_CHOSEN 0xFFEBEBEBu
+#define H3_VALUE 0xFF9A8777u
+#define H3_VALUE_CHOSEN 0xFFE0D1C2u
+#define H3_ARROW 0xFF68A8E7u
+#define H3_TAB 0xFF8A7C6Fu
+#define H3_HEADING 0xFFCCB49Fu
+#define H3_TAB_SHOWN 0xFFF2F2F2u
+#define H3_HELP 0xFFD3CBC3u
+#define H3_BUTTON_TEXT 0xFFECECECu
+#define H3_KEY 0xFF4A423Au
+#define H3_DISC 0xFF3A332Du
+
+/* the layout, on the 960x544 display */
+#define H3_LEFT 82.0f
+#define H3_RIGHT (DISPLAY_WIDTH - 82.0f)
+#define H3_ROWS_RIGHT 610.0f
+#define H3_SIDE_LEFT 648.0f
+#define H3_STRIP_TOP 34.0f
+#define H3_STRIP_HEIGHT 58.0f
+#define H3_BAND_END 480.0f
+#define H3_FOOT_TOP 488.0f
+#define H3_FOOT_HEIGHT 40.0f
+
+struct text_vertex
+{
+	float x, y, u, v;
+	unsigned char color[4];
+};
+
+static struct
+{
+	int state; /* 0 not read yet, 1 ready, -1 not there */
+	struct overlay_atlas atlas;
+	struct overlay_face title, item, small;
+	struct block memory;
+	SceGxmTexture texture;
+	/* the frame's characters, 6 vertices each */
+	struct text_vertex *built;
+	unsigned int count;
+	uint32_t color;
+} h3;
+
+static int h3_face_read(struct overlay_face *face, const char *name)
+{
+	char path[128];
+	SceIoStat stat;
+	SceUID file;
+	unsigned char *data;
+	int result = -1;
+
+	snprintf(path, sizeof(path), "app0:menus/halo3/%s", name);
+	if (sceIoGetstat(path, &stat) < 0 || stat.st_size <= 0 || stat.st_size > 1024 * 1024)
+		return -1;
+	data = malloc((size_t)stat.st_size);
+	file = sceIoOpen(path, SCE_O_RDONLY, 0);
+	if (data && file >= 0 && sceIoRead(file, data, (SceSize)stat.st_size) == (int)stat.st_size)
+		result = overlay_face_read(face, &h3.atlas, data, (unsigned long)stat.st_size);
+	if (file >= 0)
+		sceIoClose(file);
+	free(data);
+	return result;
+}
+
+/* the fonts read and their atlas a texture, the first time the panel shows
+in this style (1), or not there (0: once, the panel as before) */
+static int h3_ready(void)
+{
+	unsigned int rows;
+
+	if (h3.state)
+		return h3.state > 0;
+	h3.state = -1;
+	/* (the programs are in the shipped pack: a Vita without SceShaccCg's
+	module compiles nothing, and on the owner's, set up again, the panel was
+	as before) */
+	if (!gxm.text_vertex || !gxm.text_fragment)
+	{
+		log_line("gxm: the Halo 3 settings text programs did not load (not in shaders.pak, not compiled): the panel as "
+			"before");
+		return 0;
+	}
+	if (overlay_atlas_init(&h3.atlas, H3_ATLAS_WIDTH, H3_ATLAS_HEIGHT) < 0)
+		return 0;
+	if (h3_face_read(&h3.title, "overlay_title.bin") < 0 || h3_face_read(&h3.item, "overlay_item.bin") < 0 ||
+		h3_face_read(&h3.small, "overlay_small.bin") < 0 ||
+		!(h3.built = malloc(H3_GLYPHS * 6 * sizeof(*h3.built))))
+	{
+		log_line("gxm: the Halo 3 settings fonts (app0:menus/halo3/overlay_*.bin) not read: the panel as before");
+		overlay_atlas_free(&h3.atlas);
+		return 0;
+	}
+	/* (the texture only the rows the characters use; the quads' texture
+	coordinates are by the atlas's height, made that) */
+	rows = ((unsigned int)h3.atlas.used_height + 7u) & ~7u;
+	if (!block_allocate(&h3.memory, SCE_KERNEL_MEMBLOCK_TYPE_USER_RW_UNCACHE, H3_ATLAS_WIDTH * rows, 1,
+		"settings fonts"))
+	{
+		log_line("gxm: no memory for the Halo 3 settings fonts: the panel as before");
+		overlay_atlas_free(&h3.atlas);
+		free(h3.built);
+		h3.built = NULL;
+		return 0;
+	}
+	memcpy(h3.memory.base, h3.atlas.pixels, H3_ATLAS_WIDTH * rows);
+	h3.atlas.height = (int)rows;
+	sceGxmTextureInitLinear(&h3.texture, h3.memory.base, SCE_GXM_TEXTURE_FORMAT_U8_RRRR, H3_ATLAS_WIDTH, rows, 0);
+	sceGxmTextureSetMinFilter(&h3.texture, SCE_GXM_TEXTURE_FILTER_POINT);
+	sceGxmTextureSetMagFilter(&h3.texture, SCE_GXM_TEXTURE_FILTER_POINT);
+	log_line("gxm: the Halo 3 settings fonts: %ux%u atlas", H3_ATLAS_WIDTH, rows);
+	h3.state = 1;
+	return 1;
+}
+
+static void h3_quad(void *user, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1)
+{
+	struct text_vertex *v;
+	const float cx0 = 2.0f * x0 / DISPLAY_WIDTH - 1.0f, cx1 = 2.0f * x1 / DISPLAY_WIDTH - 1.0f;
+	const float cy0 = 1.0f - 2.0f * y0 / DISPLAY_HEIGHT, cy1 = 1.0f - 2.0f * y1 / DISPLAY_HEIGHT;
+	int index;
+
+	(void)user;
+	if (h3.count >= H3_GLYPHS)
+		return;
+	v = h3.built + h3.count++ * 6;
+	v[0].x = cx0; v[0].y = cy0; v[0].u = u0; v[0].v = v0;
+	v[1].x = cx1; v[1].y = cy0; v[1].u = u1; v[1].v = v0;
+	v[2].x = cx0; v[2].y = cy1; v[2].u = u0; v[2].v = v1;
+	v[3] = v[1];
+	v[4].x = cx1; v[4].y = cy1; v[4].u = u1; v[4].v = v1;
+	v[5] = v[2];
+	for (index = 0; index < 6; index++)
+		memcpy(v[index].color, &h3.color, 4);
+}
+
+/* text from the pen at x on the baseline (whole pixels: the atlas is
+sampled 1:1); upper: in capitals. Returns its width */
+static float h3_text(const struct overlay_face *face, float x, float baseline, uint32_t color, const char *text,
+	int upper)
+{
+	h3.color = color;
+	return overlay_face_draw(face, &h3.atlas, (float)(int)x, (float)(int)baseline, text, upper, h3_quad, NULL);
+}
+
+/* a capital's height (the baseline of text centred in a box: its top plus
+half of the box's height and half of this) */
+static float h3_capital(const struct overlay_face *face)
+{
+	return face->glyphs['H'].origin_y;
+}
+
+/* a rectangle with a colour at each corner */
+static unsigned int h3_rect(struct overlay_vertex *vertices, unsigned int count, float x, float y, float width,
+	float height, uint32_t top_left, uint32_t top_right, uint32_t bottom_left, uint32_t bottom_right)
+{
+	struct overlay_vertex *v = vertices + count * 6;
+
+	count = overlay_rect(vertices, count, x, y, width, height, top_left);
+	memcpy(v[1].color, &top_right, 4);
+	memcpy(v[3].color, &top_right, 4);
+	memcpy(v[2].color, &bottom_left, 4);
+	memcpy(v[5].color, &bottom_left, 4);
+	memcpy(v[4].color, &bottom_right, 4);
+	return count;
+}
+
+/* a 1-pixel rule across the display, fading out at both ends */
+static unsigned int h3_rule(struct overlay_vertex *vertices, unsigned int count, float y)
+{
+	const uint32_t clear = H3_RULE & 0x00FFFFFFu;
+
+	count = h3_rect(vertices, count, 0.0f, y, DISPLAY_WIDTH * 0.2f, 1.0f, clear, H3_RULE, clear, H3_RULE);
+	count = overlay_rect(vertices, count, DISPLAY_WIDTH * 0.2f, y, DISPLAY_WIDTH * 0.6f, 1.0f, H3_RULE);
+	return h3_rect(vertices, count, DISPLAY_WIDTH * 0.8f, y, DISPLAY_WIDTH * 0.2f, 1.0f, H3_RULE, clear, H3_RULE,
+		clear);
+}
+
+/* the chosen row's bar: orange, fading to the right */
+static unsigned int h3_bar(struct overlay_vertex *vertices, unsigned int count, float x, float y, float width,
+	float height)
+{
+	const float solid = width * 0.85f;
+
+	count = h3_rect(vertices, count, x, y, solid, height, H3_BAR, H3_BAR_FADED, H3_BAR, H3_BAR_FADED);
+	return h3_rect(vertices, count, x + solid, y, width - solid, height, H3_BAR_FADED, H3_BAR_FADED & 0x00FFFFFFu,
+		H3_BAR_FADED, H3_BAR_FADED & 0x00FFFFFFu);
+}
+
+/* a key's name in a small box (L, R, Left/right); returns its width */
+static float h3_key(struct overlay_vertex *vertices, unsigned int *count, float x, float baseline, const char *name)
+{
+	const float cap = h3_capital(&h3.small), width = overlay_face_width(&h3.small, name, 0) + 12.0f;
+
+	*count = overlay_rect(vertices, *count, x, baseline - cap - 5.0f, width, cap + 10.0f, H3_KEY);
+	h3_text(&h3.small, x + 6.0f, baseline, H3_BUTTON_TEXT, name, 0);
+	return width;
+}
+
+/* the PlayStation button a footer's key names (1 cross, 2 circle, 3
+triangle, 4 square: the item font's symbols; 0 none), in English or a
+translation's words */
+static int h3_symbol(const char *key, uint32_t *color)
+{
+	static const struct { const char *name; int symbol; uint32_t color; } keys[] = {
+		{ "Cross", 1, 0xFFFFC29Cu }, { "Cruz", 1, 0xFFFFC29Cu },
+		{ "Circle", 2, 0xFF7A7AFFu }, { "C\xc3\xadrculo", 2, 0xFF7A7AFFu }, { "O", 2, 0xFF7A7AFFu },
+		{ "Triangle", 3, 0xFFA8E04Fu }, { "Tri\xc3\xa1ngulo", 3, 0xFFA8E04Fu },
+		{ "Square", 4, 0xFFE49BFFu }, { "Cuadrado", 4, 0xFFE49BFFu },
+	};
+	size_t index;
+
+	for (index = 0; index < sizeof(keys) / sizeof(keys[0]); index++)
+		if (!strcmp(key, keys[index].name))
+		{
+			*color = keys[index].color;
+			return keys[index].symbol;
+		}
+	return 0;
+}
+
+/* the panel's buttons ("Cross: select   Circle: back", parts two or more
+spaces apart) in the strip: each its button's symbol on a dark disc, or its
+key in a box, then what it does */
+static unsigned int h3_buttons(struct overlay_vertex *vertices, unsigned int count, float x, float top,
+	float height, const char *text)
+{
+	const float baseline = top + (height + h3_capital(&h3.item)) / 2.0f;
+
+	while (*text)
+	{
+		char part[96];
+		size_t length = 0;
+		char *colon;
+
+		while (*text == ' ')
+			text++;
+		while (text[length] && !(text[length] == ' ' && text[length + 1] == ' '))
+			length++;
+		if (!length)
+			break;
+		if (length > sizeof(part) - 1)
+			length = sizeof(part) - 1;
+		memcpy(part, text, length);
+		part[length] = 0;
+		text += length;
+		colon = strstr(part, ": ");
+		if (colon)
+		{
+			uint32_t color = 0;
+			int symbol;
+
+			*colon = 0;
+			symbol = h3_symbol(part, &color);
+			if (symbol)
+			{
+				char mark[2] = { (char)symbol, 0 };
+
+				h3_text(&h3.item, x, baseline, H3_DISC, "\x05", 0);
+				x += h3_text(&h3.item, x, baseline, color, mark, 0);
+			}
+			else
+				x += h3_key(vertices, &count, x, baseline, part) + 8.0f;
+		}
+		{
+			/* (what it does with a capital, as Halo 3's "Select", "Back") */
+			char *label = colon ? colon + 2 : part;
+
+			if (label[0] >= 'a' && label[0] <= 'z')
+				label[0] = (char)(label[0] - 'a' + 'A');
+			x += h3_text(&h3.item, x, baseline, H3_BUTTON_TEXT, label, 0) + 30.0f;
+		}
+	}
+	return count;
+}
+
+/* text wrapped at width, its lines line_height apart from the baseline y;
+returns the baseline after the last */
+static float h3_wrapped(const struct overlay_face *face, float x, float y, float width, float line_height,
+	uint32_t color, const char *text)
+{
+	char line[256];
+	size_t length = 0;
+
+	while (text && *text)
+	{
+		const char *end = text;
+		size_t word;
+
+		while (*end == ' ')
+			end++;
+		while (*end && *end != ' ' && *end != '\n')
+			end++;
+		word = (size_t)(end - text);
+		if (length + word >= sizeof(line))
+			break;
+		memcpy(line + length, text, word);
+		line[length + word] = 0;
+		if (length && overlay_face_width(face, line, 0) > width)
+		{
+			/* (the line so far, then the word without its spaces starts the next) */
+			line[length] = 0;
+			h3_text(face, x, y, color, line, 0);
+			y += line_height;
+			while (*text == ' ')
+				text++;
+			word = (size_t)(end - text);
+			memcpy(line, text, word);
+			length = word;
+			line[length] = 0;
+		}
+		else
+			length += word;
+		text = end;
+		if (*text == '\n')
+		{
+			line[length] = 0;
+			h3_text(face, x, y, color, line, 0);
+			y += line_height;
+			length = 0;
+			text++;
+		}
+	}
+	if (length)
+	{
+		line[length] = 0;
+		h3_text(face, x, y, color, line, 0);
+		y += line_height;
+	}
+	return y;
+}
+
+/* a row's value without the classic panel's marks: the arrows ("< 544p >"),
+the spaces around it, the choices this build lacks ('\x07' on) */
+static void h3_value(char *out, size_t size, const char *value, int *left, int *right)
+{
+	const char *end = strchr(value, '\x07');
+	size_t length;
+
+	if (!end)
+		end = value + strlen(value);
+	while (value < end && *value == ' ')
+		value++;
+	*left = value < end && *value == '<';
+	if (*left)
+		value++;
+	while (end > value && end[-1] == ' ')
+		end--;
+	*right = end > value && end[-1] == '>';
+	if (*right)
+		end--;
+	while (value < end && *value == ' ')
+		value++;
+	while (end > value && end[-1] == ' ')
+		end--;
+	length = (size_t)(end - value);
+	if (length > size - 1)
+		length = size - 1;
+	memcpy(out, value, length);
+	out[length] = 0;
+}
+
+/* the tab bar: L, the tabs (the shown one bright and underlined in
+orange), R */
+static unsigned int h3_tabs(struct overlay_vertex *vertices, unsigned int count, float y, const char *tabs)
+{
+	const struct overlay_face *face = &h3.item;
+	const float cap = h3_capital(&h3.item), baseline = y + cap;
+	float x = H3_LEFT, needed = 0.0f, gap = 26.0f;
+	const char *at;
+	char name[64];
+
+	for (at = tabs; *at; )
+	{
+		size_t length = strcspn(at, "|"), shown = *at == '*';
+
+		if (length - shown < sizeof(name))
+		{
+			memcpy(name, at + shown, length - shown);
+			name[length - shown] = 0;
+			needed += overlay_face_width(face, name, 1) + gap;
+		}
+		at += length + (at[length] == '|');
+	}
+	/* (a translation's longer names: the smaller font) */
+	if (needed > H3_RIGHT - H3_LEFT - 80.0f)
+		face = &h3.small;
+	x += h3_key(vertices, &count, x, baseline, "L") + 18.0f;
+	while (*tabs)
+	{
+		size_t length = strcspn(tabs, "|"), shown = *tabs == '*', name_length = length - shown;
+		float width;
+
+		if (name_length > sizeof(name) - 1)
+			name_length = sizeof(name) - 1;
+		memcpy(name, tabs + shown, name_length);
+		name[name_length] = 0;
+		width = h3_text(face, x, baseline, shown ? H3_TAB_SHOWN : H3_TAB, name, 1);
+		if (shown)
+			count = h3_rect(vertices, count, x, baseline + 6.0f, width, 2.0f, H3_TAB_LINE, H3_TAB_LINE & 0x00FFFFFFu,
+				H3_TAB_LINE, H3_TAB_LINE & 0x00FFFFFFu);
+		x += width + gap;
+		tabs += length;
+		if (*tabs == '|')
+			tabs++;
+	}
+	h3_key(vertices, &count, x - gap + 18.0f, baseline, "R");
+	return count;
+}
+
+/* the panel with a tab bar (menu_build's lines; diagram: the touch zones') */
+static unsigned int h3_panel(struct overlay_vertex *vertices, unsigned int count, unsigned int limit,
+	const char **lines, int line_count, const char *diagram)
+{
+	const float row_width = H3_ROWS_RIGHT - H3_LEFT, side_width = H3_RIGHT - H3_SIDE_LEFT;
+	const float item_cap = h3_capital(&h3.item), small_cap = h3_capital(&h3.small);
+	const char *help = NULL, *footer = NULL;
+	char chosen_label[64] = "", chosen_value[96] = "";
+	float y, rows_top = 0.0f, row_height, units = 0.0f;
+	int index, headings = 0, headings_dropped = 0, headings_seen = 0;
+
+	count = overlay_rect(vertices, count, 0.0f, 0.0f, DISPLAY_WIDTH, DISPLAY_HEIGHT, H3_DIM);
+	count = overlay_rect(vertices, count, 0.0f, H3_STRIP_TOP, DISPLAY_WIDTH, H3_STRIP_HEIGHT, H3_STRIP);
+	h3_text(&h3.title, H3_LEFT, H3_STRIP_TOP + (H3_STRIP_HEIGHT + h3_capital(&h3.title)) / 2.0f, H3_TITLE,
+		T("Settings"), 1);
+	y = H3_STRIP_TOP + H3_STRIP_HEIGHT;
+	count = h3_rect(vertices, count, 0.0f, y, DISPLAY_WIDTH, 78.0f, H3_BAND_TOP, H3_BAND_TOP, H3_BAND_MIDDLE,
+		H3_BAND_MIDDLE);
+	count = h3_rect(vertices, count, 0.0f, y + 78.0f, DISPLAY_WIDTH, H3_BAND_END - y - 78.0f, H3_BAND_MIDDLE,
+		H3_BAND_MIDDLE, H3_BAND_BOTTOM, H3_BAND_BOTTOM);
+	count = h3_rule(vertices, count, y);
+	count = h3_rule(vertices, count, H3_BAND_END);
+	count = h3_tabs(vertices, count, y + 16.0f, lines[0] + 1);
+	y += 54.0f;
+	/* (the rows' height: as many as there are in the band, 22 to 34
+	pixels; a gap half a row) */
+	for (index = 1; index < line_count; index++)
+	{
+		char mark = lines[index][0];
+
+		if (mark == '\x03')
+			y += 26.0f;
+		else if (mark == '\x08')
+		{
+			y += 24.0f;
+			headings++;
+		}
+		else if (!mark)
+			units += 0.5f;
+		else if (mark != '\x05' && mark != '\x06')
+			units += 1.0f;
+	}
+	row_height = units > 0.0f ? (H3_BAND_END - 10.0f - y) / units : 34.0f;
+	/* (rows that would be less than 22 pixels: the first headings give way,
+	as the classic panel's do, vita_settings.c show_list) */
+	while (units > 0.0f && row_height < 22.0f && headings_dropped < headings)
+	{
+		headings_dropped++;
+		y -= 24.0f;
+		row_height = (H3_BAND_END - 10.0f - y) / units;
+	}
+	if (row_height > 34.0f)
+		row_height = 34.0f;
+	if (row_height < 22.0f)
+		row_height = 22.0f;
+	y = H3_STRIP_TOP + H3_STRIP_HEIGHT + 54.0f;
+	for (index = 1; index < line_count && y < H3_BAND_END; index++)
+	{
+		const char *line = lines[index];
+		int chosen = index == gxm.menu_selected;
+
+		if (line[0] == '\x05')
+		{
+			help = line + 1;
+			continue;
+		}
+		if (line[0] == '\x06')
+		{
+			footer = line + 1;
+			continue;
+		}
+		if (line[0] == '\x03')
+		{
+			h3_text(&h3.small, H3_LEFT, y + small_cap, H3_VALUE, line + 1, 1);
+			y += 26.0f;
+			continue;
+		}
+		/* (a heading, centred over the rows, as Halo Online's; the first
+		given way when the rows would not fit) */
+		if (line[0] == '\x08' && headings_seen++ < headings_dropped)
+			continue;
+		if (line[0] == '\x08')
+		{
+			h3_text(&h3.item, H3_LEFT + (row_width - overlay_face_width(&h3.item, line + 1, 1)) / 2.0f,
+				y + 4.0f + item_cap, H3_HEADING, line + 1, 1);
+			y += 24.0f;
+			continue;
+		}
+		if (!line[0])
+		{
+			y += row_height / 2.0f;
+			continue;
+		}
+		if (!rows_top)
+			rows_top = y;
+		if (chosen)
+			count = h3_bar(vertices, count, H3_LEFT, y, diagram ? row_width : row_width, row_height - 2.0f);
+		{
+			const float baseline = y + (row_height - 2.0f + item_cap) / 2.0f;
+
+			if (line[0] == '\x04')
+				h3_text(&h3.small, H3_LEFT + 12.0f, y + (row_height - 2.0f + small_cap) / 2.0f, H3_VALUE, line + 1, 0);
+			else if (line[0] == '!')
+				h3_text(&h3.item, H3_LEFT + 12.0f, baseline, MENU_WARNING, line + 1, 0);
+			else
+			{
+				const char *split = strchr(line, '\x02');
+				char label[64], value[96];
+				size_t length = split ? (size_t)(split - line) : strlen(line);
+				int left = 0, right = 0;
+				float x = H3_ROWS_RIGHT - 12.0f;
+
+				if (length > sizeof(label) - 1)
+					length = sizeof(label) - 1;
+				memcpy(label, line, length);
+				label[length] = 0;
+				value[0] = 0;
+				if (split)
+					h3_value(value, sizeof(value), split + 1, &left, &right);
+				h3_text(&h3.item, H3_LEFT + 12.0f, baseline, chosen ? H3_LABEL_CHOSEN : H3_LABEL, label, 1);
+				/* (the value right-aligned; the chosen row's arrows where it
+				can change) */
+				if (chosen && right)
+				{
+					x -= overlay_face_width(&h3.item, ">", 0);
+					h3_text(&h3.item, x, baseline, H3_ARROW, ">", 0);
+					x -= 10.0f;
+				}
+				x -= overlay_face_width(&h3.item, value, 1);
+				h3_text(&h3.item, x, baseline, chosen ? H3_VALUE_CHOSEN : H3_VALUE, value, 1);
+				if (chosen && left)
+					h3_text(&h3.item, x - 10.0f - overlay_face_width(&h3.item, "<", 0), baseline, H3_ARROW, "<", 0);
+				if (chosen)
+				{
+					snprintf(chosen_label, sizeof(chosen_label), "%s", label);
+					snprintf(chosen_value, sizeof(chosen_value), "%s", value);
+				}
+			}
+		}
+		y += row_height;
+	}
+	if (!rows_top)
+		rows_top = H3_STRIP_TOP + H3_STRIP_HEIGHT + 54.0f;
+	/* the side panel: the chosen row, its value large, its help; the touch
+	zones' diagram above the help on that page */
+	y = rows_top;
+	if (diagram)
+	{
+		count = menu_touch_diagram(vertices, count, limit, H3_SIDE_LEFT + 40.0f, y - 8.0f, diagram);
+		y += 250.0f;
+	}
+	else if (chosen_label[0])
+	{
+		const struct overlay_face *big = overlay_face_width(&h3.title, chosen_value, 1) <= side_width ? &h3.title :
+			&h3.item;
+
+		h3_text(&h3.small, H3_SIDE_LEFT, y + small_cap, H3_VALUE, chosen_label, 1);
+		y += small_cap + 10.0f;
+		if (chosen_value[0])
+		{
+			h3_text(big, H3_SIDE_LEFT, y + h3_capital(big), H3_TITLE, chosen_value, 1);
+			y += h3_capital(big) + 14.0f;
+		}
+		count = overlay_rect(vertices, count, H3_SIDE_LEFT, y, side_width, 1.0f, 0x5A9A8777u);
+		y += 10.0f;
+	}
+	if (help && help[0])
+		h3_wrapped(&h3.small, H3_SIDE_LEFT, y + small_cap, side_width, small_cap + 9.0f, H3_HELP, help);
+	/* the buttons' strip */
+	count = overlay_rect(vertices, count, 0.0f, H3_FOOT_TOP, DISPLAY_WIDTH, H3_FOOT_HEIGHT, H3_STRIP);
+	if (footer)
+		count = h3_buttons(vertices, count, H3_LEFT, H3_FOOT_TOP, H3_FOOT_HEIGHT, footer);
+	return count;
+}
+
+/* ---- Menu style Online's settings panel: the online look's SETTINGS
+screen - its title in a dark band across the top, the tabs under it (GAME,
+CONTROLS, VIDEO, SOUND, MULTIPLAYER, DEV: the panel's own), the rows in one
+see-through navy column with the headings centred over them, each value in
+a column of its own and, for a value stepped through a range, a slider
+('\x0b' choice/last after it: vita_settings.c), the chosen row on the
+orange bar, its help under the column, the buttons in the strip at the
+foot. The same lines as h3_panel draws (menu_build's), the same rows and
+actions: only the look. */
+#define ONLINE_LEFT 132.0f
+#define ONLINE_RIGHT (DISPLAY_WIDTH - 132.0f)
+#define ONLINE_TITLE_TOP 26.0f
+#define ONLINE_TITLE_HEIGHT 44.0f
+#define ONLINE_TABS_TOP 70.0f
+#define ONLINE_BODY_TOP 102.0f
+#define ONLINE_BODY_END 456.0f
+#define ONLINE_FOOT_TOP 470.0f
+#define ONLINE_FOOT_HEIGHT 36.0f
+#define ONLINE_DIM 0xB0100804u
+#define ONLINE_BAND 0xE8180C06u
+#define ONLINE_BODY_TOP_COLOR 0xC8582E1Au
+#define ONLINE_BODY_BOTTOM_COLOR 0xD0381C0Eu
+#define ONLINE_BAR 0xF03E6CBAu
+#define ONLINE_BAR_FADED 0xC0305496u
+#define ONLINE_LABEL 0xFFE6DDD4u
+#define ONLINE_VALUE 0xFFEFE9E2u
+#define ONLINE_TAB 0xFF9C8C7Cu
+#define ONLINE_HEADING 0xFFE8D2BCu
+#define ONLINE_TRACK 0x80D2B49Au
+#define ONLINE_KNOB 0xFFF8F0E8u
+
+static unsigned int online_tabs(struct overlay_vertex *vertices, unsigned int count, float y, const char *tabs)
+{
+	const float cap = h3_capital(&h3.item), baseline = y + cap + 4.0f;
+	float x = ONLINE_LEFT + 4.0f;
+	char name[64];
+
+	while (*tabs)
+	{
+		size_t length = strcspn(tabs, "|"), shown = *tabs == '*', name_length = length - shown;
+
+		if (name_length > sizeof(name) - 1)
+			name_length = sizeof(name) - 1;
+		memcpy(name, tabs + shown, name_length);
+		name[name_length] = 0;
+		x += h3_text(&h3.item, x, baseline, shown ? H3_TAB_SHOWN : ONLINE_TAB, name, 1) + 16.0f;
+		tabs += length;
+		if (*tabs == '|')
+			tabs++;
+	}
+	/* (L and R change them, as the online screen's bumpers) */
+	x += 6.0f;
+	x += h3_key(vertices, &count, x, baseline, "L") + 4.0f;
+	h3_key(vertices, &count, x, baseline, "R");
+	return count;
+}
+
+static unsigned int online_panel(struct overlay_vertex *vertices, unsigned int count, const char **lines,
+	int line_count)
+{
+	const float width = ONLINE_RIGHT - ONLINE_LEFT, value_x = ONLINE_LEFT + width * 0.54f;
+	const float small_cap = h3_capital(&h3.small), item_cap = h3_capital(&h3.item);
+	const char *help = NULL, *footer = NULL;
+	float y, row_height, units = 0.0f;
+	int index;
+
+	count = overlay_rect(vertices, count, 0.0f, 0.0f, DISPLAY_WIDTH, DISPLAY_HEIGHT, ONLINE_DIM);
+	/* (the title's band, the tabs' under it) */
+	count = overlay_rect(vertices, count, 0.0f, ONLINE_TITLE_TOP, DISPLAY_WIDTH, ONLINE_TITLE_HEIGHT, ONLINE_BAND);
+	h3_text(&h3.title, ONLINE_LEFT, ONLINE_TITLE_TOP + (ONLINE_TITLE_HEIGHT + h3_capital(&h3.title)) / 2.0f,
+		H3_TITLE, T("Settings"), 1);
+	count = h3_rect(vertices, count, 0.0f, ONLINE_TABS_TOP, DISPLAY_WIDTH, ONLINE_BODY_END - ONLINE_TABS_TOP,
+		ONLINE_BODY_TOP_COLOR, ONLINE_BODY_TOP_COLOR, ONLINE_BODY_BOTTOM_COLOR, ONLINE_BODY_BOTTOM_COLOR);
+	count = online_tabs(vertices, count, ONLINE_TABS_TOP, lines[0] + 1);
+	count = overlay_rect(vertices, count, ONLINE_LEFT, ONLINE_BODY_TOP - 6.0f, width, 1.0f, H3_RULE);
+	/* (the rows' height: as many as fit, 20 to 26 pixels) */
+	y = ONLINE_BODY_TOP;
+	for (index = 1; index < line_count; index++)
+	{
+		char mark = lines[index][0];
+
+		if (mark == '\x03' || mark == '\x08')
+			y += 22.0f;
+		else if (!mark)
+			units += 0.4f;
+		else if (mark == '\x05')
+			help = lines[index] + 1;
+		else if (mark == '\x06')
+			footer = lines[index] + 1;
+		else
+			units += 1.0f;
+	}
+	row_height = units > 0.0f ? (ONLINE_BODY_END - 40.0f - y) / units : 26.0f;
+	if (row_height > 26.0f)
+		row_height = 26.0f;
+	if (row_height < 18.0f)
+		row_height = 18.0f;
+	y = ONLINE_BODY_TOP;
+	for (index = 1; index < line_count && y < ONLINE_BODY_END - 30.0f; index++)
+	{
+		const char *line = lines[index];
+		int chosen = index == gxm.menu_selected;
+		const float baseline = y + (row_height - 2.0f + small_cap) / 2.0f;
+
+		if (line[0] == '\x05' || line[0] == '\x06')
+			continue;
+		if (line[0] == '\x03' || line[0] == '\x08')
+		{
+			/* (a page's title and the headings: centred, as the online
+			screen's sections) */
+			const struct overlay_face *face = line[0] == '\x08' ? &h3.item : &h3.small;
+
+			h3_text(face, ONLINE_LEFT + (width - overlay_face_width(face, line + 1, 1)) / 2.0f,
+				y + 2.0f + (line[0] == '\x08' ? item_cap : small_cap), ONLINE_HEADING, line + 1, 1);
+			y += 22.0f;
+			continue;
+		}
+		if (!line[0])
+		{
+			y += row_height * 0.4f;
+			continue;
+		}
+		if (chosen)
+			count = h3_rect(vertices, count, ONLINE_LEFT, y, width, row_height - 2.0f, ONLINE_BAR, ONLINE_BAR_FADED,
+				ONLINE_BAR, ONLINE_BAR_FADED);
+		if (line[0] == '\x04')
+			h3_text(&h3.small, ONLINE_LEFT + 16.0f, baseline, H3_VALUE_CHOSEN, line + 1, 0);
+		else if (line[0] == '!')
+			h3_text(&h3.small, ONLINE_LEFT + 16.0f, baseline, MENU_WARNING, line + 1, 0);
+		else
+		{
+			const char *split = strchr(line, '\x02');
+			const char *range = split ? strchr(split, '\x0b') : NULL;
+			char label[64], value[96];
+			size_t length = split ? (size_t)(split - line) : strlen(line);
+			int left = 0, right = 0, choice = 0, last = 0;
+			float x = value_x;
+
+			if (length > sizeof(label) - 1)
+				length = sizeof(label) - 1;
+			memcpy(label, line, length);
+			label[length] = 0;
+			value[0] = 0;
+			if (split)
+			{
+				char raw[160];
+				size_t raw_length = range ? (size_t)(range - split - 1) : strlen(split + 1);
+
+				if (raw_length > sizeof(raw) - 1)
+					raw_length = sizeof(raw) - 1;
+				memcpy(raw, split + 1, raw_length);
+				raw[raw_length] = 0;
+				h3_value(value, sizeof(value), raw, &left, &right);
+			}
+			if (range && sscanf(range + 1, "%d/%d", &choice, &last) != 2)
+				last = 0;
+			h3_text(&h3.small, ONLINE_LEFT + 16.0f, baseline, ONLINE_LABEL, label, 1);
+			if (chosen && left)
+				h3_text(&h3.small, x - 12.0f, baseline, H3_ARROW, "<", 0);
+			h3_text(&h3.small, x, baseline, ONLINE_VALUE, value, 1);
+			/* (a value of a range of numbers: its slider, the knob where
+			the choice stands) */
+			if (last >= 3 && value[0] >= '0' && value[0] <= '9')
+			{
+				const float value_end = value_x + overlay_face_width(&h3.small, value, 1) + 16.0f;
+				const float track_x = value_end > value_x + 60.0f ? value_end : value_x + 60.0f;
+				const float track_width = ONLINE_RIGHT - 34.0f - track_x;
+				const float knob = track_x + track_width * (float)choice / (float)last;
+
+				count = overlay_rect(vertices, count, track_x, y + row_height / 2.0f - 1.0f, track_width, 1.0f,
+					ONLINE_TRACK);
+				count = overlay_rect(vertices, count, knob - 1.5f, y + row_height / 2.0f - 5.0f, 3.0f, 9.0f,
+					ONLINE_KNOB);
+			}
+			if (chosen && right)
+				h3_text(&h3.small, ONLINE_RIGHT - 22.0f, baseline, H3_ARROW, ">", 0);
+		}
+		y += row_height;
+	}
+	/* (the chosen row's help, under the column) */
+	if (help && help[0])
+	{
+		count = overlay_rect(vertices, count, ONLINE_LEFT, ONLINE_BODY_END - 36.0f, width, 1.0f, H3_RULE);
+		h3_wrapped(&h3.small, ONLINE_LEFT + 16.0f, ONLINE_BODY_END - 30.0f + small_cap, width - 32.0f,
+			small_cap + 7.0f, H3_HELP, help);
+	}
+	count = overlay_rect(vertices, count, 0.0f, ONLINE_FOOT_TOP, DISPLAY_WIDTH, ONLINE_FOOT_HEIGHT, H3_STRIP);
+	if (footer)
+		count = h3_buttons(vertices, count, ONLINE_LEFT, ONLINE_FOOT_TOP, ONLINE_FOOT_HEIGHT, footer);
+	return count;
+}
+
+/* the panel without a tab bar (a message, a question, the guide, a screen an
+action opens): Halo 3's dialog, a band across the screen, its title in a
+strip above, its lines (the chosen one on the orange bar) and its buttons
+in a strip below */
+static unsigned int h3_dialog(struct overlay_vertex *vertices, unsigned int count, const char **lines, int line_count)
+{
+	const float item_cap = h3_capital(&h3.item), text_width = H3_RIGHT - H3_LEFT;
+	const int body = line_count - 2;
+	float row_height = 30.0f, height, top, y;
+	int index;
+
+	if (body > 0 && 56.0f + body * row_height + 20.0f + 48.0f > DISPLAY_HEIGHT - 16.0f)
+		row_height = (DISPLAY_HEIGHT - 16.0f - 56.0f - 20.0f - 48.0f) / (float)body;
+	height = 56.0f + (body > 0 ? body : 0) * row_height + 20.0f;
+	top = (float)(int)((DISPLAY_HEIGHT - height - 48.0f) / 2.0f);
+	count = overlay_rect(vertices, count, 0.0f, 0.0f, DISPLAY_WIDTH, DISPLAY_HEIGHT, H3_DIM);
+	count = overlay_rect(vertices, count, 0.0f, top, DISPLAY_WIDTH, 56.0f, H3_STRIP);
+	{
+		const struct overlay_face *face = overlay_face_width(&h3.title, lines[0], 1) <= text_width ? &h3.title :
+			&h3.item;
+
+		h3_text(face, H3_LEFT, top + (56.0f + h3_capital(face)) / 2.0f, H3_TITLE, lines[0], 1);
+	}
+	count = h3_rect(vertices, count, 0.0f, top + 56.0f, DISPLAY_WIDTH, height - 56.0f, H3_BAND_TOP, H3_BAND_TOP,
+		H3_BAND_BOTTOM, H3_BAND_BOTTOM);
+	count = h3_rule(vertices, count, top + 56.0f);
+	count = h3_rule(vertices, count, top + height);
+	for (index = 1, y = top + 66.0f; index < line_count - 1; index++, y += row_height)
+	{
+		const char *line = lines[index];
+		uint32_t color = H3_LABEL_CHOSEN;
+		const struct overlay_face *face = &h3.item;
+
+		if (index == gxm.menu_selected)
+			count = h3_bar(vertices, count, H3_LEFT, y, text_width, row_height - 2.0f);
+		if (line[0] == '!')
+		{
+			color = MENU_WARNING;
+			line++;
+		}
+		if (overlay_face_width(face, line, 0) > text_width - 24.0f)
+			face = &h3.small;
+		h3_text(face, H3_LEFT + 12.0f, y + (row_height - 2.0f + (face == &h3.item ? item_cap :
+			h3_capital(&h3.small))) / 2.0f, color, line, 0);
+	}
+	count = overlay_rect(vertices, count, 0.0f, top + height + 8.0f, DISPLAY_WIDTH, H3_FOOT_HEIGHT, H3_STRIP);
+	return h3_buttons(vertices, count, H3_LEFT, top + height + 8.0f, H3_FOOT_HEIGHT, lines[line_count - 1]);
+}
+
+/* the frame's characters over the overlay's rectangles */
+static void h3_draw(void)
+{
+	static SceGxmVertexProgram *vertex_program;
+	SceGxmFragmentProgram *fragment_program;
+	SceGxmBlendInfo blend;
+	struct text_vertex *vertices;
+	unsigned short *indices;
+	unsigned int index, total = h3.count * 6;
+
+	if (!total)
+		return;
+	if (!vertex_program)
+	{
+		const struct shader *shader = &gxm.shaders[gxm.text_vertex - 1];
+		static const struct { const char *name; unsigned int offset; SceGxmAttributeFormat format; } inputs[3] = {
+			{ "position", 0, SCE_GXM_ATTRIBUTE_FORMAT_F32 },
+			{ "texcoord", 2 * sizeof(float), SCE_GXM_ATTRIBUTE_FORMAT_F32 },
+			{ "color", 4 * sizeof(float), SCE_GXM_ATTRIBUTE_FORMAT_U8N },
+		};
+		SceGxmVertexAttribute attributes[3];
+		SceGxmVertexStream stream;
+
+		for (index = 0; index < 3; index++)
+		{
+			attributes[index].streamIndex = 0;
+			attributes[index].offset = (uint16_t)inputs[index].offset;
+			attributes[index].format = inputs[index].format;
+			attributes[index].componentCount = index == 2 ? 4 : 2;
+			attributes[index].regIndex = (uint16_t)sceGxmProgramParameterGetResourceIndex(
+				sceGxmProgramFindParameterByName(shader->program, inputs[index].name));
+		}
+		stream.stride = sizeof(struct text_vertex);
+		stream.indexSource = SCE_GXM_INDEX_SOURCE_INDEX_16BIT;
+		if (sceGxmShaderPatcherCreateVertexProgram(gxm.patcher, shader->id, attributes, 3, &stream, 1, &vertex_program) < 0)
+			return;
+	}
+	memset(&blend, 0, sizeof(blend));
+	blend.colorMask = SCE_GXM_COLOR_MASK_ALL;
+	blend.colorFunc = blend.alphaFunc = SCE_GXM_BLEND_FUNC_ADD;
+	blend.colorSrc = blend.alphaSrc = SCE_GXM_BLEND_FACTOR_SRC_ALPHA;
+	blend.colorDst = blend.alphaDst = SCE_GXM_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	fragment_program = fragment_program_get(gxm.text_fragment, gxm.text_vertex, &blend);
+	vertices = vgxm_worker_alloc(total * sizeof(*vertices), 16);
+	indices = vgxm_worker_alloc(total * sizeof(*indices), 16);
+	if (!fragment_program || !vertices || !indices)
+		return;
+	memcpy(vertices, h3.built, total * sizeof(*vertices));
+	for (index = 0; index < total; index++)
+		indices[index] = (unsigned short)index;
+	shadow.valid = 0;
+	sceGxmSetVertexProgram(gxm.context, vertex_program);
+	sceGxmSetFragmentProgram(gxm.context, fragment_program);
+	sceGxmSetVertexStream(gxm.context, 0, vertices);
+	sceGxmSetFragmentTexture(gxm.context, 0, &h3.texture);
+	sceGxmDraw(gxm.context, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, indices, total);
+	gxm.scene_draws++;
+}
+
 /* the settings panel. With a tab bar (a first line that starts with a
 tab, vita_settings.c show_list): the panel the height of the screen, the
 tab bar at its top, a page's title ('\x03'), the rows (label '\x02' value)
-with the chosen one on a bar, lines that are not rows ('\x04', dimmer), an
+with the chosen one on a bar, lines that are not rows ('\x04', dimmer), a
+heading over rows ('\x08', smaller), an
 empty line for a gap, the chosen row's help ('\x05') and the panel's
 buttons ('\x06') on the last two lines, and the touch zones' diagram (a
 line of '\x01' and zone marks) at the right. Without one (a message, a
@@ -4327,6 +5562,11 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 	}
 	if (line_count < 2)
 		return count;
+	if (gxm.menu_online && h3_ready() && lines[0][0] == '\t' && !diagram)
+		return online_panel(vertices, count, lines, line_count);
+	if (gxm.menu_halo3 && h3_ready())
+		return lines[0][0] == '\t' ? h3_panel(vertices, count, limit, lines, line_count, diagram) :
+			h3_dialog(vertices, count, lines, line_count);
 	if (lines[0][0] == '\t')
 	{
 		const float top = 12.0f, height = DISPLAY_HEIGHT - 24.0f, bottom = top + height;
@@ -4358,6 +5598,12 @@ static unsigned int menu_build(struct overlay_vertex *vertices, unsigned int cou
 			{
 				count = overlay_text(vertices, count, limit, x, y, 2.0f, MENU_ACCENT, line + 1);
 				y += 36.0f;
+				continue;
+			}
+			if (line[0] == '\x08')
+			{
+				count = overlay_text(vertices, count, limit, x, y + 2.0f, 1.5f, MENU_TAB, line + 1);
+				y += 22.0f;
 				continue;
 			}
 			if (!line[0])
@@ -4565,6 +5811,7 @@ static void overlay_draw(void)
 				pool_in_user ? 0xFF40E0FFu : 0xFFE0E0E0u, text);
 		}
 	}
+	h3.count = 0;
 	if (gxm.menu_visible)
 		count = menu_build(vertices, count, limit);
 	if (!count)
@@ -4585,9 +5832,16 @@ static void overlay_draw(void)
 	sceGxmSetFrontStencilFunc(gxm.context, SCE_GXM_STENCIL_FUNC_ALWAYS, SCE_GXM_STENCIL_OP_KEEP,
 		SCE_GXM_STENCIL_OP_KEEP, SCE_GXM_STENCIL_OP_KEEP, 0, 0);
 	sceGxmSetCullMode(gxm.context, SCE_GXM_CULL_NONE);
+	/* (the display's own viewport: the interface's draws, Sharp interface,
+	may have left theirs, and a depth bias) */
+	sceGxmSetFrontDepthBias(gxm.context, 0, 0);
+	sceGxmSetViewportEnable(gxm.context, SCE_GXM_VIEWPORT_ENABLED);
+	sceGxmSetViewport(gxm.context, DISPLAY_WIDTH * 0.5f, DISPLAY_WIDTH * 0.5f, DISPLAY_HEIGHT * 0.5f,
+		-DISPLAY_HEIGHT * 0.5f, 0.0f, 1.0f);
 	sceGxmSetRegionClip(gxm.context, SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
 	sceGxmDraw(gxm.context, SCE_GXM_PRIMITIVE_TRIANGLES, SCE_GXM_INDEX_FORMAT_U16, indices, count * 6);
 	gxm.scene_draws++;
+	h3_draw();
 }
 
 /* ---------- system dialogs (the ad hoc group's network check dialog,
@@ -4639,6 +5893,29 @@ static void present_step(int step)
 	present_mark = now;
 }
 
+/* (port) How often the waits for the GPU look at its notification
+(Sierra-III's handoff, Oct 21 2026, for the battery): every 1 ms, not every
+0.1 ms - ten times fewer wake-ups of a core with nothing to do. The present's
+wait (the GPU two frames behind) leaves the GPU a frame and more queued, so a
+later look delays no GPU work; the others are rare (a map's change, a
+setting's). sceGxmNotificationWait is not used: the SDK says nothing of
+what it waits for, Vita3K's waits for the value exactly, and a GPU already
+past it would wait for ever. HALO_GPU_WAIT_POLL_US=<50..5000>: another
+step, for the hardware's measures (100: as before) */
+static SceUInt gpu_wait_poll_us(void)
+{
+	static SceUInt poll;
+
+	if (!poll)
+	{
+		const char *setting = getenv("HALO_GPU_WAIT_POLL_US");
+		long value = setting ? atol(setting) : 0;
+
+		poll = value >= 50 && value <= 5000 ? (SceUInt)value : 1000;
+	}
+	return poll;
+}
+
 void vgxm_wait_gpu_idle(void)
 {
 	unsigned int frame = __atomic_load_n(&gxm.frame, __ATOMIC_ACQUIRE);
@@ -4646,7 +5923,7 @@ void vgxm_wait_gpu_idle(void)
 	if (!gxm.ready)
 		return;
 	while ((int)(*gxm.notification - frame) < 0)
-		sceKernelDelayThread(100);
+		sceKernelDelayThread(gpu_wait_poll_us());
 }
 
 void vgxm_frame_submit_begin(void)
@@ -4658,6 +5935,11 @@ void vgxm_frame_submit_begin(void)
 /* the GPU time of a frame over this long is a stall (a load, a shader
 compiled), not its work: the overlay's average leaves it out */
 #define GPU_FRAME_STALL_US 250000u
+
+void vgxm_frame_tag(unsigned long tag)
+{
+	frame_tag_next = tag;
+}
 
 int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame)
 {
@@ -4686,6 +5968,7 @@ int vgxm_gpu_frame_next(struct vgxm_gpu_frame *frame)
 	frame->tail_ms = (int)(done - end) > 0 ? (done - end) / 1000.0f : 0.0f;
 	frame->interval_ms = previous_done && (int)(done - previous_done) > 0 ? (done - previous_done) / 1000.0f : 0.0f;
 	frame->scale = frame_timing[next % FRAME_TIMING_SLOTS].scale;
+	frame->tag = frame_timing[next % FRAME_TIMING_SLOTS].tag;
 	if (frame->gpu_ms * 1000.0f < GPU_FRAME_STALL_US)
 		gpu_ms_average = gpu_ms_average > 0.0f ? gpu_ms_average * 0.9f + frame->gpu_ms * 0.1f : frame->gpu_ms;
 	return 1;
@@ -4758,6 +6041,170 @@ static void display_buffering_apply(void)
 	}
 }
 
+/* The interface at the display's resolution (Sharp interface, d3d8_gxm.c
+halo_d3d_interface_begin). The frame's 3D picture is in the back buffer, at
+the render scale; where the game's interface begins, the picture is scaled
+up to the display's size as the present would (blit) into the interface
+layer - a 960x544 target of its own in CDRAM (interface_layer_ready) - and
+the game's draws and clears into the back buffer from then on go there
+instead (vgxm_set_targets): a target of its own (DISPLAY_TARGET) whose size
+asked for is the back buffer's, so the viewports and clips the game gives
+in its 640 or 848 by 480 are scaled to the picture and moved to where it
+starts (4:3's bars), as a render-scaled target's are scaled down to its
+pixels. It has no depth buffer (the interface draws without the depth and
+stencil tests: vgxm_draw, vgxm_clear). A draw into another target in
+between (a copy the loading screen blurs) ends its scene, and the next one
+into the back buffer begins it again (scene_ensure). The present copies
+the layer to the display buffer (vgxm_present), and the settings panel and
+the overlay are drawn after it, as before.
+
+Until 1.1.1-insider.11 the interface was drawn on the display buffer
+itself, its scene begun mid-frame: with double buffering the buffer is
+free only once the display has flipped away from it, so the GPU's work
+after it waited for the vertical blank. The layer is drawn whenever, and
+only the present's scene waits for the display, as without the Sharp
+interface. HALO_SHARP_UI_LAYER=0 (debug): on the display buffer, as before;
+also when the layer's 2 MB of CDRAM cannot be had.
+
+At 100% (the back buffer drawn at the size asked for, the dynamic
+resolution's part of it all of it) there is no split: the interface is
+drawn with the picture and scaled up with it at the present, as without the
+Sharp interface (HALO_SHARP_UI_FULL=1, debug: split anyway). */
+static int interface_layer_ready(void)
+{
+	static int enabled = -1;
+	static unsigned int retry_frame;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_SHARP_UI_LAYER");
+
+		enabled = !setting || !*setting || atoi(setting) != 0;
+		if (!enabled)
+			log_line("gxm: Sharp interface on the display buffer (HALO_SHARP_UI_LAYER=0)");
+	}
+	if (!enabled)
+		return 0;
+	if (gxm.interface_memory.base)
+		return 1;
+	/* (refused: asked again 10 s later, not every frame) */
+	if (retry_frame && gxm.frame < retry_frame)
+		return 0;
+	if (!cdram_block_get(_memory_other, 4 * DISPLAY_STRIDE * DISPLAY_HEIGHT, "interface layer", &gxm.interface_memory))
+	{
+		retry_frame = gxm.frame + 600;
+		log_line("gxm: no CDRAM for the Sharp interface's layer (%u KB, %lu KB free): drawn on the display buffer",
+			4 * DISPLAY_STRIDE * DISPLAY_HEIGHT / 1024, memory_cdram_free() / 1024);
+		return 0;
+	}
+	memset(gxm.interface_memory.base, 0, 4 * DISPLAY_STRIDE * DISPLAY_HEIGHT);
+	sceGxmColorSurfaceInit(&gxm.interface_surface, SCE_GXM_COLOR_FORMAT_A8B8G8R8, SCE_GXM_COLOR_SURFACE_LINEAR,
+		SCE_GXM_COLOR_SURFACE_SCALE_NONE, SCE_GXM_OUTPUT_REGISTER_SIZE_32BIT, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+		DISPLAY_STRIDE, gxm.interface_memory.base);
+	log_line("gxm: Sharp interface layer: %ux%u, %u KB of CDRAM at %p", DISPLAY_WIDTH, DISPLAY_HEIGHT,
+		gxm.interface_memory.size / 1024, gxm.interface_memory.base);
+	return 1;
+}
+
+/* the back buffer drawn at 100%: no split (above) */
+static int interface_full_scale(const struct target *source)
+{
+	static int split_anyway = -1;
+
+	if (split_anyway < 0)
+	{
+		const char *setting = getenv("HALO_SHARP_UI_FULL");
+
+		split_anyway = setting && atoi(setting) != 0;
+	}
+	/* (Menu style Online's menus: split at 100% too, their text and lines
+	drawn at the display's pixels - its sharp fonts, menu_tags.c - not scaled
+	up with the picture; in play as ever) */
+	if (halo_menu_style_online() && halo_main_menu_loaded())
+		return 0;
+	return !split_anyway && source->scale_x <= 0.0f && source->scale_y <= 0.0f;
+}
+
+void vgxm_interface_begin(unsigned long color_target)
+{
+	struct target *source, *display = &gxm.targets[DISPLAY_TARGET - 1];
+	unsigned int asked_width, asked_height;
+	int layer;
+
+	if (!gxm.ready || gxm.interface_active || !color_target || color_target > gxm.target_count)
+		return;
+	source = &gxm.targets[color_target - 1];
+	if (source->depth || !source->memory.base || source->atlas)
+		return;
+	if (interface_full_scale(source))
+	{
+		gxm.interface_full_frames++;
+		return;
+	}
+	if (gxm.in_scene)
+	{
+		sceGxmEndScene(gxm.context, NULL, NULL);
+		gxm.in_scene = 0;
+	}
+	gxm.presented_target = color_target;
+	layer = interface_layer_ready();
+	if (layer)
+	{
+		if (!interface_scene_begin(rtt_sync_enabled() && gxm.scene_serial))
+			return;
+	}
+	else
+	{
+		/* (the display buffer this frame is drawn into, as the present has it) */
+		if (gxm.display_wanted != (int)gxm.display_count)
+			display_buffering_apply();
+		if (!display_scene_begin(rtt_sync_enabled() && gxm.scene_serial))
+			return;
+	}
+	blit(source);
+	asked_width = source->asked_width ? source->asked_width : source->width;
+	asked_height = source->asked_height ? source->asked_height : source->height;
+	memset(display, 0, sizeof(*display));
+	display->width = DISPLAY_WIDTH;
+	display->height = DISPLAY_HEIGHT;
+	display->stride = DISPLAY_STRIDE;
+	display->asked_width = asked_width;
+	display->asked_height = asked_height;
+	display->scale_x = gxm.picture_width / (float)asked_width;
+	display->scale_y = gxm.picture_height / (float)asked_height;
+	display->offset_x = gxm.picture_left;
+	display->offset_y = gxm.picture_top;
+	display->rect_width = (unsigned int)(gxm.picture_left + gxm.picture_width);
+	display->rect_height = (unsigned int)(gxm.picture_top + gxm.picture_height);
+	display->written_serial = gxm.scene_serial;
+	display->color = layer ? gxm.interface_surface : gxm.display_surface[gxm.back_buffer];
+	display->render_target = gxm.display_render_target;
+	gxm.interface_source = color_target;
+	gxm.interface_active = 1;
+	gxm.interface_layer = layer;
+	if (layer)
+	{
+		gxm.interface_layer_frames++;
+		gxm.interface_layer_used = gxm.frame;
+	}
+	else
+		gxm.interface_display_frames++;
+}
+
+/* (the present, in the display scene) the interface layer over the whole
+display, texel for texel */
+static void interface_layer_copy(void)
+{
+	SceGxmTexture texture;
+
+	if (sceGxmTextureInitLinearStrided(&texture, gxm.interface_memory.base, SCE_GXM_TEXTURE_FORMAT_U8U8U8U8_ABGR,
+		DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_STRIDE * 4) < 0)
+		return;
+	sceGxmTextureSetMinFilter(&texture, SCE_GXM_TEXTURE_FILTER_POINT);
+	sceGxmTextureSetMagFilter(&texture, SCE_GXM_TEXTURE_FILTER_POINT);
+	blit_texture(&texture, 0.0f, 0.0f, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+}
+
 void vgxm_present(unsigned long color_target, unsigned long width, unsigned long height)
 {
 	struct display_data data;
@@ -4769,30 +6216,75 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 	if (!gxm.ready)
 		return;
 	present_mark = sceKernelGetProcessTimeWide();
-	if (gxm.in_scene)
+	if (gxm.interface_active && gxm.interface_layer)
 	{
-		sceGxmEndScene(gxm.context, NULL, NULL);
-		gxm.in_scene = 0;
+		/* (the interface layer, the picture and the interface in it, copied
+		to the display in the present's scene, which waits for it) */
+		if (gxm.in_scene)
+		{
+			sceGxmEndScene(gxm.context, NULL, NULL);
+			gxm.in_scene = 0;
+		}
+		present_step(0);
+		if (gxm.display_wanted != (int)gxm.display_count)
+			display_buffering_apply();
+		sceGxmBeginScene(gxm.context, rtt_sync_enabled() ? SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY : 0,
+			gxm.display_render_target, NULL, NULL, gxm.display_sync[gxm.back_buffer],
+			&gxm.display_surface[gxm.back_buffer], NULL);
+		present_step(1);
+		interface_layer_copy();
 	}
-	present_step(0);
-	if (gxm.display_wanted != (int)gxm.display_count)
-		display_buffering_apply();
-	/* the frame on the display, in a scene of its own (it samples the
-	target the scene before drew: HALO_GXM_RTT_SYNC) */
-	gxm.presented_target = color_target;
-	sceGxmBeginScene(gxm.context, rtt_sync_enabled() && gxm.scene_serial ? SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY : 0,
-		gxm.display_render_target, NULL, NULL, gxm.display_sync[gxm.back_buffer],
-		&gxm.display_surface[gxm.back_buffer], NULL);
-	present_step(1);
-	/* (the letterbox stays as the buffers were cleared at start-up) */
-	if (color_target && color_target <= gxm.target_count && !gxm.targets[color_target - 1].depth)
-		blit(&gxm.targets[color_target - 1]);
+	else if (gxm.interface_active && gxm.in_scene && gxm.scene_color == DISPLAY_TARGET)
+	{
+		/* (the interface's display scene, the picture and the interface in
+		it: the overlay goes on) */
+		present_step(0);
+		present_step(1);
+	}
+	else
+	{
+		if (gxm.in_scene)
+		{
+			sceGxmEndScene(gxm.context, NULL, NULL);
+			gxm.in_scene = 0;
+		}
+		present_step(0);
+		/* (not while the interface is drawn: its display buffer is this
+		frame's) */
+		if (gxm.display_wanted != (int)gxm.display_count && !gxm.interface_active)
+			display_buffering_apply();
+		/* the frame on the display, in a scene of its own (it samples the
+		target the scene before drew: HALO_GXM_RTT_SYNC) */
+		gxm.presented_target = color_target;
+		sceGxmBeginScene(gxm.context, rtt_sync_enabled() && gxm.scene_serial ? SCE_GXM_SCENE_VERTEX_WAIT_FOR_DEPENDENCY : 0,
+			gxm.display_render_target, NULL, NULL, gxm.display_sync[gxm.back_buffer],
+			&gxm.display_surface[gxm.back_buffer], NULL);
+		present_step(1);
+		/* (the letterbox stays as the buffers were cleared at start-up; the
+		interface's display has the picture already) */
+		if (!gxm.interface_active && color_target && color_target <= gxm.target_count &&
+			!gxm.targets[color_target - 1].depth)
+			blit(&gxm.targets[color_target - 1]);
+	}
+	movie_draw();
 	overlay_draw();
 	notification.address = gxm.notification;
 	notification.value = ++gxm.frame;
 	if (gxm.frame >= SHADER_SWEEP_FRAME && !shader_sweep.started)
 		shader_sweep_start();
 	sceGxmEndScene(gxm.context, NULL, &notification);
+	gxm.in_scene = 0;
+	if (gxm.interface_memory.base && gxm.frame - gxm.interface_layer_used > 600)
+	{
+		/* (not drawn for 10 s - the Sharp interface off, 100%, a split
+		screen: the GPU long done with it) its CDRAM given back, made again
+		when next drawn */
+		cdram_block_put(_memory_other, &gxm.interface_memory);
+		memset(&gxm.interface_memory, 0, sizeof(gxm.interface_memory));
+		log_line("gxm: the Sharp interface's layer let go (not drawn for 10 s)");
+	}
+	gxm.interface_active = 0;
+	gxm.interface_layer = 0;
 	{
 		/* (the frame is all the GPU's now: frame_timing) */
 		unsigned int now = (unsigned int)sceKernelGetProcessTimeWide(), slot = gxm.frame % FRAME_TIMING_SLOTS;
@@ -4801,6 +6293,7 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 		frame_timing[slot].end_us = now;
 		frame_timing[slot].done_us = 0;
 		frame_timing[slot].scale = render_rect_get();
+		frame_timing[slot].tag = frame_tag_next;
 		frame_last_end_us = now;
 		frame_submit_begun = 0;
 	}
@@ -4826,7 +6319,7 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 		unsigned long long before = sceKernelGetProcessTimeWide();
 
 		while ((int)(*gxm.notification - wait_for) < 0)
-			sceKernelDelayThread(100);
+			sceKernelDelayThread(gpu_wait_poll_us());
 		waited += sceKernelGetProcessTimeWide() - before;
 		if (!started)
 			started = before;
@@ -4854,6 +6347,13 @@ void vgxm_present(unsigned long color_target, unsigned long width, unsigned long
 				log_line("gxm: render to texture: %.1f scene waits/frame, %.2f scenes begun again to wait/frame",
 					(double)gxm.dependency_waits / frames, (double)gxm.dependency_splits / frames);
 			gxm.dependency_waits = gxm.dependency_splits = 0;
+			if (gxm.interface_scenes_again || gxm.interface_layer_frames || gxm.interface_display_frames ||
+				gxm.interface_full_frames)
+				log_line("gxm: Sharp interface: %u of %u frames on the layer, %u on the display buffer, %u at 100%% (no split); "
+					"%.2f interface scenes begun again/frame", gxm.interface_layer_frames, frames,
+					gxm.interface_display_frames, gxm.interface_full_frames, (double)gxm.interface_scenes_again / frames);
+			gxm.interface_scenes_again = 0;
+			gxm.interface_layer_frames = gxm.interface_display_frames = gxm.interface_full_frames = 0;
 			memset(present_step_us, 0, sizeof(present_step_us));
 			gxm_scene_splits = 0;
 			{

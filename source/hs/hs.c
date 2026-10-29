@@ -2810,6 +2810,10 @@ symbols in this file:
 #include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
 #include "game/game_engine.h" /* port: game_engine_running */
 #include "network_wire.h" /* port: network version 28's rules */
+/* port: the console's warning (main/console.c), variadic - called below with
+no prototype in scope it was an implicit int f(): on the Vita's hard-float
+ABI a variadic call made unprototyped (tools/vita_abi_check.py) */
+void console_warning(const char *format, ...);
 
 /* ---------- constants */
 
@@ -16035,6 +16039,15 @@ boolean hs_scenario_postprocess(
 	return success;
 }
 
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean network_game_distributed_client(void);
+struct network_game_client *global_network_game_client_get(void);
+struct network_game_server *global_network_game_server_get(void);
+boolean players_coop_bring_to_host(void);
+
 /* port: whether this machine plays in another's game (joined to its lobby
 or in its game), whose host decides the game */
 static boolean hs_playing_in_anothers_game(
@@ -16140,6 +16153,10 @@ static char const *hs_host_player_command(
 	return *text == ' ' || *text == '\t' || *text == 0 ? text : NULL;
 }
 
+/* port: network Forge's (port/linux/game/forge_net.inc): this machine plays
+the host's Forge game, whose edits are requests the host checks */
+boolean forge_net_client_session(void);
+
 /* port: a command someone typed (the console, the telnet console, a cheat
 button, init.txt): what it logs is its answer, shown whatever
 config.toml's game.console_log is (terminal_command_running) */
@@ -16173,10 +16190,72 @@ static boolean hs_compile_and_evaluate_command(
 	cheats, no game speed, nothing else a command changes of the game (the
 	game run each tick also puts back what was changed before joining,
 	cheats_network_client_enforce) */
-	if (hs_playing_in_anothers_game() && !hs_expression_changes_no_game(expression))
+	if (hs_playing_in_anothers_game() && !hs_expression_changes_no_game(expression) &&
+		!(hs_host_player_command(expression, "forge") && forge_net_client_session()))
 	{
 		console_warning("not while playing in another's game: the host decides the game");
 		return FALSE;
+	}
+	/* port: Forge's commands ("forge on", "forge spawn <name>" ...: a
+spike, port/linux/game/forge.c), which are no script's */
+	{
+		char const *text = hs_host_player_command(expression, "forge");
+
+		if (text)
+		{
+			boolean forge_command(char const *arguments);
+
+			return forge_command(text);
+		}
+	}
+	/* port: the scene packs' commands ("pack load <name>"...:
+	port/linux/game/scene_packs.c), which are no script's */
+	{
+		char const *text = hs_host_player_command(expression, "pack");
+
+		if (text)
+		{
+			boolean scene_packs_command(char const *arguments);
+
+			return scene_packs_command(text);
+		}
+	}
+	/* port: the player models' commands ("models list"...:
+	port/linux/game/player_models.c), which are no script's */
+	{
+		char const *text = hs_host_player_command(expression, "models");
+
+		if (text)
+		{
+			boolean player_models_command(char const *arguments);
+
+			return player_models_command(text);
+		}
+	}
+	/* port: the host's bots added and dropped by hand (add_bot [n],
+	add_bot_red, add_bot_blue, drop_bot [n], drop_bot_red, drop_bot_blue,
+	bots_reset: network_server_manager.c), which are no script's */
+	{
+		static char const *const words[] = { "add_bot", "add_bot_red", "add_bot_blue", "drop_bot", "drop_bot_red",
+			"drop_bot_blue", "bots_reset" };
+		long word;
+
+		for (word = 0; word < (long)NUMBEROF(words); word++)
+		{
+			char const *text = hs_host_player_command(expression, words[word]);
+
+			if (text)
+			{
+				boolean network_game_server_port_bots_command(char const *word, char const *arguments, char *answer,
+					long answer_size);
+				char answer[160];
+
+				answer[0] = 0;
+				network_game_server_port_bots_command(words[word], text, answer, sizeof(answer));
+				console_printf(FALSE, "%s", answer);
+				return TRUE;
+			}
+		}
 	}
 	/* port: the host's ban and kick commands ("ban <player name>", "kick
 	<player name>", or the name's start: Tab completes it), which are no

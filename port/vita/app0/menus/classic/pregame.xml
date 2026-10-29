@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Halo CE: the Xbox's network pregame (the game's lobby: connected_pregame_screen) with
+     the port's buttons said under the Xbox's own: Y PLAYERS (menu_functions.c's Triangle in the game's
+     lobby, either Menu style) and the right trigger, LOBBY OPTIONS: a screen in the look of OpenCE's
+     Server Setup (setup.xml) with PLAYERS (the players' options: add friend, mute chat, the host's
+     kick and ban - halo3/players.xml), the host's INVITE FRIENDS (a game hosted online:
+     halo3/party.xml's invite screen) and MAP VARIANT (the hosted map's Forge variants, none first,
+     each press the next: the joiners asked to play it, as the Halo 3 lobby's MAP picker does); a
+     joined machine's has PLAYERS alone (port ce lobby) -->
+<menus>
+	<strings name="ce/lobby_labels">
+		<string text="LOBBY OPTIONS"/>
+		<string text="PLAYERS"/>
+		<string text="INVITE FRIENDS"/>
+		<string text="MAP VARIANT"/>
+		<string text="%y-button PLAYERS   %right-trigger LOBBY OPTIONS"/>
+	</strings>
+	<strings name="ce/lobby_help">
+		<string text="The players in this game: add one as a\nfriend, mute their chat; the host kicks\nor bans."/>
+		<string text="Your friends online: invite them into\nthis game."/>
+		<string text="Play one of your Forge map variants of\nthis map (FORGE, then FILE SHARE): each\n%a-button the next, then NONE."/>
+	</strings>
+	<!-- (the port's functions run from widgets of ours alone - ui_widget_function_denied -: the
+	     pregame's own, the map's, opens the screen and no more) -->
+	<widget name="ce/pregame/buttons" type="text" left="80" top="442" width="540" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/lobby_labels" string_index="4" text_flags="no_focus_test">
+		<on event="created" run="port ce pregame init"/>
+	</widget>
+	<widget name="ce/pregame/screen" extends="ui\shell\main_menu\multiplayer_type_select\connected\pregame\connected_pregame_screen" classic_patch="true">
+		<on event="right_trigger" open="ce/lobby/screen"/>
+		<child widget="ce/pregame/buttons"/>
+	</widget>
+
+	<!-- LOBBY OPTIONS, laid out as OpenCE's Multiplayer screen (multiplayer.xml): its heading, the rows at the left, the description's panel at the right - the hosted map's
+	     picture (ui.map's mp_map_grafix), its name and the map variant played, the focused row's
+	     words -, the button key under it. A row the machine has not (INVITE FRIENDS off line or
+	     joined, MAP VARIANT joined) is hidden, the rows under it moved up (port ce lobby) -->
+	<!-- (its heading as the Multiplayer screens' pictures: words drawn in their look, in the
+	     language chosen - tools/classic_menu_art.py, classic/<lang>/ -; the screen's own blue line
+	     under it) -->
+	<bitmap name="ce/lobby/header_art">
+		<frame png="classic/{lang}/header_lobby_options.png" width="512" height="64"/>
+	</bitmap>
+	<widget name="ce/lobby/header" left="35" top="11" width="512" height="64" bitmap="ce/lobby/header_art"/>
+	<widget name="ce/lobby/op_players" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/lobby_labels" string_index="1">
+		<on event="a start" open="h3/players/screen"/>
+	</widget>
+	<widget name="ce/lobby/op_invite" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/lobby_labels" string_index="2">
+		<on event="a start" run="port h3 invite ask" open="h3/invite/screen"/>
+	</widget>
+	<widget name="ce/lobby/op_variant" type="text" left="51" width="232" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/lobby_labels" string_index="3">
+		<on event="a start" run="port ce variant next"/>
+	</widget>
+	<widget name="ce/lobby/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port ce lobby"/>
+		<child widget="ce/lobby/op_players" y="111"/>
+		<child widget="ce/lobby/op_invite" y="144"/>
+		<child widget="ce/lobby/op_variant" y="177"/>
+	</widget>
+	<widget name="ce/lobby/map_picture" left="290" top="92" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix"/>
+	<widget name="ce/lobby/map_name" type="text" left="440" top="92" width="150" height="48" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/lobby/variant_value" type="text" left="440" top="140" width="150" height="66" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/lobby/code_value" type="text" left="290" top="350" width="300" height="30" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/lobby/lobby_help" type="text" left="290" top="226" width="300" height="160" string_list="ce/lobby_help" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/lobby/description" left="275" top="78" width="320" height="322" bitmap="list_field">
+		<child widget="ce/lobby/map_picture"/>
+		<child widget="ce/lobby/map_name"/>
+		<child widget="ce/lobby/variant_value"/>
+		<child widget="ce/lobby/lobby_help"/>
+		<child widget="ce/lobby/code_value"/>
+	</widget>
+	<widget name="ce/lobby/screen" flags="pass_unhandled_to_focused_child" bitmap="gradient">
+		<child widget="ce/lobby/header"/>
+		<child widget="ce/lobby/description"/>
+		<child widget="ce/lobby/list"/>
+		<child widget="ui\shell\main_menu\button_key"/>
+	</widget>
+</menus>

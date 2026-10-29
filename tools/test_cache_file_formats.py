@@ -317,8 +317,8 @@ def add_shader(blob, group, options):
     return shader
 
 
-def add_hud_placement(blob, placement, scale, flags):
-    struct.pack_into("<ff", blob.bytes, placement + 4 - blob.base, *scale)
+def add_hud_placement(blob, placement, scale, flags, offset=(0, 0)):
+    struct.pack_into("<hhff", blob.bytes, placement - blob.base, *offset, *scale)
     blob.u16(placement + 0x0C, flags)
 
 
@@ -331,6 +331,18 @@ PAUSE_BUTTONS = [
     ("game_options_button", 120, ()),
     ("change_settings_button", 300, (50, 300)),
     ("quit_netgame_button", 101, ()),
+]
+SOLO_PAUSE_FOLDER = "ui\\shell\\solo_game\\pause_game\\"
+SOLO_PAUSE_LIST = SOLO_PAUSE_FOLDER + "pause_list"
+# Halo PC's campaign pause menu: each button's handler function (SAVE LAST
+# CHECKPOINT runs Halo PC's own 179; QUIT the Xbox's save and quit, 13)
+SOLO_PAUSE_BUTTONS = [
+    ("resume_game_button", 0),
+    ("save_checkpoint_button", 179),
+    ("restart_at_save_point_button", 0),
+    ("restart_level_button", 0),
+    ("change_settings_button", 137),
+    ("quit_to_main_menu_button", 13),
 ]
 
 
@@ -377,6 +389,39 @@ def add_weapon_hud(blob, placements, bitmap_index=None):
         blob.u32(statics + 0x48 + 0x0C, bitmap_index)
         blob.u32(crosshairs + 0x24 + 0x0C, bitmap_index)
     return hud
+
+
+HUD_GLOBALS_REFERENCES = (0x48, 0x58, 0x94, 0xA4, 0xB4, 0xF0, 0x150, 0x2C0, 0x338, 0x3C8, 0x3E0)
+
+
+def add_hud_globals(blob, remap_count):
+    """HUD globals laid out on Halo: CE Anniversary's canvas (twice the
+    Xbox's): the messages at 0,130, the waypoint arrows 70 and 100 from the
+    window's edges, the damage indicators 20; and `remap_count` of MCC's
+    remaps of HUD bitmaps to its remastered ones (at 0x3F0), which mark such
+    a HUD."""
+    hud = blob.reserve(0x450)
+    for reference in HUD_GLOBALS_REFERENCES:
+        blob.u32(hud + reference + 0x0C, NONE)
+    struct.pack_into("<hh", blob.bytes, hud + 0x24 - blob.base, 0, 130)
+    struct.pack_into("<4f", blob.bytes, hud + 0x120 - blob.base, 70.0, 70.0, 100.0, 100.0)
+    struct.pack_into("<4h", blob.bytes, hud + 0x310 - blob.base, 20, 20, 20, 20)
+    if remap_count:
+        remaps = blob.reserve(max(remap_count, 1) * 28)
+        for index in range(remap_count):
+            blob.u32(remaps + index * 28 + 0x0C, NONE)
+        blob.block(hud + 0x3F0, remap_count, remaps)
+    return hud
+
+
+def add_hud_digits(blob):
+    """HUD digits (a hud_number) whose metrics are Halo: CE Anniversary's,
+    twice the Xbox's: digit 24, screen 18, x 2, y 0, decimal point and colon
+    12."""
+    digits = blob.reserve(0x64)
+    blob.u32(digits + 0x0C, NONE)
+    blob.put(digits + 0x10, struct.pack("<6b", 24, 18, 2, 0, 12, 12))
+    return digits
 
 
 def add_animation_graph(blob, overlay_animation_index):
@@ -448,8 +493,14 @@ class Map:
                  sound_buffer_size=0, sound_encoding=None, sound_sample_rate=None, sound_permutation_compression=None,
                  model=None, bsp_material=None, shaders=(), animation_overlay=None, script_nodes=None,
                  weapon_hud=None, hud_bitmap_flags=None, strings_name="test\\strings", strings=("hello", "world!"),
-                 weapon_function_modes=None, name=b"test", tags_checksum=0, pause_menu=False):
+                 weapon_function_modes=None, name=b"test", tags_checksum=0, pause_menu=False,
+                 tag_space=None, in_map_bitmap=None, mcc_hud=None, solo_pause_menu=False):
         self.bsp_sizes = bsp_sizes
+        # the tag space the structure BSPs are placed at the top of (Invader's
+        # --tag-space), without OpenSauce's header
+        self.tag_space = tag_space
+        # the bitmap kept in the map: (width, height, type, flags, mipmaps)
+        self.in_map_bitmap = in_map_bitmap
         # the header's name and the tag data's checksum, by which Chimera's
         # map list knows a map
         self.name = name
@@ -467,8 +518,13 @@ class Map:
         self.script_nodes = script_nodes
         self.weapon_hud = weapon_hud
         self.hud_bitmap_flags = hud_bitmap_flags
+        # HUD globals and digits on Halo: CE Anniversary's canvas, with this
+        # many of MCC's HUD bitmap remaps (0: none, a HUD of Halo PC's)
+        self.mcc_hud = mcc_hud
         # Halo PC's multiplayer pause menu: its list and four buttons
         self.pause_menu = pause_menu
+        # Halo PC's campaign pause menu: its list and six buttons
+        self.solo_pause_menu = solo_pause_menu
         self.weapon_function_modes = weapon_function_modes
         self.strings_name = strings_name
         self.strings = strings
@@ -530,8 +586,13 @@ class Map:
             tags.append(("antr", "test\\animations", False))
         if self.weapon_hud is not None:
             tags.append(("wphi", "test\\weapon hud", False))
+        if self.mcc_hud is not None:
+            tags += [("hudg", "test\\hud globals", False), ("hud#", "test\\digits", False)]
         if self.pause_menu:
             tags += [("DeLa", PAUSE_LIST, False)] + [("DeLa", PAUSE_FOLDER + button, False) for button, _, _ in PAUSE_BUTTONS]
+        if self.solo_pause_menu:
+            tags += [("DeLa", SOLO_PAUSE_LIST, False)] + [
+                ("DeLa", SOLO_PAUSE_FOLDER + button, False) for button, _ in SOLO_PAUSE_BUTTONS]
         # further structure BSPs go last, so the indices above never move
         bsp_tag_indices = [1] + [len(tags) + extra for extra in range(len(self.bsp_sizes) - 1)]
         tags += [("sbsp", f"test\\bsp {extra + 2}", False) for extra in range(len(self.bsp_sizes) - 1)]
@@ -548,6 +609,8 @@ class Map:
         pixels_offset = model_offset + len(model_data)
         tag_data_offset = pixels_offset + len(in_map_pixels)
         tag_cache_bytes = TAG_CACHE_BYTES_UPGRADED if self.upgraded else TAG_CACHE_BYTES
+        if self.tag_space is not None:
+            tag_cache_bytes = self.tag_space
         if self.bsp_gap is None:
             bsp_addresses = [BASE + tag_cache_bytes - size for size in self.bsp_sizes]
         else:
@@ -598,6 +661,15 @@ class Map:
         tag_data.block(group + 0x60, 1, bitmap)
         tag_data.u32(bitmap + 0x18, pixels_offset)
         tag_data.u32(bitmap + 0x1C, len(in_map_pixels))
+        if self.in_map_bitmap is not None:
+            width, height, bitmap_type, flags, mipmaps = self.in_map_bitmap
+            tag_data.u16(bitmap + 0x04, width)
+            tag_data.u16(bitmap + 0x06, height)
+            tag_data.u16(bitmap + 0x08, 1)
+            tag_data.u16(bitmap + 0x0A, bitmap_type)
+            tag_data.u16(bitmap + 0x0E, flags)
+            tag_data.u16(bitmap + 0x14, mipmaps)
+        address_of["in map bitmap data"] = bitmap
         address_of["test\\in map bitmap"] = group
         # the header the map keeps of a sound held by sounds.map
         sound = tag_data.reserve(0xA4)
@@ -624,6 +696,9 @@ class Map:
                 tag_data.u16(address_of["test\\in map bitmap"] + 6, self.hud_bitmap_flags)
                 hud_bitmap_index = [name for _, name, _ in tags].index("test\\in map bitmap")
             address_of["test\\weapon hud"] = add_weapon_hud(tag_data, self.weapon_hud, hud_bitmap_index)
+        if self.mcc_hud is not None:
+            address_of["test\\hud globals"] = add_hud_globals(tag_data, self.mcc_hud)
+            address_of["test\\digits"] = add_hud_digits(tag_data)
         if self.script_nodes is not None:
             add_script_nodes(tag_data, scenario, *self.script_nodes)
         if self.pause_menu:
@@ -632,6 +707,13 @@ class Map:
                 address_of[PAUSE_FOLDER + button] = add_widget(tag_data, handler_function, game_data_functions)
             address_of[PAUSE_LIST] = add_widget(tag_data, None, (), children=[
                 (names.index(PAUSE_FOLDER + button), 35 * index) for index, (button, _, _) in enumerate(PAUSE_BUTTONS)])
+        if self.solo_pause_menu:
+            names = [name for _, name, _ in tags]
+            for button, handler_function in SOLO_PAUSE_BUTTONS:
+                address_of[SOLO_PAUSE_FOLDER + button] = add_widget(tag_data, handler_function, ())
+            address_of[SOLO_PAUSE_LIST] = add_widget(tag_data, None, (), children=[
+                (names.index(SOLO_PAUSE_FOLDER + button), 10 + 22 * index)
+                for index, (button, _) in enumerate(SOLO_PAUSE_BUTTONS)])
         for tag_index, (group_name, name, external) in enumerate(tags):
             if name in address_of:
                 tag_data.u32(instances + tag_index * 0x20 + 0x14, address_of[name])
@@ -804,6 +886,53 @@ def test_opensauce_structure_bsp_beyond_the_stock_tag_cache_needs_the_upgrade_fl
     path.write_bytes(data)
     _, report = report_one(report_tool, path)
     assert report["load"] == "a structure BSP does not fit in the file or in the tag cache"
+
+
+def test_a_larger_tag_space_is_read_from_the_structure_bsps(report_tool, tmp_path):
+    """A cache built for more tag space than Custom Edition's 23 MB (Invader's
+    --tag-space: Halo: CE Anniversary maps rebuilt by mcc_map_convert.py), its
+    structure BSPs at the top of it, gets that room, rounded up to 64 KB."""
+    tag_space = 0x018F8000
+    path = Map(tag_space=tag_space, bsp_sizes=(0x1000, 0x2000)).write(tmp_path)
+    returncode, report = report_one(report_tool, path)
+    assert returncode == 0 and report["load"] == "ok"
+    assert report["tag_cache_bytes"] == hex(0x01900000)
+    assert report["lowest_structure_bsp_address"] == hex(BASE + tag_space - 0x2000)
+
+
+@pytest.mark.parametrize("tag_space", [TAG_CACHE_BYTES_UPGRADED + 0x10000, 0x7FFF0000])
+def test_a_tag_space_past_the_memory_upgrades_is_not_taken(report_tool, tmp_path, tag_space):
+    """No more room than OpenSauce's memory upgrades give: the structure BSPs
+    are then outside the tag cache, as before."""
+    _, report = report_one(report_tool, Map(tag_space=tag_space).write(tmp_path))
+    assert report["tag_cache_bytes"] == hex(TAG_CACHE_BYTES)
+    assert report["load"] == "a structure BSP does not fit in the file or in the tag cache"
+
+
+def test_a_structure_bsp_below_the_stock_top_keeps_the_stock_tag_cache(report_tool, tmp_path):
+    _, report = report_one(report_tool, Map(bsp_gap=0x100000).write(tmp_path))
+    assert report["tag_cache_bytes"] == hex(TAG_CACHE_BYTES) and report["load"] == "ok"
+
+
+@pytest.mark.parametrize("bitmap, linear", [
+    ((47, 44, 0, 0, 0), True),  # Halo: CE Anniversary's HUD message icons, as Invader builds them
+    ((3, 5, 0, 1, 0), True),  # (Invader's "power of two" flag, set whatever the size)
+    ((64, 32, 0, 0, 0), False),  # powers of two
+    ((47, 44, 0, 0x2, 0), False),  # compressed
+    ((47, 44, 0, 0x8, 0), False),  # swizzled
+    ((47, 44, 0, 0, 3), False),  # mipmaps
+    ((47, 44, 2, 0, 0), False),  # a cube map
+    ((0, 0, 0, 0, 0), False),  # no size
+])
+def test_unswizzled_bitmaps_of_other_sizes_than_powers_of_two_are_made_linear(report_tool, tmp_path, bitmap, linear):
+    cache = Map(in_map_bitmap=bitmap)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0
+    assert report["bitmaps_made_linear"] == ("1" if linear else "0")
+    flags = u16_at(tags, cache.addresses["in map bitmap data"] + 0x0E)
+    assert bool(flags & 0x10) == linear
+    if linear:
+        assert not flags & 1
 
 
 def test_opensauce_definitions_are_accepted_after_the_cache_data(report_tool, tmp_path):
@@ -1262,6 +1391,58 @@ def test_hud_elements_drawing_a_halo_pc_half_scale_bitmap_are_halved(report_tool
     assert (f32_at(tags, items + 4), f32_at(tags, items + 8)) == (1.0, 1.0)
 
 
+def placement_at(tags, address):
+    """A placement's offset, scale and scaling flags."""
+    return (struct.unpack_from("<hh", tags, address - BASE), (f32_at(tags, address + 4), f32_at(tags, address + 8)),
+            u16_at(tags, address + 0x0C))
+
+
+def test_mcc_hud_is_brought_to_the_xboxs_canvas(report_tool, tmp_path):
+    """Halo: CE Anniversary's HUD (its globals remap HUD bitmaps to MCC's
+    remastered ones) is laid out on a canvas twice the Xbox's: offsets
+    halved, sizes halved and halved again by the bitmap's half HUD scale; a
+    placement with the high resolution scale flag keeps its offset (MCC
+    doubles it) and loses the flag; the HUD globals' margins and the digits'
+    metrics are halved too."""
+    cache = Map(weapon_hud=[((1.0, 1.0), 0, (14, -6)), ((1.0, 1.0), 4, (14, 44)), ((1.0, 1.0), 0, (0, 121))],
+                hud_bitmap_flags=1 << 4, mcc_hud=1)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0 and report["hud_mcc_canvas"] == "1 (4 placements)"
+    assert report["hud_placements_rescaled"] == "0" and report["hud_placements_kept"] == "0"
+    hud = cache.addresses["test\\weapon hud"]
+    statics = u32_at(tags, hud + 0x64)
+    items = u32_at(tags, u32_at(tags, hud + 0x88) + 0x38)
+    assert placement_at(tags, statics + 0x24) == ((7, -3), (0.25, 0.25), 0)
+    assert placement_at(tags, statics + 0xB4 + 0x24) == ((14, 44), (0.5, 0.5), 0)
+    assert placement_at(tags, items) == ((0, 60), (0.25, 0.25), 0)
+    globals_ = cache.addresses["test\\hud globals"]
+    assert struct.unpack_from("<hh", tags, globals_ + 0x24 - BASE) == (0, 65)
+    assert struct.unpack_from("<4f", tags, globals_ + 0x120 - BASE) == (35.0, 35.0, 50.0, 50.0)
+    assert struct.unpack_from("<4h", tags, globals_ + 0x310 - BASE) == (10, 10, 10, 10)
+    assert struct.unpack_from("<6b", tags, cache.addresses["test\\digits"] + 0x10 - BASE) == (12, 9, 1, 0, 6, 6)
+
+
+@pytest.mark.parametrize("remaps", [0, 33], ids=["no remaps", "more remaps than MCC's 32"])
+def test_hud_without_mccs_remaps_is_halo_pcs(report_tool, tmp_path, remaps):
+    """HUD globals without MCC's remaps (the Xbox's and Halo PC's leave the
+    place zero), or with more than MCC allows, are not Halo: CE
+    Anniversary's: Halo PC's high resolution scale is converted as before,
+    and nothing else moves."""
+    cache = Map(weapon_hud=[((1.0, 0.5), 4 | 1, (14, -6)), ((1.0, 1.0), 1), ((2.0, 2.0), 4, (0, 121))], mcc_hud=remaps)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0 and report["hud_mcc_canvas"] == "0 (0 placements)"
+    assert report["hud_placements_rescaled"] == "1" and report["hud_placements_kept"] == "1"
+    hud = cache.addresses["test\\weapon hud"]
+    statics = u32_at(tags, hud + 0x64)
+    items = u32_at(tags, u32_at(tags, hud + 0x88) + 0x38)
+    assert placement_at(tags, statics + 0x24) == ((14, -6), (0.5, 0.25), 1)
+    assert placement_at(tags, items) == ((0, 121), (2.0, 2.0), 4)
+    globals_ = cache.addresses["test\\hud globals"]
+    assert struct.unpack_from("<hh", tags, globals_ + 0x24 - BASE) == (0, 130)
+    assert struct.unpack_from("<4h", tags, globals_ + 0x310 - BASE) == (20, 20, 20, 20)
+    assert struct.unpack_from("<6b", tags, cache.addresses["test\\digits"] + 0x10 - BASE) == (24, 18, 2, 0, 12, 12)
+
+
 @pytest.mark.parametrize("name, tags_checksum, listed", [
     (b"rev_snowcast_cavebeta", 1683840640, True),
     (b"Rev_Snowcast_CaveBeta", 1683840640, True),
@@ -1311,6 +1492,35 @@ def test_halo_pc_widget_functions_run_none_and_the_pause_menu_is_the_xboxs(repor
     kept = [(names[u32_at(tags, children + index * 0x50 + 0x0C) & 0xFFFF].split("\\")[-1],
              s16_at(tags, children + index * 0x50 + 0x36)) for index in range(count)]
     assert kept == [("resume_game_button", 35), ("quit_netgame_button", 70)]
+
+
+def test_halo_pc_campaign_pause_menu_has_no_save_last_checkpoint(report_tool, tmp_path):
+    """Halo PC's campaign pause menu saves the last checkpoint with a
+    function of its own (nothing here); its QUIT saves and quits. SAVE LAST
+    CHECKPOINT is taken out, the rows under it moved up, and every row half
+    a row down to stay in the middle of the box; the others, QUIT's save and
+    quit among them, are kept as they were (the owner, insider.19)."""
+    cache = Map(solo_pause_menu=True)
+    returncode, report, tags = converted(report_tool, cache, tmp_path)
+    assert returncode == 0
+    assert report["solo_pause_save_removed"] == "1" and report["pause_menu_trimmed"] == "0"
+    pause_list = cache.addresses[SOLO_PAUSE_LIST]
+    count, children = u32_at(tags, pause_list + 0x3E0), u32_at(tags, pause_list + 0x3E0 + 4)
+    names = [name for _, name, _ in cache.tags]
+    kept = [(names[u32_at(tags, children + index * 0x50 + 0x0C) & 0xFFFF].split("\\")[-1],
+             s16_at(tags, children + index * 0x50 + 0x36)) for index in range(count)]
+    assert kept == [("resume_game_button", 21), ("restart_at_save_point_button", 43),
+                    ("restart_level_button", 65), ("change_settings_button", 87),
+                    ("quit_to_main_menu_button", 109)]
+    quit_button = cache.addresses[SOLO_PAUSE_FOLDER + "quit_to_main_menu_button"]
+    handler = u32_at(tags, quit_button + 0x54 + 4)
+    assert (u32_at(tags, handler), u16_at(tags, handler + 6)) == (0x81, 13)
+
+
+def test_a_map_without_halo_pcs_campaign_pause_menu_is_left_alone(report_tool, tmp_path):
+    """No campaign pause list: nothing taken out."""
+    returncode, report, _ = converted(report_tool, Map(pause_menu=True), tmp_path)
+    assert returncode == 0 and report["solo_pause_save_removed"] == "0"
 
 
 SCORE_HINT = 'Hold "%s" for score'
@@ -1472,7 +1682,9 @@ MALFORMED_CACHES = {
                       "a structure BSP does not fit in the file or in the tag cache"),
     "bsp over tag data": (tag_data_case("reference", 0x08, "<I", BASE + 0x100), "load",
                           "a structure BSP does not fit in the file or in the tag cache"),
-    "bsp beyond tag cache": (tag_data_case("reference", 0x08, "<I", BASE + TAG_CACHE_BYTES - 0x800), "load",
+    # (past the most room a map's structure BSPs may say it was built for:
+    # OpenSauce's memory upgrades)
+    "bsp beyond tag cache": (tag_data_case("reference", 0x08, "<I", BASE + TAG_CACHE_BYTES_UPGRADED - 0x800), "load",
                              "a structure BSP does not fit in the file or in the tag cache"),
     "bsp signature": (lambda cache, path: patched(path, cache.where["bsp"] + 0x14, "<I", code("psbs")), "load",
                       "a structure BSP header is not valid"),

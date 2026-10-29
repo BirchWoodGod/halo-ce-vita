@@ -27,6 +27,10 @@ place then costs a load of the switch); on, each costs two clock reads. */
 #include <string.h>
 
 #include "load_profile.h"
+#if !defined(HALO_VITA) && !defined(__ANDROID__) && !defined(_WIN32)
+#include <execinfo.h>
+#define LOAD_PROFILE_BACKTRACE 1
+#endif
 
 void platform_log(const char *format, ...);
 unsigned long long vita_host_time_us(void);
@@ -51,6 +55,7 @@ static const char *const kind_names[_halo_load_count] =
 	"wait for cache thread",
 	"sound cache wait",
 	"texture cache wait",
+	"custom map read lock wait",
 	"after-load procs",
 	"file calls (game thread)",
 	"file calls (other threads)",
@@ -109,6 +114,22 @@ end: a file call before it counts as another thread's */
 int halo_thread_index(void);
 static volatile int game_thread_index = -1;
 
+/* (halo_load_profile_path_lookup) the game thread's paths looked for this
+frame, and over HALO_TEST_PATH_LOOKUPS frames */
+static volatile unsigned long frame_path_lookups, period_path_lookups;
+static int path_lookups_every = -1;
+static unsigned long path_lookups_frames;
+
+void halo_load_profile_path_lookup(void)
+{
+	int game_index = __atomic_load_n(&game_thread_index, __ATOMIC_RELAXED);
+
+	if (game_index < 0 || halo_thread_index() != game_index)
+		return;
+	__atomic_add_fetch(&frame_path_lookups, 1, __ATOMIC_RELAXED);
+	__atomic_add_fetch(&period_path_lookups, 1, __ATOMIC_RELAXED);
+}
+
 /* the frame's slowest file call, the game thread's [0] and the others' [1] */
 static struct
 {
@@ -128,6 +149,27 @@ void halo_load_profile_file_call(unsigned long long started_us, const char *call
 		return;
 	took = vita_host_time_us() - started_us;
 	game = game_index >= 0 && halo_thread_index() == game_index;
+#ifdef LOAD_PROFILE_BACKTRACE
+	/* (debug, the harness) HALO_IO_TRACE_GAME=1: each of the game thread's
+	file calls logged with its callers' addresses (addr2line -f -e halo), to
+	find which of the frame's steps touch the disk */
+	{
+		static int trace = -1;
+
+		if (trace < 0)
+			trace = getenv("HALO_IO_TRACE_GAME") && atoi(getenv("HALO_IO_TRACE_GAME")) != 0;
+		if (trace && game)
+		{
+			void *callers[10];
+			char addresses[160];
+			int count = backtrace(callers, 10), index, length = 0;
+
+			for (index = 2; index < count && length < (int)sizeof(addresses) - 12; index++)
+				length += snprintf(addresses + length, sizeof(addresses) - (size_t)length, " %p", callers[index]);
+			platform_log("io-trace: %s %.1f ms %s:%s", call, took / 1000.0, path ? path : "", addresses);
+		}
+	}
+#endif
 	__atomic_fetch_add(&kind_us[game ? _halo_load_file_game_thread : _halo_load_file_other], took, __ATOMIC_RELAXED);
 	__atomic_fetch_add(&kind_bytes[game ? _halo_load_file_game_thread : _halo_load_file_other], bytes, __ATOMIC_RELAXED);
 	__atomic_fetch_add(&kind_count[game ? _halo_load_file_game_thread : _halo_load_file_other], 1, __ATOMIC_RELAXED);
@@ -188,6 +230,15 @@ int halo_load_profile_describe(char *line, int size)
 			__atomic_store_n(&slowest_lock, 0, __ATOMIC_RELEASE);
 		}
 	}
+	/* (the paths the game thread looked for: each a directory read per
+	folder, Ben's Forge lobby's 10 frames a second) */
+	{
+		unsigned long lookups = __atomic_load_n(&frame_path_lookups, __ATOMIC_RELAXED);
+
+		if (lookups && length < size - 64)
+			length += snprintf(line + length, (size_t)(size - length), "%spaths looked up (game thread) %lu",
+				parts++ ? " | " : "", lookups);
+	}
 	if (length >= size)
 		line[size - 1] = 0;
 	return parts;
@@ -229,6 +280,19 @@ void halo_load_profile_frame_end(void)
 		}
 		platform_log("%s", line);
 	}
+	if (path_lookups_every < 0)
+	{
+		const char *every = getenv("HALO_TEST_PATH_LOOKUPS");
+
+		path_lookups_every = every ? atoi(every) : 0;
+	}
+	if (path_lookups_every > 0 && ++path_lookups_frames >= (unsigned long)path_lookups_every)
+	{
+		platform_log("path-lookups: %lu on the game thread in %lu frames",
+			__atomic_exchange_n(&period_path_lookups, 0, __ATOMIC_RELAXED), path_lookups_frames);
+		path_lookups_frames = 0;
+	}
+	__atomic_store_n(&frame_path_lookups, 0, __ATOMIC_RELAXED);
 	for (kind = 0; kind < _halo_load_count; kind++)
 	{
 		__atomic_store_n(&kind_us[kind], 0, __ATOMIC_RELAXED);

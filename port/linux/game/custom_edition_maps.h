@@ -160,6 +160,10 @@ char const *custom_edition_maps_level_title(
 downloaded into the folder: map_share.c). */
 void custom_edition_maps_look_again(
 	void);
+/* (port) whether `name` (a file's name, no folder) is one of the Xbox's
+levels, multiplayer or campaign (map_checks.c) */
+boolean custom_edition_maps_is_xbox_level(
+	char const *name);
 /* forgets what the map file `name` (.map or .yelo) was found to be, whose
 file a download has just replaced */
 void custom_edition_maps_file_forget(
@@ -181,6 +185,14 @@ a Custom Edition campaign map's (custom_maps\<name>, custom_edition_level_name:
 no file is looked at, so a client without the map knows it too). A network
 game on one with no game engine is co-op. */
 boolean custom_edition_maps_campaign_level(
+	char const *level_name);
+
+/* The level a Custom Edition campaign map's campaign goes on to when it is
+won alone: for a map named a prefix and a campaign level's name (ruby_a10,
+as port/tools/mcc_map_convert.py names a Halo: CE Anniversary mod's maps),
+the campaign map of that prefix and the next level's name (ruby_a30) when
+the maps folder has it; NULL otherwise (the main menu, as before). */
+char const *custom_edition_maps_campaign_next_level(
 	char const *level_name);
 
 /* Whether a host may send its copy of the level `level_name` to a joiner

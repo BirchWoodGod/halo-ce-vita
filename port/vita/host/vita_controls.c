@@ -278,7 +278,11 @@ int vita_button_icons_playstation(void)
 {
 	const char *value = getenv("HALO_BUTTON_ICONS");
 
-	return value && strcmp(value, "playstation") == 0;
+	if (value && strcmp(value, "playstation") == 0)
+		return 1;
+	if (value && strcmp(value, "xbox") == 0)
+		return 0;
+	return VITA_BUTTON_ICONS_DEFAULT == 1;
 }
 
 static int glyph_of_button(unsigned long button)
@@ -392,6 +396,7 @@ void vita_gyro_config_load(struct vita_gyro_config *config)
 	const char *sensitivity = getenv("HALO_GYRO_SENS");
 	const char *invert = getenv("HALO_GYRO_INVERT_Y");
 	const char *turn = getenv("HALO_GYRO_TURN");
+	const char *assist = getenv("HALO_GYRO_ASSIST");
 	int index, percent;
 
 	config->mode = VITA_GYRO_OFF;
@@ -405,6 +410,12 @@ void vita_gyro_config_load(struct vita_gyro_config *config)
 	config->sensitivity = percent / 100.0f;
 	config->invert_y = invert ? atoi(invert) != 0 : 0;
 	config->turn = turn && strcmp(turn, "roll") == 0 ? VITA_GYRO_TURN_ROLL : VITA_GYRO_TURN_YAW;
+	config->assist = assist ? atoi(assist) != 0 : 1;
+}
+
+int vita_gyro_unassisted(const struct vita_gyro_config *config)
+{
+	return config->mode != VITA_GYRO_OFF && !config->assist;
 }
 
 static float gyro_absolute(float value)
@@ -576,4 +587,57 @@ int vita_gyro_take(struct vita_gyro_state *state, const struct vita_gyro_config 
 	if (!state->active || (config->mode == VITA_GYRO_ZOOMED && !zoomed))
 		*yaw = *pitch = 0.0f;
 	return *yaw != 0.0f || *pitch != 0.0f;
+}
+
+/* ---------- the menus' pointer (vita_controls.h) */
+
+int vita_touch_pointer(struct vita_touch_pointer *pointer, const struct vita_touch_contact *contacts, int count,
+	unsigned long long now_us, int screen_width, short *x, short *y, int *tap, int *moved)
+{
+	const struct vita_touch_contact *finger = NULL;
+	int index, drawn_width, left;
+
+	*tap = 0;
+	*moved = 0;
+	for (index = 0; index < count && !finger; index++)
+		if (contacts[index].panel == VITA_TOUCH_FRONT)
+			finger = &contacts[index];
+	if (!finger)
+	{
+		if (!pointer->down)
+			return 0;
+		/* (lifted: a tap where it came down, soon) */
+		pointer->down = 0;
+		*x = pointer->x;
+		*y = pointer->y;
+		*tap = now_us - pointer->since <= VITA_TAP_MICROSECONDS;
+		return 1;
+	}
+	if (screen_width < 640)
+		screen_width = 640;
+	drawn_width = screen_width * VITA_TOUCH_HEIGHT / 480;
+	if (drawn_width > VITA_TOUCH_WIDTH)
+		drawn_width = VITA_TOUCH_WIDTH;
+	left = (VITA_TOUCH_WIDTH - drawn_width) / 2;
+	*x = (short)((finger->x - left) * screen_width / drawn_width - (screen_width - 640) / 2);
+	*y = (short)(finger->y * 480 / VITA_TOUCH_HEIGHT);
+	if (!pointer->down || pointer->id != finger->id)
+	{
+		pointer->down = 1;
+		pointer->id = finger->id;
+		pointer->start_x = finger->x;
+		pointer->start_y = finger->y;
+		pointer->since = now_us;
+		*moved = 1;
+	}
+	else
+	{
+		*moved = *x != pointer->x || *y != pointer->y;
+		/* (moved away: a drag, no tap when lifted) */
+		if (abs(finger->x - pointer->start_x) > VITA_TAP_SLOP || abs(finger->y - pointer->start_y) > VITA_TAP_SLOP)
+			pointer->since = 0;
+	}
+	pointer->x = *x;
+	pointer->y = *y;
+	return 1;
 }

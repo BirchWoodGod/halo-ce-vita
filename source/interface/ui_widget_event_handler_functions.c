@@ -928,6 +928,7 @@ boolean network_game_server_port_cooperative_menu(short *rounds);
 #include "interface/ui_widget_definitions.h"
 #ifdef HALO_LINUX
 #include "custom_edition_maps.h"
+#include "custom_edition_mods.h"
 #endif
 
 /* ---------- constants */
@@ -1056,6 +1057,10 @@ void network_game_server_open_game(
 void network_game_server_pause_countdown(
 	void *server,
 	boolean pause);
+#ifdef HALO_LINUX
+void network_game_server_port_map_pending(
+	void *server);
+#endif
 void *global_network_game_server_get(
 	void);
 boolean xbox_demos_available(
@@ -1078,10 +1083,6 @@ boolean create_global_network_game_client(
 	void);
 boolean create_global_network_game_server(
 	void);
-#ifdef HALO_LINUX
-boolean network_game_wire_refuses_hosting(
-	short controller_index);
-#endif
 void game_engine_playlist_begin(
 	void);
 void network_game_accept_remote_connections(
@@ -1346,6 +1347,49 @@ int ui_widget_port_join_listed_game(
 	list->data3C.selected_index = row;
 	return network_game_join_game_from_server_list(list, NULL, &deleted) ? 1 : 0;
 }
+
+/* port: the advertised game (network_game_client_listed_game_by_id) joined
+from the Halo 3 menus' LAN browser (port/linux/game/menu_functions.c) as A
+on its row in the System Link list joins it: network_game_join_game_from_
+server_list itself, with the browser's list standing for the System Link
+list's for the call (its one game this one) - the same checks (the host's
+network version, a closed game, the platform, the address) and the pregame
+screen next, which goes back to the browser. TRUE joined, the browser then
+deleted (*widget_deleted); FALSE not, the player told why. The list's own
+"deleted" handler is the System Link list's dispose, so that the game
+pointed at is let go with it. */
+boolean ui_widget_port_join_advertised_game(
+	struct widget_instance *list,
+	void const *server,
+	boolean *widget_deleted)
+{
+	static void const *servers[1];
+	void *generated_list;
+	short generated_count;
+	short selected_index;
+	boolean deleted = FALSE;
+	boolean joined;
+
+	if (!list || !server || !list->focused_child)
+		return FALSE;
+	generated_list = list->generated_list;
+	generated_count = list->generated_count;
+	selected_index = list->data3C.selected_index;
+	servers[0] = server;
+	list->generated_list = (void *)servers;
+	list->generated_count = 1;
+	list->data3C.selected_index = 0;
+	joined = network_game_join_game_from_server_list(list, NULL, &deleted);
+	if (!deleted)
+	{
+		list->generated_list = generated_list;
+		list->generated_count = generated_count;
+		list->data3C.selected_index = selected_index;
+	}
+	if (widget_deleted)
+		*widget_deleted = deleted;
+	return joined;
+}
 #endif
 
 static boolean network_server_list_dispose(
@@ -1384,6 +1428,12 @@ static boolean multiplayer_level_list_dispose(
 	struct widget_instance *widget,
 	struct event_record *event,
 	boolean *widget_deleted);
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean network_game_is_splitscreen_local(void);
+
 static boolean multiplayer_level_select(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -1682,6 +1732,12 @@ static boolean new_campaign_if_no_custom_player_profiles_exist(
 	struct widget_instance *widget,
 	struct event_record *event,
 	boolean *widget_deleted);
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean game_state_test_persistent_storage(char *map_name, short *difficulty, boolean *corrupted);
+
 static boolean solo_level_initialize_list_single_player(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -2734,6 +2790,16 @@ static boolean netgame_unjoin_player(
 			(short)PIN(event->controller_index, 0, MAXIMUM_LOCAL_PLAYERS - 1));
 		return TRUE;
 	}
+#ifdef HALO_LINUX
+	/* port: the host of a Halo 3 live lobby goes back to it, its game kept
+	and its players with it, the countdown stopped (menu_functions.c h3_live) */
+	{
+		extern boolean pc_menu_functions_live_lobby_back(void);
+
+		if (client && pc_menu_functions_live_lobby_back())
+			return TRUE;
+	}
+#endif
 	if (client)
 	{
 		short state;
@@ -2994,6 +3060,27 @@ static boolean start_network_game_if_no_advertised_servers(
 
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 4593,
 		widget->type == 3, "expected a column list for server list");
+#ifdef HALO_LINUX
+	/* port: not while a join of another's game is under way (an invite, a
+	code, the server browser: p2p_join_under_way). The System Link list
+	opens for that join and is empty until its host is reached and its game
+	listed; A on it then - a press meant for the game being joined, or the
+	one that answered the large PC game's question on the Vita - hosted a
+	game of this machine's own instead, public, its listing published, and
+	the join was lost (Neff, 1.1.1 RC6) */
+	{
+		extern int p2p_join_under_way(void);
+		void platform_log(char const *format, ...);
+
+		if (p2p_join_under_way())
+		{
+			platform_log("menus: not hosting from the System Link list: a join is under way (its host's game "
+				"joined once listed)");
+			ui_play_audio_feedback_sound(4);
+			return FALSE;
+		}
+	}
+#endif
 	if (widget->generated_count == 0)
 	{
 		client = global_network_game_client_get();
@@ -3755,6 +3842,7 @@ static boolean ui_widget_function_denied(
 {
 	extern boolean pc_menu_tag(long tag_index);
 	extern boolean main_menu_is_active(void);
+	extern boolean pc_menu_function_is_settings_panel(long function_index);
 	static short const main_menu_functions[] =
 	{
 		41, /* mp profile change name */
@@ -3770,6 +3858,12 @@ static boolean ui_widget_function_denied(
 
 	if (pc_menu_tag(widget->definition_tag_index))
 		return FALSE;
+	/* (Start on Menu style Halo CE's main menu, the map's list: the settings panel opens) */
+	if (function_index >= 256 && function_index < 0x8000 && main_menu_is_active() &&
+		pc_menu_function_is_settings_panel(function_index - 256))
+	{
+		return FALSE;
+	}
 	if (function_index >= 256 && function_index < 0x8000)
 	{
 		denied = TRUE;
@@ -3821,6 +3915,70 @@ static void ui_widget_function_test(
 #endif
 #endif
 
+#ifdef HALO_LINUX
+/* port: Halo PC's own event handler functions, which MCC's ui.map (the menus'
+map when there is no Xbox ui.map: custom_edition_cache.c) names by numbers
+from 102, past the Xbox's. Only the ones the main entries need are mapped to
+the port's own as yet, found by what MCC's widgets with them do (the log of
+HALO_UI_LOG=2 names each handler that runs); any other fails, is logged and
+is told to the player (custom_edition_cache_menu_handler_failed). */
+enum
+{
+	PC_FUNCTION_QUIT_GAME = 107,
+	PC_FUNCTION_DIFFICULTY_START = 169
+};
+
+/* the QUIT screen's OK */
+static boolean pc_function_quit_game(
+	struct widget_instance *widget,
+	struct event_record *event,
+	boolean *widget_deleted)
+{
+	return exit_to_xbox_dashboard(widget, event, widget_deleted);
+}
+
+/* a difficulty item (the list's rows, in the order of the difficulties):
+that difficulty chosen, as the Xbox's list does (set difficulty, then
+switch from the main menu to the campaign, the map named already) */
+static boolean pc_function_difficulty_start(
+	struct widget_instance *widget,
+	struct event_record *event,
+	boolean *widget_deleted)
+{
+	int index = widget_instance_get_child_index_from_parent(widget);
+
+	if (index < 0 || index >= 4)
+		return FALSE;
+	main_set_difficulty(index);
+	ui_play_audio_feedback_sound(2);
+	return switch_from_main_menu_to_single_player(widget, event, widget_deleted);
+}
+
+/* whether `function_index` is mapped (and run into `result`) */
+static boolean pc_function_invoke(
+	struct widget_instance *widget,
+	struct event_record *event,
+	word function_index,
+	boolean *widget_deleted,
+	boolean *result)
+{
+	extern boolean main_menu_is_active(void);
+
+	if (!main_menu_is_active())
+		return FALSE;
+	switch (function_index)
+	{
+	case PC_FUNCTION_QUIT_GAME:
+		*result = pc_function_quit_game(widget, event, widget_deleted);
+		return TRUE;
+	case PC_FUNCTION_DIFFICULTY_START:
+		*result = pc_function_difficulty_start(widget, event, widget_deleted);
+		return TRUE;
+	}
+	return FALSE;
+}
+#endif
+
 boolean ui_widget_event_handler_function_invoke(
 	struct widget_instance *widget,
 	struct event_record *event,
@@ -3852,6 +4010,15 @@ boolean ui_widget_event_handler_function_invoke(
 		return pc_menu_event_function_invoke(widget, event, function_index - 256, widget_deleted);
 	}
 #endif
+#ifdef HALO_LINUX
+	if (function_index >= 102 && function_index < 256)
+	{
+		boolean mapped_result = FALSE;
+
+		if (pc_function_invoke(widget, event, function_index, widget_deleted, &mapped_result))
+			return mapped_result;
+	}
+#endif
 	if ((short)function_index >= 0 && function_index < 102)
 	{
 		result = event_handler_function_list.functions[(short)function_index](widget, event, widget_deleted);
@@ -3871,6 +4038,27 @@ boolean ui_widget_port_start_network_game_server(
 	void)
 {
 	return network_game_start_new_server(NULL, NULL, NULL);
+}
+
+/* port: (the Halo 3 live lobby) the same, its game on that map from the
+start (the lobby's MAP, set again as the lobby's choices are): the
+playlist's first map (Carousel on the default playlist) is neither named
+nor its copy into the map cache begun and dropped on the way - a read of
+the memory card on the game thread, and the copy's buffer taken from the
+texture cache, as the lobby went live (LadyCassie, insider.20: a 404 ms
+frame) */
+static char port_server_map_name[256];
+
+boolean ui_widget_port_start_network_game_server_on_map(
+	char const *map_name)
+{
+	boolean result;
+
+	csstrncpy(port_server_map_name, map_name ? map_name : "", sizeof(port_server_map_name) - 1);
+	port_server_map_name[sizeof(port_server_map_name) - 1] = 0;
+	result = network_game_start_new_server(NULL, NULL, NULL);
+	port_server_map_name[0] = 0;
+	return result;
 }
 
 /* port: a function's name, as the tags name it, by its index (NULL past the
@@ -3910,10 +4098,6 @@ static boolean network_game_start_new_server(
 #ifdef HALO_LINUX
 	boolean had_client = global_network_game_client_get() != NULL;
 
-	/* port: never on the crossplay wire: the player stays where they were,
-	told why (network_game_wire_refuses_hosting) */
-	if (network_game_wire_refuses_hosting(event ? event->controller_index : NONE))
-		return FALSE;
 #endif
 
 	dispose_global_network_game_client();
@@ -3922,12 +4106,24 @@ static boolean network_game_start_new_server(
 	if (!global_network_game_server_get())
 	{
 		game_engine_playlist_initialize();
+#ifdef HALO_LINUX
+		/* port: the live lobby's map, not the playlist's first
+		(ui_widget_port_start_network_game_server_on_map) */
+		if (port_server_map_name[0])
+			game_engine_override_map_name(port_server_map_name);
+#endif
 		result = create_global_network_game_server();
 		if (result == TRUE)
 		{
 			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);
 			game_engine_playlist_begin();
 			game_connection_set(2);
+#ifdef HALO_LINUX
+			/* port: open from now, its map named once the host chooses it
+			(the map list next): friends and a party join its lobby
+			meanwhile, precaching nothing before the choice */
+			network_game_server_port_map_pending(global_network_game_server_get());
+#endif
 		}
 	}
 	if (result && !global_network_game_client_get())
@@ -6445,23 +6641,46 @@ machine's player joined to it under the campaign's profile, as picking a
 profile for System Link does. The caller then opens the lobby. FALSE (the
 player told why, where the game's own checks tell) without a network, on
 maps that do not play with others, or without a campaign level. */
+boolean ui_widget_port_cooperative_campaign_host_level(struct widget_instance *widget, struct event_record *event,
+	char const *level, short difficulty);
+
 boolean ui_widget_port_cooperative_campaign_host(
 	struct widget_instance *list,
 	struct event_record *event)
 {
+	return ui_widget_port_cooperative_campaign_host_level(list, event, main_get_map_name(),
+		list->data3C.selected_index);
+}
+
+/* port: the same of a level and difficulty given (the Halo 3 campaign
+lobby's START GAME with its NETWORK on co-op, port/linux/game/menu_functions.c;
+the widget the one pressed, as the difficulty list is above) */
+boolean ui_widget_port_cooperative_campaign_host_level(
+	struct widget_instance *widget,
+	struct event_record *event,
+	char const *level,
+	short difficulty)
+{
+	struct widget_instance *list = widget;
 	char map_name[128];
 	char build[0x20];
-	short difficulty = list->data3C.selected_index;
-	short controller_index = (short)PIN(event->controller_index, 0, MAXIMUM_LOCAL_PLAYERS - 1);
+	short controller_index = (short)PIN(event ? event->controller_index : 0, 0, MAXIMUM_LOCAL_PLAYERS - 1);
 	boolean deleted = FALSE;
 
-	csstrncpy(map_name, main_get_map_name(), sizeof(map_name) - 1);
+	csstrncpy(map_name, level ? level : "", sizeof(map_name) - 1);
 	map_name[sizeof(map_name) - 1] = 0;
+	/* (a mod's Halo: CE Anniversary map plays offline only: it is no
+	campaign level a network game takes, custom_edition_mods.h) */
+	if (custom_edition_mods_level_name(map_name))
+	{
+		error(2, "co-op: '%s' is a mod's Halo: CE Anniversary map, which plays offline only", map_name);
+		return FALSE;
+	}
 	if (difficulty < 0 || difficulty > 3 || !custom_edition_maps_campaign_level(map_name))
 		return FALSE;
 	if (!transport_network_available())
 	{
-		display_error(5, event->controller_index, TRUE, TRUE);
+		display_error(5, controller_index, TRUE, TRUE);
 		return FALSE;
 	}
 	if (!cache_files_multiplayer_region(build))

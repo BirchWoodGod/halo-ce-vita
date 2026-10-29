@@ -33,8 +33,15 @@ is on now, the menus' or play's, with the settings read here.
 #include <math.h>
 #include <stdlib.h>
 
+#include "../../linux/game/game_chat.h"
+
+unsigned long system_milliseconds(void);
+
 /* set while the game's menus are up (halo_ui_pointer_update, d3d8_gxm.c) */
 int vita_menus_active;
+
+/* set while Forge's monitor flies (port/linux/game/forge.c) */
+extern int forge_monitor_flying;
 
 /* bumped by the settings panel (port_config.c) */
 extern volatile unsigned long halo_settings_generation;
@@ -84,6 +91,24 @@ int vita_pad_gyro_look(short gamepad_index, float *yaw, float *pitch)
 		}
 	}
 	return result;
+}
+
+/* (the game's look code, with vita_pad_gyro_look's turns) whether the
+stick's aim assist, its friction and adhesion, also acts on them: the Gyro
+aim assist setting (HALO_GYRO_ASSIST, on by default) */
+int vita_pad_gyro_assist(short gamepad_index)
+{
+	return gamepad_index == 0 && gyro_config.assist;
+}
+
+/* (the game's look code and the player's shots, source/game/player_control.c
+and aim_assist.c) whether the player has no aim assist at all: the gyro on
+(any mode but off) and the Gyro aim assist setting off
+(vita_gyro_unassisted). The stick then has none either; with the gyro off
+the stick keeps Halo's own whatever the switch says */
+int vita_pad_gyro_unassisted(short gamepad_index)
+{
+	return gamepad_index == 0 && vita_gyro_unassisted(&gyro_config);
 }
 
 /* (the game's button icons, source/interface/hud_draw.c) the glyph of
@@ -155,6 +180,28 @@ static void stick(unsigned char raw_x, unsigned char raw_y, int deadzone, int se
 	*out_y = (SHORT)(invert ? -y : y);
 }
 
+/* the in-game chat's controls (port/linux/game/game_chat.c): SELECT + D-pad
+left opens its quick chat wheel in play (the settings panel lets the combo
+through to it then: vita_settings.c), and while the wheel is open the
+D-pad, Cross, Circle, Triangle, L and R are its own; nonzero when it takes
+the buttons */
+static int chat_buttons(unsigned long buttons)
+{
+	unsigned int chat = 0;
+
+	if (buttons & VITA_BUTTON_UP) chat |= GAME_CHAT_PAD_UP;
+	if (buttons & VITA_BUTTON_DOWN) chat |= GAME_CHAT_PAD_DOWN;
+	if (buttons & VITA_BUTTON_LEFT) chat |= GAME_CHAT_PAD_LEFT;
+	if (buttons & VITA_BUTTON_RIGHT) chat |= GAME_CHAT_PAD_RIGHT;
+	if ((buttons & VITA_BUTTON_SELECT) && (buttons & VITA_BUTTON_LEFT)) chat |= GAME_CHAT_PAD_COMBO;
+	if (buttons & VITA_BUTTON_CROSS) chat |= GAME_CHAT_PAD_ACCEPT;
+	if (buttons & VITA_BUTTON_CIRCLE) chat |= GAME_CHAT_PAD_BACK;
+	if (buttons & VITA_BUTTON_TRIANGLE) chat |= GAME_CHAT_PAD_TYPE;
+	if (buttons & VITA_BUTTON_L) chat |= GAME_CHAT_PAD_PREVIOUS;
+	if (buttons & VITA_BUTTON_R) chat |= GAME_CHAT_PAD_NEXT;
+	return game_chat_pad(chat, system_milliseconds());
+}
+
 void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 {
 	static int deadzone = -1, sensitivity, curve, invert;
@@ -194,11 +241,30 @@ void vita_pad_state(XINPUT_GAMEPAD *gamepad)
 		vita_gyro_active(&gyro_config, pad.buttons, vita_menus_active));
 	if (gyro_config.mode == VITA_GYRO_HOLD && !vita_menus_active)
 		pad.buttons &= ~gyro_config.button;
+	/* (the chat's wheel open: its buttons, the sticks still the game's) */
+	if (!vita_menus_active && chat_buttons(pad.buttons))
+	{
+		stick(pad.lx, pad.ly, deadzone, 100, 0, 0, &gamepad->sThumbLX, &gamepad->sThumbLY);
+		stick(pad.rx, pad.ry, deadzone, sensitivity, curve, invert, &gamepad->sThumbRX, &gamepad->sThumbRY);
+		return;
+	}
 	/* the buttons and the touch zones held as the Xbox's buttons
 	(vita_controls.c): crouch is the left stick's click, which the Vita
 	does not have; HALO_CROUCH_TOGGLE (the panel's Crouch, on by default)
 	makes a press crouch and the next one stand */
-	vita_controls_map(&controls, &controls_state, pad.buttons, pad.touch, vita_menus_active, &output);
+	/* (Forge's monitor, port/linux/game/forge.c: D-pad down flies down
+	while it is held, never latched by the crouch toggle; the touch zones,
+	whose buttons (a weapon switch, a grenade) would be the monitor's
+	delete or copy, are off, as the design has them in Forge) */
+	if (forge_monitor_flying)
+	{
+		struct vita_controls_config flying = controls;
+
+		flying.crouch_toggle = 0;
+		vita_controls_map(&flying, &controls_state, pad.buttons, 0, vita_menus_active, &output);
+	}
+	else
+		vita_controls_map(&controls, &controls_state, pad.buttons, pad.touch, vita_menus_active, &output);
 	gamepad->wButtons |= (WORD)output.digital;
 	for (index = 0; index < 8; index++)
 		gamepad->bAnalogButtons[index] = output.analog[index];

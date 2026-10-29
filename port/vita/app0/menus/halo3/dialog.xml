@@ -1,0 +1,444 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3 dialog (Menu style Halo 3): every message box and question the game shows, in one
+look - a title, the text, up to three choices in rows, the buttons in a strip at the bottom
+(Cross Select, Circle Back: the icons the button icons setting shows), over what is behind,
+dimmed. The art is this folder's own (tools/halo3_menu_art.py: dim, panel, rule, strip,
+item, the glyphs), the words the port's own (menu_functions.c "port h3 dialog" gives each
+its title and text, in the player's language).
+
+The screens stand for the Xbox's message boxes (ui\shell\error\...) while Menu style is
+Halo 3, through dialog_ui.xml (the main menu's: ui.map) and dialog_ingame.xml (a level's):
+their handlers are the Xbox's (HALO_MENUS_DUMP), so each does what the box it stands for did.
+With Menu style Halo CE the Xbox's own boxes open, as ever.
+
+- error, notice (its non-modal one: it closes by itself), half_error, half_notice (split
+  screen): display_error's box - its first child's first child is the text box the game
+  gives the error's number (ui_widget.c display_error), which "port h3 dialog" reads.
+- abort, abort_final: the errors that end the game (display_error_abort_to_dashboard: the
+  screen is the text box); exit: "Quitting", then the game ends.
+- revert, restart (and half_revert, half_restart, half_quit): the pause screen's questions.
+- savequit, saved: SAVE AND QUIT's "Saving", then the main menu.
+- saving, creating: the main menu's "Saving" boxes (a profile, a game type).
+- delprof, delgt: delete a profile, a game type (the Xbox screens' questions).
+- message, question: the port's own (map sharing, invites, the crossplay check, Forge),
+  which the platform's own box shows otherwise (menu_functions.c h3_dialog_port). -->
+<menus>
+	<bitmap name="h3/dlg_dim">
+		<frame png="halo3/dim.png" width="64" height="64"/>
+	</bitmap>
+	<strings name="h3/dlg_text">
+		<string text="Select"/>
+		<string text="Back"/>
+		<string text="OK"/>
+		<string text="CANCEL"/>
+		<string text="REVERT TO CHECKPOINT"/>
+		<string text="RESTART MISSION"/>
+		<string text="QUIT MISSION"/>
+		<string text="DELETE PROFILE"/>
+		<string text="DELETE GAME TYPE"/>
+		<string text="CONTINUE"/>
+		<string text="QUIT GAME"/>
+		<string text="YES"/>
+		<string text="NO"/>
+	</strings>
+	<!-- the look: full screen (the panel 400 x 280 in the middle: the title, the text in up to nine
+	lines, three rows of choices, the buttons' strip), and half screen (split screen's halves:
+	a shorter panel, two rows) -->
+	<widget name="h3/dlg/haze" left="0" top="0" width="640" height="480" bitmap="h3/dlg_dim"/>
+	<widget name="h3/dlg/panel" left="120" top="100" width="400" height="280" bitmap="h3/panel"/>
+	<widget name="h3/dlg/title" type="text" left="132" top="106" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/dlg/rule" left="120" top="134" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/dlg/body" type="text" left="132" top="142" width="376" height="138" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/dlg/strip" left="120" top="360" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/dlg/a_butn" left="132" top="362" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/dlg/select" type="text" left="152" top="361" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/dlg_text" string_index="0"/>
+	<widget name="h3/dlg/b_butn" left="226" top="362" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/dlg/back" type="text" left="246" top="361" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/dlg_text" string_index="1"/>
+	<widget name="h3/dlg/half/haze" left="0" top="0" width="640" height="240" bitmap="h3/dlg_dim"/>
+	<widget name="h3/dlg/half/panel" left="120" top="10" width="400" height="220" bitmap="h3/panel"/>
+	<widget name="h3/dlg/half/title" type="text" left="132" top="16" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/dlg/half/rule" left="120" top="44" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/dlg/half/body" type="text" left="132" top="52" width="376" height="96" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/dlg/half/strip" left="120" top="210" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/dlg/half/a_butn" left="132" top="212" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/dlg/half/select" type="text" left="152" top="211" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/dlg_text" string_index="0"/>
+	<widget name="h3/dlg/half/b_butn" left="226" top="212" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/dlg/half/back" type="text" left="246" top="211" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/dlg_text" string_index="1"/>
+	<!-- (and the boxes with no choice - "Saving", "Quitting" -: a shorter panel in the middle) -->
+	<widget name="h3/dlg/busy/panel" left="120" top="170" width="400" height="120" bitmap="h3/panel"/>
+	<widget name="h3/dlg/busy/title" type="text" left="132" top="176" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/dlg/busy/rule" left="120" top="204" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/dlg/busy/body" type="text" left="132" top="212" width="376" height="56" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/dlg/busy/strip" left="120" top="270" width="400" height="20" bitmap="h3/strip"/>
+	<!-- (display_error's text box, the screen's first child's first child: the error's number
+	set in it, read by "port h3 dialog"; it shows nothing itself) -->
+	<widget name="h3/dlg/code" width="1" height="1">
+		<child widget="h3/dlg/code_text"/>
+	</widget>
+	<widget name="h3/dlg/code_text" type="text" width="1" height="1" font="h3/font_small" color="#00000000"/>
+
+	<!-- the choices: each dialog's rows, its handlers the Xbox box's (CANCEL first, focused, as the
+	Halo 3 menus' other questions; Circle is CANCEL too) -->
+	<widget name="h3/dlg/row_ok" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="2">
+		<on event="a start" close="current"/>
+	</widget>
+	<widget name="h3/dlg/row_cancel" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="3">
+		<on event="a start" close="current"/>
+	</widget>
+	<widget name="h3/dlg/row_revert" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="4">
+		<on event="a start" run="pause game restart at checkpoint" close="all"/>
+	</widget>
+	<widget name="h3/dlg/row_restart" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="5">
+		<on event="a start" run="pause game restart level" close="all"/>
+	</widget>
+	<widget name="h3/dlg/row_quit" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="6">
+		<on event="a start" run="pause game return to main menu" close="all"/>
+	</widget>
+	<widget name="h3/dlg/row_profile_cancel" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="3">
+		<on event="a start" run="cancel profile delete" close="current"/>
+	</widget>
+	<widget name="h3/dlg/row_profile_delete" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="7">
+		<on event="a start" run="final del player profile" close="current"/>
+	</widget>
+	<widget name="h3/dlg/row_gametype_delete" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="8">
+		<on event="a start" run="final del playlist profile" close="current"/>
+	</widget>
+	<widget name="h3/dlg/row_continue" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="9">
+		<on event="a start" close="current"/>
+	</widget>
+	<widget name="h3/dlg/row_exit" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="10">
+		<on event="a start" open="h3/dlg/exit/screen"/>
+	</widget>
+	<widget name="h3/dlg/row_port_ok" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="2">
+		<on event="a start" run="port h3 dialog ok" close="current"/>
+	</widget>
+	<widget name="h3/dlg/row_port_no" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="12">
+		<on event="a start" run="port h3 dialog no" close="current"/>
+	</widget>
+	<widget name="h3/dlg/row_port_yes" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/dlg_text" string_index="11">
+		<on event="a start" run="port h3 dialog yes" close="current"/>
+	</widget>
+	<widget name="h3/dlg/list_ok" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/dlg/row_ok" y="0"/>
+	</widget>
+	<widget name="h3/dlg/list_revert" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/dlg/row_cancel" y="0"/>
+		<child widget="h3/dlg/row_revert" y="24"/>
+	</widget>
+	<widget name="h3/dlg/list_restart" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/dlg/row_cancel" y="0"/>
+		<child widget="h3/dlg/row_restart" y="24"/>
+	</widget>
+	<widget name="h3/dlg/list_quit" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/dlg/row_cancel" y="0"/>
+		<child widget="h3/dlg/row_quit" y="24"/>
+	</widget>
+	<widget name="h3/dlg/list_profile" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/dlg/row_profile_cancel" y="0"/>
+		<child widget="h3/dlg/row_profile_delete" y="24"/>
+	</widget>
+	<widget name="h3/dlg/list_gametype" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/dlg/row_profile_cancel" y="0"/>
+		<child widget="h3/dlg/row_gametype_delete" y="24"/>
+	</widget>
+	<widget name="h3/dlg/list_abort" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/dlg/row_continue" y="0"/>
+		<child widget="h3/dlg/row_exit" y="24"/>
+	</widget>
+	<widget name="h3/dlg/list_exit" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/dlg/row_exit" y="0"/>
+	</widget>
+	<widget name="h3/dlg/list_port_ok" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/dlg/row_port_ok" y="0"/>
+	</widget>
+	<widget name="h3/dlg/list_port_question" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/dlg/row_port_no" y="0"/>
+		<child widget="h3/dlg/row_port_yes" y="24"/>
+	</widget>
+
+	<!-- the screens -->
+	<widget name="h3/dlg/error/screen" width="640" height="480" flags="pass_unhandled_to_focused_child">
+		<on event="b back" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/code"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/panel"/>
+		<child widget="h3/dlg/title"/>
+		<child widget="h3/dlg/rule"/>
+		<child widget="h3/dlg/body"/>
+		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/a_butn"/>
+		<child widget="h3/dlg/select"/>
+		<child widget="h3/dlg/b_butn"/>
+		<child widget="h3/dlg/back"/>
+		<child widget="h3/dlg/list_ok" x="132" y="286"/>
+	</widget>
+	<widget name="h3/dlg/notice/screen" width="640" height="480" flags="pass_unhandled_to_focused_child" auto_close="5000" auto_close_fade="1000">
+		<on event="b back" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/code"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/panel"/>
+		<child widget="h3/dlg/title"/>
+		<child widget="h3/dlg/rule"/>
+		<child widget="h3/dlg/body"/>
+		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/a_butn"/>
+		<child widget="h3/dlg/select"/>
+		<child widget="h3/dlg/b_butn"/>
+		<child widget="h3/dlg/back"/>
+		<child widget="h3/dlg/list_ok" x="132" y="286"/>
+	</widget>
+	<widget name="h3/dlg/half_error/screen" width="640" height="240" flags="pass_unhandled_to_focused_child">
+		<on event="b back" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/code"/>
+		<child widget="h3/dlg/half/haze"/>
+		<child widget="h3/dlg/half/panel"/>
+		<child widget="h3/dlg/half/title"/>
+		<child widget="h3/dlg/half/rule"/>
+		<child widget="h3/dlg/half/body"/>
+		<child widget="h3/dlg/half/strip"/>
+		<child widget="h3/dlg/half/a_butn"/>
+		<child widget="h3/dlg/half/select"/>
+		<child widget="h3/dlg/half/b_butn"/>
+		<child widget="h3/dlg/half/back"/>
+		<child widget="h3/dlg/list_ok" x="132" y="154"/>
+	</widget>
+	<widget name="h3/dlg/half_notice/screen" width="640" height="240" flags="pass_unhandled_to_focused_child" auto_close="5000" auto_close_fade="1000">
+		<on event="b back" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/code"/>
+		<child widget="h3/dlg/half/haze"/>
+		<child widget="h3/dlg/half/panel"/>
+		<child widget="h3/dlg/half/title"/>
+		<child widget="h3/dlg/half/rule"/>
+		<child widget="h3/dlg/half/body"/>
+		<child widget="h3/dlg/half/strip"/>
+		<child widget="h3/dlg/half/a_butn"/>
+		<child widget="h3/dlg/half/select"/>
+		<child widget="h3/dlg/half/b_butn"/>
+		<child widget="h3/dlg/half/back"/>
+		<child widget="h3/dlg/list_ok" x="132" y="154"/>
+	</widget>
+	<!-- (display_error_abort_to_dashboard's: the screen is its text box, the error's number set in
+	it; Circle keeps playing, as CONTINUE: never the game's end by Back) -->
+	<widget name="h3/dlg/abort/screen" type="text" width="640" height="480" font="h3/font_small" color="#00000000" flags="pass_unhandled_to_focused_child main_menu_if_no_history">
+		<on event="b back" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/panel"/>
+		<child widget="h3/dlg/title"/>
+		<child widget="h3/dlg/rule"/>
+		<child widget="h3/dlg/body"/>
+		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/a_butn"/>
+		<child widget="h3/dlg/select"/>
+		<child widget="h3/dlg/b_butn"/>
+		<child widget="h3/dlg/back"/>
+		<child widget="h3/dlg/list_abort" x="132" y="286"/>
+	</widget>
+	<widget name="h3/dlg/abort_final/screen" type="text" width="640" height="480" font="h3/font_small" color="#00000000" flags="pass_unhandled_to_focused_child">
+		<on event="b back" run="NULL"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/panel"/>
+		<child widget="h3/dlg/title"/>
+		<child widget="h3/dlg/rule"/>
+		<child widget="h3/dlg/body"/>
+		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/a_butn"/>
+		<child widget="h3/dlg/select"/>
+		<child widget="h3/dlg/list_exit" x="132" y="286"/>
+	</widget>
+	<widget name="h3/dlg/exit/screen" width="640" height="480" auto_close="500">
+		<on event="deleted" run="exit to xbox dashboard"/>
+		<on event="b back" run="NULL"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/busy/panel"/>
+		<child widget="h3/dlg/busy/title"/>
+		<child widget="h3/dlg/busy/rule"/>
+		<child widget="h3/dlg/busy/body"/>
+		<child widget="h3/dlg/busy/strip"/>
+	</widget>
+	<widget name="h3/dlg/revert/screen" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game">
+		<on event="b back" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/panel"/>
+		<child widget="h3/dlg/title"/>
+		<child widget="h3/dlg/rule"/>
+		<child widget="h3/dlg/body"/>
+		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/a_butn"/>
+		<child widget="h3/dlg/select"/>
+		<child widget="h3/dlg/b_butn"/>
+		<child widget="h3/dlg/back"/>
+		<child widget="h3/dlg/list_revert" x="132" y="286"/>
+	</widget>
+	<widget name="h3/dlg/restart/screen" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game">
+		<on event="b back" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/panel"/>
+		<child widget="h3/dlg/title"/>
+		<child widget="h3/dlg/rule"/>
+		<child widget="h3/dlg/body"/>
+		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/a_butn"/>
+		<child widget="h3/dlg/select"/>
+		<child widget="h3/dlg/b_butn"/>
+		<child widget="h3/dlg/back"/>
+		<child widget="h3/dlg/list_restart" x="132" y="286"/>
+	</widget>
+	<widget name="h3/dlg/half_revert/screen" width="640" height="240" flags="pass_unhandled_to_focused_child pause_game">
+		<on event="b back" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/half/haze"/>
+		<child widget="h3/dlg/half/panel"/>
+		<child widget="h3/dlg/half/title"/>
+		<child widget="h3/dlg/half/rule"/>
+		<child widget="h3/dlg/half/body"/>
+		<child widget="h3/dlg/half/strip"/>
+		<child widget="h3/dlg/half/a_butn"/>
+		<child widget="h3/dlg/half/select"/>
+		<child widget="h3/dlg/half/b_butn"/>
+		<child widget="h3/dlg/half/back"/>
+		<child widget="h3/dlg/list_revert" x="132" y="154"/>
+	</widget>
+	<widget name="h3/dlg/half_restart/screen" width="640" height="240" flags="pass_unhandled_to_focused_child pause_game">
+		<on event="b back" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/half/haze"/>
+		<child widget="h3/dlg/half/panel"/>
+		<child widget="h3/dlg/half/title"/>
+		<child widget="h3/dlg/half/rule"/>
+		<child widget="h3/dlg/half/body"/>
+		<child widget="h3/dlg/half/strip"/>
+		<child widget="h3/dlg/half/a_butn"/>
+		<child widget="h3/dlg/half/select"/>
+		<child widget="h3/dlg/half/b_butn"/>
+		<child widget="h3/dlg/half/back"/>
+		<child widget="h3/dlg/list_restart" x="132" y="154"/>
+	</widget>
+	<widget name="h3/dlg/half_quit/screen" width="640" height="240" flags="pass_unhandled_to_focused_child pause_game">
+		<on event="b back" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/half/haze"/>
+		<child widget="h3/dlg/half/panel"/>
+		<child widget="h3/dlg/half/title"/>
+		<child widget="h3/dlg/half/rule"/>
+		<child widget="h3/dlg/half/body"/>
+		<child widget="h3/dlg/half/strip"/>
+		<child widget="h3/dlg/half/a_butn"/>
+		<child widget="h3/dlg/half/select"/>
+		<child widget="h3/dlg/half/b_butn"/>
+		<child widget="h3/dlg/half/back"/>
+		<child widget="h3/dlg/list_quit" x="132" y="154"/>
+	</widget>
+	<!-- (SAVE AND QUIT: the save is written as the box closes, then the main menu loads under the
+	second, as the Xbox's two did) -->
+	<widget name="h3/dlg/savequit/screen" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game no_history" auto_close="3000">
+		<on event="b back" run="NULL"/>
+		<on event="deleted" run="pause game return to main menu" open="h3/dlg/saved/screen"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/busy/panel"/>
+		<child widget="h3/dlg/busy/title"/>
+		<child widget="h3/dlg/busy/rule"/>
+		<child widget="h3/dlg/busy/body"/>
+		<child widget="h3/dlg/busy/strip"/>
+	</widget>
+	<widget name="h3/dlg/saved/screen" width="640" height="480" flags="pass_unhandled_to_focused_child pause_game no_history">
+		<on event="b back" run="NULL"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/busy/panel"/>
+		<child widget="h3/dlg/busy/title"/>
+		<child widget="h3/dlg/busy/rule"/>
+		<child widget="h3/dlg/busy/body"/>
+		<child widget="h3/dlg/busy/strip"/>
+	</widget>
+	<widget name="h3/dlg/saving/screen" width="640" height="480" flags="pass_unhandled_to_focused_child" auto_close="3000" auto_close_fade="1000">
+		<on event="b back" run="NULL"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/busy/panel"/>
+		<child widget="h3/dlg/busy/title"/>
+		<child widget="h3/dlg/busy/rule"/>
+		<child widget="h3/dlg/busy/body"/>
+		<child widget="h3/dlg/busy/strip"/>
+	</widget>
+	<widget name="h3/dlg/creating/screen" width="640" height="480" flags="pass_unhandled_to_focused_child" auto_close="3000" auto_close_fade="1000">
+		<on event="b back" run="NULL"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/busy/panel"/>
+		<child widget="h3/dlg/busy/title"/>
+		<child widget="h3/dlg/busy/rule"/>
+		<child widget="h3/dlg/busy/body"/>
+		<child widget="h3/dlg/busy/strip"/>
+	</widget>
+	<widget name="h3/dlg/delprof/screen" width="640" height="480" flags="pass_unhandled_to_focused_child">
+		<on event="b back" run="cancel profile delete" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/panel"/>
+		<child widget="h3/dlg/title"/>
+		<child widget="h3/dlg/rule"/>
+		<child widget="h3/dlg/body"/>
+		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/a_butn"/>
+		<child widget="h3/dlg/select"/>
+		<child widget="h3/dlg/b_butn"/>
+		<child widget="h3/dlg/back"/>
+		<child widget="h3/dlg/list_profile" x="132" y="286"/>
+	</widget>
+	<widget name="h3/dlg/delgt/screen" width="640" height="480" flags="pass_unhandled_to_focused_child">
+		<on event="b back" run="cancel profile delete" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/panel"/>
+		<child widget="h3/dlg/title"/>
+		<child widget="h3/dlg/rule"/>
+		<child widget="h3/dlg/body"/>
+		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/a_butn"/>
+		<child widget="h3/dlg/select"/>
+		<child widget="h3/dlg/b_butn"/>
+		<child widget="h3/dlg/back"/>
+		<child widget="h3/dlg/list_gametype" x="132" y="286"/>
+	</widget>
+	<!-- (the port's own: a message, a yes or no question; Circle is NO) -->
+	<widget name="h3/dlg/message/screen" width="640" height="480" flags="pass_unhandled_to_focused_child">
+		<on event="b back" run="port h3 dialog ok" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/panel"/>
+		<child widget="h3/dlg/title"/>
+		<child widget="h3/dlg/rule"/>
+		<child widget="h3/dlg/body"/>
+		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/a_butn"/>
+		<child widget="h3/dlg/select"/>
+		<child widget="h3/dlg/b_butn"/>
+		<child widget="h3/dlg/back"/>
+		<child widget="h3/dlg/list_port_ok" x="132" y="286"/>
+	</widget>
+	<widget name="h3/dlg/question/screen" width="640" height="480" flags="pass_unhandled_to_focused_child">
+		<on event="b back" run="port h3 dialog no" close="current"/>
+		<data input="port h3 dialog"/>
+		<child widget="h3/dlg/haze"/>
+		<child widget="h3/dlg/panel"/>
+		<child widget="h3/dlg/title"/>
+		<child widget="h3/dlg/rule"/>
+		<child widget="h3/dlg/body"/>
+		<child widget="h3/dlg/strip"/>
+		<child widget="h3/dlg/a_butn"/>
+		<child widget="h3/dlg/select"/>
+		<child widget="h3/dlg/b_butn"/>
+		<child widget="h3/dlg/back"/>
+		<child widget="h3/dlg/list_port_question" x="132" y="286"/>
+	</widget>
+</menus>

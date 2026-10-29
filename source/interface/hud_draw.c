@@ -1085,6 +1085,38 @@ static void hud_full_screen_element_widen(
 	return;
 }
 
+/* (port) the scale at which a map whose HUD is Halo: CE Anniversary's
+(custom_edition_cache_hud_mcc_canvas) draws a HUD bitmap no placement
+scales, 1 for any other: on MCC's canvas twice the Xbox's (`on_canvas`, the
+HUD messages' icons) half, and half again for Halo PC's half HUD scale on
+the bitmap, which MCC's HUD bitmaps have: the icons are four times the
+Xbox's, the waypoint arrows and damage indicators twice (hud_waypoints'
+68 against 34), drawn at the screen's size (as the motion sensor's blips,
+at the Xbox's distances from its centre) */
+real hud_mcc_bitmap_scale(
+	long bitmap_group_index,
+	boolean on_canvas)
+{
+	real scale = 1.0f;
+
+	if (custom_edition_cache_hud_mcc_canvas())
+	{
+		if (on_canvas)
+			scale *= 0.5f;
+		if (bitmap_group_index != NONE)
+		{
+			struct bitmap_group const *bitmap_group = bitmap_group_get(bitmap_group_index);
+
+			if (TEST_FLAG(bitmap_group->flags, _bitmap_group_half_hud_scale_bit) ||
+				TEST_FLAG(bitmap_group->flags, _bitmap_group_force_hud_use_highres_scale_bit))
+			{
+				scale *= 0.5f;
+			}
+		}
+	}
+	return scale;
+}
+
 /* (port) whether a static element is part of a zoomed scope: one of its
 multitexture overlays is driven by the zoom level (the sniper rifle's two
 range ladders, drawn as overlays faded in by the zoom, are anchored to the top
@@ -2179,6 +2211,11 @@ void hud_draw_numbers(
 			{
 				digit_scale = scale * 0.5f;
 			}
+			/* port: and half again on Halo: CE Anniversary's canvas, twice
+			the Xbox's, whose digits are four times the Xbox's (their
+			spacing was halved as the map loaded: cache_file_formats.c
+			mcc_hud_digits_convert) */
+			digit_scale *= hud_mcc_bitmap_scale(NONE, TRUE);
 #endif
 
 			if (TEST_FLAG(numbers->number_flags, _hud_number_show_trailing_m_bit))
@@ -2421,7 +2458,7 @@ void hud_draw_numbers(
 	return;
 }
 
-#ifdef HALO_VITA
+#ifdef HALO_BUTTON_GLYPHS
 /* ---------- (port) the Vita's button icons
 
 The settings panel's Button icons, PlayStation (vita_controls.h): each of
@@ -2429,36 +2466,79 @@ the game's button icons - the HUD's prompts (hud_messaging.c), the icons in
 the menus' and the HUD's text (ui_widget.c draw_string_and_hack_in_icons)
 and the menus' button hints (the a_butn ... widgets, ui_widget.c) - shows
 the Vita button its Xbox button is on now (vita_pad.c, which follows the
-Button layout and the touch zones). Cross, circle, square and triangle are
-drawn here, centred where the Xbox icon's sprite would be and as tall as
-it: two strokes, a ring, a square, a triangle, quads of the game's own
-white bitmap (the virtual keyboard's caret), in the PlayStation's own
-colours (cross blue, circle red, square pink, triangle green), with the
-alpha the callers give (the Xbox icon's, from hud_globals' button icons,
-as it fades). The others
-(L, R, Start, Select, the D-pad, the touch zones) are words in the game's
-font, drawn by the callers as the icons that are text are. */
+Button layout and the touch zones), in the look of the Halo 3 menus' own
+icons: a dark round button with its symbol in the PlayStation's colours
+(cross blue, circle red, square pink, triangle green), L and R on a dark
+tab, START, SELECT and the D-pad's directions on a round button too. They
+are the menus' art, drawn by tools/halo3_menu_art.py at twice the menus'
+size into one picture of the menus folder (halo3/glyph_atlas.png, read the
+first time one is drawn: menu_tags.c menu_tags_png_texture), drawn here
+square, centred where the Xbox icon's sprite would be and as tall as it,
+at the alpha the callers give (the Xbox icon's, from hud_globals' button
+icons, as it fades). Without the picture (the menus folder missing) cross,
+circle, square and triangle are drawn in code - two strokes, a ring, a
+square, a triangle, quads of the game's own white bitmap (the virtual
+keyboard's caret), in the same colours - and the others are words in the
+game's font ("L", "START", "D-pad down"), drawn by the callers as the
+icons that are text are. The touch zones are always words ("rear touch
+left").
+
+The Linux harness has them too, for its tests: HALO_BUTTON_ICONS=playstation
+there shows the Vita's shipped layout (port/linux/src/button_glyphs.c). */
 
 #include "input/input.h"
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
-#include "vita_controls.h"
+#include "../../port/vita/include/vita_controls.h" /* port: the glyphs, VITA_GLYPH_* */
 #include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 
 #include <string.h>
 
+#ifdef HALO_VITA
 /* (vita_pad.c) */
 int vita_pad_button_glyph(short gamepad_button);
 int vita_pad_play_button_glyph(short gamepad_button);
+#else
+/* (port/linux/src/button_glyphs.c, and ui_widget.c: whether the menus are
+up, which the Vita's pad is told each frame) */
+int halo_button_glyph(short gamepad_button, int menus);
+int ui_widget_menus_active(void);
+#define vita_pad_button_glyph(gamepad_button) halo_button_glyph((gamepad_button), ui_widget_menus_active())
+#endif
+#ifdef HALO_KEY_GLYPHS
+#include "../../port/linux/include/halo_button_icons.h" /* port: the keyboard's and the Xbox's glyphs */
+#include "text/unicode.h"
+
+static short halo3_menu_glyph(char const *kind);
+static boolean key_glyph_is(short glyph);
+static boolean key_glyph_drawn(short glyph);
+static wchar_t const *key_glyph_text(short glyph);
+static boolean key_glyph_draw(short glyph, real_rectangle2d const *rectangle, pixel32 color, boolean flow);
+#endif
+
+/* (menu_tags.c) */
+boolean menu_tags_png_texture(char const *png, long width, long height, long smallest, struct bitmap_data *bitmap);
 
 enum
 {
-	VITA_GLYPH_RING_SEGMENTS = 24
+	VITA_GLYPH_RING_SEGMENTS = 24,
+	/* the atlas: 32x32 cells, four to a row, from VITA_GLYPH_CROSS to
+	VITA_GLYPH_SELECT (tools/halo3_menu_art.py ATLAS_GLYPHS), its mipmaps
+	down to 16x16 cells */
+	VITA_GLYPH_ATLAS_SIZE = 128,
+	VITA_GLYPH_ATLAS_CELL = 32,
+	VITA_GLYPH_ATLAS_SMALLEST = 64,
+	VITA_GLYPH_ATLAS_LAST = VITA_GLYPH_SELECT
 };
 
 short hud_vita_button_glyph(
 	short icon_index)
 {
+#ifdef HALO_KEY_GLYPHS
+	/* (the keyboard's sticks: WASD and the mouse) */
+	if (icon_index == NUMBER_OF_GAMEPAD_BUTTONS || icon_index == NUMBER_OF_GAMEPAD_BUTTONS + 1)
+		return (short)vita_pad_button_glyph(icon_index);
+#endif
 	/* (the buttons only: the sticks' icons, 16 and 17, are the Vita's too) */
 	if (icon_index < 0 || icon_index >= NUMBER_OF_GAMEPAD_BUTTONS)
 		return VITA_GLYPH_NONE;
@@ -2466,6 +2546,7 @@ short hud_vita_button_glyph(
 	return (short)vita_pad_button_glyph(icon_index);
 }
 
+#ifdef HALO_VITA
 /* the multiplayer score hint (game_engine.c), "Hold BACK for score" in
 the Xbox maps and a Custom Edition map's (cache_file_formats.c), names the
 Vita button the Xbox's Back is on in play: SELECT as shipped. A face button
@@ -2479,6 +2560,7 @@ void hud_vita_score_hint(
 	if (name && buffer_size > 0)
 		vita_text_name_button(buffer, (int)buffer_size, L"BACK", name);
 }
+#endif
 
 /* the glyph of a menu's button hint widget, by its bitmap
 (ui\shell\bitmaps\a_butn, b_butn, x_butn, y_butn, a_butn_sm, b_butn_sm);
@@ -2497,6 +2579,12 @@ short hud_vita_menu_button_glyph(
 		return VITA_GLYPH_NONE;
 	base = strrchr(name, '\\');
 	base = base ? base + 1 : name;
+#ifdef HALO_KEY_GLYPHS
+	/* (the Halo 3 menus' button pictures, the PlayStation's: menus/halo3's
+	h3/glyph_cross ...) */
+	if (!strncmp(name, "pc\\", 3) && !strncmp(base, "glyph_", 6))
+		return halo3_menu_glyph(base + 6);
+#endif
 	letter = base[0] ? strchr("abxy", base[0]) : NULL;
 	if (!letter || strncmp(base + 1, "_butn", 5) || (base[6] && strcmp(base + 6, "_sm")))
 		return VITA_GLYPH_NONE;
@@ -2505,12 +2593,53 @@ short hud_vita_menu_button_glyph(
 	return hud_vita_button_glyph((short)(letter - "abxy"));
 }
 
-/* the face button (_icon_a_button ... _icon_y_button) whose Xbox icon's
-colour a drawn glyph takes; NONE for one that is text */
+/* the face button (_icon_a_button ... _icon_y_button) a glyph is (cross,
+circle, square, triangle: A B X Y in the menus' layout); NONE for another */
 short hud_vita_glyph_face_icon(
 	short glyph)
 {
 	return glyph >= VITA_GLYPH_CROSS && glyph <= VITA_GLYPH_TRIANGLE ? glyph - VITA_GLYPH_CROSS : NONE;
+}
+
+/* the atlas's texture (halo3/glyph_atlas.png), made the first time it is
+wanted; NULL if it could not be (tried once) */
+static struct bitmap_data *vita_glyph_atlas(
+	void)
+{
+	static struct bitmap_data atlas;
+	static short state; /* 0 not tried, 1 made, -1 not to be had */
+
+	if (!state)
+	{
+		state = menu_tags_png_texture("halo3/glyph_atlas.png", VITA_GLYPH_ATLAS_SIZE, VITA_GLYPH_ATLAS_SIZE,
+			VITA_GLYPH_ATLAS_SMALLEST, &atlas) ? 1 : -1;
+	}
+
+	return state > 0 && atlas.hardware_format ? &atlas : NULL;
+}
+
+/* whether a glyph is drawn in the Xbox icon's place (hud_vita_glyph_draw):
+any but a touch zone with the atlas, the face buttons without it */
+boolean hud_vita_glyph_drawn(
+	short glyph)
+{
+#ifdef HALO_KEY_GLYPHS
+	if (key_glyph_is(glyph))
+		return key_glyph_drawn(glyph);
+#endif
+	if (glyph >= VITA_GLYPH_CROSS && glyph <= VITA_GLYPH_ATLAS_LAST && vita_glyph_atlas())
+		return TRUE;
+
+	return hud_vita_glyph_face_icon(glyph) != NONE;
+}
+
+/* the word a glyph that is not drawn shows in the Xbox icon's place (a
+touch zone; L, START, the D-pad ... without the atlas); NULL for one that
+is drawn, or none */
+wchar_t const *hud_vita_glyph_word(
+	short glyph)
+{
+	return hud_vita_glyph_drawn(glyph) ? NULL : hud_vita_glyph_text(glyph);
 }
 
 /* the word of a glyph that is text (in the style of the game's own icon
@@ -2529,6 +2658,10 @@ wchar_t const *hud_vita_glyph_text(
 		N_(L"rear touch left"), N_(L"rear touch right")
 	};
 
+#ifdef HALO_KEY_GLYPHS
+	if (key_glyph_is(glyph))
+		return key_glyph_text(glyph);
+#endif
 	return glyph > VITA_GLYPH_NONE && glyph < VITA_GLYPH_COUNT && texts[glyph] ? TW(texts[glyph]) : NULL;
 }
 
@@ -2615,9 +2748,11 @@ boolean hud_vita_glyph_draw_in_rect(
 	pixel32 color)
 {
 	/* (cross, circle, square, triangle: the PlayStation's colours, the
+	Halo 3 menus' own - tools/halo3_menu_art.py GLYPH_COLOURS - at the
 	caller's alpha) */
-	static pixel32 const face_colors[4] = { 0x006EA8F0, 0x00F05A5A, 0x00E08CD8, 0x0030D0A0 };
-	long white_index = tag_loaded(BITMAP_GROUP_TAG, "ui\\shell\\bitmaps\\white");
+	static pixel32 const face_colors[4] = { 0x009CC2FF, 0x00FF7A7A, 0x00FF9BE4, 0x004FE0A8 };
+	struct bitmap_data *atlas = vita_glyph_atlas();
+	long white_index;
 	struct bitmap_data *white;
 	real width = rectangle->x1 - rectangle->x0;
 	real height = rectangle->y1 - rectangle->y0;
@@ -2631,6 +2766,54 @@ boolean hud_vita_glyph_draw_in_rect(
 	real_point2d outer[VITA_GLYPH_RING_SEGMENTS];
 	real_point2d inner[VITA_GLYPH_RING_SEGMENTS];
 
+#ifdef HALO_KEY_GLYPHS
+	/* (a key's square keycap, or the Xbox's button: a hint's fixed box) */
+	if (key_glyph_is(glyph))
+		return key_glyph_draw(glyph, rectangle, color, FALSE);
+#endif
+	/* the Halo 3 menus' icon, from the atlas: a square as tall as the
+	sprite (its round button then as tall as the Xbox's oval in it; no
+	wider than a quarter more than the sprite), on its middle; white, the
+	caller's alpha */
+	if (atlas && glyph >= VITA_GLYPH_CROSS && glyph <= VITA_GLYPH_ATLAS_LAST)
+	{
+		struct dynamic_screen_vertex vertices[4];
+		struct rasterizer_dynamic_screen_geometry_parameters parameters;
+		short cell = glyph - VITA_GLYPH_CROSS;
+		real side = height < width * 1.25f ? height : width * 1.25f;
+		real u0 = (real)((cell % 4) * VITA_GLYPH_ATLAS_CELL) / VITA_GLYPH_ATLAS_SIZE;
+		real v0 = (real)((cell / 4) * VITA_GLYPH_ATLAS_CELL) / VITA_GLYPH_ATLAS_SIZE;
+		real span = (real)VITA_GLYPH_ATLAS_CELL / VITA_GLYPH_ATLAS_SIZE;
+		short vertex_index;
+
+		for (vertex_index = 0; vertex_index < 4; vertex_index++)
+		{
+			/* (the corners as hud_draw_bitmap_internal winds them: top
+			left, top right, bottom right, bottom left) */
+			boolean right = ((vertex_index + 1) & 2) != 0;
+			boolean bottom = vertex_index > 1;
+
+			vertices[vertex_index].position.x = x + (right ? 0.5f : -0.5f) * side;
+			vertices[vertex_index].position.y = y + (bottom ? 0.5f : -0.5f) * side;
+			vertices[vertex_index].texture_coordinates.x = u0 + (right ? span : 0.0f);
+			vertices[vertex_index].texture_coordinates.y = v0 + (bottom ? span : 0.0f);
+			vertices[vertex_index].color = 0x00FFFFFF | (color & 0xFF000000);
+		}
+		csmemset(&parameters, 0, sizeof(parameters));
+		parameters.map_texture_scale[0].i = 1.0f;
+		parameters.map_texture_scale[0].j = 1.0f;
+		parameters.map_scale[0].i = 1.0f;
+		parameters.map_scale[0].j = 1.0f;
+		/* (the picture's alpha is not multiplied in: blended as the menus'
+		PNGs are, draw_bitmap_in_rect) */
+		parameters.framebuffer_blend_function = _shader_framebuffer_blend_function_alpha_blend;
+		parameters.map[0] = atlas;
+		rasterizer_psuedo_dynamic_screen_quad_draw(&parameters, vertices);
+		return TRUE;
+	}
+
+	/* without it, the face buttons' symbols in code */
+	white_index = tag_loaded(BITMAP_GROUP_TAG, "ui\\shell\\bitmaps\\white");
 	if (white_index == NONE || hud_vita_glyph_face_icon(glyph) == NONE)
 		return FALSE;
 	color = face_colors[hud_vita_glyph_face_icon(glyph)] | (color & 0xFF000000);
@@ -2737,6 +2920,323 @@ boolean hud_vita_glyph_draw(
 	rectangle.y0 = point->y + bounds.y0 * scale;
 	rectangle.y1 = point->y + bounds.y1 * scale;
 
+#ifdef HALO_KEY_GLYPHS
+	/* (in a line of text: a wider keycap's label in full) */
+	if (key_glyph_is(glyph))
+		return key_glyph_draw(glyph, &rectangle, color, TRUE);
+#endif
 	return hud_vita_glyph_draw_in_rect(glyph, &rectangle, color);
 }
+
+#ifdef HALO_KEY_GLYPHS
+/* ---------- (port) the desktop build's keyboard and Xbox icons
+
+display.button_icons (port/linux/include/halo_button_icons.h,
+port/linux/src/button_glyphs.c): with the keyboard's, each button icon is
+the key or mouse button it is pressed with - a keycap (a dark rounded key,
+its label or symbol in light grey) or the mouse with its button lit -; the
+Halo 3 menus' hints, whose pictures are the PlayStation's, show the
+keyboard's or the Xbox controller's own buttons (a dark round button, its
+letter in its colour). Our own art, drawn by tools/halo3_menu_art.py into
+two pictures of the menus folder (halo3/key_atlas.png, halo3/xbox_atlas.png:
+read the first time one is drawn), drawn where the Xbox icon's sprite would
+be, as tall as it, at the caller's alpha. In a line of text a key with a
+long label (SPACE, ENTER ...) is a wider keycap, the line moved on by what
+it is wider (hud_vita_glyph_flow_extra); in a hint's fixed box it is the
+square one (a symbol: the return arrow, the space bar ...). Without the
+pictures, a word in the game's font ("Space", "left click"). */
+
+/* (the wider keycaps' widths, in the atlas's 32-pixel cells' pixels) */
+#define KEY_GLYPH_WIDE_WIDTH(name, compact, wide, wide_width) wide_width,
+static short const key_glyph_wide_widths[HALO_KEY_COUNT] = { HALO_KEY_GLYPH_LIST(KEY_GLYPH_WIDE_WIDTH) };
+#undef KEY_GLYPH_WIDE_WIDTH
+#define KEY_GLYPH_WIDE_ES(name, wide, wide_width) { HALO_KEY_##name, wide_width },
+static struct
+{
+	short key;
+	short width;
+} const key_glyph_wide_es[] = { HALO_KEY_GLYPH_LIST_ES(KEY_GLYPH_WIDE_ES) };
+#undef KEY_GLYPH_WIDE_ES
+
+static boolean key_glyph_is(
+	short glyph)
+{
+	return (glyph >= HALO_GLYPH_KEY_FIRST && glyph < HALO_GLYPH_KEY_FIRST + HALO_KEY_COUNT) ||
+		(glyph >= HALO_GLYPH_XBOX_FIRST && glyph < HALO_GLYPH_XBOX_FIRST + HALO_GLYPH_XBOX_COUNT);
+}
+
+/* the Halo 3 menus' button picture h3/glyph_<kind> (the PlayStation's, in
+the menus' layout: cross A, circle B, square X, triangle Y, L and R the
+triggers, START, the D-pad's left and right): VITA_GLYPH_NONE with the
+PlayStation's icons (the picture is drawn), else the key it is pressed
+with in the menus, or the Xbox's button (the keyboard has none for it: the
+right trigger) */
+static short halo3_menu_glyph(
+	char const *kind)
+{
+	static struct
+	{
+		char const *kind;
+		short button;
+	} const kinds[] =
+	{
+		{ "cross", _gamepad_analog_button_a }, { "circle", _gamepad_analog_button_b },
+		{ "square", _gamepad_analog_button_x }, { "triangle", _gamepad_analog_button_y },
+		{ "l", _gamepad_analog_button_left_trigger }, { "r", _gamepad_analog_button_right_trigger },
+		{ "start", _gamepad_binary_button_start }, { "dpad_lr", NONE },
+	};
+	int shown = halo_button_icons_shown();
+	short index;
+
+	if (shown == _halo_button_icons_playstation)
+		return VITA_GLYPH_NONE;
+	for (index = 0; index < (short)NUMBEROF(kinds); index++)
+	{
+		if (!strcmp(kind, kinds[index].kind))
+		{
+			short button = kinds[index].button;
+			int key = button == NONE ? HALO_KEY_LEFT_RIGHT : halo_keyboard_button_key(button, TRUE);
+
+			if (shown == _halo_button_icons_keyboard && key >= 0)
+				return (short)(HALO_GLYPH_KEY_FIRST + key);
+			return (short)(HALO_GLYPH_XBOX_FIRST + (button == NONE ? HALO_GLYPH_XBOX_DPAD_LEFT_RIGHT : button));
+		}
+	}
+
+	return VITA_GLYPH_NONE;
+}
+
+/* an atlas's texture, made the first time it is wanted; NULL if it could
+not be (tried once) */
+static struct bitmap_data *key_glyph_atlas(
+	boolean controller)
+{
+	static struct bitmap_data atlases[2];
+	static short states[2]; /* 0 not tried, 1 made, -1 not to be had */
+
+	if (!states[controller])
+	{
+		/* (mipmaps down to 16-pixel cells) */
+		states[controller] = menu_tags_png_texture(controller ? "halo3/xbox_atlas.png" : "halo3/key_atlas.png",
+			controller ? HALO_XBOX_ATLAS_WIDTH : HALO_KEY_ATLAS_SIZE, controller ? HALO_XBOX_ATLAS_HEIGHT : HALO_KEY_ATLAS_SIZE,
+			128, &atlases[controller]) ? 1 : -1;
+	}
+
+	return states[controller] > 0 && atlases[controller].hardware_format ? &atlases[controller] : NULL;
+}
+
+static boolean key_glyph_drawn(
+	short glyph)
+{
+	return key_glyph_atlas(glyph >= HALO_GLYPH_XBOX_FIRST) != NULL;
+}
+
+static wchar_t const *key_glyph_text(
+	short glyph)
+{
+	/* (the keys' names as the keys say them; the others in the player's
+	language) */
+	static wchar_t const *const keys[HALO_KEY_COUNT] =
+	{
+		N_(L"Space"), N_(L"Enter"), L"Esc", L"Tab", N_(L"Backspace"), L"Del", L"Ctrl", N_(L"Shift"), L"F1",
+		N_(L"up arrow"), N_(L"down arrow"), N_(L"left arrow"), N_(L"right arrow"), N_(L"left and right arrows"),
+		L"E", L"F", L"R", L"Q", L"X", L"G", L"C", L"Z", L"W", L"A", L"S", L"D", L"WASD",
+		N_(L"left click"), N_(L"right click"), N_(L"middle click"), N_(L"mouse wheel"), N_(L"mouse button 4"),
+		N_(L"mouse"), L"H", L"V", L"T", L"B", L"1", L"2", L"3",
+	};
+	static wchar_t const *const controller[HALO_GLYPH_XBOX_COUNT] =
+	{
+		L"A", L"B", L"X", L"Y", L"BLACK", L"WHITE", L"LT", L"RT",
+		N_(L"D-pad up"), N_(L"D-pad down"), N_(L"D-pad left"), N_(L"D-pad right"),
+		L"START", L"BACK", L"LS", L"RS", L"D-pad",
+	};
+
+	if (glyph >= HALO_GLYPH_XBOX_FIRST)
+		return TW(controller[glyph - HALO_GLYPH_XBOX_FIRST]);
+	return TW(keys[glyph - HALO_GLYPH_KEY_FIRST]);
+}
+
+/* a glyph's place in its atlas, in pixels: the square cell, or the wider
+keycap's (`wide`, when the key has one: the Spanish label's in Spanish) */
+static void key_glyph_cell(
+	short glyph,
+	boolean wide,
+	short *x,
+	short *y,
+	short *width)
+{
+	short key = glyph - HALO_GLYPH_KEY_FIRST;
+	short slot = NONE;
+	short index;
+
+	*width = HALO_KEY_ATLAS_CELL;
+	if (glyph >= HALO_GLYPH_XBOX_FIRST)
+	{
+		index = glyph - HALO_GLYPH_XBOX_FIRST;
+		*x = (index % 8) * HALO_KEY_ATLAS_CELL;
+		*y = (index / 8) * HALO_KEY_ATLAS_CELL;
+		return;
+	}
+	*x = (key % 8) * HALO_KEY_ATLAS_CELL;
+	*y = (key / 8) * HALO_KEY_ATLAS_CELL;
+	if (!wide || key_glyph_wide_widths[key] <= 0)
+		return;
+	{
+		char const *language = lang_current();
+		short english = 0;
+
+		for (index = 0; index < HALO_KEY_COUNT; index++)
+		{
+			if (index == key)
+			{
+				slot = english;
+				*width = key_glyph_wide_widths[key];
+			}
+			if (key_glyph_wide_widths[index] > 0)
+				english++;
+		}
+		if (language && !strncmp(language, "es", 2))
+		{
+			for (index = 0; index < (short)NUMBEROF(key_glyph_wide_es); index++)
+			{
+				if (key_glyph_wide_es[index].key == key)
+				{
+					slot = english + index;
+					*width = key_glyph_wide_es[index].width;
+				}
+			}
+		}
+	}
+	*x = (slot % 4) * HALO_KEY_ATLAS_CELL * 2;
+	*y = (HALO_KEY_ATLAS_WIDE_ROW + slot / 4) * HALO_KEY_ATLAS_CELL;
+
+	return;
+}
+
+/* the glyph's side (as tall as the sprite, no wider than a quarter more
+than it, as the PlayStation's) and, in a line of text, how much wider its
+keycap is than that */
+static real key_glyph_side(
+	real width,
+	real height)
+{
+	return height < width * 1.25f ? height : width * 1.25f;
+}
+
+static real key_glyph_extra(
+	short glyph,
+	real side)
+{
+	short x, y, width;
+
+	if (!key_glyph_is(glyph) || glyph >= HALO_GLYPH_XBOX_FIRST || !key_glyph_drawn(glyph))
+		return 0.0f;
+	key_glyph_cell(glyph, TRUE, &x, &y, &width);
+
+	return side * (width - HALO_KEY_ATLAS_CELL) / HALO_KEY_ATLAS_CELL;
+}
+
+static boolean key_glyph_draw(
+	short glyph,
+	real_rectangle2d const *rectangle,
+	pixel32 color,
+	boolean flow)
+{
+	boolean controller = glyph >= HALO_GLYPH_XBOX_FIRST;
+	struct bitmap_data *atlas = key_glyph_atlas(controller);
+	struct dynamic_screen_vertex vertices[4];
+	struct rasterizer_dynamic_screen_geometry_parameters parameters;
+	real atlas_width = (real)(controller ? HALO_XBOX_ATLAS_WIDTH : HALO_KEY_ATLAS_SIZE);
+	real atlas_height = (real)(controller ? HALO_XBOX_ATLAS_HEIGHT : HALO_KEY_ATLAS_SIZE);
+	real side = key_glyph_side(rectangle->x1 - rectangle->x0, rectangle->y1 - rectangle->y0);
+	real x = (rectangle->x0 + rectangle->x1) * 0.5f;
+	real y = (rectangle->y0 + rectangle->y1) * 0.5f;
+	real left = x - side * 0.5f;
+	real right = x + side * 0.5f;
+	short cell_x, cell_y, cell_width;
+	short vertex_index;
+
+	if (!atlas)
+		return FALSE;
+	key_glyph_cell(glyph, flow, &cell_x, &cell_y, &cell_width);
+	/* (a wider keycap from where the square one would start) */
+	right = left + side * cell_width / HALO_KEY_ATLAS_CELL;
+	for (vertex_index = 0; vertex_index < 4; vertex_index++)
+	{
+		/* (the corners as hud_draw_bitmap_internal winds them: top left,
+		top right, bottom right, bottom left) */
+		boolean is_right = ((vertex_index + 1) & 2) != 0;
+		boolean bottom = vertex_index > 1;
+
+		vertices[vertex_index].position.x = is_right ? right : left;
+		vertices[vertex_index].position.y = y + (bottom ? 0.5f : -0.5f) * side;
+		vertices[vertex_index].texture_coordinates.x = (cell_x + (is_right ? cell_width : 0)) / atlas_width;
+		vertices[vertex_index].texture_coordinates.y = (cell_y + (bottom ? HALO_KEY_ATLAS_CELL : 0)) / atlas_height;
+		vertices[vertex_index].color = 0x00FFFFFF | (color & 0xFF000000);
+	}
+	csmemset(&parameters, 0, sizeof(parameters));
+	parameters.map_texture_scale[0].i = 1.0f;
+	parameters.map_texture_scale[0].j = 1.0f;
+	parameters.map_scale[0].i = 1.0f;
+	parameters.map_scale[0].j = 1.0f;
+	/* (blended as the menus' PNGs are, draw_bitmap_in_rect) */
+	parameters.framebuffer_blend_function = _shader_framebuffer_blend_function_alpha_blend;
+	parameters.map[0] = atlas;
+	rasterizer_psuedo_dynamic_screen_quad_draw(&parameters, vertices);
+
+	return TRUE;
+}
+
+void hud_key_score_hint(
+	wchar_t *buffer,
+	long buffer_size)
+{
+	wchar_t const *name;
+	long length;
+	long index;
+
+	if (halo_button_icons_shown() != _halo_button_icons_keyboard || buffer_size <= 0)
+		return;
+	name = key_glyph_text((short)(HALO_GLYPH_KEY_FIRST + halo_keyboard_button_key(_gamepad_binary_button_back, FALSE)));
+	length = (long)ustrlen(buffer);
+	/* (BACK as a word: the map's text, whatever its language, names the
+	Xbox's button so) */
+	for (index = 0; index + 4 <= length; index++)
+	{
+		if (!memcmp(&buffer[index], L"BACK", 4 * sizeof(wchar_t)) &&
+			(index == 0 || buffer[index - 1] == L' ') && (index + 4 == length || buffer[index + 4] == L' '))
+		{
+			long name_length = (long)ustrlen(name);
+			long tail = length - (index + 4);
+
+			if (length - 4 + name_length >= buffer_size)
+				return;
+			memmove(&buffer[index + name_length], &buffer[index + 4], (tail + 1) * sizeof(wchar_t));
+			memcpy(&buffer[index], name, name_length * sizeof(wchar_t));
+			return;
+		}
+	}
+}
+
+real hud_vita_glyph_flow_extra(
+	short glyph,
+	struct bitmap_data const *bitmap,
+	short placement,
+	real_rectangle2d const *clip,
+	real scale)
+{
+	real_rectangle2d default_clip;
+	real_rectangle2d bounds;
+
+	if (!key_glyph_is(glyph))
+		return 0.0f;
+	default_clip.x0 = 0.0f;
+	default_clip.x1 = 1.0f;
+	default_clip.y0 = 0.0f;
+	default_clip.y1 = 1.0f;
+	hud_calculate_bitmap_bounds(bitmap, placement, clip ? clip : &default_clip, &bounds, FALSE);
+
+	return key_glyph_extra(glyph, key_glyph_side((bounds.x1 - bounds.x0) * scale, (bounds.y1 - bounds.y0) * scale));
+}
+#endif
 #endif

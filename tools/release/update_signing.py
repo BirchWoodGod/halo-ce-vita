@@ -23,7 +23,12 @@ import ed25519_rfc8032 as ed25519  # noqa: E402
 MAGIC = "halo-ce-vita-update 1"
 MANIFEST = "halo-update.txt"
 SIGNATURE = "halo-update.txt.sig"
-VPK = "halo.vpk"
+# the release's VPK: halo-ce-vita-<version>-vita.vpk (vpk_name), beside the
+# PC builds' halo-ce-vita-<version>-pc-windows.zip and -pc-linux.tar.gz
+# (tools/package_pc.py); halo.vpk, its name until 1.1.1, which the builds
+# before 1.1.1 download alone (LEGACY_VPK; README.md, "Release files")
+LEGACY_VPK = "halo.vpk"
+VPK = LEGACY_VPK
 VPK_MAXIMUM = 64 * 1024 * 1024
 TAG = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}(-(beta|rc)\.\d{1,3})?")
 TITLE = re.compile(r"[A-Z0-9]{9}")
@@ -71,7 +76,7 @@ def source_public_key():
         text = KEY_HEADER.read_text(encoding="utf-8")
     except OSError:
         return None
-    match = re.search(r'#define HALO_UPDATE_PUBLIC_KEY "([0-9a-fA-F]{64})"', text)
+    match = re.search(r'#define HALO_(?:RELEASE|UPDATE)_PUBLIC_KEY "([0-9a-fA-F]{64})"', text)
     return match.group(1).lower() if match else None
 
 
@@ -124,13 +129,20 @@ def file_digest(path):
     return size, digest.hexdigest()
 
 
-def manifest_text(version, title, size, sha512):
-    return f"{MAGIC}\nversion {version}\ntitle {title}\nfile {VPK}\nsize {size}\nsha512 {sha512}\n"
+def vpk_name(version):
+    """the release's VPK for a version (port/vita/host/vita_update_verify.c's
+    update_asset_vpk_name)"""
+    return f"halo-ce-vita-{version}-vita.vpk"
+
+
+def manifest_text(version, title, size, sha512, file=None):
+    return (f"{MAGIC}\nversion {version}\ntitle {title}\nfile {file or vpk_name(version)}\nsize {size}\n"
+            f"sha512 {sha512}\n")
 
 
 def parse_manifest(text):
     """the manifest's fields (dict), as strictly as the game reads it, or None"""
     pattern = (r"halo-ce-vita-update 1\nversion (?P<version>[0-9a-z.-]{1,63})\ntitle (?P<title>[A-Z0-9]{9})\n"
-               r"file (?P<file>[0-9a-z._-]{1,31})\nsize (?P<size>[1-9][0-9]{0,8}|0)\nsha512 (?P<sha512>[0-9a-f]{128})\n")
+               r"file (?P<file>[0-9a-z._-]{1,95})\nsize (?P<size>[1-9][0-9]{0,8}|0)\nsha512 (?P<sha512>[0-9a-f]{128})\n")
     match = re.fullmatch(pattern, text)
     return match.groupdict() if match else None

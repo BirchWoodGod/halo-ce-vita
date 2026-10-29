@@ -2,8 +2,9 @@
 NETWORK_CROSSPLAY_GUARD.H
 
 The game client's side of the crossplay guardrails (docs/crossplay.md 6,
-T11; the rules are port/linux/src/crossplay_guard.h's). With Crossplay on
-(network_wire.h) this machine joins PC games only, and:
+T11; the rules are port/linux/src/crossplay_guard.h's). In a PC host's game
+on the crossplay wire (network_wire.h; a Vita's game on that wire is none of
+this but the split screen rule):
 
 - a PC co-op game (no game engine, or a campaign level) and a large PC
   game (more than 16 players in it, or a maximum above 16) are joined,
@@ -35,6 +36,14 @@ boolean network_crossplay_guard_advertisement(
 	long players,
 	long maximum,
 	boolean tell);
+/* whether a game on this map (map_name_size bytes at most) with this game
+engine is co-op: a campaign level whatever it says, or no game engine (as
+OpenCE lists and hosts co-op) on a level that is not one of the Xbox's
+multiplayer ones */
+boolean network_crossplay_guard_coop_game(
+	char const *map_name,
+	long map_name_size,
+	long engine_type);
 /* whether the player said no to this large PC game a moment ago (the
 automatic joins, network_game_client_join_first_available_game, leave it
 alone: said once, if tell) */

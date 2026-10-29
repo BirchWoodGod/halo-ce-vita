@@ -1029,6 +1029,7 @@ while the mixer may be between two voices: a pass that sees the count move
 starts over from the head and skips the voices it has mixed already */
 static unsigned long stream_list_generation;
 static unsigned long mix_pass;
+static void mix_buffers(float *output, unsigned long frames);
 
 static void mix(float *output, unsigned long frames)
 {
@@ -1087,6 +1088,7 @@ static void mix(float *output, unsigned long frames)
 		}
 		stream = next;
 	}
+	mix_buffers(output, frames);
 	pthread_mutex_unlock(&mixer_lock);
 	statistics_mix_us += statistics_now() - started;
 	statistics_mixes++;
@@ -1118,8 +1120,95 @@ void vita_host_pin_current_thread(int core) __attribute__((weak));
 #ifdef HALO_VITA
 int vita_host_fourth_core_move(const char *role);
 int vita_host_fourth_core_join(const char *role, int level);
+int vita_host_fourth_core_step_aside(int aside);
 void vita_host_thread_watch(const char *role);
 #endif
+
+/* the mixer moved to the fourth core (audio_callback) */
+static int mixer_on_fourth_core;
+
+/* The mixer late on the fourth core: off it for the rest of the run.
+xal's insider.21 log (Oct 22, All async): with the fourth core busy - the
+helpers at 11-15 ms a frame, the core 48-56% busy, after a network game and
+at the menus - the device's calls came up to 50 ms apart, 47 and 49 of them
+over 25 ms in ten seconds, and the menus' music crackled; with the core
+under 40% busy, none. The mixer is the game's highest priority thread, but
+the system's own work shares the fourth core. Two calls over 25 ms apart
+within a second move it to cores 0-2, where it preempts a game thread for
+well under a millisecond a mix (Audio's 0.5-0.9 ms); HALO_AUDIO_CORE=3
+keeps it there whatever happens */
+static int mixer_fourth_core_left;
+static int mixer_fourth_core_forced;
+
+static void mixer_fourth_core_late(unsigned long long now, unsigned long long gap)
+{
+	static unsigned long long last_late;
+
+	if (!mixer_on_fourth_core || mixer_fourth_core_left || mixer_fourth_core_forced)
+		return;
+	if (last_late && now - last_late < 1000000ull)
+	{
+#ifdef HALO_VITA
+		if (vita_host_fourth_core_step_aside(1) >= 0)
+#endif
+		{
+			mixer_fourth_core_left = 1;
+			platform_log("sound mixer: the device's calls came late on the fourth core (%.1f ms apart, twice in a second): "
+				"the mixer on cores 0-2 from now on", (double)gap / 1000.0);
+		}
+	}
+	last_late = now;
+}
+
+/* The loading screen's chant (DirectSound buffers, mix_buffers) on the
+mixer's thread: while it plays, a mixer on the Vita's fourth core steps
+aside to cores 0-2 - a map's load keeps the fourth core busy (the cache file
+thread at 77-86% of it at Fourth core helpers All async, insider.20 and .21
+testers' logs, while cores 0-2 idle under 20%) and the chant crackled
+there: its mixes came late. Nothing played during a load before insider.21,
+so late mixes were silent. When it stops, halo.log says how late the
+device's calls came meanwhile */
+static struct
+{
+	/* playing now (mix_buffers), and as the mixer last saw it */
+	volatile int heard;
+	int was_heard;
+	int aside;
+	unsigned long long started_us;
+	unsigned long long longest_gap_us;
+	unsigned long late;
+	unsigned long mixes;
+} chant;
+
+static void chant_update(void)
+{
+	int heard = chant.heard;
+
+	if (heard)
+		chant.mixes++;
+	if (heard == chant.was_heard)
+		return;
+	chant.was_heard = heard;
+#ifdef HALO_VITA
+	if (mixer_on_fourth_core && !mixer_fourth_core_left && heard != chant.aside)
+	{
+		vita_host_fourth_core_step_aside(heard);
+		chant.aside = heard;
+	}
+#endif
+	if (heard)
+	{
+		chant.started_us = statistics_now();
+		chant.longest_gap_us = 0;
+		chant.late = 0;
+		chant.mixes = 0;
+		return;
+	}
+	platform_log("sound mixer: the loading screen's chant played %.1f s (%lu mixes%s): device calls over 25 ms apart %lu, "
+		"longest gap %.1f ms", (double)(statistics_now() - chant.started_us) / 1.0e6, chant.mixes,
+		mixer_on_fourth_core ? ", the mixer off the fourth core meanwhile" : "", chant.late,
+		(double)chant.longest_gap_us / 1000.0);
+}
 
 static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
@@ -1152,9 +1241,12 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 				vita_host_pin_current_thread(core);
 #ifdef HALO_VITA
 			if (core == 3)
-				vita_host_fourth_core_move("sound mixer");
+			{
+				mixer_on_fourth_core = vita_host_fourth_core_move("sound mixer") == 3;
+				mixer_fourth_core_forced = 1;
+			}
 			else if (!setting)
-				vita_host_fourth_core_join("sound mixer", 1);
+				mixer_on_fourth_core = vita_host_fourth_core_join("sound mixer", 1) == 3;
 			else
 				vita_host_thread_watch("sound mixer");
 #endif
@@ -1172,6 +1264,15 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 				statistics_callback_gap_us = gap;
 			if (gap > 25000)
 				statistics_callbacks_late++;
+			if (gap > 25000)
+				mixer_fourth_core_late(now, gap);
+			if (chant.heard)
+			{
+				if (gap > chant.longest_gap_us)
+					chant.longest_gap_us = gap;
+				if (gap > 25000)
+					chant.late++;
+			}
 		}
 		previous_call = now;
 	}
@@ -1187,6 +1288,7 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 		SDL_PutAudioStreamData(stream, buffer, (int)(frames * OUTPUT_CHANNELS * sizeof(float)));
 		additional_amount -= (int)(frames * OUTPUT_CHANNELS * sizeof(float));
 	}
+	chant_update();
 }
 
 /* without a device, drain voices in real time */
@@ -1810,25 +1912,109 @@ HRESULT WINAPI IDirectSoundStream_SetConeOutsideVolume(LPDIRECTSOUNDSTREAM strea
 
 /* ---------- buffers
 
-The game's only buffer is a silent looping one that keeps the voice
-processor busy; it needs no mixing. */
+Two kinds: the sound system's silent looping PCM one that keeps the voice
+processor busy (never mixed), and the loading screen's four looping Xbox
+ADPCM voices of the monk chant (progress_bar_make_stuff_ready, from the
+player's default.xbe), mixed: the whole buffer decoded once, resampled to
+the output rate at its pitch (SetPitch: 4096ths of an octave from 48 kHz,
+as the Xbox's), at its volume (millibels, ramped across a mix), to both
+fronts. The loop region is the whole buffer, as the game sets it. */
 
-struct null_buffer
+struct sdl_buffer
 {
 	ULONG reference_count;
+	struct sdl_buffer *next;
 	LPVOID data;
 	DWORD size;
+	BOOL adpcm;
+	unsigned long channels;
+	DWORD sample_rate;
+	/* the decoded mono (first channel) samples, ADPCM buffers only */
+	short *samples;
+	unsigned long frames;
+	/* set by the game (parameter_lock) */
 	BOOL playing;
+	BOOL looping;
+	double step;           /* source frames an output frame */
+	float volume;
+	/* the mixer's */
+	double cursor;
+	float current_volume;
 };
+
+static struct sdl_buffer *buffers;
+
+/* (mixer_lock held) */
+static void mix_buffers(float *output, unsigned long frames)
+{
+	struct sdl_buffer *buffer;
+	int heard = 0;
+
+	for (buffer = buffers; buffer; buffer = buffer->next)
+	{
+		BOOL playing, looping;
+		double step;
+		float volume, current, increment;
+		unsigned long frame;
+
+		pthread_mutex_lock(&parameter_lock);
+		playing = buffer->playing;
+		looping = buffer->looping;
+		step = buffer->step;
+		volume = buffer->volume * master_volume;
+		pthread_mutex_unlock(&parameter_lock);
+		if (!playing || !buffer->samples || buffer->frames < 2 || step <= 0.0)
+			continue;
+		heard = 1;
+		current = buffer->current_volume;
+		increment = (volume - current) / (float)frames;
+		for (frame = 0; frame < frames; frame++)
+		{
+			unsigned long index = (unsigned long)buffer->cursor;
+			double fraction = buffer->cursor - (double)index;
+			unsigned long next_index = index + 1 < buffer->frames ? index + 1 : (looping ? 0 : index);
+			float sample = (float)((buffer->samples[index] + (buffer->samples[next_index] - buffer->samples[index]) * fraction) /
+				32768.0);
+
+			current += increment;
+			output[frame * OUTPUT_CHANNELS] += sample * current;
+			output[frame * OUTPUT_CHANNELS + 1] += sample * current;
+			buffer->cursor += step;
+			if (buffer->cursor >= (double)buffer->frames)
+			{
+				if (!looping)
+				{
+					pthread_mutex_lock(&parameter_lock);
+					buffer->playing = FALSE;
+					pthread_mutex_unlock(&parameter_lock);
+					buffer->cursor = 0.0;
+					break;
+				}
+				buffer->cursor -= (double)buffer->frames * (double)(unsigned long)(buffer->cursor / (double)buffer->frames);
+			}
+		}
+		buffer->current_volume = volume;
+	}
+	chant.heard = heard;
+}
 
 HRESULT WINAPI DirectSoundCreateBuffer(LPCDSBUFFERDESC description, LPDIRECTSOUNDBUFFER *result)
 {
-	struct null_buffer *buffer = calloc(1, sizeof(*buffer));
+	struct sdl_buffer *buffer = calloc(1, sizeof(*buffer));
+	const WAVEFORMATEX *format = description ? description->lpwfxFormat : NULL;
 
-	(void)description;
 	if (!buffer)
 		return E_OUTOFMEMORY;
 	buffer->reference_count = 1;
+	buffer->adpcm = format && format->wFormatTag == WAVE_FORMAT_XBOX_ADPCM;
+	buffer->channels = format && format->nChannels == 2 ? 2 : 1;
+	buffer->sample_rate = format ? format->nSamplesPerSec : 0;
+	buffer->step = (double)buffer->sample_rate / OUTPUT_RATE;
+	buffer->volume = 1.0f;
+	game_lock();
+	buffer->next = buffers;
+	buffers = buffer;
+	pthread_mutex_unlock(&mixer_lock);
 	*result = (LPDIRECTSOUNDBUFFER)buffer;
 	return DS_OK;
 }
@@ -1843,39 +2029,121 @@ HRESULT WINAPI IDirectSound_CreateSoundBuffer(LPDIRECTSOUND sound, LPCDSBUFFERDE
 
 ULONG WINAPI IDirectSoundBuffer_Release(LPDIRECTSOUNDBUFFER buffer)
 {
-	struct null_buffer *record = (struct null_buffer *)buffer;
+	struct sdl_buffer *record = (struct sdl_buffer *)buffer;
 	ULONG count = --record->reference_count;
 
 	if (!count)
+	{
+		struct sdl_buffer **link;
+
+		game_lock();
+		for (link = &buffers; *link; link = &(*link)->next)
+		{
+			if (*link == record)
+			{
+				*link = record->next;
+				break;
+			}
+		}
+		pthread_mutex_unlock(&mixer_lock);
+		free(record->samples);
 		free(record);
+	}
 	return count;
 }
 
 HRESULT WINAPI IDirectSoundBuffer_SetBufferData(LPDIRECTSOUNDBUFFER buffer, LPVOID data, DWORD size)
 {
-	struct null_buffer *record = (struct null_buffer *)buffer;
+	struct sdl_buffer *record = (struct sdl_buffer *)buffer;
+	short *samples = NULL;
+	unsigned long frames = 0;
 
+	if (record->adpcm && data)
+	{
+		/* decoded here, on the game's thread, once: the chant is 511
+		blocks (32704 samples) */
+		unsigned long blocks = size / (XBOX_ADPCM_BLOCK_BYTES * record->channels);
+		short *decoded = blocks ? malloc(blocks * XBOX_ADPCM_BLOCK_SAMPLES * record->channels * sizeof(short)) : NULL;
+
+		if (decoded)
+		{
+			unsigned long frame;
+
+			decode_adpcm_blocks(data, record->channels, decoded, 0, blocks);
+			frames = blocks * XBOX_ADPCM_BLOCK_SAMPLES;
+			/* (the first channel alone: both fronts play it) */
+			for (frame = 0; record->channels > 1 && frame < frames; frame++)
+				decoded[frame] = decoded[frame * record->channels];
+			samples = decoded;
+		}
+	}
+	game_lock();
+	free(record->samples);
+	record->samples = samples;
+	record->frames = frames;
+	record->cursor = 0.0;
 	record->data = data;
 	record->size = size;
+	pthread_mutex_unlock(&mixer_lock);
 	return DS_OK;
 }
 
 HRESULT WINAPI IDirectSoundBuffer_Play(LPDIRECTSOUNDBUFFER buffer, DWORD reserved1, DWORD reserved2, DWORD flags)
 {
+	struct sdl_buffer *record = (struct sdl_buffer *)buffer;
+
 	(void)reserved1;
 	(void)reserved2;
-	(void)flags;
-	((struct null_buffer *)buffer)->playing = TRUE;
+	pthread_mutex_lock(&parameter_lock);
+	record->looping = (flags & DSBPLAY_LOOPING) != 0;
+	record->playing = TRUE;
+	pthread_mutex_unlock(&parameter_lock);
 	return DS_OK;
 }
 
 HRESULT WINAPI IDirectSoundBuffer_Stop(LPDIRECTSOUNDBUFFER buffer)
 {
-	((struct null_buffer *)buffer)->playing = FALSE;
+	struct sdl_buffer *record = (struct sdl_buffer *)buffer;
+
+	pthread_mutex_lock(&parameter_lock);
+	record->playing = FALSE;
+	pthread_mutex_unlock(&parameter_lock);
 	return DS_OK;
 }
 
-HRESULT WINAPI IDirectSoundBuffer_SetCurrentPosition(LPDIRECTSOUNDBUFFER buffer, DWORD play_cursor) { (void)buffer; (void)play_cursor; return DS_OK; }
+HRESULT WINAPI IDirectSoundBuffer_SetCurrentPosition(LPDIRECTSOUNDBUFFER buffer, DWORD play_cursor)
+{
+	struct sdl_buffer *record = (struct sdl_buffer *)buffer;
+
+	game_lock();
+	/* (a byte offset: whole ADPCM blocks of 64 samples) */
+	record->cursor = record->adpcm ?
+		(double)(play_cursor / (XBOX_ADPCM_BLOCK_BYTES * record->channels) * XBOX_ADPCM_BLOCK_SAMPLES) : 0.0;
+	if (record->cursor >= (double)record->frames)
+		record->cursor = 0.0;
+	pthread_mutex_unlock(&mixer_lock);
+	return DS_OK;
+}
+
 HRESULT WINAPI IDirectSoundBuffer_SetLoopRegion(LPDIRECTSOUNDBUFFER buffer, DWORD loop_start, DWORD loop_length) { (void)buffer; (void)loop_start; (void)loop_length; return DS_OK; }
-HRESULT WINAPI IDirectSoundBuffer_SetPitch(LPDIRECTSOUNDBUFFER buffer, LONG pitch) { (void)buffer; (void)pitch; return DS_OK; }
-HRESULT WINAPI IDirectSoundBuffer_SetVolume(LPDIRECTSOUNDBUFFER buffer, LONG volume) { (void)buffer; (void)volume; return DS_OK; }
+
+HRESULT WINAPI IDirectSoundBuffer_SetPitch(LPDIRECTSOUNDBUFFER buffer, LONG pitch)
+{
+	struct sdl_buffer *record = (struct sdl_buffer *)buffer;
+	double frequency = 48000.0 * pow(2.0, (double)pitch / 4096.0);
+
+	pthread_mutex_lock(&parameter_lock);
+	record->step = frequency / OUTPUT_RATE;
+	pthread_mutex_unlock(&parameter_lock);
+	return DS_OK;
+}
+
+HRESULT WINAPI IDirectSoundBuffer_SetVolume(LPDIRECTSOUNDBUFFER buffer, LONG volume)
+{
+	struct sdl_buffer *record = (struct sdl_buffer *)buffer;
+
+	pthread_mutex_lock(&parameter_lock);
+	record->volume = gain_from_millibels(volume);
+	pthread_mutex_unlock(&parameter_lock);
+	return DS_OK;
+}

@@ -85,8 +85,89 @@ static float screen_scale[2] = { 1.0f, 1.0f };
 static long ui_offset;
 #define UI_OFFSET ((GLint)ui_offset)
 
+/* (debug) HALO_GL_VITA_DISPLAY=1: the Vita's picture, previewed (no
+Vita, no emulator): the screen 848 columns wide (HALO_DISPLAY_WIDTH=640:
+4:3) by 480, its targets drawn at the Vita's render scale (HALO_RENDER_SCALE,
+0.5 to 1; Dynamic: 1) and the frame scaled up, bilinear, into the picture
+of a 960x544 display as vita_gxm.c blit places it, which is what the
+window and the screenshots show. With the Vita's Sharp interface
+(HALO_SHARP_UI, on unless "0") the interface is drawn into that picture at
+its own resolution from the game's split on (halo_d3d_interface_begin), as
+the Vita draws it into its display buffer. For screenshots that compare the
+two; the desktop never needs it */
+#define VITA_DISPLAY_WIDTH 960
+#define VITA_DISPLAY_HEIGHT 544
+
+static int vita_preview = -1;
+static float vita_preview_scale = 1.0f;
+
+static int vita_preview_enabled(void)
+{
+	if (vita_preview < 0)
+	{
+		const char *setting = getenv("HALO_GL_VITA_DISPLAY"), *scale = getenv("HALO_RENDER_SCALE");
+
+		vita_preview = setting && atoi(setting) != 0;
+		vita_preview_scale = scale && strcmp(scale, "dynamic") ? (float)atof(scale) : 1.0f;
+		if (vita_preview_scale < 0.5f || vita_preview_scale > 1.0f)
+			vita_preview_scale = 1.0f;
+	}
+	return vita_preview;
+}
+
+/* the picture on the Vita's display for a screen this wide (vita_gxm.c
+blit: the display's height, the shape kept; wider than the display, its
+width and the height within a few lines of the display's) */
+static void vita_preview_picture(long width, int *left, int *top, int *picture_width, int *picture_height)
+{
+	float height = (float)VITA_DISPLAY_HEIGHT, across = height * (float)width / (float)SCREEN_HEIGHT;
+
+	if (across > VITA_DISPLAY_WIDTH)
+	{
+		across = VITA_DISPLAY_WIDTH;
+		height = across * (float)SCREEN_HEIGHT / (float)width;
+		if (height > VITA_DISPLAY_HEIGHT - 4)
+			height = VITA_DISPLAY_HEIGHT;
+	}
+	*picture_width = (int)(across + 0.5f);
+	*picture_height = (int)(height + 0.5f);
+	*left = (VITA_DISPLAY_WIDTH - *picture_width) / 2;
+	*top = (VITA_DISPLAY_HEIGHT - *picture_height) / 2;
+}
+
+/* (Menu style ElDewrito, port/linux/game: its screens laid out over 800
+columns - the 640 in the middle and 80 on each side, as a 16:9 display has
+them -) the narrowest the menus are drawn while they are up: a display
+narrower than that (4:3: 640) draws them that wide, letterboxed, so that
+nothing of them is off its edges; 640 otherwise */
+int halo_menus_minimum_width(void);
+
+static void screen_mode_minimum(long *width, float scale[2], long display_width, long display_height)
+{
+	long minimum = halo_menus_minimum_width();
+
+	if (*width >= minimum || display_width <= 0 || display_height <= 0)
+		return;
+	*width = minimum & ~1L;
+	scale[0] = (float)display_width / (float)*width;
+	scale[1] = (float)display_height / (float)SCREEN_HEIGHT;
+	scale[0] = scale[1] = scale[0] < scale[1] ? scale[0] : scale[1];
+}
+
 static void screen_mode_choose(long *width, float scale[2])
 {
+	if (vita_preview_enabled())
+	{
+		const char *display = getenv("HALO_DISPLAY_WIDTH");
+
+		*width = display && atol(display) == 640 ? 640 : 848;
+		/* the Vita widens a 4:3 screen for ElDewrito's menus
+		(d3d8_gxm.c screen_width_wanted) */
+		if (*width < halo_menus_minimum_width())
+			*width = 848;
+		scale[0] = scale[1] = vita_preview_scale;
+		return;
+	}
 #ifdef HALO_ANDROID
 	/* display.screen_width, or 0 for the display's shape, which the app
 	passes (port/android/host/host_main.c) */
@@ -117,6 +198,7 @@ static void screen_mode_choose(long *width, float scale[2])
 		keeps its shape and the display blit letterboxes it */
 		if (*width != wanted && *width != (wanted & ~1L))
 			scale[0] = scale[1] = scale[0] < scale[1] ? scale[0] : scale[1];
+		screen_mode_minimum(width, scale, display_width, display_height);
 	}
 #endif
 }
@@ -130,6 +212,16 @@ long halo_screen_width(void)
 			screen_width * screen_scale[0], SCREEN_HEIGHT * screen_scale[1]);
 	}
 	return screen_width;
+}
+
+/* the display's pixels per unit of the 640x480 interface (the Vita
+preview's: the Vita's display, 544 lines for 480) */
+float halo_ui_pixel_scale(void)
+{
+	halo_screen_width();
+	if (vita_preview_enabled())
+		return (float)VITA_DISPLAY_HEIGHT / (float)SCREEN_HEIGHT;
+	return screen_scale[1];
 }
 
 void halo_screen_ui_offset(unsigned char centered)
@@ -856,6 +948,18 @@ static GLint target_pixel(float coordinate, int axis)
 
 /* binds the framebuffer for the current targets; returns FALSE if there is
 nothing to draw into */
+/* (the Vita preview's Sharp interface: halo_d3d_interface_begin) the
+picture's target the interface is drawn into, its size, and whether this
+frame's back buffer draws go there */
+static struct
+{
+	GLuint color, depth;
+	int width, height;
+	long screen_width;
+	BOOL active;
+	unsigned long frame;
+} vita_interface = { 0, 0, 0, 0, 0, FALSE, (unsigned long)-1 };
+
 static BOOL bind_targets(BOOL *has_depth)
 {
 	struct render_target_entry *color = render_target_get(device.render_target);
@@ -865,6 +969,16 @@ static BOOL bind_targets(BOOL *has_depth)
 		depth = NULL;
 	if (!color && !depth)
 		return FALSE;
+	if (color && vita_interface.active && color->target.data == device.back_buffer.Data && !color->target.depth)
+	{
+		/* (the interface into the picture, with a depth buffer of its own) */
+		color->last_rendered = device.frame + 1;
+		target_scale[0] = (float)vita_interface.width / (float)color->target.width;
+		target_scale[1] = (float)vita_interface.height / (float)color->target.height;
+		state_framebuffer(framebuffer_get(vita_interface.color, depth ? vita_interface.depth : 0));
+		*has_depth = depth != NULL;
+		return TRUE;
+	}
 	if (color)
 		color->last_rendered = device.frame + 1;
 	/* viewports and clears are in the targets' units (render_target_get) */
@@ -1176,10 +1290,105 @@ static void ui_point_from_window(float window_x, float window_y, short *x, short
 	*y = (short)floorf(screen_y);
 }
 
+#ifndef HALO_RELEASE
+/* (automated tests only, never in release builds) HALO_TEST_TAPS="ms:x,y
+...": a tap (the pointer there and a left click, as a touch screen's) at
+x,y of the menus' 640x480 that many milliseconds after the menus first
+asked, each said in the log ("test tap: x,y"); the Vita's touch screen
+reaches the menus the same way (vita_controls.c vita_touch_pointer).
+"ms:x,y>x2,y2" is a drag instead: a finger down at x,y moved to x2,y2 over
+TEST_DRAG_MILLISECONDS and lifted there, no tap ("test drag: ...") */
+#define TEST_DRAG_MILLISECONDS 800
+static int test_taps(int menus_active, struct halo_ui_pointer *pointer)
+{
+	static int parsed, count, next;
+	static long times[32];
+	static short xs[32], ys[32];
+	/* (a drag's end; drags[] nonzero for a drag) */
+	static short x2s[32], y2s[32];
+	static unsigned char drags[32];
+	static struct timespec start;
+	struct timespec now;
+	long elapsed;
+
+	if (!parsed)
+	{
+		char const *text = getenv("HALO_TEST_TAPS");
+
+		parsed = 1;
+		while (text && *text && count < 32)
+		{
+			long ms;
+			int x, y, used = 0;
+
+			if (sscanf(text, " %ld:%d,%d%n", &ms, &x, &y, &used) != 3 || !used)
+				break;
+			times[count] = ms;
+			xs[count] = (short)x;
+			ys[count] = (short)y;
+			text += used;
+			{
+				int x2, y2, more = 0;
+
+				if (*text == '>' && sscanf(text, ">%d,%d%n", &x2, &y2, &more) == 2 && more)
+				{
+					drags[count] = 1;
+					x2s[count] = (short)x2;
+					y2s[count] = (short)y2;
+					text += more;
+				}
+			}
+			count++;
+		}
+		clock_gettime(CLOCK_MONOTONIC, &start);
+	}
+	if (!count || !menus_active)
+		return 0;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	elapsed = (long)(now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000;
+	memset(pointer, 0, sizeof(*pointer));
+	pointer->x = pointer->click_x = next ? (drags[next - 1] ? x2s[next - 1] : xs[next - 1]) : -1;
+	pointer->y = pointer->click_y = next ? (drags[next - 1] ? y2s[next - 1] : ys[next - 1]) : -1;
+	if (next < count && elapsed >= times[next] && drags[next])
+	{
+		/* (a drag: down, moved along its way, lifted at its end) */
+		static int drag_said;
+		long along = elapsed - times[next];
+
+		if (along < TEST_DRAG_MILLISECONDS)
+		{
+			if (drag_said != next + 1 && (drag_said = next + 1) != 0)
+				platform_log("test drag: %d,%d to %d,%d", (int)xs[next], (int)ys[next], (int)x2s[next], (int)y2s[next]);
+			pointer->x = pointer->click_x = (short)(xs[next] + (x2s[next] - xs[next]) * along / TEST_DRAG_MILLISECONDS);
+			pointer->y = pointer->click_y = (short)(ys[next] + (y2s[next] - ys[next]) * along / TEST_DRAG_MILLISECONDS);
+			pointer->moved = 1;
+			pointer->held = 1;
+			return 1;
+		}
+		next++;
+		return 1;
+	}
+	if (next < count && elapsed >= times[next])
+	{
+		pointer->x = pointer->click_x = xs[next];
+		pointer->y = pointer->click_y = ys[next];
+		pointer->moved = 1;
+		pointer->left_clicks = 1;
+		platform_log("test tap: %d,%d", (int)xs[next], (int)ys[next]);
+		next++;
+	}
+	return 1;
+}
+#endif
+
 int halo_ui_pointer_update(int menus_active, struct halo_ui_pointer *pointer)
 {
 	struct platform_ui_pointer state;
 
+#ifndef HALO_RELEASE
+	if (test_taps(menus_active, pointer))
+		return 1;
+#endif
 	platform_ui_pointer_set_active(menus_active != 0);
 	if (!menus_active || !device.gl_ready || !platform_ui_pointer_read(&state))
 		return 0;
@@ -3362,6 +3571,14 @@ void halo_d3d_buffer_in_place(const void *buffer, int in_place)
 	(void)in_place;
 }
 
+/* (port) indices the game never rewrites, which the Vita's device reads in
+place (port/vita/platform/d3d8_gxm.c); OpenGL takes them as it does any */
+void halo_d3d_static_indices(const void *base, unsigned long bytes)
+{
+	(void)base;
+	(void)bytes;
+}
+
 /* (port) the dynamic triangles' index buffer, and its parts the game locks
 to write: the Vita's device reuses its copies of them within a frame
 (port/vita/platform/d3d8_gxm.c); OpenGL uploads every draw's indices anyway */
@@ -3377,11 +3594,132 @@ void halo_d3d_indices_written(const void *data, unsigned long bytes)
 	(void)bytes;
 }
 
+/* (rasterizer_xbox_environment.c) how far a stage's coordinates reach, in
+its texels: the Vita's device takes far-reaching ones back near zero
+(d3d8_gxm.c); a desktop GPU filters them in full precision */
+void halo_d3d_texcoord_extent(long stage, float texels_per_unit)
+{
+	(void)stage;
+	(void)texels_per_unit;
+}
+
 void halo_d3d_stream_attribute(long reg, long stream)
 {
 	device.extra_attribute_active = reg >= 0 && reg < XGPU_VERTEX_ATTRIBUTE_COUNT && stream >= 0 && stream < 16;
 	device.extra_attribute_reg = device.extra_attribute_active ? (unsigned long)reg : 0;
 	device.extra_attribute_stream = device.extra_attribute_active ? (unsigned long)stream : 0;
+}
+
+/* (the game's split between a window's 3D picture and its interface,
+rasterizer_xbox.c rasterizer_interface_begin) The Vita draws the interface
+at its display's resolution from here (d3d8_gxm.c, Sharp interface); the
+desktop draws everything at its display's already. The Vita preview
+(HALO_GL_VITA_DISPLAY) does as the Vita: the back buffer, at the render
+scale, scaled into a target of the picture's size, and the back buffer's
+draws to the present drawn there instead (bind_targets) */
+extern volatile unsigned long halo_settings_generation;
+
+static int vita_preview_sharp_interface(void)
+{
+	static int enabled = -1;
+	static unsigned long settings_seen;
+
+	if (enabled < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *setting = getenv("HALO_SHARP_UI");
+
+		settings_seen = halo_settings_generation;
+		enabled = !setting || !*setting || strcmp(setting, "0") != 0;
+	}
+	return enabled;
+}
+
+/* (the Vita renderer's movie frames, d3d8_gxm.c halo_d3d_movie_*: this
+renderer has none, so the movies take the game's texture and quad) */
+void *halo_d3d_movie_buffer(unsigned long width, unsigned long height, long *pitch, int cdram_first)
+{
+	(void)width; (void)height; (void)cdram_first;
+	*pitch = 0;
+	return NULL;
+}
+
+void halo_d3d_movie_buffer_done(void)
+{
+}
+
+int halo_d3d_movie_draw(float left, float top, float right, float bottom)
+{
+	(void)left; (void)top; (void)right; (void)bottom;
+	return 0;
+}
+
+void halo_d3d_movie_release(void)
+{
+}
+
+void halo_d3d_interface_begin(void)
+{
+	struct render_target_entry *back_buffer;
+	int left, top;
+
+	if (!device.gl_ready || !vita_preview_enabled() || vita_interface.frame == device.frame ||
+		!vita_preview_sharp_interface())
+	{
+		return;
+	}
+	if (!device.render_target || device.render_target->Data != device.back_buffer.Data)
+		return;
+	{
+		/* (as the Vita: no split at 100%, the interface scaled up with the
+		picture; HALO_SHARP_UI_FULL=1 splits anyway - vita_gxm.c
+		vgxm_interface_begin) */
+		const char *setting = getenv("HALO_SHARP_UI_FULL");
+
+		extern int halo_menu_style_online(void);
+		extern int halo_main_menu_loaded(void);
+
+		if (vita_preview_scale >= 1.0f && !(setting && atoi(setting) != 0) &&
+			!(halo_menu_style_online() && halo_main_menu_loaded()))
+			return;
+	}
+	back_buffer = render_target_get(&device.back_buffer);
+	if (!back_buffer)
+		return;
+	vita_interface.frame = device.frame;
+	if (!vita_interface.color || vita_interface.screen_width != (long)back_buffer->target.width)
+	{
+		/* (the picture's size for this screen width: made, or made again) */
+		if (!vita_interface.color)
+		{
+			glGenTextures(1, &vita_interface.color);
+			glGenTextures(1, &vita_interface.depth);
+		}
+		vita_interface.screen_width = (long)back_buffer->target.width;
+		vita_preview_picture(vita_interface.screen_width, &left, &top, &vita_interface.width, &vita_interface.height);
+		glBindTexture(GL_TEXTURE_2D, vita_interface.color);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, vita_interface.width, vita_interface.height, 0, GL_BGRA,
+			GL_UNSIGNED_BYTE, NULL);
+		glBindTexture(GL_TEXTURE_2D, vita_interface.depth);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, vita_interface.width, vita_interface.height, 0,
+			GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, NULL);
+	}
+	/* the 3D picture scaled up, bilinear, as the Vita's blit; a cleared
+	depth buffer (the Vita's display has none: its interface draws untested) */
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(back_buffer->target.texture, 0));
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer_get(vita_interface.color, vita_interface.depth));
+	glDisable(GL_SCISSOR_TEST);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height, 0, 0,
+		vita_interface.width, vita_interface.height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	glDepthMask(GL_TRUE);
+	glStencilMask(0xff);
+	glClearDepth(1.0);
+	glClearStencil(0);
+	glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+	xgpu_gl_state_invalidate();
+	vita_interface.active = TRUE;
 }
 
 /* (the GXM device's light scissor, d3d8_gxm.c: drawn unclipped here) */
@@ -3399,6 +3737,20 @@ void halo_d3d_sky_depth(int on)
 int halo_d3d_sky_late_supported(void)
 {
 	return 0;
+}
+
+/* (render.c render_backdrop_frame_kept) the menu backdrop kept between
+frames only in the Vita preview with its Sharp interface (the menus drawn
+into the picture's own target, the back buffer left as the 3D drew it, as
+the Vita's interface layer: the screenshots that check it); the desktop's
+menus are drawn into the back buffer, the backdrop every frame */
+int halo_d3d_backdrop_reuse_supported(void)
+{
+	extern int halo_menu_style_online(void);
+	extern int halo_main_menu_loaded(void);
+
+	return device.gl_ready && vita_preview_enabled() && vita_preview_sharp_interface() && halo_menu_style_online() &&
+		halo_main_menu_loaded();
 }
 
 void WINAPI D3DDevice_SetIndices(D3DIndexBuffer *index_data, UINT base_vertex_index)
@@ -3682,17 +4034,165 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 	xgpu_gl_state_invalidate();
 }
 
+/* ---------- the brightness curve
+
+The display's final pass puts the 3D picture on the screen: a framebuffer
+blit. With the brightness setting at its default (HALO_BRIGHTNESS 5) it is
+that blit, as before. Otherwise the same pass is drawn as a triangle
+sampling the picture, with the curve c + k * c * (1 - c) per channel
+(halo_brightness_curve, port_config.c; vita_gxm.c's blit program has it
+too): the same one pass, no other. */
+
+static struct
+{
+	GLuint program, vertex_array, linear, nearest;
+	GLint curve, flip;
+	BOOL failed;
+} brightness_pass;
+
+static BOOL brightness_pass_ready(void)
+{
+	static const char *vertex =
+		"out vec2 texcoord;\n"
+		"void main()\n"
+		"{\n"
+		"	vec2 corner = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
+		"	texcoord = corner;\n"
+		"	gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);\n"
+		"}\n";
+	static const char *fragment =
+		"precision highp float;\n"
+		"in vec2 texcoord;\n"
+		"uniform sampler2D picture;\n"
+		"uniform float curve;\n"
+		"uniform float flip;\n"
+		"out vec4 color;\n"
+		"void main()\n"
+		"{\n"
+		"	vec2 at = vec2(texcoord.x, flip > 0.5 ? 1.0 - texcoord.y : texcoord.y);\n"
+		"	vec3 c = texture(picture, at).rgb;\n"
+		"	color = vec4(c + curve * c * (1.0 - c), 1.0);\n"
+		"}\n";
+
+#ifdef HALO_ANDROID
+	const char *version = xgpu_capabilities.shading_language;
+#else
+	const char *version = "450 core";
+#endif
+
+	if (brightness_pass.program)
+		return TRUE;
+	if (brightness_pass.failed)
+		return FALSE;
+	{
+		char vertex_text[1024], fragment_text[1024];
+		GLuint vertex_shader, fragment_shader;
+		GLint linked = 0;
+
+		snprintf(vertex_text, sizeof(vertex_text), "#version %s\n%s", version, vertex);
+		snprintf(fragment_text, sizeof(fragment_text), "#version %s\n%s", version, fragment);
+		vertex_shader = compile_shader(GL_VERTEX_SHADER, vertex_text, "brightness vertex");
+		fragment_shader = compile_shader(GL_FRAGMENT_SHADER, fragment_text, "brightness fragment");
+		if (vertex_shader && fragment_shader)
+		{
+			brightness_pass.program = glCreateProgram();
+			glAttachShader(brightness_pass.program, vertex_shader);
+			glAttachShader(brightness_pass.program, fragment_shader);
+			glLinkProgram(brightness_pass.program);
+			glGetProgramiv(brightness_pass.program, GL_LINK_STATUS, &linked);
+			if (!linked)
+				brightness_pass.program = 0;
+		}
+		if (vertex_shader)
+			glDeleteShader(vertex_shader);
+		if (fragment_shader)
+			glDeleteShader(fragment_shader);
+	}
+	if (!brightness_pass.program)
+	{
+		brightness_pass.failed = TRUE;
+		return FALSE;
+	}
+	brightness_pass.curve = glGetUniformLocation(brightness_pass.program, "curve");
+	brightness_pass.flip = glGetUniformLocation(brightness_pass.program, "flip");
+	glGenVertexArrays(1, &brightness_pass.vertex_array);
+	glGenSamplers(1, &brightness_pass.linear);
+	glGenSamplers(1, &brightness_pass.nearest);
+	glSamplerParameteri(brightness_pass.linear, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glSamplerParameteri(brightness_pass.linear, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glSamplerParameteri(brightness_pass.nearest, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glSamplerParameteri(brightness_pass.nearest, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glSamplerParameteri(brightness_pass.linear, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glSamplerParameteri(brightness_pass.linear, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glSamplerParameteri(brightness_pass.nearest, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glSamplerParameteri(brightness_pass.nearest, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	return TRUE;
+}
+
+/* The final pass: the texture's whole picture onto the rectangle dx0,dy0 to
+dx1,dy1 of the framebuffer drawn to (bound by the caller), the rectangle's
+y running down when dy1 < dy0 (the window's flip), as glBlitFramebuffer
+takes it. The read framebuffer is the texture's (bound by the caller, for
+the plain blit). */
+static void final_blit(GLuint texture, GLint width, GLint height, GLint dx0, GLint dy0, GLint dx1, GLint dy1,
+	GLenum filter)
+{
+	float curve = halo_brightness_curve();
+
+	if (curve == 0.0f || !brightness_pass_ready())
+	{
+		glBlitFramebuffer(0, 0, width, height, dx0, dy0, dx1, dy1, GL_COLOR_BUFFER_BIT, filter);
+		return;
+	}
+	glDisable(GL_SCISSOR_TEST);
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_STENCIL_TEST);
+	glDisable(GL_BLEND);
+	glDisable(GL_CULL_FACE);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glViewport(dx1 < dx0 ? dx1 : dx0, dy1 < dy0 ? dy1 : dy0, dx1 < dx0 ? dx0 - dx1 : dx1 - dx0,
+		dy1 < dy0 ? dy0 - dy1 : dy1 - dy0);
+	glUseProgram(brightness_pass.program);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glBindSampler(0, filter == GL_NEAREST ? brightness_pass.nearest : brightness_pass.linear);
+	glUniform1f(brightness_pass.curve, curve);
+	/* (the render targets' row 0 is the picture's top: at the top of the
+	viewport when the rectangle runs down, the window's; at the bottom of
+	the texture's v otherwise, a GL framebuffer's own rows) */
+	glUniform1f(brightness_pass.flip, dy1 < dy0 ? 0.0f : 1.0f);
+	glBindVertexArray(brightness_pass.vertex_array);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	glBindVertexArray(device.vertex_array);
+	glBindSampler(0, 0);
+	xgpu_gl_state_invalidate();
+}
+
 /* ---------- presentation */
 
 /* (main.c, HALO_TEST_COMMANDS @shot) the next frame's screenshot name */
 extern char halo_screenshot_name[64];
 
-static void write_screenshot(struct render_target_entry *target)
+static void write_screenshot_pixels(unsigned char *pixels, unsigned long width, unsigned long height);
+
+static void write_screenshot_texture(GLuint texture, unsigned long width, unsigned long height)
+{
+	unsigned char *pixels;
+
+	if (!*config_string("debug.screenshot_directory"))
+		return;
+	pixels = malloc(width * height * 4);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(texture, 0));
+	glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
+	write_screenshot_pixels(pixels, width, height);
+	free(pixels);
+}
+
+/* (the pixels as read, rows from the top; freed by the caller) */
+static void write_screenshot_pixels(unsigned char *pixels, unsigned long width, unsigned long height)
 {
 	const char *directory = *config_string("debug.screenshot_directory") ?
 		config_string("debug.screenshot_directory") : NULL;
-	unsigned long width = target->target.gl_width, height = target->target.gl_height;
-	unsigned char *pixels;
 	char path[512];
 	FILE *file;
 	unsigned long row;
@@ -3701,9 +4201,6 @@ static void write_screenshot(struct render_target_entry *target)
 
 	if (!directory)
 		return;
-	pixels = malloc(image_size);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(target->target.texture, 0));
-	glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
 	/* the display ignores destination alpha, which the game uses as scratch;
 	image viewers would show it as transparency */
 	for (row = 0; row < width * height; row++)
@@ -3737,7 +4234,50 @@ static void write_screenshot(struct render_target_entry *target)
 			fwrite(pixels + row * width * 4, 1, width * 4, file);
 		fclose(file);
 	}
-	free(pixels);
+}
+
+static void write_screenshot(struct render_target_entry *target)
+{
+	write_screenshot_texture(target->target.texture, target->target.gl_width, target->target.gl_height);
+}
+
+/* (the Vita preview) the frame as the Vita's display shows it: the back
+buffer, or the picture its interface was drawn into, in the picture's
+place on a black 960x544 display; the display's texture */
+static GLuint vita_preview_display(struct render_target_entry *back_buffer)
+{
+	static GLuint display;
+	int left, top, width, height;
+
+	if (!display)
+	{
+		glGenTextures(1, &display);
+		glBindTexture(GL_TEXTURE_2D, display);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, VITA_DISPLAY_WIDTH, VITA_DISPLAY_HEIGHT, 0, GL_BGRA,
+			GL_UNSIGNED_BYTE, NULL);
+	}
+	vita_preview_picture((long)back_buffer->target.width, &left, &top, &width, &height);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer_get(display, 0));
+	glDisable(GL_SCISSOR_TEST);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	if (vita_interface.active)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(vita_interface.color, 0));
+		final_blit(vita_interface.color, vita_interface.width, vita_interface.height, left, top, left + width,
+			top + height, GL_NEAREST);
+	}
+	else
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(back_buffer->target.texture, 0));
+		final_blit(back_buffer->target.texture, (GLint)back_buffer->target.gl_width,
+			(GLint)back_buffer->target.gl_height, left, top, left + width, top + height, GL_LINEAR);
+	}
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+	xgpu_gl_state_invalidate();
+	return display;
 }
 
 void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destination_rectangle,
@@ -3756,11 +4296,43 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	{
 		struct render_target_entry *back_buffer = render_target_get(&device.back_buffer);
 		int window_width, window_height, width, height, x, y;
+		BOOL brightness_shot = FALSE;
 
 		if (trace_frame())
 			platform_log("present back buffer %08lx texture %u", (unsigned long)device.back_buffer.Data,
 				back_buffer->target.texture);
-		if ((screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0) || halo_screenshot_name[0])
+		if (vita_preview_enabled())
+		{
+			/* (the Vita's display, shown and saved) */
+			GLuint display = vita_preview_display(back_buffer);
+
+			if ((screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0) || halo_screenshot_name[0])
+				write_screenshot_texture(display, VITA_DISPLAY_WIDTH, VITA_DISPLAY_HEIGHT);
+			vita_interface.active = FALSE;
+			platform_video_drawable_size(&window_width, &window_height);
+			width = window_width;
+			height = (int)((long)window_width * VITA_DISPLAY_HEIGHT / VITA_DISPLAY_WIDTH);
+			if (height > window_height)
+			{
+				height = window_height;
+				width = (int)((long)window_height * VITA_DISPLAY_WIDTH / VITA_DISPLAY_HEIGHT);
+			}
+			x = (window_width - width) / 2;
+			y = (window_height - height) / 2;
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+			glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+			glClear(GL_COLOR_BUFFER_BIT);
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(display, 0));
+			glBlitFramebuffer(0, 0, VITA_DISPLAY_WIDTH, VITA_DISPLAY_HEIGHT, x, y + height, x + width, y,
+				GL_COLOR_BUFFER_BIT, GL_LINEAR);
+			goto presented;
+		}
+		/* (with a brightness set, the screenshot is the window's picture, the
+		curve in it: read below; else the back buffer, as the game drew it) */
+		brightness_shot = ((screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0) ||
+			halo_screenshot_name[0]) && halo_brightness_curve() != 0.0f;
+		if (!brightness_shot && ((screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0) ||
+			halo_screenshot_name[0]))
 			write_screenshot(back_buffer);
 
 		platform_video_drawable_size(&window_width, &window_height);
@@ -3781,8 +4353,24 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		glClear(GL_COLOR_BUFFER_BIT);
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer_get(back_buffer->target.texture, 0));
 		/* row 0 of the render target is the top of the picture */
-		glBlitFramebuffer(0, 0, (GLint)back_buffer->target.gl_width, (GLint)back_buffer->target.gl_height,
-			x, y + height, x + width, y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		final_blit(back_buffer->target.texture, (GLint)back_buffer->target.gl_width,
+			(GLint)back_buffer->target.gl_height, x, y + height, x + width, y, GL_LINEAR);
+		if (brightness_shot)
+		{
+			unsigned char *pixels = malloc((size_t)width * (size_t)height * 4);
+			unsigned char *flipped = malloc((size_t)width * (size_t)height * 4);
+			int row;
+
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+			glReadPixels(x, y, width, height, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
+			for (row = 0; row < height; row++)
+				memcpy(flipped + (size_t)row * width * 4, pixels + (size_t)(height - 1 - row) * width * 4,
+					(size_t)width * 4);
+			write_screenshot_pixels(flipped, (unsigned long)width, (unsigned long)height);
+			free(pixels);
+			free(flipped);
+		}
+	presented:
 		platform_video_swap();
 		xgpu_gl_state_invalidate();
 		xgpu_texture_cache_begin_frame();

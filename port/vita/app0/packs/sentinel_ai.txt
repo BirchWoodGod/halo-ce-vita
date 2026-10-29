@@ -1,0 +1,7 @@
+# The Sentinels for Forge on the multiplayer maps: the sentinel and its
+# major (on the Sentinels' team), from the player's own campaign maps (The
+# Library, or Two Betrayals).
+pack sentinel_ai
+map c20 c40
+tag actv characters\sentinel\sentinel
+tag actv characters\sentinel\sentinel major

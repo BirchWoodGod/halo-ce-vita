@@ -67,6 +67,23 @@ typedef char player_action_desired_facing_yaw_offset_assert[
 typedef char player_action_desired_facing_pitch_offset_assert[
 	offsetof(struct player_action, desired_facing.pitch) == 0x8 ? 1 : -1];
 
+/* port: network_player.icon_index's value for a player who claims the
+tester's flaming helmet (port/linux/src/p2p_flame.inc): a hint to ask that
+player's machine for its signed proof, never trusted. The game never read
+icon_index (NONE always) and the record carries it whole; builds before it
+ignore it */
+#define NETWORK_PLAYER_FLAME_CLAIM 0x4648
+/* port: icon_index for a player of this project's builds with the
+platform's cosmetics (port/linux/game/player_cosmetics.h): the mark in the
+top four bits, the flame's claim, the visor (4 bits) and the extended armour
+colour (7 bits, 0 none). Never NONE's or the claim's value; sent only
+between this project's builds (never on the crossplay wire) */
+#define NETWORK_PLAYER_COSMETICS_MARK_MASK 0xF000
+#define NETWORK_PLAYER_COSMETICS_MARK 0xC000
+#define NETWORK_PLAYER_COSMETICS_FLAME_BIT 0x0800
+#define NETWORK_PLAYER_COSMETICS_VISOR_SHIFT 7
+#define NETWORK_PLAYER_COSMETICS_COLOR_MASK 0x007F
+
 struct network_player
 {
 	wchar_t name[12];

@@ -58,12 +58,31 @@ DIAGNOSES = [
 ]
 
 
-def read_lines(folder, name):
+def read_lines(folder, name, end=None):
+    """the file's lines; with end, (those before byte end, those after)"""
     path = os.path.join(folder, name)
     if not os.path.exists(path):
-        return []
+        return [] if end is None else ([], [])
     with open(path, "rb") as file:
-        return file.read().decode("utf-8", "replace").splitlines()
+        data = file.read()
+    if end is None:
+        return data.decode("utf-8", "replace").splitlines()
+    return (data[:end].decode("utf-8", "replace").splitlines(), data[end:].decode("utf-8", "replace").splitlines())
+
+
+def stop_offsets(folder):
+    """(run.log, debug.txt) sizes as the harness stopped a PC build's copy
+    (run_netns_crossplay_test.sh mark_stop), else None: ours are held to
+    their whole logs"""
+    try:
+        with open(os.path.join(folder, "kind")) as file:
+            if file.read().strip() == "ours":
+                return None
+        with open(os.path.join(folder, "stop_offsets")) as file:
+            out, debug = file.read().split()
+        return int(out), int(debug)
+    except (OSError, ValueError):
+        return None
 
 
 class Copy:
@@ -72,6 +91,36 @@ class Copy:
         self.name = os.path.basename(os.path.normpath(folder))
         self.out = read_lines(folder, "run.log")
         self.debug = read_lines(folder, os.path.join("data", "debug.txt"))
+        # (a PC build's lines after the harness stopped it: its faults at
+        # being stopped are noted, not a crash in the game)
+        self.after_stop = []
+        offsets = stop_offsets(folder)
+        if offsets:
+            before_out, after_out = read_lines(folder, "run.log", offsets[0])
+            before_debug, after_debug = read_lines(folder, os.path.join("data", "debug.txt"), offsets[1])
+            self.after_stop = after_out + after_debug
+            self.stability_lines = before_out + before_debug
+        else:
+            self.stability_lines = self.out + self.debug
+        # (a PC build known to fault once its game is over, its own control
+        # games too, named by the harness: XPPC_POSTGAME_FAULT_KINDS, the
+        # copies' kinds; OpenCE 6ec42856, docs/crossplay.md 10.9): its trouble
+        # after its first game's end is noted, not a crash in the game
+        self.after_game = []
+        kinds = os.environ.get("XPPC_POSTGAME_FAULT_KINDS", "").split()
+        try:
+            with open(os.path.join(folder, "kind")) as file:
+                kind = file.read().strip()
+        except OSError:
+            kind = ""
+        if kind and kind != "ours" and kind in kinds:
+            over = next((i for i, line in enumerate(self.out) if "network test: tick" in line and "| game over to" in line),
+                None)
+            if over is not None:
+                late = [line.strip() for line in self.out[over:] if TROUBLE_LINES.search(line)]
+                self.after_game = late
+                self.stability_lines = [line for line in self.stability_lines
+                    if not (TROUBLE_LINES.search(line) and any(l and l in line for l in late))]
         self.games, self.scripted = read_games(self.out)
 
 
@@ -195,11 +244,18 @@ def diagnose(copies):
 
 def stability(copies):
     trouble = {}
+    stopped = []
     for copy in copies:
-        lines = [line.strip() for line in copy.out + copy.debug if TROUBLE_LINES.search(line)][:3]
+        lines = [line.strip() for line in copy.stability_lines if TROUBLE_LINES.search(line)][:3]
         if lines:
             trouble[copy.name] = lines
-    return step(not trouble, "no copy crashed" if not trouble else trouble)
+        if any(TROUBLE_LINES.search(line) for line in copy.after_stop):
+            stopped.append(copy.name)
+        if copy.after_game:
+            stopped.append(copy.name + " (after its game: " + copy.after_game[0][:80] + ")")
+    note = "; PC copies that faulted only as the harness stopped them or after their game: " + ", ".join(stopped) \
+        if stopped else ""
+    return step(not trouble, "no copy crashed" + note if not trouble else trouble)
 
 
 def check_direction(host, clients, score_to_win, rejoin):
@@ -224,7 +280,8 @@ def check_direction(host, clients, score_to_win, rejoin):
     # (internet play: an invite opened, or a listing joined, reaches the host
     # through the brokers' signalling, then the tunnel connects)
     asked = any("Internet play: joining" in line for line in first.out)
-    connected = any(re.search(r"Internet play: connected to host", line) for line in first.out)
+    connected = any(re.search(r"Internet play: connected to host|Internet play: joining .*, reached already", line)
+                    for line in first.out)
     steps["signal"] = step(not asked or connected, "no internet play" if not asked else
         "the tunnel to the host connected" if connected else
         "the client asked to join through the brokers and never reached the host")
@@ -315,8 +372,14 @@ def check_direction(host, clients, score_to_win, rejoin):
             for entry in game.ticks:
                 if tick + TICKS_PER_SECOND <= entry[0] <= tick + 2 * TICKS_PER_SECOND:
                     host_state = seconds.near(entry[0])[1] or {}
+                    # (and still dead on the host a second on: a client
+                    # alive within a sample of the host's respawn - its
+                    # clock in step with the host's, or a tick ahead, the
+                    # death seen up to a sample late - is no body standing)
+                    host_later = seconds.near(entry[0] + TICKS_PER_SECOND)[1] or {}
                     mine = entry[1].get(victim)
-                    if mine and mine["alive"] and victim in host_state and not host_state[victim]["alive"]:
+                    if mine and mine["alive"] and victim in host_state and not host_state[victim]["alive"] and \
+                            victim in host_later and not host_later[victim]["alive"]:
                         standing.append((copy.name, number + 1, entry[0], victim))
     steps["kills"] = step(seen and not missed and not standing,
         f"{len(events)} deaths on the host ({host.scripted} scripted; {unwatched} with no client there); {seen} seen "
@@ -375,7 +438,11 @@ def check_server(server, clients):
         f"{subject.name} heard the server (and refused it: below)" if "version" in diag else
         f"{subject.name} never found the server")
     asked = any("Internet play: joining" in line for line in subject.out)
-    connected = any("Internet play: connected to host" in line for line in subject.out)
+    # (or "reached already": OpenCE's browser of 39 pings a listed game, its
+    # tunnel up before the join asks: docs/opence-net39-spec.md, crossplay.md
+    # 10.12)
+    connected = any("Internet play: connected to host" in line or
+                    re.search(r"Internet play: joining .*, reached already", line) for line in subject.out)
     steps["signal"] = step(not asked or connected, "no internet play" if not asked else
         "the tunnel to the server connected" if connected else
         f"{subject.name} asked to join through the brokers and never reached the server")

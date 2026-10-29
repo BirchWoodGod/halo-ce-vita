@@ -61,6 +61,33 @@ enum network_game_message_type
 	_message_client_map_download,
 	_message_server_map_download_answer,
 	_message_server_map_download_data,
+	/* port: network Forge (port/linux/game/forge_net_protocol.h), an
+	optional capability: the host's hello to a machine joining a Forge game
+	(that it is Forge, its packs, its map variant), and the machine's answer
+	(that it plays it). A machine of a build without them drops the host's
+	as an unknown packet type and so never answers: the host then refuses it
+	from the Forge game alone. Never sent on the crossplay wire */
+	_message_client_forge,
+	_message_server_forge,
+	/* port: the game's rules a joiner plays (port/linux/game/infection_net.h),
+	an optional capability as network Forge's: the host of an Infection game
+	asks each machine that joins, and refuses one that does not answer (an
+	older build drops the host's as an unknown packet type) from that game
+	alone. Never sent on the crossplay wire */
+	_message_client_game_rules,
+	_message_server_game_rules,
+	/* port: the tester's flaming helmet's proofs (port/linux/game/flame_net.h,
+	port/linux/src/p2p_flame.inc), both ways, in any state of any network
+	game: a joiner's to the host, the host's (its own or relayed) to a
+	joiner. A build without them drops them as unknown packet types. Never
+	sent on the crossplay wire */
+	_message_client_flame,
+	_message_server_flame,
+	/* port: a joiner's party's team token (port/linux/game/party_net.h),
+	before its request to add its player: a host that fills its game with
+	bots puts a party's members on one team. A build without it drops it as
+	an unknown packet type. Never sent on the crossplay wire */
+	_message_client_party,
 	NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES,
 };
 

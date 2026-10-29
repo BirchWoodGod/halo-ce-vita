@@ -225,6 +225,15 @@ static long particles_tick_frame_indices[MAXIMUM_PARTICLE_UNRENDERED_FRAME_COUNT
 static long particles_tick_frame_head = 0;
 #endif
 
+#ifdef HALO_LINUX
+/* (port) set while the menus' scene makes particles of its own (the
+flaming helmet on CUSTOMIZATION's Spartan, port/linux/game/flaming_helmet.c):
+the main menu has no player, so no player's potentially visible set, and
+every new particle would be refused as unseen; the scene's camera draws
+what it sees (render_location_visible) */
+boolean particles_new_ignore_players_pvs = FALSE;
+#endif
+
 static char const *particle_effect_marker_names[NUMBER_OF_PARTICLE_EFFECT_MARKERS] =
 {
 	"velocity",
@@ -945,7 +954,14 @@ void particle_new(
 #endif
 
 	if (location.leaf_index == NONE ||
+#ifdef HALO_LINUX
+		/* (port) the menus' scene (ui.map, no player: no player's potentially
+		visible set) may make its own: particles_new_ignore_players_pvs */
+		(!particles_new_ignore_players_pvs &&
+		!new_particle_is_visible(definition, &location, &position, data->radius)))
+#else
 		!new_particle_is_visible(definition, &location, &position, data->radius))
+#endif
 	{
 		return;
 	}
@@ -993,6 +1009,10 @@ void particle_new(
 		data->dont_draw_first_person);
 	SET_FLAG(particle->flags, _particle_datum_dont_draw_third_person_bit,
 		data->dont_draw_third_person);
+#ifdef HALO_LINUX
+	/* port: the menus' scene's own (the CUSTOMIZATION preview's flaming helmet) */
+	SET_FLAG(particle->flags, _particle_datum_menu_scene_bit, particles_new_ignore_players_pvs);
+#endif
 	SET_FLAG(particle->flags, _particle_datum_attached_to_local_player_bit,
 		data->attached_to_local_player);
 

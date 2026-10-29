@@ -16,6 +16,19 @@
 #    repository; else SKIP for this part): the visor (odst_hud\odst final, a
 #    1024-pixel frame at 0.625 and 0.475) fills the 640 columns and 486 rows in
 #    4:3, and the 848 columns in 16:9 (hud_full_screen_element_widen).
+# 3. Halo: CE Anniversary's HUD (Oct 10 2026: on the owner's Vita, Ruby's
+#    Rebalanced Halo: CE's HUD drew twice its size and pushed in from the
+#    corners; MCC lays it out on a canvas twice the Xbox's, its bitmaps four
+#    times the Xbox's with Halo PC's half HUD scale): the mod's b30 played
+#    natively from the mods folder (HALO_TEST_MCC_MOD, default Ruby's in
+#    Steam's workshop folder; else SKIP for this part), and when
+#    HALO_TEST_MCC_MAPS names a folder of maps port/tools/mcc_map_convert.py
+#    made, its *b30.map too, at 640 and 848 columns: drawn at the Xbox b30's
+#    size and place (the shield panel 128x32 on the frame, the crosshair 66
+#    wide and centred, the digits 12 rows), the motion sensor 128 wide, 10 in
+#    from the frame's corner (MCC's own margin, 20 on its canvas); its
+#    meters (MCC's "use xbox shading") keep their channels, not swapped as
+#    Halo PC's (swapped, they drew only full or empty).
 #
 #   run_hud_layout_test.sh
 #   HALO_TEST_VITA          the harness (default build/linux/halo of this tree)
@@ -25,6 +38,8 @@
 #   HALO_TEST_CE_RESOURCES  Halo PC's bitmaps.map, sounds.map and loc.map
 #                           (default the data's maps folder, else Steam's MCC
 #                           halo1/maps/custom_edition)
+#   HALO_TEST_MCC_MOD       a Halo: CE Anniversary mod's folder (its maps\b30.map)
+#   HALO_TEST_MCC_MAPS      a folder of maps converted from it (optional)
 #   HALO_TEST_OUT           where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -62,6 +77,10 @@ run() {
 	for file in "${extra_maps[@]}"; do
 		ln -sfn "$file" "$dir/data/maps/"
 	done
+	if [ -n "${mods_folder:-}" ]; then
+		mkdir -p "$dir/data/mods"
+		ln -sfn "$mods_folder" "$dir/data/mods/ruby"
+	fi
 	printf '%s\n' "$init" > "$dir/data/init.txt"
 	(cd "$dir" && exec env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$dir/data" \
 		HALO_SAVE_ROOT="$dir/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 \
@@ -134,6 +153,56 @@ else
 		expect "$name" "the visor fills the $width columns and 486 rows" \
 			"x0 <= 1 && x1 >= $((width - 1)) && y1 - y0 >= 484" 'odst final'
 	done
+fi
+
+# 3. Halo: CE Anniversary's HUD, natively and converted
+mcc_mod=${HALO_TEST_MCC_MOD:-$HOME/.local/share/Steam/steamapps/workshop/content/976730/2915693904}
+mcc_maps=${HALO_TEST_MCC_MAPS:-}
+mcc_expect() {
+	local name=$1 width=$2
+	local margin=$((48 * width / 640))
+	expect "$name" "the shield panel 128x32 on the frame ($((width - margin)), 37)" \
+		"x1 == $((width - margin)) && y0 == 37 && x1 - x0 == 128 && y1 - y0 == 32" 'hud_unit_backgrounds'
+	expect "$name" "the motion sensor 128 wide, 10 in from the frame's corner ($((margin + 10)), 434)" \
+		"x0 == $((margin + 10)) && y1 == 434 && x1 - x0 == 128" 'hud_unit_backgrounds'
+	expect "$name" "the crosshair 66 wide, centred ($((width / 2)))" \
+		"x0 + x1 == $width && x1 - x0 == 66" 'hud_reticles'
+	expect "$name" "the digits 12 rows" "y1 - y0 == 12" 'hud_counter_numbers'
+	if quads "$name" 'hud_unit_backgrounds' | awk '$3 - $1 > 128 { found = 1 } END { exit !found }'; then
+		fail "$name: a unit HUD background wider than the Xbox's 128 (quads: $(quads "$name" 'hud_unit_backgrounds' | tr '\n' ';'))"
+	fi
+}
+if [ ! -e "$mcc_mod/maps/b30.map" ]; then
+	echo "SKIP (the Halo: CE Anniversary part): no b30.map in $mcc_mod/maps (HALO_TEST_MCC_MOD)"
+else
+	extra_maps=()
+	mods_folder=$(cd "$mcc_mod" && pwd)
+	for width in 640 848; do
+		name="mcc-native-$width"
+		run "$name" "$width" 60 'map_name mods\ruby_b30' HALO_CUSTOM_EDITION=1 HALO_MCC_MODS=1
+		grep -aq "the HUD is Halo: CE Anniversary's" "$out/$name/data/debug.txt" 2>/dev/null ||
+			fail "$name: the HUD was not taken for Halo: CE Anniversary's ($out/$name/data/debug.txt)"
+		grep -aq "HUD meters are shaded as the Xbox's" "$out/$name/data/debug.txt" 2>/dev/null ||
+			fail "$name: MCC's meters were not kept in the Xbox's channels ($out/$name/data/debug.txt)"
+		mcc_expect "$name" "$width"
+	done
+	mods_folder=
+	converted=
+	[ -n "$mcc_maps" ] && converted=$(ls "$mcc_maps"/*b30.map 2> /dev/null | head -1)
+	if [ -z "$converted" ]; then
+		echo "SKIP (the converted map): no *b30.map in HALO_TEST_MCC_MAPS"
+	else
+		extra_maps=("$(cd "$(dirname "$converted")" && pwd)/$(basename "$converted")")
+		for name in bitmaps sounds loc; do
+			[ -e "$resources/$name.map" ] && extra_maps+=("$(cd "$resources" && pwd)/$name.map")
+		done
+		map=$(basename "$converted" .map)
+		for width in 640 848; do
+			name="mcc-converted-$width"
+			run "$name" "$width" 60 "map_name custom_maps\\$map" HALO_CUSTOM_EDITION=1
+			mcc_expect "$name" "$width"
+		done
+	fi
 fi
 
 echo "logs: $out"

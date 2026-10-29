@@ -17,6 +17,7 @@ file and line, and then no file is used: the game keeps its own menus.
 #include "halo_menus.h"
 #include "platform.h"
 #include "port_config.h"
+#include "network_wire.h"
 
 #include "expat.h"
 #include "../game/cache_file_formats.h"
@@ -108,16 +109,97 @@ void halo_menus_file_free(unsigned char *data)
 	free(data);
 }
 
+unsigned char *halo_packs_file_read(char const *path, unsigned long *size)
+{
+	const char *setting = getenv("HALO_PACKS_FOLDER");
+	char packs[1100];
+	char full[1200];
+	size_t length = 0;
+	char *data;
+
+	if (!path || !*path || strstr(path, "..") || strchr(path, ':') || path[0] == '/' || path[0] == '\\')
+		return NULL;
+	if (setting && *setting)
+	{
+		snprintf(packs, sizeof(packs), "%s%s", setting, setting[strlen(setting) - 1] == '/' ? "" : "/");
+	}
+	else
+	{
+		/* (the menus folder's neighbour: <...>/menus/ -> <...>/packs/) */
+		size_t end;
+
+		folder_find();
+		snprintf(packs, sizeof(packs), "%s", folder);
+		end = strlen(packs);
+		while (end && packs[end - 1] == '/')
+			packs[--end] = 0;
+		if (end >= 5 && !strcmp(packs + end - 5, "menus"))
+			snprintf(packs + end - 5, sizeof(packs) - (end - 5), "packs/");
+		else
+			snprintf(packs + end, sizeof(packs) - end, "/../packs/");
+	}
+	snprintf(full, sizeof(full), "%s%s", packs, path);
+	data = config_file_read(full, &length);
+	if (!data)
+		return NULL;
+	if (length > MAXIMUM_FILE_BYTES)
+	{
+		free(data);
+		return NULL;
+	}
+	*size = (unsigned long)length;
+	return (unsigned char *)data;
+}
+
+/* a file of app0's own (the in-game chat's chat/filter.txt): the menus
+folder's parent (<...>/menus/ -> <...>/; app0: on the Vita) */
+unsigned char *halo_app0_file_read(char const *path, unsigned long *size)
+{
+	char app0[1100];
+	char full[1200];
+	size_t length = 0, end;
+	char *data;
+
+	if (!path || !*path || strstr(path, "..") || strchr(path, ':') || path[0] == '/' || path[0] == '\\')
+		return NULL;
+	folder_find();
+	snprintf(app0, sizeof(app0), "%s", folder);
+	end = strlen(app0);
+	while (end && app0[end - 1] == '/')
+		app0[--end] = 0;
+	if (end >= 5 && !strcmp(app0 + end - 5, "menus"))
+		app0[end - 5] = 0;
+	else
+		snprintf(app0 + end, sizeof(app0) - end, "/../");
+	snprintf(full, sizeof(full), "%s%s", app0, path);
+	data = config_file_read(full, &length);
+	if (!data)
+		return NULL;
+	if (length > MAXIMUM_FILE_BYTES)
+	{
+		free(data);
+		return NULL;
+	}
+	*size = (unsigned long)length;
+	return (unsigned char *)data;
+}
+
+void halo_app0_file_free(unsigned char *data)
+{
+	free(data);
+}
+
 /* the files menus.txt lists */
-static void files_gather(void)
+/* the files a list names (menus.txt, ingame.txt), added to files */
+static void files_gather(char const *list_name)
 {
 	unsigned long size = 0;
-	unsigned char *list = halo_menus_file_read("menus.txt", &size);
+	unsigned char *list = halo_menus_file_read(list_name, &size);
 	unsigned long position = 0;
 
 	if (!list)
 	{
-		platform_log("menus: %smenus.txt cannot be read; the game's own menus", folder);
+		platform_log("menus: %s%s cannot be read; the game's own menus", folder, list_name);
 		return;
 	}
 	while (position < size)
@@ -177,12 +259,14 @@ enum element
 	_element_frame,
 	_element_strings,
 	_element_string,
+	_element_font,
 	_element_widget,
 	_element_child,
 	_element_on,
 	_element_data,
 	_element_conditional,
 	_element_replace,
+	_element_screen,
 };
 
 /* an attribute an element may have: its text (text) or number (number,
@@ -373,6 +457,25 @@ function returns (out of memory: the reading has failed) */
 		(reader)->last[owner] = (index); \
 	} while (0)
 
+static void read_font(struct reader *reader, const XML_Char **attributes)
+{
+	struct halo_menus *menus = &reader->menus;
+	struct halo_menu_font font;
+	struct attribute table[] = { { "name", &font.name }, { "file", &font.path }, { "sharp", &font.sharp } };
+
+	memset(&font, 0, sizeof(font));
+	font.file = reader->file;
+	font.line = current_line(reader);
+	read_attributes(reader, "font", attributes, table, sizeof(table) / sizeof(*table));
+	if (!reader->failed && (!font.name || !font.path))
+	{
+		reader_error(reader, "a <font> needs a name and a file");
+		return;
+	}
+	GROW(reader, menus->fonts, menus->font_count);
+	menus->fonts[menus->font_count++] = font;
+}
+
 static void read_bitmap(struct reader *reader, const XML_Char **attributes)
 {
 	struct halo_menus *menus = &reader->menus;
@@ -382,7 +485,7 @@ static void read_bitmap(struct reader *reader, const XML_Char **attributes)
 	struct attribute table[] =
 	{
 		{ "name", &bitmap.name }, { "resource", &bitmap.resource }, { "frames", &frames },
-		{ "width", NULL, &width }, { "height", NULL, &height },
+		{ "width", NULL, &width }, { "height", NULL, &height }, { "fit", &bitmap.fit },
 	};
 
 	memset(&bitmap, 0, sizeof(bitmap));
@@ -426,6 +529,8 @@ static void read_bitmap(struct reader *reader, const XML_Char **attributes)
 	}
 	if (!reader->failed && !bitmap.name)
 		reader_error(reader, "a <bitmap> needs a name");
+	if (!reader->failed && bitmap.fit && strcmp(bitmap.fit, "widget"))
+		reader_error(reader, "a <bitmap>'s fit is \"widget\" (drawn whole into its widget) or not given");
 	GROW(reader, menus->bitmaps, menus->bitmap_count);
 	menus->bitmaps[menus->bitmap_count++] = bitmap;
 }
@@ -528,6 +633,9 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 	struct halo_menu_widget widget;
 	long index = menus->widget_count;
 	const char *child_controller = NULL;
+	/* (a spinner's strings on the port's PC build, in place of strings:
+	WHO CAN JOIN offers no VITA there - network_wire.h) */
+	const char *strings_pc = NULL;
 	struct attribute table[] =
 	{
 		{ "name", &widget.name }, { "type", &widget.type }, { "controller", &widget.controller },
@@ -538,7 +646,10 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 		{ "list_flags", &widget.list_flags }, { "text_flags", &widget.text_flags },
 		{ "header_bitmap", &widget.header_bitmap }, { "footer_bitmap", &widget.footer_bitmap },
 		{ "header_bounds", &widget.header_bounds }, { "footer_bounds", &widget.footer_bounds },
-		{ "child_controller", &child_controller },
+		{ "scene", &widget.scene }, { "scene_object", &widget.scene_object },
+		{ "backdrop", &widget.backdrop }, { "backdrop_object", &widget.backdrop_object },
+		{ "child_controller", &child_controller }, { "strings_pc", &strings_pc },
+		{ "extends", &widget.extends }, { "drop", &widget.drop }, { "classic_patch", &widget.classic_patch },
 		{ "x", NULL, &widget.x }, { "y", NULL, &widget.y }, { "left", NULL, &widget.left },
 		{ "top", NULL, &widget.top }, { "width", NULL, &widget.width, &widget.has_width },
 		{ "height", NULL, &widget.height, &widget.has_height }, { "text_x", NULL, &widget.text_x },
@@ -553,8 +664,12 @@ static void read_widget(struct reader *reader, const XML_Char **attributes, long
 	widget.file = reader->file;
 	widget.line = current_line(reader);
 	read_attributes(reader, "widget", attributes, table, sizeof(table) / sizeof(*table));
+	if (strings_pc && network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC)
+		widget.strings = strings_pc;
 	if (!reader->failed && !widget.name)
 		reader_error(reader, "a <widget> needs a name");
+	if (!reader->failed && widget.classic_patch && (!widget.extends || strcmp(widget.classic_patch, "true")))
+		reader_error(reader, "classic_patch is \"true\", with extends");
 	GROW(reader, menus->widgets, index);
 	menus->widgets[index] = widget;
 	menus->widget_count++;
@@ -684,14 +799,57 @@ static void read_replace(struct reader *reader, const XML_Char **attributes, lon
 	LIST_ADD(reader, owner, first_replace, last_replace, replaces, index);
 }
 
+/* (a Halo 3 screen) root stands for the Xbox screen replaces while Menu
+style is Halo 3 (menu_tags.c) */
+static void screen_add(struct reader *reader, const char *root, const char *replaces)
+{
+	struct halo_menus *menus = &reader->menus;
+
+	GROW(reader, menus->screens, menus->screen_count);
+	menus->screens[menus->screen_count].root = root;
+	menus->screens[menus->screen_count].replaces = replaces;
+	menus->screens[menus->screen_count].file = reader->file;
+	menus->screens[menus->screen_count].line = current_line(reader);
+	menus->screen_count++;
+}
+
 static void read_menus(struct reader *reader, const XML_Char **attributes)
 {
-	const char *root = NULL;
-	struct attribute table[] = { { "root", &root } };
+	const char *root = NULL, *replaces = NULL;
+	struct attribute table[] = { { "root", &root }, { "replaces", &replaces } };
 
 	read_attributes(reader, "menus", attributes, table, sizeof(table) / sizeof(*table));
-	if (root)
+	/* (a Halo 3 screen: the Xbox screen it stands for while Menu style is
+	Halo 3, menu_tags.c; else the Multiplayer screen's root) */
+	if (replaces)
+	{
+		if (!root)
+		{
+			reader_error(reader, "a <menus replaces=...> needs its root");
+			return;
+		}
+		screen_add(reader, root, replaces);
+	}
+	else if (root)
 		reader->menus.root = root;
+}
+
+/* <screen root="..." replaces="..."/>: one more Halo 3 screen of the file,
+as <menus root= replaces=> names one (the Halo 3 dialogs, halo3/dialog.xml,
+stand for many of the Xbox's) */
+static void read_screen(struct reader *reader, const XML_Char **attributes)
+{
+	const char *root = NULL, *replaces = NULL;
+	struct attribute table[] = { { "root", &root }, { "replaces", &replaces } };
+
+	read_attributes(reader, "screen", attributes, table, sizeof(table) / sizeof(*table));
+	if (!reader->failed && (!root || !replaces))
+	{
+		reader_error(reader, "a <screen> needs root and replaces");
+		return;
+	}
+	if (!reader->failed)
+		screen_add(reader, root, replaces);
 }
 
 static void XMLCALL element_start(void *data, const XML_Char *name, const XML_Char **attributes)
@@ -728,6 +886,16 @@ static void XMLCALL element_start(void *data, const XML_Char *name, const XML_Ch
 	{
 		element = _element_frame;
 		read_frame(reader, attributes, owner);
+	}
+	else if (!strcmp(name, "screen") && parent == _element_menus)
+	{
+		element = _element_screen;
+		read_screen(reader, attributes);
+	}
+	else if (!strcmp(name, "font") && parent == _element_menus)
+	{
+		element = _element_font;
+		read_font(reader, attributes);
 	}
 	else if (!strcmp(name, "strings") && parent == _element_menus)
 	{
@@ -841,27 +1009,24 @@ static int read_file(struct reader *reader, const struct menu_file *file)
 
 /* ---------- public code */
 
-static struct halo_menus const *menus_load(void)
+/* a list's files read into menus (0: none, or a problem); need_root: the
+list must name the Multiplayer screen's stand-in (menus.txt's; the in-game
+list, ingame.txt, has only Halo 3 screens) */
+static int menus_read(char const *list_name, int need_root, struct halo_menus *menus)
 {
-	static int read;
-	static struct halo_menus menus;
-	static int succeeded;
 	struct reader reader;
-	long index;
+	long index, first = file_count;
 	unsigned long long gather_started, parse_started;
 
-	if (read)
-		return succeeded ? &menus : NULL;
-	read = 1;
 	gather_started = platform_microseconds_now();
-	files_gather();
+	files_gather(list_name);
 	parse_started = platform_microseconds_now();
 	memset(&reader, 0, sizeof(reader));
-	for (index = 0; index < file_count && !reader.failed; index++)
+	for (index = first; index < file_count && !reader.failed; index++)
 		read_file(&reader, &files[index]);
 	/* (the files' text is not kept: the elements hold copies of what they
 	need; their paths stay, for the problems the game logs) */
-	for (index = 0; index < file_count; index++)
+	for (index = first; index < file_count; index++)
 	{
 		free((void *)files[index].data);
 		files[index].data = NULL;
@@ -874,19 +1039,31 @@ static struct halo_menus const *menus_load(void)
 	if (reader.failed || !reader.menus.widget_count)
 	{
 		if (reader.failed)
-			platform_log("menus: the files have a problem; using the game's own menus");
-		return NULL;
+			platform_log("menus: the files have a problem (%s); using the game's own menus", list_name);
+		return 0;
 	}
-	if (!reader.menus.root)
+	if (need_root && !reader.menus.root)
 	{
 		platform_log("menus: no <menus root=...> names the Multiplayer screen; the game's own menus");
-		return NULL;
+		return 0;
 	}
-	menus = reader.menus;
-	succeeded = 1;
-	platform_log("menus: %ld files read in %llu us, parsed in %llu us", file_count, parse_started - gather_started,
-		platform_microseconds_now() - parse_started);
-	return &menus;
+	*menus = reader.menus;
+	platform_log("menus: %s: %ld files read in %llu us, parsed in %llu us", list_name, file_count - first,
+		parse_started - gather_started, platform_microseconds_now() - parse_started);
+	return 1;
+}
+
+static struct halo_menus const *menus_load(void)
+{
+	static int read;
+	static struct halo_menus menus;
+	static int succeeded;
+
+	if (read)
+		return succeeded ? &menus : NULL;
+	read = 1;
+	succeeded = menus_read("menus.txt", 1, &menus);
+	return succeeded ? &menus : NULL;
 }
 
 long halo_menus_utf16(char const *utf8, unsigned short *out, long capacity)
@@ -967,6 +1144,48 @@ void halo_menus_preload(void)
 	pthread_mutex_unlock(&preload_lock);
 }
 
+/* (Halo 3 unless "classic" - Classic+ - or "original" - Classic: the
+default since 1.1.1, the owner's call) */
+int halo_menu_style_halo3(void)
+{
+	char const *style = getenv("HALO_MENU_STYLE");
+
+	return !style || (strcmp(style, "classic") != 0 && strcmp(style, "original") != 0);
+}
+
+/* (Menu style Classic+, "classic": the Xbox menus with the port's rows and
+screens - a settings.txt from before the split naming "classic" keeps its
+features. Classic, "original": the Xbox menus as they shipped, the port's
+features in the settings panel alone; owner, insider.25) */
+int halo_menu_style_classic_plus(void)
+{
+	char const *style = getenv("HALO_MENU_STYLE");
+
+	return style && strcmp(style, "classic") == 0;
+}
+
+int halo_menu_style_original(void)
+{
+	char const *style = getenv("HALO_MENU_STYLE");
+
+	return style && strcmp(style, "original") == 0;
+}
+
+/* (Menu style Online: the Halo 3 set's flows, menus/online's screens in
+place of those it has, menu_tags.c menu_tags_online) */
+int halo_menu_style_online(void)
+{
+	char const *style = getenv("HALO_MENU_STYLE");
+	char const *halo3 = getenv("HALO_MENU_HALO3");
+
+	/* (ElDewrito replaced the Halo 3 style, insider.25: the default; the
+	Halo 3 set's own look only as HALO_MENU_STYLE=halo3 says outright - a
+	test's - or HALO_MENU_HALO3=1 over any other) */
+	if (halo3 && atoi(halo3))
+		return 0;
+	return !style || strcmp(style, "online") == 0;
+}
+
 struct halo_menus const *halo_menus_load(void)
 {
 	struct halo_menus const *result;
@@ -980,6 +1199,22 @@ struct halo_menus const *halo_menus_load(void)
 	result = preload_started ? preload_result : menus_load();
 	pthread_mutex_unlock(&preload_lock);
 	return result;
+}
+
+struct halo_menus const *halo_menus_load_ingame(void)
+{
+	static int read;
+	static struct halo_menus menus;
+	static int succeeded;
+
+	pthread_mutex_lock(&preload_lock);
+	if (!read)
+	{
+		read = 1;
+		succeeded = menus_read("ingame.txt", 0, &menus);
+	}
+	pthread_mutex_unlock(&preload_lock);
+	return succeeded ? &menus : NULL;
 }
 
 /* ---------- the Halo PC pictures and text, read ahead (halo_menus.h) */
@@ -1076,7 +1311,8 @@ static int art_file_open(struct art_file *file, char const *name, int type)
 	DWORD size;
 
 	memset(file, 0, sizeof(*file));
-	snprintf(path, sizeof(path), "%s%s.map", art.plan.map_directory, name);
+	/* (the maps folder's, else the Halo content folder's custom_edition one) */
+	platform_halo_pc_resource_map(art.plan.map_directory, name, path, sizeof(path));
 	file->handle = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
 	if (file->handle == INVALID_HANDLE_VALUE)
 		return 0;

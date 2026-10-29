@@ -29,7 +29,11 @@ NULL, ...)): the SDK's pthread library takes this in place of its 32 KB
 minimum. Internet play's threads (p2p.c's, which keeps two 754-socket
 lists on its stack and selects over up to 128 sockets, its UPnP thread,
 and ad hoc play's two in p2p_adhoc.c) were made for desktops' megabytes;
-xbox_kernel.c gives the game's own threads theirs explicitly */
+xbox_kernel.c gives the game's own threads theirs explicitly. One made with
+attributes takes their size alone, and with none set (0) gets the library's
+4 KiB minimum, not this: every pthread_attr_init before a pthread_create
+needs its pthread_attr_setstacksize (the friend code backup's thread had
+none in insider.21, and Argon2id overflowed it) */
 unsigned int _pthread_stack_default_user = 256 * 1024;
 
 void posix_random_bytes(void *buffer, posix_ulong size)
@@ -132,16 +136,53 @@ int pause(void)
 	return -1;
 }
 
-/* ---------- generic atomics (libatomic) for the game's unaligned fields
+/* ---------- generic atomics (libatomic)
 
-clang, told nothing is aligned (-fmax-type-align=1), turns an atomic on a
-short in a packed structure into these library calls. One lock serves
-them all; only a light's flags word uses them (object_lights.c). */
+clang, told nothing is aligned (-fmax-type-align=1), turns an atomic on any
+field it cannot prove aligned - a structure's member reached through a
+pointer, not only a short in a packed structure - into these library calls:
+some 90 in the game (d3d8_gxm.c's waits, the scene packs, the texture
+decoder, the stream reads, the lights...), on words that other code reaches
+with the processor's own atomics (ldrex/strex, plain aligned loads and
+stores). A lock and a byte copy were atomic only against each other: an
+exchange here and an inline increment on the same word could lose either
+(the render worker's sleepers), and a byte-wise copy could be read torn.
+
+So a naturally aligned object of 1, 2, 4 or 8 bytes - every cross-thread
+field there is - takes the processor's atomic of its size (this file is
+GCC's, which assumes the alignment of the types below); only a truly
+unaligned one (a packed structure's short) takes the lock, as before, and
+is atomic against the lock's other users only. */
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 
+typedef uint8_t atomic_8;
+typedef uint16_t atomic_16 __attribute__((aligned(2)));
+typedef uint32_t atomic_32 __attribute__((aligned(4)));
+typedef uint64_t atomic_64 __attribute__((aligned(8)));
+
 static volatile int generic_atomic_lock;
+
+void vita_host_log(const char *line);
+
+/* (the first few objects that take the lock, named: a packed field the
+game's other code may reach with the processor's atomics, which the lock
+does not exclude) */
+static void generic_atomic_unaligned(size_t size, const volatile void *object)
+{
+	static volatile int logged;
+
+	if (__atomic_add_fetch(&logged, 1, __ATOMIC_RELAXED) <= 4)
+	{
+		char line[128];
+
+		snprintf(line, sizeof(line), "atomics: a %u-byte object at %p not aligned to its size: under the lock",
+			(unsigned)size, (const void *)object);
+		vita_host_log(line);
+	}
+}
 
 static void generic_atomic_acquire(void)
 {
@@ -155,12 +196,45 @@ static void generic_atomic_release(void)
 	__atomic_store_n(&generic_atomic_lock, 0, __ATOMIC_RELEASE);
 }
 
+/* the object's own size, naturally aligned: the processor's atomics */
+static int generic_atomic_native(size_t size, const volatile void *object)
+{
+	return (size == 1 || size == 2 || size == 4 || size == 8) && ((uintptr_t)object & (size - 1)) == 0;
+}
+
+/* (the native ones, by size: `type` the size's, a and b its values) */
+#define GENERIC_ATOMIC_BY_SIZE(size, operation) \
+	switch (size) \
+	{ \
+	case 1: operation(atomic_8); break; \
+	case 2: operation(atomic_16); break; \
+	case 4: operation(atomic_32); break; \
+	default: operation(atomic_64); break; \
+	}
+
 bool __atomic_compare_exchange(size_t size, void *object, void *expected, const void *desired, int success, int failure)
 {
 	bool matched;
 
 	(void)success;
 	(void)failure;
+	if (generic_atomic_native(size, object))
+	{
+#define COMPARE_EXCHANGE(type) \
+		{ \
+			type was, want; \
+			memcpy(&was, expected, sizeof(type)); \
+			memcpy(&want, desired, sizeof(type)); \
+			matched = __atomic_compare_exchange_n((type *)object, &was, want, false, __ATOMIC_SEQ_CST, \
+				__ATOMIC_SEQ_CST); \
+			if (!matched) \
+				memcpy(expected, &was, sizeof(type)); \
+		}
+		GENERIC_ATOMIC_BY_SIZE(size, COMPARE_EXCHANGE)
+#undef COMPARE_EXCHANGE
+		return matched;
+	}
+	generic_atomic_unaligned(size, object);
 	generic_atomic_acquire();
 	matched = memcmp(object, expected, size) == 0;
 	if (matched)
@@ -174,6 +248,18 @@ bool __atomic_compare_exchange(size_t size, void *object, void *expected, const 
 void __atomic_load(size_t size, const void *object, void *result, int order)
 {
 	(void)order;
+	if (generic_atomic_native(size, object))
+	{
+#define LOAD(type) \
+		{ \
+			type value = __atomic_load_n((const type *)object, __ATOMIC_SEQ_CST); \
+			memcpy(result, &value, sizeof(type)); \
+		}
+		GENERIC_ATOMIC_BY_SIZE(size, LOAD)
+#undef LOAD
+		return;
+	}
+	generic_atomic_unaligned(size, object);
 	generic_atomic_acquire();
 	memcpy(result, object, size);
 	generic_atomic_release();
@@ -182,6 +268,19 @@ void __atomic_load(size_t size, const void *object, void *result, int order)
 void __atomic_store(size_t size, void *object, const void *value, int order)
 {
 	(void)order;
+	if (generic_atomic_native(size, object))
+	{
+#define STORE(type) \
+		{ \
+			type stored; \
+			memcpy(&stored, value, sizeof(type)); \
+			__atomic_store_n((type *)object, stored, __ATOMIC_SEQ_CST); \
+		}
+		GENERIC_ATOMIC_BY_SIZE(size, STORE)
+#undef STORE
+		return;
+	}
+	generic_atomic_unaligned(size, object);
 	generic_atomic_acquire();
 	memcpy(object, value, size);
 	generic_atomic_release();
@@ -190,6 +289,20 @@ void __atomic_store(size_t size, void *object, const void *value, int order)
 void __atomic_exchange(size_t size, void *object, const void *value, void *result, int order)
 {
 	(void)order;
+	if (generic_atomic_native(size, object))
+	{
+#define EXCHANGE(type) \
+		{ \
+			type stored, was; \
+			memcpy(&stored, value, sizeof(type)); \
+			was = __atomic_exchange_n((type *)object, stored, __ATOMIC_SEQ_CST); \
+			memcpy(result, &was, sizeof(type)); \
+		}
+		GENERIC_ATOMIC_BY_SIZE(size, EXCHANGE)
+#undef EXCHANGE
+		return;
+	}
+	generic_atomic_unaligned(size, object);
 	generic_atomic_acquire();
 	memcpy(result, object, size);
 	memcpy(object, value, size);

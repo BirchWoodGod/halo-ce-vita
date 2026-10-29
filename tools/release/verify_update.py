@@ -4,10 +4,11 @@ or after downloading them back from the release).
 
   python3 tools/release/verify_update.py --dir release-files/ --version 1.1.0-beta.4 [--public HEX]
 
---dir holds halo.vpk, halo-update.txt and halo-update.txt.sig; the public
-key is vita_update_key.h's unless --public gives one. Exit status 0 when
-the signature is the key's, the manifest names this version and title and
-halo.vpk's size and SHA-512 are the manifest's.
+--dir holds the VPK the manifest names (halo-ce-vita-<version>-vita.vpk, or
+halo.vpk), halo-update.txt and halo-update.txt.sig; the public key is
+vita_update_key.h's unless --public gives one. Exit status 0 when the
+signature is the key's, the manifest names this version and title and one
+of those two names, and that file's size and SHA-512 are the manifest's.
 """
 
 import argparse
@@ -42,10 +43,15 @@ def main():
         common.fail("the manifest is malformed")
     if fields["version"] != version:
         common.fail(f"the manifest is for {fields['version']}, not {version}")
-    size, sha512 = common.file_digest(folder / common.VPK)
-    if fields["file"] != common.VPK or int(fields["size"]) != size or fields["sha512"] != sha512:
-        common.fail("halo.vpk is not the file the manifest names")
-    title = common.vpk_title(folder / common.VPK)
+    if fields["file"] not in (common.vpk_name(version), common.LEGACY_VPK):
+        common.fail(f"the manifest names {fields['file']}, not {common.vpk_name(version)} or {common.LEGACY_VPK}")
+    vpk = folder / fields["file"]
+    if not vpk.is_file():
+        common.fail(f"{vpk} is missing (the file the manifest names)")
+    size, sha512 = common.file_digest(vpk)
+    if int(fields["size"]) != size or fields["sha512"] != sha512:
+        common.fail(f"{fields['file']} is not the file the manifest signs")
+    title = common.vpk_title(vpk)
     if title != fields["title"]:
         common.fail(f"the VPK's title {title} is not the manifest's {fields['title']}")
     print(f"OK: {version}, {title}, {size} bytes, signed by {public}")

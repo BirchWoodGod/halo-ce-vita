@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style multiplayer pause screen (Menu style Halo 3), built into each level's map
+with the campaign's (ingame.txt): it stands for the Xbox's multiplayer pause screen of a player
+alone on their machine (ui\shell\multiplayer_game\pause_game\1p_pause_game, which Start opens in
+a multiplayer game: ui_widget.c ui_check_for_pause_game; split screen's 2p and 4p screens, each
+player's own over their part of the screen, stay the Xbox's) and does what that one does - RESUME
+and its quit, the Xbox's own "mp game player quit" - laid out as pause.xml (its fonts and
+pictures, the same set): the game type and map in the title strip, the score to win under it,
+the column of choices at the left, the game's panel at the right, the buttons in a strip at the
+bottom. As the Xbox's, it never pauses the game (no pause_game flag). Its rows
+(menu_functions.c "port h3 mp pause ..."):
+- RESUME;
+- PLAYERS: Halo 3's roster (players.xml: add friend, block);
+- SETTINGS: the profile's controls, as CUSTOMIZATION's (stick and button layout, look sensitivity,
+  invert look and flight, auto-center, vibration: the Xbox profile's fields, saved to it on Circle
+  and played at once), and ALL SETTINGS, the settings panel. The Xbox's multiplayer pause has no
+  settings of its own (Halo PC's had, and its maps' are taken out: cache_file_formats.c
+  multiplayer_pause_list_convert);
+- PARTY, in a party only: the settings panel's Party page (its chat and quick chat);
+- LEAVE GAME for a machine that joined, END GAME for the host's: Halo 3's question first, then the
+  Xbox's quit (the same function its pause ran, for every network: system link, online, a
+  dedicated server's or a PC's game).
+No CHANGE TEAMS: the Xbox changes a player's team in the game's lobby only (its server refuses a
+player's settings once the game has started: network_server_message_handler.c). In a Forge game
+the Forge menu opens instead (forge.xml), as before. The art is this folder's own
+(tools/halo3_menu_art.py). -->
+<menus root="h3/mppause/screen" replaces="ui\shell\multiplayer_game\pause_game\1p_pause_game">
+	<bitmap name="h3/mp_arrow_left">
+		<frame png="halo3/arrow_left.png" width="8" height="16"/>
+	</bitmap>
+	<bitmap name="h3/mp_arrow_right">
+		<frame png="halo3/arrow_right.png" width="8" height="16"/>
+	</bitmap>
+	<strings name="h3/mppause_text">
+		<string text="RESUME"/>
+		<string text="PLAYERS"/>
+		<string text="SETTINGS"/>
+		<string text="PARTY"/>
+		<string text="LEAVE GAME"/>
+		<string text="END GAME"/>
+		<string text="GAME"/>
+		<string text="LEAVE GAME?"/>
+		<string text="You leave this game and go back to the menus.\nThe others play on without you."/>
+		<string text="Leave"/>
+		<string text="END GAME?"/>
+		<string text="You host this game: it ends for every player\nand everyone goes back to the menus."/>
+		<string text="End"/>
+		<string text="Back"/>
+		<string text="Select"/>
+		<string text="ALL SETTINGS"/>
+		<string text="Change"/>
+		<string text="Save"/>
+	</strings>
+	<strings name="h3/mpset_labels">
+		<string text="STICK LAYOUT"/>
+		<string text="BUTTON LAYOUT"/>
+		<string text="LOOK SENSITIVITY"/>
+		<string text="INVERT LOOK"/>
+		<string text="INVERT FLIGHT"/>
+		<string text="AUTO-CENTER"/>
+		<string text="VIBRATION"/>
+	</strings>
+	<!-- (the rows' help, in the list's order: CUSTOMIZATION's, then ALL SETTINGS') -->
+	<strings name="h3/mpset_help">
+		<string text="STANDARD: move with the left stick, look with\nthe right. SOUTHPAW swaps them. LEGACY: move\nand turn with the left, strafe and look with the right."/>
+		<string text="What the game's buttons do. The settings panel's\nButton layout picks which PS Vita button each\nof them is on: the two add up."/>
+		<string text="How fast the right stick turns you, 1 to 10. The\nsettings panel's Look sensitivity speeds it up or\nslows it down on this PS Vita."/>
+		<string text="Push up to look down. The settings panel's Invert\nlook does the same on this PS Vita: use one of\nthe two, not both."/>
+		<string text="Push up to dive in the Banshee and the other\naircraft, as with a flight stick."/>
+		<string text="The view levels itself as you move."/>
+		<string text="For a controller that vibrates (on a PC). The\nPS Vita has no vibration motor."/>
+		<string text="The settings panel: graphics, sound, the PS Vita's\nown controls, the connection, friends and party."/>
+	</strings>
+
+	<!-- the choices: their places written by port h3 mp pause (the rows shown, one under another:
+	PARTY in a party only, LEAVE GAME or END GAME) -->
+	<widget name="h3/mppause/resume" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/mppause_text" string_index="0">
+		<on event="a" close="all"/>
+	</widget>
+	<widget name="h3/mppause/players" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mppause_text" string_index="1">
+		<on event="a" open="h3/players/screen"/>
+	</widget>
+	<widget name="h3/mppause/settings" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mppause_text" string_index="2">
+		<on event="a" open="h3/mpset/screen"/>
+	</widget>
+	<widget name="h3/mppause/party" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mppause_text" string_index="3">
+		<on event="a" run="port h3 mp pause party"/>
+	</widget>
+	<widget name="h3/mppause/leave" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mppause_text" string_index="4">
+		<on event="a" open="h3/mppause/leave_screen"/>
+	</widget>
+	<widget name="h3/mppause/end" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/mppause_text" string_index="5">
+		<on event="a" open="h3/mppause/end_screen"/>
+	</widget>
+	<widget name="h3/mppause/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 mp pause"/>
+		<child widget="h3/mppause/resume" x="0" y="0"/>
+		<child widget="h3/mppause/players" x="0" y="24"/>
+		<child widget="h3/mppause/settings" x="0" y="48"/>
+		<child widget="h3/mppause/party" x="0" y="72"/>
+		<child widget="h3/mppause/leave" x="0" y="96"/>
+		<child widget="h3/mppause/end" x="0" y="120"/>
+	</widget>
+
+	<!-- (the column behind the rows: one for four, one for five, as many as are shown) -->
+	<widget name="h3/mppause/column_4" left="48" top="112" width="236" height="112" bitmap="h3/column"/>
+	<widget name="h3/mppause/column_5" left="48" top="112" width="236" height="136" bitmap="h3/column"/>
+	<widget name="h3/mppause/title" type="text" left="56" top="49" width="540" height="26" font="h3/font_title" color="#FFF4F4F4"/>
+	<widget name="h3/mppause/rules" type="text" left="56" top="88" width="320" height="16" font="h3/font_small" color="#FF9FB6CC"/>
+	<widget name="h3/mppause/count" type="text" left="380" top="92" width="200" height="16" font="h3/font_small" color="#FFEEF2F6"/>
+	<widget name="h3/mppause/game_caption" type="text" left="312" top="156" width="280" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/mppause_text" string_index="6"/>
+	<widget name="h3/mppause/game" type="text" left="312" top="180" width="276" height="94" font="h3/font_small" color="#FFD3CBC3"/>
+
+	<widget name="h3/mppause/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" close="all"/>
+		<child widget="h3/pause/haze"/>
+		<child widget="h3/pause/strip"/>
+		<child widget="h3/pause/rule"/>
+		<child widget="h3/mppause/title"/>
+		<child widget="h3/mppause/rules"/>
+		<child widget="h3/mppause/count"/>
+		<child widget="h3/pause/nameplate"/>
+		<child widget="h3/mppause/column_4"/>
+		<child widget="h3/mppause/column_5"/>
+		<child widget="h3/pause/objectives_panel"/>
+		<child widget="h3/mppause/game_caption"/>
+		<child widget="h3/pause/objectives_rule"/>
+		<child widget="h3/mppause/game"/>
+		<child widget="h3/pause/buttons"/>
+		<child widget="h3/pause/a_butn"/>
+		<child widget="h3/pause/select"/>
+		<child widget="h3/pause/b_butn"/>
+		<child widget="h3/pause/back"/>
+		<child widget="h3/mppause/list" x="56" y="120"/>
+	</widget>
+
+	<!-- LEAVE GAME and END GAME, asked first (Halo 3's question over the haze: forge.xml's
+	dialog), then the Xbox's quit -->
+	<widget name="h3/mppause/leave_title" type="text" left="132" top="156" width="376" height="22" font="h3/font_title" color="#FFF2F6FA" string_list="h3/mppause_text" string_index="7"/>
+	<widget name="h3/mppause/leave_text" type="text" left="132" top="194" width="376" height="80" font="h3/font_small" color="#FFCFD9E3" string_list="h3/mppause_text" string_index="8"/>
+	<widget name="h3/mppause/leave_label" type="text" left="152" top="291" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mppause_text" string_index="9"/>
+	<widget name="h3/mppause/leave_screen" flags="pass_unhandled_to_focused_child">
+		<on event="a start" run="mp game player quit" close="all"/>
+		<on event="b back" back="true"/>
+		<child widget="h3/pause/haze"/>
+		<child widget="h3/forge/leave/panel"/>
+		<child widget="h3/forge/leave/rule"/>
+		<child widget="h3/forge/leave/strip"/>
+		<child widget="h3/mppause/leave_title"/>
+		<child widget="h3/mppause/leave_text"/>
+		<child widget="h3/forge/leave/a_butn"/>
+		<child widget="h3/mppause/leave_label"/>
+		<child widget="h3/forge/leave/b_butn"/>
+		<child widget="h3/forge/leave/back"/>
+	</widget>
+	<widget name="h3/mppause/end_title" type="text" left="132" top="156" width="376" height="22" font="h3/font_title" color="#FFF2F6FA" string_list="h3/mppause_text" string_index="10"/>
+	<widget name="h3/mppause/end_text" type="text" left="132" top="194" width="376" height="80" font="h3/font_small" color="#FFCFD9E3" string_list="h3/mppause_text" string_index="11"/>
+	<widget name="h3/mppause/end_label" type="text" left="152" top="291" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/mppause_text" string_index="12"/>
+	<widget name="h3/mppause/end_screen" flags="pass_unhandled_to_focused_child">
+		<on event="a start" run="mp game player quit" close="all"/>
+		<on event="b back" back="true"/>
+		<child widget="h3/pause/haze"/>
+		<child widget="h3/forge/leave/panel"/>
+		<child widget="h3/forge/leave/rule"/>
+		<child widget="h3/forge/leave/strip"/>
+		<child widget="h3/mppause/end_title"/>
+		<child widget="h3/mppause/end_text"/>
+		<child widget="h3/forge/leave/a_butn"/>
+		<child widget="h3/mppause/end_label"/>
+		<child widget="h3/forge/leave/b_butn"/>
+		<child widget="h3/forge/leave/back"/>
+	</widget>
+
+	<!-- SETTINGS: the profile's controls, rows as CUSTOMIZATION's (their names its: menu_functions.c
+	h3_custom_change steps them), Cross and right a value on, left back; ALL SETTINGS the settings
+	panel; Circle saves the profile when anything changed and the controls play at once -->
+	<widget name="h3/mpset/value" type="text" left="152" top="0" width="170" height="20" align="center" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/mpset/arrow_left" left="144" top="2" width="8" height="16" bitmap="h3/mp_arrow_left"/>
+	<widget name="h3/mpset/arrow_right" left="326" top="2" width="8" height="16" bitmap="h3/mp_arrow_right"/>
+	<widget name="h3/mpset/stick_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mpset_labels" string_index="0"/>
+	<widget name="h3/mpset/op_stick" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/browser_row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/mpset/stick_label"/>
+		<child widget="h3/mpset/value"/>
+		<child widget="h3/mpset/arrow_left"/>
+		<child widget="h3/mpset/arrow_right"/>
+	</widget>
+	<widget name="h3/mpset/buttons_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mpset_labels" string_index="1"/>
+	<widget name="h3/mpset/op_buttons" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/browser_row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/mpset/buttons_label"/>
+		<child widget="h3/mpset/value"/>
+		<child widget="h3/mpset/arrow_left"/>
+		<child widget="h3/mpset/arrow_right"/>
+	</widget>
+	<widget name="h3/mpset/look_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mpset_labels" string_index="2"/>
+	<widget name="h3/mpset/op_look" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/browser_row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/mpset/look_label"/>
+		<child widget="h3/mpset/value"/>
+		<child widget="h3/mpset/arrow_left"/>
+		<child widget="h3/mpset/arrow_right"/>
+	</widget>
+	<widget name="h3/mpset/invert_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mpset_labels" string_index="3"/>
+	<widget name="h3/mpset/op_invert" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/browser_row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/mpset/invert_label"/>
+		<child widget="h3/mpset/value"/>
+		<child widget="h3/mpset/arrow_left"/>
+		<child widget="h3/mpset/arrow_right"/>
+	</widget>
+	<widget name="h3/mpset/flight_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mpset_labels" string_index="4"/>
+	<widget name="h3/mpset/op_flight" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/browser_row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/mpset/flight_label"/>
+		<child widget="h3/mpset/value"/>
+		<child widget="h3/mpset/arrow_left"/>
+		<child widget="h3/mpset/arrow_right"/>
+	</widget>
+	<widget name="h3/mpset/autocenter_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mpset_labels" string_index="5"/>
+	<widget name="h3/mpset/op_autocenter" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/browser_row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/mpset/autocenter_label"/>
+		<child widget="h3/mpset/value"/>
+		<child widget="h3/mpset/arrow_left"/>
+		<child widget="h3/mpset/arrow_right"/>
+	</widget>
+	<widget name="h3/mpset/vibration_label" type="text" left="0" top="0" width="160" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mpset_labels" string_index="6"/>
+	<widget name="h3/mpset/op_vibration" width="336" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/browser_row">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="h3/mpset/vibration_label"/>
+		<child widget="h3/mpset/value"/>
+		<child widget="h3/mpset/arrow_left"/>
+		<child widget="h3/mpset/arrow_right"/>
+	</widget>
+	<widget name="h3/mpset/op_panel" type="text" width="336" height="20" bitmap="h3/browser_row" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/mppause_text" string_index="15">
+		<on event="a start" run="port settings panel"/>
+	</widget>
+	<widget name="h3/mpset/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 mp settings"/>
+		<child widget="h3/mpset/op_stick" x="0" y="0"/>
+		<child widget="h3/mpset/op_buttons" x="0" y="20"/>
+		<child widget="h3/mpset/op_look" x="0" y="40"/>
+		<child widget="h3/mpset/op_invert" x="0" y="60"/>
+		<child widget="h3/mpset/op_flight" x="0" y="80"/>
+		<child widget="h3/mpset/op_autocenter" x="0" y="100"/>
+		<child widget="h3/mpset/op_vibration" x="0" y="120"/>
+		<child widget="h3/mpset/op_panel" x="0" y="146"/>
+	</widget>
+	<widget name="h3/mpset/title" type="text" left="56" top="49" width="540" height="26" font="h3/font_title" color="#FFF4F4F4" string_list="h3/mppause_text" string_index="2"/>
+	<widget name="h3/mpset/profile_name" type="text" left="56" top="88" width="536" height="16" font="h3/font_small" color="#FF9FB6CC"/>
+	<widget name="h3/mpset/panel" left="44" top="112" width="352" height="184" bitmap="h3/panel"/>
+	<widget name="h3/mpset/custom_help" type="text" left="56" top="306" width="400" height="50" font="h3/font_small" color="#FFCFD9E3" string_list="h3/mpset_help"/>
+	<widget name="h3/mpset/status" type="text" left="56" top="360" width="536" height="34" font="h3/font_small" color="#FFF0B070" text_y="1"/>
+	<widget name="h3/mpset/change" type="text" left="76" top="443" width="90" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/mppause_text" string_index="16"/>
+	<widget name="h3/mpset/save" type="text" left="192" top="443" width="100" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/mppause_text" string_index="17"/>
+	<widget name="h3/mpset/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port h3 mp settings init"/>
+		<on event="b back" run="port h3 mp settings save" back="true"/>
+		<on event="deleted" run="port h3 mp settings close"/>
+		<child widget="h3/pause/haze"/>
+		<child widget="h3/pause/strip"/>
+		<child widget="h3/pause/rule"/>
+		<child widget="h3/mpset/title"/>
+		<child widget="h3/mpset/profile_name"/>
+		<child widget="h3/mpset/panel"/>
+		<child widget="h3/mpset/custom_help"/>
+		<child widget="h3/mpset/status"/>
+		<child widget="h3/pause/buttons"/>
+		<child widget="h3/pause/a_butn"/>
+		<child widget="h3/mpset/change"/>
+		<child widget="h3/pause/b_butn"/>
+		<child widget="h3/mpset/save"/>
+		<child widget="h3/mpset/list" x="52" y="122"/>
+	</widget>
+</menus>

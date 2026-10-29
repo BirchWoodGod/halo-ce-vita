@@ -43,6 +43,7 @@ void platform_log(const char *format, ...);
 #include "cseries/profile.h"
 #include "devices/device_definitions.h"
 #include "devices/devices.h"
+#include "devices/device_machines.h"
 #include "editor/editor_stubs.h"
 #include "effects/contrail_definitions.h"
 #include "effects/contrails.h"
@@ -169,12 +170,17 @@ makes the host's objects at the host's datum indices, and deletes them only
 on the host's word */
 long network_objects_new_object_index(void);
 boolean network_objects_creating_host_object(void);
+/* (port: Forge's placement, port/linux/game/forge.c: the object chosen, as
+it is, not the game type's in its place) */
+extern int forge_placing_exact;
 boolean network_objects_may_delete(long object_index);
 /* port/linux/game/network_coop.c's: the co-op host's object census looks at each object made */
 void network_coop_note_object_new(long object_index);
 /* port/linux/game/first_person_legs.c's (from OpenCE): the last map's
 waist and mesh forgotten */
 void first_person_legs_reset(void);
+/* port/linux/game/ragdolls.c's: the last map's ragdolls let go */
+void ragdolls_reset(void);
 #endif
 /* port/linux/game/network_coop.c's: the scripts' attaching, on co-op's clients */
 void network_coop_note_attach(long parent_index, char const *parent_marker_name, long child_index,
@@ -1292,6 +1298,8 @@ void objects_initialize_for_new_map(
 	/* port: the last map's waist and mesh forgotten
 	(port/linux/game/first_person_legs.c) */
 	first_person_legs_reset();
+	/* port: the last map's ragdolls let go (port/linux/game/ragdolls.c) */
+	ragdolls_reset();
 #endif
 	
 	data_make_valid(object_header_data);
@@ -2026,6 +2034,12 @@ void objects_scripting_set_scale(
 	return;
 }
 
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean network_game_distributed_client(void);
+
 static void object_delete_initial_recursive(
 	long object_index,
 	boolean delete_siblings)
@@ -2037,8 +2051,10 @@ static void object_delete_initial_recursive(
 	on the host's word, a flag the host returns or resets included, so a
 	client's flag deletion is no bug (ChupathingyCE 2ec77029, CC0: it halted
 	debug builds in CTF games online; release builds check nothing) */
+	/* port: nor an Infection zombie's skull, which the host deletes as the
+	zombie drops it (port/linux/game/infection.c) */
 	if (game_engine_running() && object->object.type == _object_type_weapon &&
-		!network_game_distributed_client())
+		!network_game_distributed_client() && !infection_active())
 	{
 		match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 829, !(weapon_is_flag(object_index)));
 	}
@@ -2122,6 +2138,15 @@ void object_reconnect_to_map(
 		if (location->cluster_index!=NONE)
 		{
 			object->object.location = *location;
+#ifdef HALO_LINUX
+			/* (port) the original game's bug: the locations made on the
+			stack never set bonus (only scenario_location_award_bonus
+			writes it, to NONE, and play never reads it), so the stack's
+			garbage was copied into the object - into game state, saved
+			games and the resting lights' hash below (Sierra-III's handoff,
+			5.6) */
+			object->object.location.bonus = (word)NONE;
+#endif
 			header->cluster_index = object->object.location.cluster_index;
 
 			SET_FLAG(object->object.flags, _object_outside_of_map_bit, FALSE);
@@ -3708,6 +3733,9 @@ long object_new(
 #ifdef HALO_LINUX
 		/* (the host's object, which the host made as the game type has it) */
 		&& !network_objects_creating_host_object()
+		/* (what Forge's monitor chose: a flamethrower, a Scorpion where the
+		vehicle set has Warthogs) */
+		&& !forge_placing_exact
 #endif
 		)
 	{
@@ -4277,6 +4305,14 @@ static boolean object_update(
 			}
 		}
 
+#ifdef HALO_LINUX
+		/* port: an elevator's riders carried by this tick's movement
+		(OpenCE's 30, device_machines.h): where its node is before its
+		update, and moved by how far it went once its nodes are recomputed */
+		real_point3d elevator_before;
+		boolean elevator_carry = header->type == _object_type_machine &&
+			machine_elevator_carry_begin(object_index, &elevator_before);
+#endif
 		OBJECT_STEP_BEGIN(_objects_phase_type); object_type_update(object_index); OBJECT_STEP_END();
 		if (object_definition->object.collision_model.index!=NONE)
 		{
@@ -4330,6 +4366,8 @@ static boolean object_update(
 			{
 				object_compute_node_matrices(object_index);
 			}
+			if (elevator_carry)
+				machine_elevator_carry_end(object_index, &elevator_before);
 #else
 			object_compute_node_matrices(object_index);
 #endif
@@ -5456,6 +5494,10 @@ static void object_connect_lights(
 		{
 			if (!object->object.attachment_types[i] && object->object.attachment_indices[i]!=NONE)
 			{
+#ifdef HALO_LINUX
+				/* (port: a dark light left off the map, object_lights.c) */
+				light_attached_reconnect(object->object.attachment_indices[i], disconnect, reconnect);
+#else
 				if (disconnect)
 				{
 					light_disconnect_from_map(object->object.attachment_indices[i]);
@@ -5464,6 +5506,7 @@ static void object_connect_lights(
 				{
 					light_reconnect_to_map(object->object.attachment_indices[i]);
 				}
+#endif
 			}
 		}
 	}

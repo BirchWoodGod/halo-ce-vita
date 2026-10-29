@@ -206,6 +206,20 @@ enum
 	DEDICATED_PEER_PACKETS_PER_SECOND = 2000,
 	DEDICATED_PEERS_PER_ADDRESS = 8,
 #endif
+	/* a Vita hosting a game for Vitas and PC (the crossplay wire,
+	network_wire.h: strangers' PC clients, docs/crossplay.md 7.4): a peer's
+	packets a second past which the rest are dropped (a game sends a few
+	score a second; no map download on that wire), the peers one address
+	may have connected, and the players it reaches or has reached at once
+	(the game takes the Vitas' 16, its host and 15 machines; a few more
+	while some leave and others come) */
+	CROSSPLAY_HOST_PEER_PACKETS_PER_SECOND = 1000,
+	CROSSPLAY_HOST_PEERS_PER_ADDRESS = 8,
+	CROSSPLAY_HOST_MAXIMUM_PEERS = 24,
+	/* ... and how long one of those may stay connected with no packet of the
+	game before a new player asking takes its place (an OpenCE browser's ping
+	closes within seconds) */
+	CROSSPLAY_HOST_IDLE_PEER_MILLISECONDS = 15000,
 };
 
 enum
@@ -220,6 +234,10 @@ enum
 	do not know unread (tunnel_received's switch has no default), so this
 	is no network change */
 	_packet_ping_table,
+	/* friends' cards, a player's options' Add friend and Block (p2p_friends.c:
+	asks and answers, the host relaying between its joiners). Builds before it
+	drop the type unread: no network change; never on the crossplay wire */
+	_packet_friends,
 };
 
 /* the messages of a stream, inside KCP */
@@ -295,13 +313,11 @@ struct peer
 	unsigned long stray_time;
 	/* a pong came back: it is reached both ways */
 	int two_way;
-#ifdef HALO_DEDICATED_SERVER
-	/* (a dedicated server) its packets this second, and since when; when an
-	excess was last logged */
+	/* (a dedicated server, a Vita's crossplay host) its packets this second,
+	and since when; when an excess was last logged */
 	int rate_count;
 	unsigned long rate_time;
 	unsigned long rate_logged_time;
-#endif
 	/* relays: those it offered; the allocation of the session (from its
 	secret); whether it is asked for through relays, and through which; the
 	endpoint is a relay's, since when; and when its addresses were last
@@ -315,6 +331,10 @@ struct peer
 	int via_relay;
 	unsigned long relayed_time;
 	unsigned long punch_time;
+	/* (a host) whether the game's packets (a datagram, its stream) came from
+	it yet: a peer that sends none is no player (an OpenCE server browser's
+	ping of the game: docs/opence-net32-spec.md 9.1) */
+	int game_heard;
 };
 
 /* a UDP stand-in for one port of a peer */
@@ -445,6 +465,8 @@ static struct
 	unsigned char token[P2P_TOKEN_SIZE];
 	/* whether the server browser's exit hook is set (lobby_quit) */
 	int lobby_quit_registered;
+	/* friends went online once this run: their offline presence at exit */
+	int friends_quit_registered;
 	/* whether the server browser listed this token (p2p_lobby.c): going
 	private makes a new one */
 	int token_listed;
@@ -460,6 +482,10 @@ static struct
 
 	/* joining: until the host is reached, or JOIN_TIMEOUT */
 	int join_requested;
+	/* the wire of the game being joined (network_wire.h: 0 legacy, 1
+	crossplay, -1 not known - an invite link's, asked on both until its host
+	answers: p2p_join_wire_known) */
+	int join_wire;
 	int joining;
 	unsigned char join_host[P2P_IDENTIFIER_SIZE];
 	unsigned char join_host_hash[P2P_KEY_HASH_SIZE];
@@ -502,10 +528,15 @@ static struct
 	group's machines, through local relays; nothing goes to the internet
 	(no signalling, STUN or UPnP) */
 	int adhoc;
+	/* p2p_shutdown asked the thread to stop (it tears everything down, and
+	internet play is off again) */
+	int stopping;
 
 	/* UPnP (posix_upnp.c): a thread asking the router; the port it forwards
 	here, and when it was last asked */
 	int upnp_working;
+	/* (network.allow_upnp, not in ad hoc play: the session's) */
+	int upnp_allowed;
 	int upnp_asked;
 	int upnp_forwarded;
 	int upnp_release_registered;
@@ -533,6 +564,9 @@ static struct
 /* the proxy (its index + 1) with each local port (all of theirs are on
 p2p.local_address) */
 static unsigned short proxy_by_port[65536];
+
+/* the network thread (joined when internet play stops: p2p_shutdown) */
+static pthread_t p2p_thread_handle;
 
 static unsigned char identifier[P2P_IDENTIFIER_SIZE];
 /* this run's X25519 keys, which the identifier comes from: from an Ed25519
@@ -1254,7 +1288,7 @@ static void drop_peer(struct peer *peer, const char *reason)
 	makes no second session from one request, which anyone who saw it could
 	send again) */
 	if (ask_again)
-		p2p_signal_join(p2p.join_host_hash, p2p.join_token);
+		p2p_signal_join(p2p.join_host_hash, p2p.join_token, p2p.join_wire);
 }
 
 static void add_candidates(struct peer *peer, const struct p2p_candidate *candidates, int count)
@@ -1293,6 +1327,17 @@ static struct peer *free_peer(void)
 	return NULL;
 }
 
+/* the players this host is reaching or has reached */
+static int joiner_peer_count(void)
+{
+	int count = 0;
+	int index;
+
+	for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
+		count += p2p.peers[index].used && !p2p.peers[index].is_host;
+	return count;
+}
+
 /* the players this host is reaching and has not reached yet */
 static int opening_peer_count(void)
 {
@@ -1304,7 +1349,42 @@ static int opening_peer_count(void)
 	return count;
 }
 
+/* (a Vita hosting for Vitas and PC, its peers full) the joiner that has
+gone longest with its tunnel up and no packet of the game, if one has for
+CROSSPLAY_HOST_IDLE_PEER_MILLISECONDS: whether there is one, dropped (drop)
+as a proven request makes its session, never sooner (a request that proves
+nothing drops no one) */
+static int crossplay_host_idle_peer(int drop)
+{
+	struct peer *idlest = NULL;
+	int index;
+
+	for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
+	{
+		struct peer *peer = &p2p.peers[index];
+
+		if (peer->used && !peer->is_host && peer->connected && !peer->game_heard &&
+			elapsed(peer->offered_time, CROSSPLAY_HOST_IDLE_PEER_MILLISECONDS) &&
+			(!idlest || (unsigned int)(p2p_now() - peer->offered_time) > (unsigned int)(p2p_now() - idlest->offered_time)))
+		{
+			idlest = peer;
+		}
+	}
+	if (!idlest)
+		return 0;
+	if (drop)
+		drop_peer(idlest, "no game from it (a server browser's ping, or idle): making way");
+	return 1;
+}
+
+static int peer_turned_away(const unsigned char *peer_identifier, int is_host, int making);
+
 int p2p_peer_turned_away(const unsigned char *peer_identifier, int is_host)
+{
+	return peer_turned_away(peer_identifier, is_host, 0);
+}
+
+static int peer_turned_away(const unsigned char *peer_identifier, int is_host, int making)
 {
 	static unsigned long logged_time;
 	const char *reason = NULL;
@@ -1317,6 +1397,14 @@ int p2p_peer_turned_away(const unsigned char *peer_identifier, int is_host)
 		reason = "too many players";
 	else if (!is_host && opening_peer_count() >= MAXIMUM_OPENING_PEERS)
 		reason = "too many players connecting at once";
+	/* (a Vita hosting for Vitas and PC: the players a game of the Vitas' 16
+	has, and a few more, never a hundred strangers' tunnels; one that has
+	been there CROSSPLAY_HOST_IDLE_PEER_MILLISECONDS without a packet of the
+	game - an OpenCE server browser's ping, which asks as a player does, or
+	an idle stranger - makes way for the one asking) */
+	else if (!is_host && p2p.hosting && !p2p.adhoc && network_wire_crossplay() &&
+		joiner_peer_count() >= CROSSPLAY_HOST_MAXIMUM_PEERS && !crossplay_host_idle_peer(making))
+		reason = "as many players as a Vita's game for Vitas and PC takes";
 	if (!reason)
 		return 0;
 	/* (anyone with the invite can ask as often as they like) */
@@ -1346,7 +1434,7 @@ int p2p_peer_offered(const unsigned char *peer_identifier, const unsigned char *
 	{
 		unsigned char joiner_key[P2P_SHA256_SIZE], host_key[P2P_SHA256_SIZE];
 
-		if (session_retired(secret) || p2p_peer_turned_away(peer_identifier, is_host))
+		if (session_retired(secret) || peer_turned_away(peer_identifier, is_host, 1))
 			return 0;
 		peer = free_peer();
 		memset(peer, 0, sizeof(*peer));
@@ -1865,9 +1953,10 @@ static void relay_setup(void)
 	char text[1024];
 	const char *entry;
 
-	/* (never on the crossplay wire: relays are this build's, which no PC
-	machine knows, network_wire.h) */
-	p2p.relay_allowed = config_boolean("network.allow_relay") && !p2p.adhoc && !network_wire_crossplay();
+	/* (the legacy wire's alone: relays are this build's, which no PC machine
+	knows, network_wire.h; a game on the crossplay wire offers and takes
+	none in its JOIN and ACCEPT, p2p_signal.c) */
+	p2p.relay_allowed = config_boolean("network.allow_relay") && !p2p.adhoc;
 	if (!p2p.relay_allowed)
 		return;
 	p2p_list_setting("network.relays", "network.relays_file", text, sizeof(text));
@@ -2588,6 +2677,19 @@ int p2p_joined_host(unsigned char *identifier, int take)
 	}
 	if (take)
 		p2p.join_reached = 0;
+	pthread_mutex_unlock(&p2p_lock);
+	return result;
+}
+
+int p2p_join_under_way(void)
+{
+	int result;
+
+	if (!p2p.running)
+		return 0;
+	pthread_mutex_lock(&p2p_lock);
+	result = p2p.join_requested || p2p.joining ||
+		(p2p.join_reached && !elapsed(p2p.join_reached_time, P2P_JOINED_HOST_MILLISECONDS));
 	pthread_mutex_unlock(&p2p_lock);
 	return result;
 }
@@ -3342,15 +3444,25 @@ long p2p_ping_table(unsigned short *pings, int count, long *tick)
 
 /* ---------- the tunnel */
 
-#ifdef HALO_DEDICATED_SERVER
-/* (a dedicated server) a peer's sealed packet, from where it came: 0 if it
-is dropped, as one of more than DEDICATED_PEER_PACKETS_PER_SECOND, or with
-the peer, the first from an address that has DEDICATED_PEERS_PER_ADDRESS
-peers connected already (not through a relay, whose peers share it) */
-static int dedicated_peer_admitted(struct peer *peer, const struct sockaddr_in *from)
+/* (a dedicated server, or a Vita hosting for Vitas and PC) a peer's
+sealed packet, from where it came: 0 if it is dropped, as one of more than
+its packets a second (DEDICATED_PEER_PACKETS_PER_SECOND,
+CROSSPLAY_HOST_PEER_PACKETS_PER_SECOND), or with the peer, the first from
+an address that has as many peers connected already (DEDICATED_PEERS_PER_ADDRESS,
+CROSSPLAY_HOST_PEERS_PER_ADDRESS; not through a relay, whose peers share it).
+Anything else admitted */
+static int peer_admitted(struct peer *peer, const struct sockaddr_in *from)
 {
 	unsigned long now = p2p_now();
 	char text[32];
+#ifdef HALO_DEDICATED_SERVER
+	int packets_per_second = DEDICATED_PEER_PACKETS_PER_SECOND, peers_per_address = DEDICATED_PEERS_PER_ADDRESS;
+#else
+	int packets_per_second = CROSSPLAY_HOST_PEER_PACKETS_PER_SECOND, peers_per_address = CROSSPLAY_HOST_PEERS_PER_ADDRESS;
+
+	if (peer->is_host || !p2p.hosting || p2p.adhoc || !network_wire_crossplay())
+		return 1;
+#endif
 
 	if (!peer->connected && !peer_relay_at(peer, from->sin_addr.s_addr, from->sin_port))
 	{
@@ -3366,7 +3478,7 @@ static int dedicated_peer_admitted(struct peer *peer, const struct sockaddr_in *
 				count++;
 			}
 		}
-		if (count >= DEDICATED_PEERS_PER_ADDRESS)
+		if (count >= peers_per_address)
 		{
 			platform_log("Internet play: player %s refused: %d machines are connected from %s already", peer->name,
 				count, address_text(from->sin_addr.s_addr, 0, text));
@@ -3379,19 +3491,18 @@ static int dedicated_peer_admitted(struct peer *peer, const struct sockaddr_in *
 		peer->rate_time = now;
 		peer->rate_count = 0;
 	}
-	if (++peer->rate_count > DEDICATED_PEER_PACKETS_PER_SECOND)
+	if (++peer->rate_count > packets_per_second)
 	{
 		if (!peer->rate_logged_time || elapsed(peer->rate_logged_time, 10000))
 		{
 			peer->rate_logged_time = now ? now : 1;
 			platform_log("Internet play: player %s sends more than %d packets a second; the rest are dropped",
-				peer->name, DEDICATED_PEER_PACKETS_PER_SECOND);
+				peer->name, packets_per_second);
 		}
 		return 0;
 	}
 	return 1;
 }
-#endif
 
 static void tunnel_received(const unsigned char *packet, int size, const struct sockaddr_in *from)
 {
@@ -3446,10 +3557,8 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 		size - TUNNEL_HEADER_SIZE, inner);
 	if (inner_size < 1)
 		return;
-#ifdef HALO_DEDICATED_SERVER
-	if (!dedicated_peer_admitted(peer, from))
+	if (!peer_admitted(peer, from))
 		return;
-#endif
 	newest = counter > peer->receive_highest;
 	packet_received(peer, counter);
 	peer_heard(peer, from->sin_addr.s_addr, from->sin_port, newest, inner[0] == _packet_pong && inner_size >= 5);
@@ -3477,9 +3586,11 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 		}
 		break;
 	case _packet_datagram:
+		peer->game_heard = 1;
 		datagram_received(peer, inner, inner_size);
 		break;
 	case _packet_stream:
+		peer->game_heard = 1;
 		stream_received(peer, inner + 1, inner_size - 1);
 		break;
 	case _packet_bye:
@@ -3490,6 +3601,10 @@ static void tunnel_received(const unsigned char *packet, int size, const struct 
 		builds that send none, network_wire.h) */
 		if (!network_wire_crossplay())
 			ping_table_received(peer, inner + 1, inner_size - 1);
+		break;
+	case _packet_friends:
+		if (!network_wire_crossplay() && !p2p.adhoc)
+			p2p_friends_tunnel_heard(peer->virtual_address, peer->is_host, inner + 1, inner_size - 1);
 		break;
 	}
 }
@@ -3626,13 +3741,8 @@ static int join_code(const char *code, int public, const unsigned char *host)
 	set_status(N_("a dedicated server joins no games (code %.4s-%.4s ignored)"), code, code + 4);
 	return 1;
 #endif
-	/* (codes are Vita games', the legacy wire's: no PC host has one,
-	network_wire.h) */
-	if (network_wire_crossplay())
-	{
-		set_status(N_("codes join Vita games: turn Crossplay off to use code %.4s-%.4s"), code, code + 4);
-		return 1;
-	}
+	/* (codes are this build's own: a Vita's game on either wire has one,
+	its record saying which; no PC host has one) */
 	if (p2p.code[0] && !memcmp(p2p.code, code, 4) && !memcmp(p2p.code + 5, code + 4, 4))
 	{
 		set_status(N_("that is this machine's own code"));
@@ -3648,8 +3758,10 @@ static int join_code(const char *code, int public, const unsigned char *host)
 }
 
 /* under p2p_lock: parse_invite's result (a code, with its dash, is looked
-up); public: the invite a public lobby's code led to */
-static int join_invite(const char *text, int public)
+up); public: the invite a public lobby's code led to; crossplay: the wire
+of its host's game (0 legacy, 1 crossplay, -1 not known: an invite link,
+asked on both) */
+static int join_invite(const char *text, int public, int crossplay)
 {
 	unsigned char hash[P2P_KEY_HASH_SIZE], host[P2P_IDENTIFIER_SIZE], token[P2P_TOKEN_SIZE];
 	char code[P2P_CODE_LENGTH + 1];
@@ -3677,15 +3789,31 @@ static int join_invite(const char *text, int public)
 	peer = find_peer(host);
 	if (peer && peer->connected)
 	{
-		platform_log("Internet play: already connected to that invite's host");
+		/* (reached already - its peer kept from a game before, as a party's
+		members are when the leader hosts again: its game joined by itself
+		once listed, as a host just reached; insider.21 waited for a press,
+		the follow taking 11 to 22 s) */
+		memcpy(p2p.join_host, host, sizeof(host));
+		memcpy(p2p.join_host_hash, hash, sizeof(hash));
+		memcpy(p2p.join_token, token, sizeof(token));
+		if (p2p.joining)
+		{
+			p2p.joining = 0;
+			p2p_signal_stop_joining();
+		}
+		p2p.join_requested = 0;
+		p2p.join_reached = 1;
+		p2p.join_reached_time = p2p_now();
+		platform_log("Internet play: already connected to that invite's host: its game joined once listed");
 		return 1;
 	}
 	if ((p2p.joining || p2p.join_requested) && !memcmp(hash, p2p.join_host_hash, sizeof(hash)) &&
-		!memcmp(token, p2p.join_token, sizeof(token)))
+		!memcmp(token, p2p.join_token, sizeof(token)) && (crossplay < 0 || p2p.join_wire == crossplay))
 		return 1;
 	memcpy(p2p.join_host, host, sizeof(host));
 	memcpy(p2p.join_host_hash, hash, sizeof(hash));
 	memcpy(p2p.join_token, token, sizeof(token));
+	p2p.join_wire = crossplay < 0 ? -1 : crossplay != 0;
 	p2p.join_requested = 1;
 	return 1;
 }
@@ -3695,10 +3823,10 @@ int p2p_running(void)
 	return p2p.running;
 }
 
-int p2p_join_invite_locked(const char *text)
+int p2p_join_invite_locked(const char *text, int crossplay)
 {
 	/* (the server browser's: its host is a stranger's) */
-	int result = join_invite(text, 1);
+	int result = join_invite(text, 1, crossplay);
 
 	if (result > 0 && !p2p.running)
 		platform_log("Internet play is off: the invite is ignored");
@@ -3720,7 +3848,22 @@ int p2p_join_invite(const char *text)
 
 	p2p_identifier();
 	pthread_mutex_lock(&p2p_lock);
-	result = join_invite(text, 0);
+	/* (a link: its host's wire not known, asked on both - a Vita's or a
+	PC's, OpenCE's links are ours, halo://join/<key hash><token>) */
+	result = join_invite(text, 0, -1);
+	pthread_mutex_unlock(&p2p_lock);
+	if (result > 0 && !p2p.running)
+		platform_log("Internet play is off (network.online in config.toml): the invite is ignored");
+	return result > 0;
+}
+
+int p2p_join_invite_on(const char *text, int crossplay)
+{
+	int result;
+
+	p2p_identifier();
+	pthread_mutex_lock(&p2p_lock);
+	result = join_invite(text, 0, crossplay != 0);
 	pthread_mutex_unlock(&p2p_lock);
 	if (result > 0 && !p2p.running)
 		platform_log("Internet play is off (network.online in config.toml): the invite is ignored");
@@ -3730,18 +3873,24 @@ int p2p_join_invite(const char *text)
 void p2p_invite_received(const char *text)
 {
 	/* (an older version's is logged as such) */
-	if (!join_invite(text, 0))
+	if (!join_invite(text, 0, -1))
 		set_status(N_("that is not an invite"));
 }
 
-void p2p_code_found(const char *text)
+void p2p_code_found(const char *text, int crossplay)
 {
 	if (!p2p.looking_up)
 		return;
 	p2p.looking_up = 0;
 	p2p_signal_stop_lookup();
 	set_status(N_("code %.4s-%.4s found; reaching its host"), p2p.lookup_code, p2p.lookup_code + 4);
-	join_invite(text, p2p.lookup_public);
+	join_invite(text, p2p.lookup_public, crossplay);
+}
+
+void p2p_join_wire_known(int crossplay)
+{
+	if (p2p.joining && p2p.join_wire < 0)
+		p2p.join_wire = crossplay != 0;
 }
 
 static int join_code_from(const char *text, int public)
@@ -3828,7 +3977,7 @@ static void update_joining(void)
 		p2p_hex(p2p.join_host, P2P_IDENTIFIER_SIZE, name);
 		set_status(N_("joining %s's game"), name);
 		p2p_signal_start();
-		p2p_signal_join(p2p.join_host_hash, p2p.join_token);
+		p2p_signal_join(p2p.join_host_hash, p2p.join_token, p2p.join_wire);
 	}
 	else if (p2p.joining && elapsed(p2p.join_time, JOIN_TIMEOUT))
 	{
@@ -3876,7 +4025,7 @@ void p2p_new_invite_if_listed(void)
 	{
 		/* (the code stays: it was never listed, and now leads to the new
 		invite) */
-		p2p_signal_host(p2p.token, p2p.code);
+		p2p_signal_host(p2p.token, p2p.code, network_wire_crossplay());
 		memcpy(p2p.clipboard, p2p.invite, sizeof(p2p.clipboard));
 		p2p.has_clipboard = 1;
 		/* (Discord is told the new one) */
@@ -3979,7 +4128,8 @@ static void update_hosting(void)
 		p2p_signal_start();
 		/* (a broker waiting after a failure tries now) */
 		p2p_signal_kick();
-		p2p_signal_host(p2p.token, p2p.code);
+		/* (on the game's wire: network_wire.h, chosen as its server was made) */
+		p2p_signal_host(p2p.token, p2p.code, network_wire_crossplay());
 		/* (the invite is a bearer token: anyone who reads it can join, so the
 		log shows only the host's part; the link itself goes to the
 		clipboard, or on the Vita to host_invite.txt) */
@@ -4104,6 +4254,101 @@ static void lobby_quit(void)
 	pthread_mutex_unlock(&p2p_lock);
 }
 
+/* the game exits: friends told this machine went offline (p2p_friends.c),
+through the brokers ready now */
+static void friends_quit(void)
+{
+	pthread_mutex_lock(&p2p_lock);
+	if (p2p.running && !p2p.stopping)
+	{
+		p2p_friends_stopping(1);
+		p2p_signal_friends_flush();
+	}
+	pthread_mutex_unlock(&p2p_lock);
+}
+
+/* friends' cards to send on the tunnel (p2p_friends.c), each to its peer
+(0: the host this machine joined), under p2p_lock; none on the crossplay
+wire */
+static void friends_tunnel_send(void)
+{
+	unsigned char inner[1 + 256];
+	unsigned long address;
+	int index, size;
+
+	for (index = 0; (size = p2p_friends_tunnel_outgoing(index, &address, inner + 1, (int)sizeof(inner) - 1)) >= 0;
+		index++)
+	{
+		struct peer *peer = NULL;
+		int each;
+
+		if (network_wire_crossplay())
+			continue;
+		if (address)
+			peer = find_peer_by_address(address);
+		else
+		{
+			for (each = 0; each < P2P_MAXIMUM_PEERS && !peer; each++)
+				if (p2p.peers[each].used && p2p.peers[each].is_host)
+					peer = &p2p.peers[each];
+		}
+		if (!peer || !peer->connected)
+			continue;
+		inner[0] = _packet_friends;
+		peer_send(peer, inner, 1 + size);
+	}
+	p2p_friends_tunnel_sent();
+}
+
+/* what friends need of internet play (p2p_friends.c), under p2p_lock: it
+runs, its wire, and the game hosted for the internet (its invite, and as
+the server browser lists it) */
+static void friends_host_view(struct p2p_friends_host *host)
+{
+	int count, maximum;
+
+	memset(host, 0, sizeof(*host));
+	host->online = p2p.running && !p2p.adhoc && !p2p.stopping && config_boolean("network.online");
+	host->crossplay = network_wire_crossplay();
+	host->pc_host = !network_wire_host_vita();
+	if (p2p.hosting)
+	{
+		host->host_pc_build = network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC;
+		host->vitas_only = !host->crossplay && network_wire_host_audience() == NETWORK_AUDIENCE_VITAS;
+	}
+	/* (a game with a password: its token sealed for friends, p2p_friends.c) */
+	if (p2p.hosting && p2p.has_token)
+		host->has_sealed = p2p_lobby_password_seal(p2p.token, host->signing_key, host->sealed_token);
+	host->hosting = p2p.hosting && p2p.has_token && p2p.game_player_maximum > 0;
+	if (!host->hosting)
+	{
+		int index;
+
+		/* (joined: the invite's host reached, its peer connected) */
+		for (index = 0; index < P2P_MAXIMUM_PEERS && !p2p.adhoc; index++)
+		{
+			const struct peer *peer = &p2p.peers[index];
+
+			if (peer->used && peer->is_host && peer->connected &&
+				!memcmp(peer->identifier, p2p.join_host, P2P_IDENTIFIER_SIZE))
+			{
+				host->joined = 1;
+				memcpy(host->joined_hash, p2p.join_host_hash, P2P_KEY_HASH_SIZE);
+				memcpy(host->joined_token, p2p.join_token, P2P_TOKEN_SIZE);
+				host->joined_locked = p2p_lobby_host_locked(p2p.join_host_hash);
+				break;
+			}
+		}
+		return;
+	}
+	p2p_key_hash(public_key, host->key_hash);
+	memcpy(host->token, p2p.token, P2P_TOKEN_SIZE);
+	p2p_lobby_friends_view(host);
+	hosted_player_counts(&count, &maximum);
+	host->players = count;
+	host->maximum = maximum;
+}
+
 /* the game exits: the router forwards the port no longer (after a request
 under way, which may forward one, if it ends soon) */
 static void upnp_release(void)
@@ -4158,13 +4403,10 @@ static int upnp_needed(void)
 
 static void update_upnp(void)
 {
-	static int allowed = -1;
 	int ask;
 	pthread_t thread;
 
-	if (allowed < 0)
-		allowed = config_boolean("network.allow_upnp") && !p2p.adhoc ? 1 : 0;
-	if (!allowed || p2p.upnp_working || p2p.upnp_released)
+	if (!p2p.upnp_allowed || p2p.upnp_working || p2p.upnp_released)
 		return;
 	if (p2p.upnp_forwarded)
 		ask = elapsed(p2p.upnp_time, UPNP_RENEW_INTERVAL);
@@ -4414,24 +4656,115 @@ static void poll_invite_file(void)
 	snprintf(path, sizeof(path), "%s/join_link.txt", platform_data_root());
 	snprintf(taken, sizeof(taken), "%s/join_link.taken", platform_data_root());
 #endif
+	/* (the file calls without the lock: on the Vita the memory card serves
+	one request at a time, and a call can wait seconds behind another
+	thread's long write - insider.25's backdrop build wrote 9 MB at once,
+	this remove waited behind it holding the lock, and the game thread,
+	which takes the lock every frame (p2p_take_clipboard_text), presented
+	nothing for over 8 s: the watchdog) */
+	pthread_mutex_unlock(&p2p_lock);
 	/* (taken first: a link the launcher writes while this reads is left for
 	the next look, not removed unread; a .taken left by a run that stopped
 	in between would make the rename fail on some file systems) */
 	remove(taken);
-	if (rename(path, taken) != 0)
+	file = rename(path, taken) == 0 ? fopen(taken, "rb") : NULL;
+	size = 0;
+	if (file)
+	{
+		size = fread(text, 1, sizeof(text) - 1, file);
+		fclose(file);
+		remove(taken);
+	}
+	pthread_mutex_lock(&p2p_lock);
+	if (!file || p2p.stopping)
 		return;
-	file = fopen(taken, "rb");
-	if (!file)
-		return;
-	size = fread(text, 1, sizeof(text) - 1, file);
-	fclose(file);
-	remove(taken);
 	text[size] = 0;
 	p2p_invite_received(text);
 }
 #endif
 
 /* ---------- the thread */
+
+/* (the p2p thread, under p2p_lock, stopping) everything internet play
+holds let go, as before it started: a listed game's tombstone written and
+the brokers' connections closed (p2p_lobby_stop, p2p_signal_stop), every
+peer told goodbye and dropped (its session retired: it never comes back),
+the stand-ins, connections, tunnel and invite handoff sockets closed, and
+the session's state cleared. What lasts the run is kept: this machine's
+keys and identifier, the sessions that ended (their packets would pass
+again), the invite's token and code, the hosts joined from the public
+lobby (their maps' downloads are warned about) and the exit hooks */
+static void teardown(void)
+{
+	int index;
+
+	p2p_lobby_stop();
+	/* (friends told this machine went offline, before the brokers close) */
+	p2p_friends_stopping(0);
+	p2p_signal_friends_flush();
+	p2p_signal_stop();
+	/* (nothing asked again: a joining host dropped would be) */
+	p2p.joining = 0;
+	p2p.join_requested = 0;
+	for (index = 0; index < P2P_MAXIMUM_PEERS; index++)
+	{
+		if (p2p.peers[index].used)
+			drop_peer(&p2p.peers[index], "internet play stopped");
+	}
+	memset(p2p.peers, 0, sizeof(p2p.peers));
+	for (index = 0; index < MAXIMUM_STREAMS; index++)
+	{
+		if (p2p.streams[index].used)
+			stream_free(&p2p.streams[index]);
+	}
+	for (index = 0; index < MAXIMUM_PROXIES; index++)
+	{
+		close_socket(&p2p.proxies[index].socket);
+		memset(&p2p.proxies[index], 0, sizeof(p2p.proxies[index]));
+		p2p.proxies[index].socket = -1;
+	}
+	for (index = 0; index < MAXIMUM_LISTENERS; index++)
+	{
+		close_socket(&p2p.listeners[index].socket);
+		memset(&p2p.listeners[index], 0, sizeof(p2p.listeners[index]));
+		p2p.listeners[index].socket = -1;
+	}
+	memset(proxy_by_port, 0, sizeof(proxy_by_port));
+	close_socket(&p2p.tunnel_socket);
+	close_socket(&p2p.handoff_socket);
+	p2p.tunnel_port = 0;
+	memset(p2p.closed, 0, sizeof(p2p.closed));
+	memset(p2p.game_ports, 0, sizeof(p2p.game_ports));
+	memset(p2p.sent_ports, 0, sizeof(p2p.sent_ports));
+	p2p.sent_port_next = 0;
+	memset(p2p.stun, 0, sizeof(p2p.stun));
+	p2p.stun_count = 0;
+	p2p.stun_started = 0;
+	p2p.reported_symmetric = 0;
+	/* (the game's own sockets: not internet play's to close) */
+	p2p.hosting_socket = -1;
+	p2p.game_accepts_remote = 0;
+	p2p.hosting = 0;
+	p2p.invite_copied = 0;
+	p2p.game_player_count = p2p.game_player_maximum = 0;
+	p2p.reported_player_count = p2p.reported_player_maximum = 0;
+	p2p.join_reached = 0;
+	p2p.has_clipboard = 0;
+	p2p.lookup_requested = 0;
+	p2p.looking_up = 0;
+	p2p.status[0] = 0;
+	p2p.status_shown[0] = 0;
+	p2p.upnp_asked = 0;
+	p2p.relay_allowed = 0;
+	p2p.relay_host_count = 0;
+	p2p.relays_resolved = 0;
+	p2p.relay_count = 0;
+	memset(p2p.relay_host_found, 0, sizeof(p2p.relay_host_found));
+	memset(p2p.relay_lookup_failures, 0, sizeof(p2p.relay_lookup_failures));
+	p2p.adhoc = 0;
+	p2p.stopping = 0;
+	p2p.running = 0;
+}
 
 static void *p2p_thread(void *unused)
 {
@@ -4465,8 +4798,16 @@ static void *p2p_thread(void *unused)
 	(void)unused;
 	pthread_mutex_lock(&p2p_lock);
 #ifndef HALO_ANDROID
-	/* (here: it may wait for a program) */
-	p2p_register_url_scheme("halo", "Halo: Combat Evolved invite");
+	{
+		/* (here: it may wait for a program; once a run) */
+		static int registered;
+
+		if (!registered)
+		{
+			registered = 1;
+			p2p_register_url_scheme("halo", "Halo: Combat Evolved invite");
+		}
+	}
 #endif
 	for (;;)
 	{
@@ -4477,6 +4818,14 @@ static void *p2p_thread(void *unused)
 		int wait = LOOP_INTERVAL * 5;
 		int index, asked;
 
+		/* (internet play stopping: everything torn down here, under the
+		lock, and the thread ends: p2p_shutdown joins it) */
+		if (p2p.stopping)
+		{
+			teardown();
+			pthread_mutex_unlock(&p2p_lock);
+			return NULL;
+		}
 		/* what to wait for: the tunnel, then the brokers (whose sockets are
 		few), then the stand-ins, as many as a select takes */
 		read_owners[read_count] = _owner_tunnel;
@@ -4509,6 +4858,10 @@ static void *p2p_thread(void *unused)
 				read[read_count++] = p2p.listeners[index].socket;
 			}
 		}
+		/* (and while the server browser's listings wait for their
+		signatures' checks, a budget's worth each pass: p2p_lobby.c) */
+		if (p2p_lobby_pending())
+			wait = LOOP_INTERVAL;
 		for (index = 0; index < MAXIMUM_STREAMS; index++)
 		{
 			struct stream *stream = &p2p.streams[index];
@@ -4641,6 +4994,27 @@ static void *p2p_thread(void *unused)
 				}
 			}
 		}
+		/* friends (p2p_friends.c): their work (crypto) without the lock, the
+		brokers while they are on (not in ad hoc play) */
+		if (!p2p.adhoc)
+		{
+			struct p2p_friends_host host;
+
+			friends_host_view(&host);
+			pthread_mutex_unlock(&p2p_lock);
+			p2p_friends_update(&host);
+			pthread_mutex_lock(&p2p_lock);
+			friends_tunnel_send();
+			if (p2p_friends_wanted() && !p2p.stopping)
+			{
+				p2p_signal_start();
+				if (!p2p.friends_quit_registered)
+				{
+					p2p.friends_quit_registered = 1;
+					atexit(friends_quit);
+				}
+			}
+		}
 		update_joining();
 		update_upnp();
 		p2p_discord_update();
@@ -4654,8 +5028,9 @@ static void *p2p_thread(void *unused)
 
 void p2p_initialize(unsigned long local_address)
 {
+	/* (the command line's invite: taken at the first start only) */
+	static int command_line_taken;
 	char invite[256];
-	pthread_t thread;
 	long tunnel_port = config_integer("network.tunnel_port");
 	int index;
 
@@ -4665,7 +5040,7 @@ void p2p_initialize(unsigned long local_address)
 	/* (ad hoc play is internet play's tunnel without the internet) */
 	if (!config_boolean("network.online") && !config_boolean("network.adhoc"))
 	{
-		platform_log("Internet play: disabled; enable Online and restart to use invites");
+		platform_log("Internet play: off (the connection Online, or Ad hoc, starts it)");
 		return;
 	}
 	if (tunnel_port < 0 || tunnel_port > 65535)
@@ -4682,6 +5057,7 @@ void p2p_initialize(unsigned long local_address)
 		p2p.streams[index].socket = -1;
 	p2p.local_address = local_address;
 	p2p.adhoc = config_boolean("network.adhoc");
+	p2p.upnp_allowed = config_boolean("network.allow_upnp") && !p2p.adhoc;
 	p2p.tunnel_socket = open_socket(SOCK_DGRAM, 0, network_short((unsigned short)tunnel_port), &p2p.tunnel_port);
 	if (p2p.tunnel_socket < 0)
 	{
@@ -4708,20 +5084,70 @@ void p2p_initialize(unsigned long local_address)
 	stun_setup();
 	relay_setup();
 	{
-		int error = pthread_create(&thread, NULL, p2p_thread, NULL);
+		int error;
+
+		/* (running before the thread is: it may stop at once) */
+		p2p.running = 1;
+		error = pthread_create(&p2p_thread_handle, NULL, p2p_thread, NULL);
 		if (error != 0)
 		{
+			p2p.running = 0;
 			platform_log("Internet play: cannot start network thread: %d", error);
 			close_socket(&p2p.tunnel_socket);
 			close_socket(&p2p.handoff_socket);
+			p2p.stun_count = 0;
+			p2p.relay_host_count = 0;
 			return;
 		}
 	}
-	pthread_detach(thread);
-	p2p.running = 1;
-	platform_log("Internet play: network thread started");
+	platform_log("Internet play: network thread started%s", p2p.adhoc ? " (ad hoc play)" : "");
 	if (p2p.adhoc)
 		p2p_adhoc_start(p2p.tunnel_port);
-	if (command_line_invite(invite, sizeof(invite)))
-		p2p_join_invite(invite);
+	if (!command_line_taken)
+	{
+		command_line_taken = 1;
+		if (command_line_invite(invite, sizeof(invite)))
+			p2p_join_invite(invite);
+	}
+}
+
+/* (the game's thread, at the menus with no network game:
+port/linux/game/network_connection.c) internet play, or ad hoc play's
+bridge, stopped: the thread tears everything down and ends (teardown), the
+bridge's threads end, and a port the router forwards is no longer; no
+thread, socket or peer of internet play is left, and p2p_initialize can
+start it again, with the same keys. Nothing is done when it is off */
+void p2p_shutdown(void)
+{
+	unsigned short external_port = 0;
+	unsigned long start;
+
+	pthread_mutex_lock(&p2p_lock);
+	if (!p2p.running || p2p.stopping)
+	{
+		pthread_mutex_unlock(&p2p_lock);
+		return;
+	}
+	p2p.stopping = 1;
+	pthread_mutex_unlock(&p2p_lock);
+	pthread_join(p2p_thread_handle, NULL);
+	p2p_adhoc_stop();
+	/* (a UPnP request under way ends first, as at exit: upnp_release) */
+	start = p2p_now();
+	pthread_mutex_lock(&p2p_lock);
+	while (p2p.upnp_working && !elapsed(start, UPNP_RELEASE_WAIT))
+	{
+		pthread_mutex_unlock(&p2p_lock);
+		Sleep(50);
+		pthread_mutex_lock(&p2p_lock);
+	}
+	if (p2p.upnp_forwarded && !p2p.upnp_working)
+	{
+		external_port = p2p.upnp_candidate.port;
+		p2p.upnp_forwarded = 0;
+	}
+	pthread_mutex_unlock(&p2p_lock);
+	if (external_port)
+		posix_upnp_stop_forwarding_udp(external_port);
+	platform_log("Internet play: stopped (its thread, sockets and peers gone)");
 }

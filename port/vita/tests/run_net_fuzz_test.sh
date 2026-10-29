@@ -20,6 +20,16 @@
 #              p2p_lobby_fuzz.c drives it): the Vita's (format 2) and, on the
 #              crossplay wire, OpenCE's (format 1 under hceu-lobby-1), read,
 #              checked, taken, shown and joined
+#   forge      network Forge's messages (port/linux/game/forge_net_protocol.c):
+#              a client's requests as the host takes them, the host's updates,
+#              palette and lobby messages as a client takes them, the replay
+#              window, the rate limits, and a layout sent in pieces read
+#              through the map variant validator (forge_files.c)
+#   chat       the in-game chat's lines and settings as the host and a client
+#              parse them (OpenCE's kinds 87-89), the text cleaned, links
+#              found and the slur filter's mask (port/linux/game/
+#              game_chat_protocol.c, port/linux/src/chat_filter.c, its words
+#              port/vita/app0/chat/filter.txt), mutes and rates
 #   actor_table  a client's table of the host's AI units, which a PC co-op
 #              host's actor states fill on the crossplay wire (its unit
 #              indices any 32-bit values; port/linux/game/network_actor_table.c),
@@ -34,7 +44,7 @@
 #                        (clang's i386 runtime, its COMDAT groups taken out
 #                        when it does not link as it is); what it finds goes
 #                        to NET_FUZZ_OUT (default a folder under TMPDIR)
-#   NET_FUZZ_TARGETS     the targets (default all eight)
+#   NET_FUZZ_TARGETS     the targets (default all ten)
 #   NET_FUZZ_DEDICATED=1 builds them as the dedicated server's code
 #                        (HALO_DEDICATED_SERVER, HALO_NET_AS_VITA: its limits
 #                        on a peer's packets and an address's peers, its
@@ -50,7 +60,7 @@ out=${TMPDIR:-/tmp}/net_fuzz_test.$$
 test_out_begin "$out"
 clang=${CLANG:-$(sed -n 's/^linux_cc = //p' "$root/build.ninja" | head -1)}
 [ -n "$clang" ] || clang=clang
-targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share variant_options crossplay_maps lobby actor_table"}
+targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share variant_options crossplay_maps lobby actor_table forge chat"}
 seconds=${NET_FUZZ_SECONDS:-0}
 mkdir -p "$out"
 cd "$root"
@@ -119,6 +129,8 @@ for target in $targets; do
 	variant_options) flags=$game_flags; sources="port/vita/tests/net_fuzz_variant_options.c
 		port/linux/game/network_game_record.c" ;;
 	actor_table) flags=$platform_flags; sources="port/vita/tests/net_fuzz_actor_table.c port/linux/game/network_actor_table.c" ;;
+	forge) flags=$platform_flags; sources="port/vita/tests/net_fuzz_forge.c" ;;
+	chat) flags=$platform_flags; sources="port/vita/tests/net_fuzz_chat.c" ;;
 	lobby) flags=$lobby_flags; sources="port/vita/tests/p2p_lobby_fuzz.c port/linux/src/p2p_crypto.c port/linux/src/crossplay_guard.c
 		port/linux/src/lang.c
 		$monocypher" ;;

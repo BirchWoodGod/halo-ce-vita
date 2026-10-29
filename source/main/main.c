@@ -404,6 +404,8 @@ void platform_log(const char *format, ...);
 #ifdef HALO_LINUX
 #include "load_profile.h"
 #include "custom_edition_cache.h" /* port: custom_edition_level_name */
+#include "custom_edition_maps.h" /* port: custom_edition_maps_campaign_next_level */
+#include "custom_edition_mods.h" /* port: custom_edition_mods_level_name */
 #endif
 #include "render/render.h"
 #include "text/draw_string.h"
@@ -681,6 +683,8 @@ typedef char screenshot_and_framerate_globals_size_assert[
 #endif
 #ifdef HALO_LINUX
 void network_test_update(boolean main_menu_loaded, real seconds);
+/* port/linux/game/game_chat.c */
+void game_chat_update(void);
 /* the offline bots' playlist (port/linux/game/bots_playlist.c) */
 void bots_playlist_update(int main_menu_loaded, float seconds);
 /* the Vita settings panel's Host a game and Join a game
@@ -790,6 +794,12 @@ boolean gamepad_button_is_down(
 	return result;
 }
 
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+short player_ui_get_single_player_local_player_controller(short local_player_index);
+
 static void create_local_players(
 	void)
 {
@@ -896,6 +906,13 @@ nothing is lost if the game restarts now (vita_ce_installer.c) */
 int halo_main_menu_idle(void)
 {
 	return main_globals.main_menu_scenario_loaded && main_globals.connection == _game_connection_local;
+}
+
+/* (port) whether the main menu's map is the one loaded, a network game's
+search or lobby there or not (latency_meter.c: no meter over the menus) */
+int halo_main_menu_loaded(void)
+{
+	return main_globals.main_menu_scenario_loaded;
 }
 
 /* (port) whether the arrays data.c holds to the Xbox's sizes are held now:
@@ -1225,19 +1242,34 @@ static void screenshot_record(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port/linux/game/field_of_view.c */
+real field_of_view_world_scale(short local_player_index, real observer_field_of_view);
+#endif
+
 void set_window_camera_values(
 	struct render_window *window,
 	struct observer_result const *observer)
 {
 	if (observer)
 	{
+		real field_of_view_scale = 1.0f;
+
+#ifdef HALO_LINUX
+		/* port: the player's Field of view (display.field_of_view,
+		port/linux/game/field_of_view.c): the view's tangent widened, 1 at
+		the stock 70, zoomed or not a player's view */
+		field_of_view_scale = field_of_view_world_scale(
+			window->local_player_index,
+			observer->field_of_view);
+#endif
 		window->rasterizer_camera.position = observer->position;
 		window->rasterizer_camera.forward = observer->forward;
 		window->rasterizer_camera.up = observer->up;
 		window->rasterizer_camera.vertical_field_of_view =
 			2.0f * arctangent(
 				0.75f * render_camera_get_adjusted_field_of_view_tangent(
-					observer->field_of_view),
+					observer->field_of_view) * field_of_view_scale,
 				1.0f);
 
 		if (window->local_player_index != NONE &&
@@ -1316,6 +1348,27 @@ void main_menu_ensure_player_queues_exist(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: (network_game_globals.c, after main_menu_ensure_player_queues_exist
+as the menus let a network client go: the SERVER BROWSER, its network
+switched or left) the new queues number their updates from 0, but the main
+menu's clock keeps its time there: the local ticks then ran only once the
+queues' count had caught up with the clock - tens of seconds to minutes of
+a frozen main menu (no ticks: the backdrop's camera, the lobbies' characters
+and the ring's script stood still, a30's campaign spot not shown). The
+queues start from the clock's time, as a game's start does. Not where the
+clock itself starts again from 0 after the queues are made (a screen that
+paused the game time closing at the main menu, ui_widget.c): queues filled
+to the old time there left the next tick's update missing, and the host's
+lobby halted in players_update_before_game */
+void main_menu_player_queues_from_clock(
+	void)
+{
+	if (game_in_progress() && game_time_get() > 0)
+		update_queues_reset_and_fill_with_lies();
+}
+#endif
+
 boolean main_menu_fade_active(
 	void)
 {
@@ -1345,8 +1398,9 @@ short main_get_solo_level_from_name(
 #ifdef HALO_LINUX
 	/* port: a Custom Edition campaign map (custom_maps\firefight-airlock)
 	is never one of the campaign's levels, whatever its name holds: not its
-	saved game, its progress or its next level (custom_edition_cache.h) */
-	if (custom_edition_level_name(name))
+	saved game, its progress or its next level (custom_edition_cache.h);
+	nor is a mod's map (mods\ruby_a10, custom_edition_mods.h) */
+	if (custom_edition_level_name(name) || custom_edition_mods_level_name(name))
 		return NONE;
 #endif
 	csstrncpy(lower_name, name, NUMBEROF(lower_name) - 1);
@@ -1382,6 +1436,20 @@ short main_get_current_solo_level(
 {
 	return main_get_solo_level_from_name(main_globals.soloplayer_map_name);
 }
+
+#ifdef HALO_LINUX
+/* (port) whether the level being played alone is a Custom Edition campaign
+map (custom_maps\...) or an MCC mod's (mods\...): its Save and Quit writes
+the custom campaign maps' save (game_state_save_to_persistent_storage) */
+boolean main_current_level_is_custom_campaign(
+	void)
+{
+	char const *name = main_globals.soloplayer_map_name;
+
+	return main_globals.connection == _game_connection_local && !game_engine_running() &&
+		(custom_edition_level_name(name) || custom_edition_mods_level_name(name));
+}
+#endif
 
 char const *main_get_solo_level_name(
 	short level)
@@ -1528,6 +1596,8 @@ short main_get_window_count(
 
 #ifdef HALO_LINUX
 static void main_checkpoint_log_new_map(void);
+/* (main_new_map) the last map's load failed */
+static boolean main_new_map_failed;
 /* (HALO_TEST_COMMANDS' "M" commands) the maps loaded */
 static unsigned long main_test_maps_loaded;
 #endif
@@ -1546,7 +1616,51 @@ static void main_new_map(
 	platform_log("new map: loading");
 	main_checkpoint_log_new_map();
 	game_load_started = halo_load_profile_now();
+#ifndef HALO_RELEASE
+	/* (debug, the tests) HALO_TEST_UI_LOAD_FAILS=1: the main menu's map's
+	first load after another map failed to load is taken as failed, as
+	Ben's was */
+	{
+		static int fail_ui_once = -1;
+
+		if (fail_ui_once < 0)
+			fail_ui_once = getenv("HALO_TEST_UI_LOAD_FAILS") && atoi(getenv("HALO_TEST_UI_LOAD_FAILS")) > 0;
+		if (fail_ui_once && main_new_map_failed && !csstrcasecmp(tag_name_strip_path(options->map_name), "ui"))
+		{
+			fail_ui_once = 0;
+			platform_log("new map: (test) the main menu's map's load taken as failed");
+			loaded = FALSE;
+		}
+		else
+			loaded = game_load(options);
+	}
+#else
 	loaded = game_load(options);
+#endif
+	/* port: the main menu's own map that did not load - after another map
+	failed (Ben's insider.17 Vita, Oct 20 2026: Battle Creek, then Blood
+	Gulch, then ui.map "damaged", every read ended by a stopped map copy's
+	state, xbox_files.c) - is tried once more with no map copy under way: a
+	main menu that cannot load has no menu to go back to (main_menu_load
+	then found it "loaded" and the game stood on no map for ever) */
+	if (!loaded && !csstrcasecmp(tag_name_strip_path(options->map_name), "ui"))
+	{
+		platform_log("new map: the main menu's map did not load: the map copy stopped, tried again");
+		errors_clear();
+		if (cache_files_precache_in_progress())
+			cache_files_precache_map_end();
+		loaded = game_load(options);
+		if (!loaded)
+		{
+			extern void display_error_damaged_media_reason(char const *format, ...);
+			extern void display_error_damaged_media(void);
+
+			platform_log("new map: the main menu's map could not be loaded again: the damaged disc's error");
+			display_error_damaged_media_reason("the menus' map ui.map could not be loaded");
+			display_error_damaged_media();
+		}
+	}
+	main_new_map_failed = !loaded;
 	halo_load_profile_add(_halo_load_game_load, game_load_started, 0);
 	/* port: a custom or downloaded map that failed to load for any reason
 	(not only the Custom Edition loader's) goes back to the menu with a
@@ -1707,6 +1821,12 @@ static void main_change_map_name(
 
 	return;
 }
+
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean cache_files_give_time_to_precache(char const *map_name);
 
 void main_set_multiplayer_map_name(
 	char const *map_name)
@@ -2507,6 +2627,17 @@ static void main_won_map_private(
 	(OpenCE's main.c, ce41b41d, rolls the credits instead) */
 	if (level == NONE)
 	{
+		/* port: a mod's campaign rebuilt as Custom Edition maps (ruby_a10,
+		ruby_a30 ...: custom_edition_maps_campaign_next_level) goes on to
+		its next map */
+		char const *next_level_name = custom_edition_maps_campaign_next_level(main_globals.soloplayer_map_name);
+
+		if (next_level_name)
+		{
+			error(_error_silent, "won '%s': on to '%s'", main_globals.soloplayer_map_name, next_level_name);
+			main_set_map_name(next_level_name);
+			return;
+		}
 		error(_error_silent, "won '%s', not a campaign level: back to the main menu", main_globals.soloplayer_map_name);
 		return;
 	}
@@ -2523,6 +2654,20 @@ static void main_won_map_private(
 void main_set_map_name(
 	char const *map_name)
 {
+#ifdef HALO_LINUX
+	/* port: a campaign level of the Xbox's the machine has no map for, in the
+	Halo content folder (MCC's), as the classic menus' level lists and the
+	new campaign name them (custom_edition_cache.c) */
+	{
+		extern boolean custom_edition_cache_campaign_level_translate(char const *level_name, char *out, long out_size);
+		char translated[64];
+
+		if (map_name && custom_edition_cache_campaign_level_translate(map_name, translated, sizeof(translated)))
+		{
+			map_name = translated;
+		}
+	}
+#endif
 	main_globals.want_to_be_at_main_menu = FALSE;
 	csstrncpy(main_globals.soloplayer_map_name, map_name, NUMBEROF(main_globals.soloplayer_map_name) - 1);
 	main_globals.soloplayer_map_name[NUMBEROF(main_globals.soloplayer_map_name) - 1] = 0;
@@ -3523,10 +3668,22 @@ void main_rasterizer_throttle(
 			profile_idle_start();
 			while ((__int64)rasterizer_globals.frame_and_vertical_blank_index < target_index)
 			{
+#ifdef HALO_LINUX
+				/* port (from OpenCE e799d081): the native builds sleep
+				between looks. The Xbox spun here; on a port each look at the
+				clock is a system call, and a game held to the vertical blank
+				(display.vsync on, display.interpolation off) spent its main
+				thread asking the time, on the Vita while the vertical blank's
+				own thread waited for a core. A millisecond is well inside a
+				frame */
+				(void)precache_in_progress;
+				Sleep(1);
+#else
 				if (precache_in_progress)
 				{
 					Sleep(1);
 				}
+#endif
 				if (system_milliseconds() > start_milliseconds + 1000)
 				{
 					console_warning(
@@ -3720,11 +3877,23 @@ static void main_reset_map_private(
 {
 	if (!game_time_get_paused())
 	{
+#ifdef HALO_LINUX
+		/* (port: a Forge game's layout taken while its objects are there,
+		placed again once the reset map's player has spawned:
+		port/linux/game/forge.c, the Forge menu's NEW ROUND) */
+		void forge_map_resetting(void);
+		void forge_map_reset(void);
+
+		forge_map_resetting();
+#endif
 		scenario_switch_structure_bsp(0);
 		game_dispose_from_old_map();
 		input_flush();
 		game_initialize_for_new_map();
 		create_local_players();
+#ifdef HALO_LINUX
+		forge_map_reset();
+#endif
 		game_time_start();
 		game_initial_pulse();
 		ui_widgets_disable_pause_game(30);
@@ -4308,7 +4477,10 @@ tick, for testing the save paths without a controller, e.g.
 level: not the main menu's scenario). Besides the console's
 own, @skip asks for a cinematic skip (as the controller does), @quit
 does the pause menu's Save and Quit, @menu goes back to the main menu
-without saving, @exit ends the game, and "@camera x y z yaw pitch" puts
+without saving, "@error N [nonmodal]" shows error N's dialog (display_error),
+"@abort N" the error that offers to end the game, "@say title|text" and
+"@ask title|text" the platform's message and question (@answer logs its
+answer), @exit ends the game, and "@camera x y z yaw pitch" puts
 the debug camera there (degrees; yaw 0 looks along +x, pitch up is
 positive), through d:\\camera.txt and debug_camera_load ("@pan x y z yaw
 pitch yaw_rate pitch_rate": from then on turned by the rates, in degrees a
@@ -4320,7 +4492,10 @@ every vehicle and scenery object is, "@seat" which vehicle and seat each
 player's unit rides in, "@look pitch [zoom]" turns the first local
 player's view to that pitch (degrees, down negative) and, given, sets its
 zoom level (-1 none), and "@legs" logs the frames its own legs were drawn in
-(display.first_person_legs, first_person_legs.c), and "@shot name"
+(display.first_person_legs, first_person_legs.c), "@ragdoll boom|kill
+[count] [range]" sets off a grenade's explosion beside (or kills) the
+nearest living characters and "@ragdoll stats|check" logs the dead bodies'
+ragdolls (display.ragdolls, ragdolls.c), and "@shot name"
 has the next frame presented saved as name.bmp in HALO_SCREENSHOT_DIR
 (the desktop GL device; on the Vita its display, as name<frame>.bmp);
 "@set VARIABLE value" changes a setting as the Vita's settings panel does
@@ -4332,7 +4507,9 @@ bringto) as the Vita's Play page does (main_request_host_command),
 "@sound tag [n]" plays that sound tag (the nth so named) as
 sound_impulse_start does with no object, and "@weapon P name" takes
 player P's weapons and gives it one of the first weapon tag with name in
-its name. Each runs once,
+its name. In a desktop test build "@mouse dx dy" and "@key name" push a
+motion of the mouse or a key's press into SDL's queue, as the real ones
+arrive (sdl_platform.c; "@aim angles" logs the facing). Each runs once,
 at the first frame whose game time has reached its tick. */
 void game_state_save_to_persistent_storage(void);
 /* (the Vita's settings panel sets it: vita_settings_load) */
@@ -4343,6 +4520,7 @@ void platform_log(const char *format, ...);
 char halo_screenshot_name[64];
 
 static void main_test_camera(char const *arguments);
+static void main_test_field_of_view(void);
 static void main_test_trigger_volume(char const *name);
 static void main_test_bsp_switch_trigger(char const *arguments);
 /* damage.c's */
@@ -4357,10 +4535,14 @@ enum
 };
 static pthread_mutex_t main_host_commands_lock = PTHREAD_MUTEX_INITIALIZER;
 static char main_host_commands[MAXIMUM_REQUESTED_HOST_COMMANDS][96];
+/* (who asked, for the log: the settings panel's Play page, a test's @host,
+the Halo 3 menus' scenes) */
+static char const *main_host_command_sources[MAXIMUM_REQUESTED_HOST_COMMANDS];
 static short main_host_command_count;
 
-boolean main_request_host_command(
-	char const *command)
+boolean main_request_host_command_from(
+	char const *command,
+	char const *source)
 {
 	boolean queued = FALSE;
 
@@ -4369,6 +4551,7 @@ boolean main_request_host_command(
 	pthread_mutex_lock(&main_host_commands_lock);
 	if (main_host_command_count < MAXIMUM_REQUESTED_HOST_COMMANDS)
 	{
+		main_host_command_sources[main_host_command_count] = source ? source : "host";
 		strcpy(main_host_commands[main_host_command_count++], command);
 		queued = TRUE;
 	}
@@ -4376,21 +4559,29 @@ boolean main_request_host_command(
 	return queued;
 }
 
+boolean main_request_host_command(
+	char const *command)
+{
+	return main_request_host_command_from(command, "settings panel");
+}
+
 static void main_host_commands_update(
 	void)
 {
 	char commands[MAXIMUM_REQUESTED_HOST_COMMANDS][96];
+	char const *sources[MAXIMUM_REQUESTED_HOST_COMMANDS];
 	short count;
 	short index;
 
 	pthread_mutex_lock(&main_host_commands_lock);
 	count = main_host_command_count;
 	memcpy(commands, main_host_commands, sizeof(commands[0]) * count);
+	memcpy(sources, main_host_command_sources, sizeof(sources[0]) * count);
 	main_host_command_count = 0;
 	pthread_mutex_unlock(&main_host_commands_lock);
 	for (index = 0; index < count; index++)
 	{
-		platform_log("host command (settings panel): %s", commands[index]);
+		platform_log("host command (%s): %s", sources[index], commands[index]);
 		hs_compile_and_evaluate(commands[index]);
 	}
 }
@@ -4399,6 +4590,8 @@ static void main_test_commands_update(
 	void)
 {
 	static boolean pan_active;
+	static boolean flamecam_active;
+	static float flamecam[2];
 	static float pan[7];
 	static long pan_start;
 	static int parsed = 0;
@@ -4484,6 +4677,51 @@ static void main_test_commands_update(
 		leaving it does, without saving) */
 		else if (!strcmp(commands[index].command, "@menu"))
 			main_goto_main_menu();
+		/* (@error N [nonmodal]: error N's dialog, as the game shows it -
+		display_error -, for the message boxes' tests: run_menus_test.sh
+		msgboxes) */
+		else if (!strncmp(commands[index].command, "@error ", 7))
+		{
+			int code = atoi(commands[index].command + 7);
+
+			if (code >= 0 && code < NUMBER_OF_ERROR_CODES)
+				display_error((short)code, 0, strstr(commands[index].command, "nonmodal") == NULL, FALSE);
+		}
+		/* (@abort N: the error that offers to end the game, as the saved
+		games' checks show it - display_error_abort_to_dashboard, optional) */
+		else if (!strncmp(commands[index].command, "@abort ", 7))
+		{
+			int code = atoi(commands[index].command + 7);
+
+			if (code >= 0 && code < NUMBER_OF_ERROR_CODES)
+				display_error_abort_to_dashboard((short)code, TRUE);
+		}
+		/* (@say title|text, @ask title|text: the platform's message and yes or
+		no question, as map sharing and the invites show them; @answer logs
+		the question's answer) */
+		else if (!strncmp(commands[index].command, "@say ", 5) || !strncmp(commands[index].command, "@ask ", 5))
+		{
+			void platform_show_message(char const *title, char const *message);
+			void platform_ask_question(char const *title, char const *text);
+			char title[64];
+			char const *bar = strchr(commands[index].command + 5, '|');
+
+			if (bar)
+			{
+				csstrncpy(title, commands[index].command + 5, MIN((size_t)(bar - commands[index].command - 5), sizeof(title) - 1));
+				title[MIN((size_t)(bar - commands[index].command - 5), sizeof(title) - 1)] = 0;
+				if (commands[index].command[1] == 's')
+					platform_show_message(title, bar + 1);
+				else
+					platform_ask_question(title, bar + 1);
+			}
+		}
+		else if (!strcmp(commands[index].command, "@answer"))
+		{
+			int platform_question_answer(void);
+
+			platform_log("test command: the question's answer: %d", platform_question_answer());
+		}
 		else if (!strncmp(commands[index].command, "@shot ", 6))
 			csstrncpy(halo_screenshot_name, commands[index].command + 6, sizeof(halo_screenshot_name) - 1);
 		else if (!strncmp(commands[index].command, "@pan ", 5))
@@ -4494,6 +4732,17 @@ static void main_test_commands_update(
 		}
 		else if (!strncmp(commands[index].command, "@camera ", 8))
 			main_test_camera(commands[index].command + 8);
+		else if (!strncmp(commands[index].command, "@flamecam", 9))
+		{
+			/* (@flamecam [distance] [angle]: from then on the camera looks at
+			the first local player's head from that far (world units) and that
+			side (degrees from its facing), for the flaming helmet's
+			screenshots: flaming_helmet.c) */
+			flamecam[0] = 0.9f;
+			flamecam[1] = 0.0f;
+			sscanf(commands[index].command + 9, "%f %f", &flamecam[0], &flamecam[1]);
+			flamecam_active = TRUE;
+		}
 		else if (!strcmp(commands[index].command, "@where"))
 		{
 			/* (@where: every vehicle's and scenery object's tag and place,
@@ -4514,7 +4763,8 @@ static void main_test_commands_update(
 		{
 			float pitch;
 			int zoom;
-			int given = sscanf(commands[index].command + 6, "%f %d", &pitch, &zoom);
+			float yaw;
+			int given = sscanf(commands[index].command + 6, "%f %d %f", &pitch, &zoom, &yaw);
 
 			if (given >= 1 && local_player_get_player_index(0) != NONE)
 			{
@@ -4523,8 +4773,16 @@ static void main_test_commands_update(
 				control->desired_angles.pitch = DEGREES_TO_RADIANS(pitch);
 				if (given >= 2)
 					control->zoom_level = (short)zoom;
+				/* (a third number: the yaw too, degrees, 0 along +x:
+				run_field_of_view_test.sh's same spot) */
+				if (given >= 3)
+					control->desired_angles.yaw = DEGREES_TO_RADIANS(yaw);
 			}
 		}
+		/* (@fov: each player's window's field of view and where its aim
+		lands on the screen, field_of_view.c, run_field_of_view_test.sh) */
+		else if (!strcmp(commands[index].command, "@fov"))
+			main_test_field_of_view();
 		else if (!strcmp(commands[index].command, "@legs"))
 		{
 			unsigned long first_person_legs_drawn_frames(real *set_back_last, real *set_back_most);
@@ -4535,6 +4793,58 @@ static void main_test_commands_update(
 			platform_log("test command: first-person legs drawn in %lu frames (set back %.3f, at most %.3f)", frames,
 				(double)set_back_last, (double)set_back_most);
 		}
+		/* (@ragdoll boom|kill [count] [range], stats, check: the dead
+		bodies' ragdolls, port/linux/game/ragdolls.c and
+		run_ragdolls_test.sh) */
+		else if (!strncmp(commands[index].command, "@ragdoll", 8))
+		{
+			void ragdolls_test_command(char const *arguments);
+
+			ragdolls_test_command(commands[index].command + 8);
+		}
+		/* (@aim log|face|gyro|pad: the aim assist's counts, the player
+		turned to an enemy, the harness's gyro and pad: player_control.c,
+		run_gyro_assist_test.sh) */
+		else if (!strncmp(commands[index].command, "@aim ", 5))
+			player_control_aim_test_command(commands[index].command + 5);
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+		/* (@mouse dx dy: a motion of the mouse, as SDL reports one, through
+		the desktop build's own event path: sdl_platform.c) */
+		else if (!strncmp(commands[index].command, "@mouse ", 7))
+		{
+			void platform_test_mouse_motion(float dx, float dy);
+			float dx = 0.f, dy = 0.f;
+
+			sscanf(commands[index].command + 7, "%f %f", &dx, &dy);
+			platform_test_mouse_motion(dx, dy);
+		}
+		/* (@key name: a key pressed and let go through the same path,
+		"Escape", "ctrl+V" ...) */
+		else if (!strncmp(commands[index].command, "@key ", 5))
+		{
+			int platform_test_key(char const *name);
+
+			platform_test_key(commands[index].command + 5);
+		}
+		/* (@hold NAME MS: a key, mouse button or wheel notch held for MS
+		milliseconds - "Mouse Left 300", "G 200" -, the keyboard and mouse's
+		bindings: run_pc_controls_test.sh; the desktop's) */
+#ifndef HALO_ANDROID
+		else if (!strncmp(commands[index].command, "@hold ", 6))
+		{
+			int platform_test_input_hold(char const *name, int milliseconds);
+			char name[64];
+			char const *last = strrchr(commands[index].command + 6, ' ');
+
+			if (last)
+			{
+				snprintf(name, sizeof(name), "%.*s", (int)(last - (commands[index].command + 6)),
+					commands[index].command + 6);
+				platform_test_input_hold(name, atoi(last + 1));
+			}
+		}
+#endif
+#endif
 		else if (!strcmp(commands[index].command, "@seat"))
 		{
 			struct data_iterator iterator;
@@ -4692,7 +5002,7 @@ static void main_test_commands_update(
 		/* (@host <command>: asked for as the settings panel asks,
 		main_request_host_command: run at the next frame's top) */
 		else if (!strncmp(commands[index].command, "@host ", 6))
-			main_request_host_command(commands[index].command + 6);
+			main_request_host_command_from(commands[index].command + 6, "test command");
 		/* (@sound <tag> [n]: the sound of that name (the nth of them:
 		protected maps name every tag alike) played as a script's
 		sound_impulse_start with no object plays it, any sound the map
@@ -4707,8 +5017,19 @@ static void main_test_commands_update(
 			struct tag_iterator iterator;
 			long tag_index;
 
-			name[0] = '\0';
-			sscanf(commands[index].command + 7, "%127s %ld", name, &wanted);
+			/* (the name is all of it but a trailing number, so a name with
+			spaces ("sound\sfx\weapons\assault rifle\fire") can be named) */
+			strncpy(name, commands[index].command + 7, sizeof(name) - 1);
+			name[sizeof(name) - 1] = '\0';
+			{
+				char *last_space = strrchr(name, ' ');
+				char *end;
+
+				if (last_space && last_space[1] && (wanted = strtol(last_space + 1, &end, 10), !*end))
+					*last_space = '\0';
+				else
+					wanted = 0;
+			}
 			tag_iterator_new(&iterator, 'snd!');
 			while ((tag_index = tag_iterator_next(&iterator)) != NONE)
 			{
@@ -4725,6 +5046,14 @@ static void main_test_commands_update(
 		}
 		else
 			hs_compile_and_evaluate(commands[index].command);
+	}
+	if (flamecam_active)
+	{
+		char line[120];
+		boolean flaming_helmet_test_camera(char *line, int size, float distance, float angle);
+
+		if (flaming_helmet_test_camera(line, (int)sizeof(line), flamecam[0], flamecam[1]))
+			main_test_camera(line);
 	}
 	if (pan_active)
 	{
@@ -4847,6 +5176,74 @@ static void main_test_bsp_switch_trigger(
 	}
 	if (player_absolute_index != -2)
 		platform_log("test command: no BSP switch trigger %d from BSP %d", wanted, (int)global_structure_bsp_index_get());
+}
+
+/* (@fov) each local player's window as last drawn: the setting, the
+vertical and horizontal fields of view (and the horizontal at 4:3), the
+first-person weapon's (field_of_view.c), and where the unit's aim and its
+aim assist's target land against the view's centre, the crosshair's (in
+the window's pixels) */
+static void main_test_field_of_view(
+	void)
+{
+	long field_of_view_setting(void);
+	real field_of_view_first_person_scale(short local_player_index);
+	boolean render_camera_world_to_screen(const struct render_camera *camera, const struct render_frustum *frustum,
+		const real_point3d *world_point, real_point2d *screen_point);
+	short window_index;
+
+	for (window_index = 0; window_index < MAXIMUM_WINDOWS; window_index++)
+	{
+		struct render_window const *window = &global_screenshot_count.windows[window_index];
+		struct render_camera const *camera = &window->render_camera;
+		struct render_frustum frustum;
+		real width = (real)(camera->viewport_bounds.x1 - camera->viewport_bounds.x0);
+		real height = (real)(camera->viewport_bounds.y1 - camera->viewport_bounds.y0);
+		real vertical_tangent = tangent(camera->vertical_field_of_view * 0.5f);
+		real first_person_scale;
+		long unit_index;
+		long target_index;
+		real_point2d aim = { -1.0f, -1.0f };
+		real_point2d target = { -1.0f, -1.0f };
+		boolean aim_seen = FALSE;
+		boolean target_seen = FALSE;
+
+		if (window->console_window || window->local_player_index == NONE || width <= 0.0f || height <= 0.0f)
+			continue;
+		first_person_scale = field_of_view_first_person_scale(window->local_player_index);
+		render_camera_build_frustum(camera, NULL, &frustum, TRUE);
+		unit_index = player_control_get_unit_index(window->local_player_index);
+		if (unit_index != NONE)
+		{
+			struct unit_datum *unit = unit_get(unit_index);
+			real_point3d point;
+
+			point_from_line3d(&camera->position, &unit->unit.aiming_vector, 20.0f, &point);
+			aim_seen = render_camera_world_to_screen(camera, &frustum, &point, &aim);
+		}
+		target_index = player_control_get_target_object_index(window->local_player_index);
+		if (target_index != NONE)
+		{
+			struct object_datum *object = object_get(target_index);
+
+			target_seen = render_camera_world_to_screen(camera, &frustum, &object->object.bounding_sphere_center,
+				&target);
+		}
+		platform_log("test command: field of view: window %d player %d setting %ld: vertical %.2f, horizontal %.2f "
+			"(%dx%d), at 4:3 %.2f; first-person weapon at 4:3 %.2f (scale %.4f); aim %s %.2f %.2f from the centre; "
+			"target %s %.2f %.2f",
+			(int)window_index, (int)window->local_player_index, field_of_view_setting(),
+			(double)RADIANS_TO_DEGREES(camera->vertical_field_of_view),
+			(double)RADIANS_TO_DEGREES(2.0f * arctangent(vertical_tangent * width / height, 1.0f)), (int)width,
+			(int)height, (double)RADIANS_TO_DEGREES(2.0f * arctangent(vertical_tangent * 4.0f / 3.0f, 1.0f)),
+			(double)RADIANS_TO_DEGREES(2.0f * arctangent(vertical_tangent * 4.0f / 3.0f / first_person_scale, 1.0f)),
+			(double)first_person_scale, aim_seen ? "at" : "off-screen",
+			(double)(aim.x - (camera->viewport_bounds.x0 + width * 0.5f)),
+			(double)(aim.y - (camera->viewport_bounds.y0 + height * 0.5f)),
+			target_index == NONE ? "none" : target_seen ? "at" : "off-screen",
+			(double)(target.x - (camera->viewport_bounds.x0 + width * 0.5f)),
+			(double)(target.y - (camera->viewport_bounds.y0 + height * 0.5f)));
+	}
 }
 
 static void main_test_camera(
@@ -5066,6 +5463,45 @@ void main_loop(
 	{
 #ifdef HALO_LINUX
 		main_test_commands_update();
+		{
+			/* (the Online menus' live backdrop - a30's bsp, a scene pack's -
+			switched to or from here, between frames, before the menus'
+			cameras: menu_backdrop.c) */
+			void menu_backdrop_update(void);
+
+			menu_backdrop_update();
+		}
+		{
+			/* (the Halo 3 menus' camera behind the screen opened, its
+			point written here, between frames: menu_functions.c) */
+			void menu_functions_scenes_update(void);
+
+			menu_functions_scenes_update();
+		}
+		{
+			/* (the scene packs built meanwhile loaded beside the map, its
+			tag table grown, between frames: scene_packs.c) */
+			void scene_packs_update(void);
+			void player_models_update(void);
+			void player_cosmetics_update(void);
+			void forge_net_frame(void);
+			void game_rules_net_frame(void);
+
+			scene_packs_update();
+			/* (network Forge's lobby: the host's hellos to its joiners and
+			their answers, port/linux/game/forge_net.inc) */
+			forge_net_frame();
+			/* (an Infection game's lobby: the host asks each joiner whether
+			it plays Infection, port/linux/game/infection_net.c) */
+			game_rules_net_frame();
+			/* (the player models from Custom Edition maps: the maps folder
+			looked through once, the settings panel's choice taken:
+			player_models.c) */
+			player_models_update();
+			/* (the settings panel's armour and visor colours taken:
+			player_cosmetics.c) */
+			player_cosmetics_update();
+		}
 		main_host_commands_update();
 		{
 			void halo_shader_tour_update(void);
@@ -5132,6 +5568,13 @@ void main_loop(
 
 			if (main_globals.want_to_be_at_main_menu)
 			{
+#ifdef HALO_LINUX
+				/* port: a game left with the menus' live background chosen
+				fades to black first (port/linux/game/menu_backdrop.c) */
+				int menu_backdrop_leave_hold(void);
+
+				if (!menu_backdrop_leave_hold())
+#endif
 				main_menu_load();
 			}
 
@@ -5154,6 +5597,15 @@ void main_loop(
 			{
 				main_queue_map_private();
 			}
+#ifdef HALO_LINUX
+			/* port: a lobby's precache whose start waited for the textures'
+			loads (cache_files_give_time_to_precache), started once they are
+			done: a host's map choice has no other ask */
+			if (cache_files_precache_deferred(main_globals.multiplayer_map_name))
+			{
+				cache_files_give_time_to_precache(main_globals.multiplayer_map_name);
+			}
+#endif
 		}
 		else if (main_globals.reset_map)
 		{
@@ -5193,6 +5645,9 @@ void main_loop(
 			/* the dedicated server's hosting and commands
 			(port/linux/game/dedicated_server.c); none of the tests' sessions */
 			dedicated_server_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			/* the in-game chat's host: its settings sent, its lines relayed
+			(port/linux/game/game_chat.c) */
+			game_chat_update();
 			MAIN_SPLIT(_main_split_input);
 #elif defined(HALO_LINUX)
 			/* automated system link tests (port/linux/game/network_test.c) */
@@ -5200,6 +5655,9 @@ void main_loop(
 			/* the offline bots' playlist (port/linux/game/bots_playlist.c) */
 			bots_playlist_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
 			system_link_shortcut_update(main_globals.main_menu_scenario_loaded);
+			/* the in-game chat (port/linux/game/game_chat.c): the host's
+			settings, the party's lines, a typed line, the panel's mutes */
+			game_chat_update();
 			test_input_main_menu(main_globals.main_menu_scenario_loaded);
 			MAIN_SPLIT(_main_split_input);
 #endif
@@ -5327,6 +5785,20 @@ void main_loop(
 					collision_log_continue_period(1);
 					director_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 					observer_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+#ifdef HALO_LINUX
+					/* (port: Forge's monitor, a spike: what it holds goes
+					where the camera just went, before the tick starts;
+					port/linux/game/forge.c) */
+					{
+						void forge_update(void);
+						void menu_scene_objects_update(void);
+
+						forge_update();
+						/* (and the characters in the Halo 3 menus'
+						scenes: port/linux/game/menu_scene_objects.c) */
+						menu_scene_objects_update();
+					}
+#endif
 					collision_log_end_period();
 					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 #ifdef HALO_LINUX

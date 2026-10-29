@@ -31,8 +31,9 @@ int halo_windows_rmdir(const char *path);
 #define freopen halo_windows_freopen
 #define remove halo_windows_remove
 #define rename halo_windows_rename
-#define open halo_windows_open
-#define _open halo_windows_open
+/* (calls only: structures have members named open, p2p_lobby_entry's) */
+#define open(...) halo_windows_open(__VA_ARGS__)
+#define _open(...) halo_windows_open(__VA_ARGS__)
 #define unlink halo_windows_unlink
 #define _unlink halo_windows_unlink
 #define access halo_windows_access

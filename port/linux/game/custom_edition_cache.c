@@ -23,6 +23,16 @@ the game's own conversions are done, the tags' pointers are moved to where
 the copy is (port/linux/src/tag_relocate.c, with this build's tag layouts,
 which the converted tags now have), as is each structure BSP when it is
 read.
+
+(port) A Halo: CE Anniversary map of a mod's (MCC's version 13,
+custom_edition_mods.c, docs/mcc_cea_maps.md) is loaded the same way, only
+from the mods folder and only for a game of this machine's own: its tags
+are linked to 0x50000000, so they are always moved (every build moves the
+tags of a map linked elsewhere than its tag cache is); its structure BSPs
+are each read into the room after its tags (cache_file_formats.c moved
+their references there), their pointers moved from where the map links
+each one, and their vertices read from the file as they load
+(custom_edition_geometry.c).
 */
 
 /* ---------- headers */
@@ -33,6 +43,7 @@ read.
 #include "tag_files/files.h"
 #include "tag_files/tag_files.h"
 #include "cache/cache_files.h"
+#include "game/game.h"
 #include "scenario/scenario_definitions.h"
 #include "cache_file_formats.h"
 #include "custom_edition_cache.h"
@@ -42,13 +53,16 @@ read.
 #include "network_wire.h"
 #include "tag_schema.h"
 #include "../src/lang.h"
-#ifdef HALO_RELOCATABLE_TAG_CACHE
+#include "custom_edition_mods.h"
+#include "mcc_content.h"
+#include "mcc_sound.h"
 #include "tag_relocate.h"
-#endif
+#include "load_profile.h"
 
 #include "memory/zlib/zlib.h"
 
 #include <pthread.h>
+#include "halo_cond.h"
 #include <stdlib.h>
 
 /* ---------- constants */
@@ -90,6 +104,9 @@ struct custom_edition_cache_globals
 	/* the Halo PC behaviours the loaded map relies on (enum
 	custom_edition_behaviour, flags) */
 	uint32_t behaviours;
+	/* (port) the HUD is laid out on Halo: CE Anniversary's canvas
+	(custom_edition_cache_hud_mcc_canvas) */
+	boolean hud_mcc_canvas;
 	/* the tag cache and the bytes of it the loaded tags use */
 	uint8_t *tag_cache;
 	uint32_t loaded_bytes;
@@ -103,6 +120,26 @@ struct custom_edition_cache_globals
 	predicts) and the render thread (textures) at once: one at a time, each
 	with its arrival (custom_edition_bitmap_pixels_arrived), under this */
 	volatile int read_lock;
+	/* (port) a Halo: CE Anniversary map's structure BSPs as it links them,
+	and where the one loaded has its vertices in the file */
+	boolean mcc_cea;
+	int32_t mcc_cea_structure_bsp_count;
+	uint32_t mcc_cea_structure_bsp_address;
+	struct mcc_cea_structure_bsp mcc_cea_structure_bsps[CACHE_FILE_MAXIMUM_STRUCTURE_BSPS];
+	boolean structure_bsp_vertices_known;
+	uint32_t structure_bsp_vertices_offset;
+	uint32_t structure_bsp_vertices_size;
+	/* (port) the files' paths, a mod's map or not, and the CRC-32 of the
+	map's header: custom_edition_sounds.c's own reader, and its sound cache
+	file's name and what it was made from */
+	char map_path[MAP_PATH_SIZE];
+	boolean map_from_mods;
+	/* (port) a map of the Halo content folder (mcc_content.h), named
+	mcc_<stem>: its sound cache is d:\sound_cache's, never in MCC's folder */
+	boolean map_from_mcc;
+	char map_mcc_stem[MCC_CONTENT_STEM_BYTES];
+	uint32_t map_header_crc;
+	char resource_paths[NUMBER_OF_RESOURCE_MAP_TYPES][MAP_PATH_SIZE];
 };
 
 /* ---------- globals */
@@ -259,13 +296,13 @@ enum
 static struct
 {
 	pthread_mutex_t lock;
-	pthread_cond_t wake;
+	halo_cond_t wake;
 	boolean started;
 	boolean failed;
 	struct custom_edition_read_job *queue[LOAD_READ_QUEUE_LENGTH];
 	short head;
 	short count;
-} load_reader = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER };
+} load_reader = { PTHREAD_MUTEX_INITIALIZER, HALO_COND_INITIALIZER };
 
 /* the model data's pieces whose CRC-32 (from 0) the reader took, in order,
 none touching another (model_checksum_take); only the reader writes them
@@ -439,7 +476,7 @@ static void *load_reader_thread(
 
 		while (!load_reader.count)
 		{
-			pthread_cond_wait(&load_reader.wake, &load_reader.lock);
+			halo_cond_wait(&load_reader.wake, &load_reader.lock);
 		}
 		job = load_reader.queue[load_reader.head];
 		load_reader.head = (short)((load_reader.head + 1) % LOAD_READ_QUEUE_LENGTH);
@@ -503,7 +540,7 @@ void custom_edition_read_job_submit(
 		{
 			load_reader.queue[(load_reader.head + load_reader.count) % LOAD_READ_QUEUE_LENGTH] = job;
 			load_reader.count++;
-			pthread_cond_signal(&load_reader.wake);
+			halo_cond_signal(&load_reader.wake);
 			pthread_mutex_unlock(&load_reader.lock);
 			return;
 		}
@@ -641,6 +678,68 @@ static boolean file_path_exists(
 	struct file_reference reference;
 
 	return file_exists(file_reference_create_from_path(&reference, path, FALSE));
+}
+
+/* ---------- the menus' map
+
+(port) The menus' map, the bare name "ui", is the Xbox's ui.map of the maps
+folder, or - with no Xbox ui.map, or with paths.menu_source "mcc" - MCC's own
+halo1\maps\ui.map (Halo PC's menus, a Halo: CE Anniversary cache of the same
+kind as MCC's other maps), a map of the Halo content folder like the rest
+(mcc_content_menu_source_choose says which). Chosen at each use from the
+files that are there; the choice is logged when it changes. */
+const char *config_string(char const *name);
+
+static boolean custom_edition_cache_menu_from_mcc(
+	void)
+{
+	static int logged = -1;
+	char path[MAP_PATH_SIZE];
+	char const *reason = "";
+	char const *setting = getenv("HALO_MENU_SOURCE");
+	boolean xbox_ui;
+	boolean mcc_ui = FALSE;
+	int source;
+
+	if (!setting)
+	{
+		setting = config_string("paths.menu_source");
+	}
+	snprintf(path, sizeof(path), "%sui.map", cache_files_map_directory());
+	xbox_ui = file_path_exists(path);
+	if (halo_content_library_found())
+	{
+		mcc_content_map_path("ui", path, sizeof(path));
+		mcc_ui = file_path_exists(path);
+	}
+	source = mcc_content_menu_source_choose(setting, xbox_ui, mcc_ui, &reason);
+	if (logged != source)
+	{
+		logged = source;
+		error(_error_silent, "menus: the menu map is %s (%s)",
+			source == _mcc_content_menu_source_mcc ? "MCC's halo1\\maps\\ui.map" : "the Xbox's ui.map", reason);
+	}
+
+	return source == _mcc_content_menu_source_mcc;
+}
+
+/* mcc_content_name_stem, and the menus' "ui" when MCC's is the menus' map */
+static int custom_edition_cache_name_stem(
+	char const *map_name,
+	char *stem)
+{
+	if (mcc_content_name_is_menu(map_name))
+	{
+		stem[0] = 0;
+		if (!custom_edition_cache_menu_from_mcc())
+		{
+			return _mcc_content_none;
+		}
+		snprintf(stem, MCC_CONTENT_STEM_BYTES, "ui");
+		return _mcc_content_menu;
+	}
+
+	return mcc_content_name_stem(map_name, stem);
 }
 
 /* <maps>\<name>.map, or the OpenSauce <maps>\<name>.yelo when there is no
@@ -881,24 +980,61 @@ static boolean custom_edition_crossplay_map_version(
 }
 
 /* the file that holds the map `map_name` names: <maps>\<name>.map, or the
-OpenSauce <maps>\<name>.yelo when there is no .map. With crossplay on, in a
-PC host's game on that level with a version (OpenCE's network version 29):
-the file of that version (custom_edition_crossplay_version_path), and none
-if this machine has none, as OpenCE's custom_edition_map_path (8102e711,
-CC0) takes it: another version's tags are not the host's */
+OpenSauce <maps>\<name>.yelo when there is no .map; with `from_mods`, else
+the mod map of that name (custom_edition_mods.c), and *from_mods says which
+(a mod map is only loaded from there, and only by a caller that asks). With
+crossplay on, in a PC host's game on that level with a version (OpenCE's
+network version 29): the file of that version
+(custom_edition_crossplay_version_path), and none if this machine has none,
+as OpenCE's custom_edition_map_path (8102e711, CC0) takes it: another
+version's tags are not the host's, and a mod map is never the host's */
 static boolean custom_edition_map_path(
 	char const *map_name,
-	char *path)
+	char *path,
+	boolean *from_mods)
 {
 	char const *name = tag_name_strip_path(map_name);
 	unsigned long version;
+	char mcc_stem[MCC_CONTENT_STEM_BYTES];
+	int mcc_kind = custom_edition_cache_name_stem(map_name, mcc_stem);
 
+	if (from_mods)
+	{
+		*from_mods = FALSE;
+	}
+	/* (port) a name of MCC's (mcc_content.h, mcc_bloodgulch, mods\mcc_a10)
+	is only ever the Halo content folder's map, with the Halo content
+	folder: never a file of the maps folder (where map sharing writes), nor
+	a mod's; a campaign map only for a caller that asks for mod maps (a game
+	of this machine's own), as a mod's */
+	if (mcc_kind != _mcc_content_none)
+	{
+		if (!halo_content_library_found() || (mcc_kind == _mcc_content_campaign && !from_mods) ||
+			!mcc_content_map_path(mcc_stem, path, MAP_PATH_SIZE) || !file_path_exists(path))
+		{
+			return FALSE;
+		}
+		if (from_mods)
+		{
+			*from_mods = mcc_kind == _mcc_content_campaign;
+		}
+		return TRUE;
+	}
 	if (network_wire_crossplay() && custom_edition_crossplay_map_version(map_name, &version))
 	{
 		return custom_edition_crossplay_version_path(name, version, path);
 	}
+	if (maps_folder_map_path(name, path))
+	{
+		return TRUE;
+	}
+	if (from_mods && custom_edition_mods_map_path(name, path, MAP_PATH_SIZE))
+	{
+		*from_mods = TRUE;
+		return TRUE;
+	}
 
-	return maps_folder_map_path(name, path);
+	return FALSE;
 }
 
 /* A cache's resource map of `type`: <maps>\bitmaps.map and so on, or for an
@@ -924,6 +1060,8 @@ static boolean custom_edition_resource_map_path(
 	else
 	{
 		sprintf(path, "%s%s%s", directory, type_name, MAP_FILE_EXTENSION);
+		/* (port: or the Halo content folder's halo1\maps\custom_edition) */
+		platform_halo_pc_resource_map(directory, type_name, path, MAP_PATH_SIZE);
 	}
 
 	return TRUE;
@@ -1053,6 +1191,7 @@ static boolean custom_edition_cache_tags_convert(
 {
 	uint32_t loaded_bytes = report->tag_data_bytes + report->resource_tag_bytes;
 	struct custom_edition_conversion_report conversion;
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
 	enum cache_file_status status;
 
 	custom_edition_cache_combine_resource_offsets(
@@ -1060,7 +1199,34 @@ static boolean custom_edition_cache_tags_convert(
 		loaded_bytes,
 		COMBINED_BITMAPS_OFFSET,
 		COMBINED_SOUNDS_OFFSET);
-	status = custom_edition_cache_convert(tag_cache, loaded_bytes, report->identity.name, &conversion);
+	{
+		/* (port) the sound effects of MCC's own maps, from its FSB bank
+		(mcc_sound.h): its streams asked for as each sound tag is converted */
+		struct mcc_sound_source mcc_sounds;
+		char reason[160];
+		boolean mcc_sounds_open = FALSE;
+
+		if (globals->map_from_mcc && globals->resource_files[_resource_map_sounds].opened)
+		{
+			mcc_sounds_open = mcc_sound_open(
+				&mcc_sounds,
+				COMBINED_SOUNDS_OFFSET,
+				globals->resource_files[_resource_map_sounds].source.size,
+				reason,
+				sizeof(reason));
+			if (mcc_sounds_open)
+				custom_edition_cache_convert_mcc_sounds(&mcc_sounds);
+			else
+				error(_error_silent, "mcc sound: the sound effects are silent: %s", reason);
+		}
+		status = custom_edition_cache_convert(tag_cache, loaded_bytes, report->identity.name, &conversion);
+		if (mcc_sounds_open)
+		{
+			custom_edition_cache_convert_mcc_sounds(NULL);
+			mcc_sound_log(&conversion);
+			mcc_sound_close();
+		}
+	}
 	custom_edition_load_progress_set(0.48f);
 	if (status != _cache_file_status_ok)
 	{
@@ -1078,6 +1244,11 @@ static boolean custom_edition_cache_tags_convert(
 		(long)conversion.chicago_extended_shaders,
 		(long)conversion.bitmaps_prepared,
 		conversion.script_nodes_reduced ? ", OpenSauce's script nodes made this build's number" : "");
+	if (conversion.bitmaps_made_linear)
+	{
+		error(_error_silent, "custom edition: %ld bitmaps of other dimensions than powers of two made linear",
+			(long)conversion.bitmaps_made_linear);
+	}
 	if (conversion.shaders_mistyped)
 	{
 		error(_error_silent, "custom edition: %ld shaders whose type was not their group's were given their group's",
@@ -1137,7 +1308,15 @@ static boolean custom_edition_cache_tags_convert(
 			"custom edition: %ld HUD elements drawn from Halo PC's double resolution bitmaps were given half their scale",
 			(long)conversion.hud_placements_rescaled);
 	}
+	if (conversion.hud_mcc_canvas)
+	{
+		error(
+			_error_silent,
+			"custom edition: the HUD is Halo: CE Anniversary's, made for a canvas twice the Xbox's: %ld HUD placements brought to the Xbox's",
+			(long)conversion.hud_mcc_placements);
+	}
 	custom_edition_cache_globals.behaviours = conversion.behaviours;
+	custom_edition_cache_globals.hud_mcc_canvas = conversion.hud_mcc_canvas != 0;
 	custom_edition_behaviours_log(conversion.behaviours);
 	if (conversion.hud_placements_kept)
 	{
@@ -1150,6 +1329,10 @@ static boolean custom_edition_cache_tags_convert(
 	{
 		error(_error_silent, "custom edition: the multiplayer score hint names the BACK button where Halo PC names a key");
 	}
+	if (conversion.solo_pause_save_removed)
+	{
+		error(_error_silent, "custom edition: the campaign pause menu's SAVE LAST CHECKPOINT taken out (its QUIT saves the checkpoint)");
+	}
 	if (conversion.widget_functions_cleared || conversion.pause_menu_trimmed)
 	{
 		error(
@@ -1159,10 +1342,10 @@ static boolean custom_edition_cache_tags_convert(
 			conversion.pause_menu_trimmed ? "; the multiplayer pause menu is the Xbox's resume and quit" : "");
 	}
 
-#ifdef HALO_RELOCATABLE_TAG_CACHE
 	/* The tags, in this build's layouts now but for the models (whose
 	Custom Edition layout the walk knows too), moved to where they are
-	before the game's own code below reads them through their pointers */
+	before the game's own code below reads them through their pointers
+	(port: in every build, a Halo: CE Anniversary map's always) */
 	if ((uint32_t)(unsigned long)tag_cache != custom_edition_cache_linked_address())
 	{
 		if (!halo_tag_relocate_linked_tags(tag_cache, loaded_bytes, custom_edition_cache_linked_address(), tag_cache_bytes))
@@ -1178,7 +1361,6 @@ static boolean custom_edition_cache_tags_convert(
 			(unsigned long)custom_edition_cache_linked_address(),
 			tag_cache);
 	}
-#endif
 
 	/* (from OpenCE, MrBruh's "Validate map tags before loading" and "Load,
 	check and run Halo Custom Edition and OpenSauce maps") the tags, made
@@ -1211,7 +1393,13 @@ frame on the game thread, each waiting on the Vita for the memory card,
 which serves one request at a time: behind a map copy's write it took
 hundreds of milliseconds, the lobby's hitches with nothing else happening.
 An answer stands IDENTITY_MEMORY_MS, and a map share download forgets its
-map's (custom_edition_cache_map_identity_forget). */
+map's (custom_edition_cache_map_identity_forget). While a map copy is under
+way it stands until the copy is over: an insider.10 tester's lobby looked
+again 10 s into damnation.map's copy, and its six file calls took 2.6 s of
+the game thread behind the copy's writes. Nothing in the maps folder changes
+under a copy but what this game writes (a map share download, the mod
+manager), which forgets its map's answer; the map's load reads its file
+afresh whatever was remembered. */
 enum
 {
 	REMEMBERED_ANSWERS = 8,
@@ -1221,6 +1409,8 @@ static struct
 {
 	char name[CACHE_FILE_STRING_BYTES];
 	unsigned long when;
+	/* (port) asked of a mod map too (custom_edition_cache_identify_file) */
+	boolean mod_maps;
 	boolean identified;
 	struct cache_file_identity identity;
 } remembered_answers[REMEMBERED_ANSWERS];
@@ -1266,12 +1456,16 @@ static void remembered_answers_forget(
 /* Whether the map `map_name` names is a Custom Edition cache, whose header
 is then described in `identity`, whatever the setting; and when
 `resource_maps_used`, the resource maps it takes tags from
-(custom_edition_cache_resource_maps_used). */
+(custom_edition_cache_resource_maps_used). (port) With `mod_maps`, a mod
+map's Halo: CE Anniversary cache of a solo scenario in the mods folder is
+one too (custom_edition_mods.c): the cache file loader's question alone. */
 static boolean custom_edition_cache_identify_file(
 	char const *map_name,
 	struct cache_file_identity *identity,
-	uint32_t *resource_maps_used)
+	uint32_t *resource_maps_used,
+	boolean mod_maps)
 {
+	boolean from_mods = FALSE;
 	char path[MAP_PATH_SIZE];
 	struct custom_edition_file file;
 	boolean identified = FALSE;
@@ -1279,14 +1473,23 @@ static boolean custom_edition_cache_identify_file(
 	unsigned long now = system_milliseconds();
 	boolean rememberable = !resource_maps_used && strlen(name) < CACHE_FILE_STRING_BYTES;
 	short index;
+	char mcc_stem[MCC_CONTENT_STEM_BYTES];
+	int mcc_kind = custom_edition_cache_name_stem(map_name, mcc_stem);
 
+	/* (port: a name of MCC's is no map with no Halo content folder,
+	whatever was found of it before) */
+	if (mcc_kind != _mcc_content_none && !halo_content_library_found())
+	{
+		return FALSE;
+	}
 	if (rememberable)
 	{
 		remembered_answers_take();
 		for (index = 0; index < REMEMBERED_ANSWERS; index++)
 		{
 			if (remembered_answers[index].name[0] &&
-				now - remembered_answers[index].when < IDENTITY_MEMORY_MS &&
+				(now - remembered_answers[index].when < IDENTITY_MEMORY_MS || cache_files_precache_in_progress()) &&
+				remembered_answers[index].mod_maps == mod_maps &&
 				!csstrcasecmp(remembered_answers[index].name, name))
 			{
 				identified = remembered_answers[index].identified;
@@ -1300,14 +1503,28 @@ static boolean custom_edition_cache_identify_file(
 		}
 		remembered_answers_give();
 	}
-	if (custom_edition_map_path(map_name, path) &&
+	if (custom_edition_map_path(map_name, path, mod_maps ? &from_mods : NULL) &&
 		custom_edition_file_open(&file, path))
 	{
+		/* (port: MCC's own multiplayer maps, Halo: CE Anniversary caches of
+		multiplayer scenarios, mcc_content.h) */
 		if (cache_file_identify(&file.source, identity) == _cache_file_status_ok &&
-			identity->format == _cache_file_format_custom_edition_cache)
+			(mcc_kind == _mcc_content_menu ?
+				identity->format == _cache_file_format_mcc_cea_cache :
+			mcc_kind == _mcc_content_multiplayer ?
+				identity->format == _cache_file_format_mcc_cea_cache && identity->scenario_type == _scenario_type_multiplayer :
+			from_mods ?
+				identity->format == _cache_file_format_mcc_cea_cache && identity->scenario_type == _scenario_type_solo :
+				identity->format == _cache_file_format_custom_edition_cache))
 		{
 			identified = TRUE;
-			if (resource_maps_used)
+			if (resource_maps_used && mcc_kind != _mcc_content_none)
+			{
+				/* (pixels from the bitmaps.map beside it, checked as it loads:
+				no tag of a resource map) */
+				*resource_maps_used = 0;
+			}
+			else if (resource_maps_used)
 			{
 				*resource_maps_used = custom_edition_cache_resource_maps_used(&file.source, identity);
 			}
@@ -1319,7 +1536,7 @@ static boolean custom_edition_cache_identify_file(
 		remembered_answers_take();
 		for (index = 0; index < REMEMBERED_ANSWERS; index++)
 		{
-			if (!csstrcasecmp(remembered_answers[index].name, name))
+			if (remembered_answers[index].mod_maps == mod_maps && !csstrcasecmp(remembered_answers[index].name, name))
 			{
 				break;
 			}
@@ -1332,6 +1549,7 @@ static boolean custom_edition_cache_identify_file(
 		csstrncpy(remembered_answers[index].name, name, CACHE_FILE_STRING_BYTES - 1);
 		remembered_answers[index].name[CACHE_FILE_STRING_BYTES - 1] = 0;
 		remembered_answers[index].when = now;
+		remembered_answers[index].mod_maps = mod_maps;
 		remembered_answers[index].identified = identified;
 		if (identified)
 		{
@@ -1350,7 +1568,12 @@ static boolean custom_edition_cache_identify(
 	char const *map_name,
 	struct cache_file_identity *identity)
 {
-	return halo_custom_edition_enabled() && custom_edition_cache_identify_file(map_name, identity, NULL);
+	char mcc_stem[MCC_CONTENT_STEM_BYTES];
+
+	/* (port: or one of MCC's own multiplayer maps, with the Halo content
+	folder, whatever PC maps is) */
+	return (halo_custom_edition_enabled() || custom_edition_cache_name_stem(map_name, mcc_stem) == _mcc_content_multiplayer) &&
+		custom_edition_cache_identify_file(map_name, identity, NULL, FALSE);
 }
 
 static void custom_edition_cache_report_log(
@@ -1375,6 +1598,13 @@ static void custom_edition_cache_report_log(
 		(long)report->relocated_pointer_count,
 		report->checksum_deferred ? "taken with the models" :
 		TEST_FLAG(report->warnings, _custom_edition_warning_checksum_mismatch_bit) ? "mismatched" : "matched");
+	if (report->mcc_cea_sound_permutations_silent)
+	{
+		error(
+			_error_silent,
+			"custom edition: Halo: CE Anniversary: %ld sound permutations are silent: their samples are in a sounds.map the mod does not have (MCC keeps its own in FMOD banks)",
+			(long)report->mcc_cea_sound_permutations_silent);
+	}
 
 	return;
 }
@@ -1474,8 +1704,23 @@ boolean custom_edition_cache_refuse(
 	boolean fatal)
 {
 	int has_opensauce_header;
+	enum cache_file_format format = cache_file_header_format(header, &has_opensauce_header);
 
-	if (cache_file_header_format(header, &has_opensauce_header) != _cache_file_format_custom_edition_cache)
+	/* (port) a Halo: CE Anniversary map anywhere but a mod's folder (one in
+	the maps folder, where map sharing writes): refused, as a damaged map is
+	(the menu says so: halo_map_load_refused), never stopping a debug build,
+	whatever the file */
+	if (format == _cache_file_format_mcc_cea_cache)
+	{
+		csprintf(
+			temporary,
+			"'%.96s' is a Halo: CE Anniversary map (build %.31s): this build plays one only from a mod's folder, offline, or MCC's own from the Halo content folder (docs/mcc_cea_maps.md)",
+			scenario_name,
+			build);
+		error(_error_silent, "%s", temporary);
+		return TRUE;
+	}
+	if (format != _cache_file_format_custom_edition_cache)
 	{
 		return FALSE;
 	}
@@ -1527,15 +1772,116 @@ boolean custom_edition_cache_playable(
 {
 	struct cache_file_identity identity;
 
-	return custom_edition_cache_identify(map_name, &identity);
+	/* (port: or a mod's Halo: CE Anniversary map, which only the cache file
+	loader asks of, and which custom_edition_cache_tags_load loads only for
+	a game of this machine's own: for any other, a network game's or a
+	film's, the mods folder is not looked in at all, whatever name the
+	network gave) */
+	char mcc_stem[MCC_CONTENT_STEM_BYTES];
+
+	/* (port: MCC's own maps, mcc_content.h, need the Halo content folder,
+	not PC maps: custom_edition_cache_identify_file) */
+	return (halo_custom_edition_enabled() || custom_edition_cache_name_stem(map_name, mcc_stem) != _mcc_content_none) &&
+		custom_edition_cache_identify_file(map_name, &identity, NULL, game_connection() == _game_connection_local);
+}
+
+short custom_edition_cache_content_loader(
+	char const *path,
+	int *game_index)
+{
+	struct custom_edition_file file;
+	unsigned char header[8];
+	int loader = _content_library_loader_none;
+
+	if (game_index)
+	{
+		*game_index = -1;
+	}
+	if (!custom_edition_file_open(&file, path))
+	{
+		return _content_library_loader_none;
+	}
+	if (file.source.size >= sizeof(header) && file.source.read(file.source.context, 0, sizeof(header), header))
+	{
+		loader = content_library_loader_for_header(header, sizeof(header), game_index);
+	}
+	custom_edition_file_close(&file);
+
+	return (short)loader;
+}
+
+boolean custom_edition_cache_mod_map_identify(
+	char const *path)
+{
+	struct custom_edition_file file;
+	struct cache_file_identity identity;
+	enum cache_file_status status;
+
+	if (!custom_edition_file_open(&file, path))
+	{
+		return FALSE;
+	}
+	status = cache_file_identify(&file.source, &identity);
+	custom_edition_file_close(&file);
+	if (status != _cache_file_status_ok || identity.format != _cache_file_format_mcc_cea_cache)
+	{
+		error(_error_silent, "mods: '%s' is left out: %s", path,
+			status != _cache_file_status_ok ? cache_file_status_describe(status) : "not a Halo: CE Anniversary map");
+		return FALSE;
+	}
+	if (identity.scenario_type != _scenario_type_solo)
+	{
+		error(_error_silent, "mods: '%s' is left out: not a campaign map (scenario type %d)", path, identity.scenario_type);
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+short custom_edition_cache_file_check(
+	char const *path,
+	short *format,
+	short *scenario_type,
+	char *inside_name,
+	long inside_name_size)
+{
+	struct custom_edition_file file;
+	struct cache_file_identity identity;
+	enum cache_file_status status;
+
+	*format = _cache_file_format_unrecognized;
+	*scenario_type = NONE;
+	if (inside_name_size > 0)
+	{
+		inside_name[0] = 0;
+	}
+	if (!custom_edition_file_open(&file, path))
+	{
+		return _cache_file_status_read_failed;
+	}
+	csmemset(&identity, 0, sizeof(identity));
+	status = cache_file_identify(&file.source, &identity);
+	custom_edition_file_close(&file);
+	*format = (short)identity.format;
+	*scenario_type = identity.scenario_type;
+	if (inside_name_size > 0)
+	{
+		csstrncpy(inside_name, identity.name, (size_t)(inside_name_size - 1));
+		inside_name[inside_name_size - 1] = 0;
+	}
+
+	return (short)status;
 }
 
 boolean custom_edition_cache_is_custom_edition(
 	char const *map_name)
 {
 	struct cache_file_identity identity;
+	char mcc_stem[MCC_CONTENT_STEM_BYTES];
 
-	return custom_edition_cache_identify_file(map_name, &identity, NULL);
+	/* (port: MCC's own maps are not: custom_edition_cache_mcc_content) */
+	return custom_edition_cache_name_stem(map_name, mcc_stem) == _mcc_content_none &&
+		custom_edition_cache_identify_file(map_name, &identity, NULL, FALSE);
 }
 
 boolean custom_edition_cache_missing_resource_maps(
@@ -1552,7 +1898,7 @@ boolean custom_edition_cache_missing_resource_maps(
 	{
 		missing[0] = 0;
 	}
-	if (!custom_edition_cache_identify_file(map_name, &identity, &used))
+	if (!custom_edition_cache_identify_file(map_name, &identity, &used, FALSE))
 	{
 		return FALSE;
 	}
@@ -1583,8 +1929,10 @@ boolean custom_edition_cache_missing_resource_maps(
 	return missing_size > 0 && missing[0];
 }
 
-boolean custom_edition_cache_xbox_multiplayer(
-	char const *map_name)
+/* (custom_edition_cache_xbox_multiplayer and _renamed) */
+static boolean custom_edition_cache_xbox_multiplayer_check(
+	char const *map_name,
+	boolean *renamed)
 {
 	/* the cache partition's room for a multiplayer map
 	(cache_files_windows.c, MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE), which its
@@ -1596,6 +1944,7 @@ boolean custom_edition_cache_xbox_multiplayer(
 	struct cache_file_identity identity;
 	boolean multiplayer = FALSE;
 
+	*renamed = FALSE;
 	if (strlen(cache_files_map_directory()) + strlen(name) + strlen(MAP_FILE_EXTENSION) >= MAP_PATH_SIZE)
 	{
 		return FALSE;
@@ -1610,8 +1959,13 @@ boolean custom_edition_cache_xbox_multiplayer(
 		identity.scenario_type == _scenario_type_multiplayer)
 	{
 		/* the cache partition knows a copied map by the name in its header
-		(cache_files_windows.c, cached_map_files_find_map) */
-		if (csstrcasecmp(identity.name, name))
+		(cache_files_windows.c, cached_map_files_find_map): a renamed copy
+		by its file's (cache_file_read_header_from_dvd), but for an Xbox
+		level's name, which must be the one inside, and a name longer than
+		the header's */
+		if (csstrcasecmp(identity.name, name) &&
+			(custom_edition_maps_is_xbox_level(name) || !csstrcasecmp(name, "ui") ||
+				strlen(name) >= CACHE_FILE_STRING_BYTES))
 		{
 			error(_error_silent, "custom maps: '%s' is named '%s' inside: rename the file to %s.map", path, identity.name, identity.name);
 		}
@@ -1627,11 +1981,28 @@ boolean custom_edition_cache_xbox_multiplayer(
 		else
 		{
 			multiplayer = TRUE;
+			*renamed = csstrcasecmp(identity.name, name) != 0;
 		}
 	}
 	custom_edition_file_close(&file);
 
 	return multiplayer;
+}
+
+boolean custom_edition_cache_xbox_multiplayer(
+	char const *map_name)
+{
+	boolean renamed;
+
+	return custom_edition_cache_xbox_multiplayer_check(map_name, &renamed);
+}
+
+boolean custom_edition_cache_xbox_renamed(
+	char const *map_name)
+{
+	boolean renamed;
+
+	return custom_edition_cache_xbox_multiplayer_check(map_name, &renamed) && renamed;
 }
 
 /* the identities custom_edition_cache_map_identity worked out, by file
@@ -1651,7 +2022,7 @@ boolean custom_edition_cache_map_file_path(
 {
 	char found[MAP_PATH_SIZE];
 
-	if (!custom_edition_map_path(map_name, found) || (long)strlen(found) >= path_size)
+	if (!custom_edition_map_path(map_name, found, NULL) || (long)strlen(found) >= path_size)
 	{
 		return FALSE;
 	}
@@ -1693,7 +2064,7 @@ unsigned long custom_edition_cache_map_identity(
 	short index;
 
 	if (strlen(name) >= CACHE_FILE_STRING_BYTES ||
-		!custom_edition_map_path(name, path) ||
+		!custom_edition_map_path(name, path, NULL) ||
 		!custom_edition_file_open(&file, path))
 	{
 		return 0;
@@ -1708,8 +2079,11 @@ unsigned long custom_edition_cache_map_identity(
 			return remembered_identities[index].identity;
 		}
 	}
+	/* (port: and MCC's own multiplayer maps, Halo: CE Anniversary caches:
+	mcc_content.h; custom_edition_map_path finds no other version 13 map) */
 	if (cache_file_identify(&file.source, &identity) == _cache_file_status_ok &&
-		(identity.format == _cache_file_format_xbox_cache || identity.format == _cache_file_format_custom_edition_cache))
+		(identity.format == _cache_file_format_xbox_cache || identity.format == _cache_file_format_custom_edition_cache ||
+			identity.format == _cache_file_format_mcc_cea_cache))
 	{
 		uLong crc = 0;
 
@@ -1845,19 +2219,70 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 	struct custom_edition_load_phase phase;
 	char phases[320];
 	int phases_length = 0;
+	/* (port) a mod's Halo: CE Anniversary map (custom_edition_mods.c) */
+	boolean from_mods = FALSE;
+	boolean mcc_cea;
+	/* (port) a map of the Halo content folder (mcc_content.h) */
+	char mcc_stem[MCC_CONTENT_STEM_BYTES];
+	int mcc_kind = custom_edition_cache_name_stem(map_name, mcc_stem);
 
 	custom_edition_load_phase_mark(&phase);
 	assert(!globals->tags_loaded);
 	custom_edition_cache_load_failure_begin(map_name);
-	if (!custom_edition_map_path(map_name, path) || !custom_edition_file_open(&globals->map, path))
+	globals->mcc_cea = FALSE;
+	/* (the mods folder looked in only for a game of this machine's own, as
+	the check below loads one only for that) */
+	if (!custom_edition_map_path(map_name, path, game_connection() == _game_connection_local ? &from_mods : NULL) ||
+		!custom_edition_file_open(&globals->map, path))
 	{
 		error(_error_silent, "custom edition: cannot open the map '%s'", map_name);
 		custom_edition_cache_load_failure_reason(T("its file could not be opened"));
 		return NULL;
 	}
 	status = cache_file_identify(&globals->map.source, &identity);
+	mcc_cea = status == _cache_file_status_ok && identity.format == _cache_file_format_mcc_cea_cache;
+	/* (port) a map of the Halo content folder is played by the loader its
+	own header asks for (mcc_content.h's table): this one Halo CE's */
+	if (mcc_kind != _mcc_content_none)
+	{
+		unsigned char content_header[8];
+		int loader = globals->map.source.size >= sizeof(content_header) &&
+			globals->map.source.read(globals->map.source.context, 0, sizeof(content_header), content_header) ?
+			content_library_loader_for_header(content_header, sizeof(content_header), NULL) : _content_library_loader_none;
+
+		if (loader != _content_library_loader_halo1)
+		{
+			mcc_cea = FALSE;
+		}
+	}
+	/* (port) a Halo: CE Anniversary map is loaded only from a mod's folder,
+	where map sharing never writes, only of a solo scenario, and only for a
+	game of this machine's own: never a network game's, hosted or joined;
+	a mod's folder holds nothing else that is loaded. Or from the Halo content
+	folder (the Halo content folder, mcc_content.h), which map
+	sharing never writes either: its campaign maps as a mod's, its
+	multiplayer maps for any game but the dedicated server's (a network
+	game's players each with the same file, compared as a custom map's:
+	custom_edition_maps_host_copy_matches); it too holds nothing else that
+	is loaded */
+	if ((mcc_cea || from_mods || mcc_kind != _mcc_content_none) &&
+		!(mcc_cea && from_mods && identity.scenario_type == _scenario_type_solo &&
+			game_connection() == _game_connection_local) &&
+		!(mcc_cea && mcc_kind == _mcc_content_menu && halo_content_library_found()) &&
+		!(mcc_cea && mcc_kind == _mcc_content_multiplayer && identity.scenario_type == _scenario_type_multiplayer &&
+			halo_content_library_found()))
+	{
+		error(
+			_error_silent,
+			"custom edition: '%s' is not loaded: Halo: CE Anniversary maps are loaded only from a mod's folder, for a campaign game of this machine's own, or as MCC's own maps",
+			path);
+		custom_edition_cache_load_failure_reason(
+			T("Halo: CE Anniversary maps play only from the mods folder, offline, or the Halo content folder"));
+		custom_edition_cache_files_close();
+		return NULL;
+	}
 	if (status != _cache_file_status_ok ||
-		identity.format != _cache_file_format_custom_edition_cache ||
+		(identity.format != _cache_file_format_custom_edition_cache && !mcc_cea) ||
 		identity.file_size > COMBINED_BITMAPS_OFFSET ||
 		!globals->map.source.read(globals->map.source.context, 0, CACHE_FILE_HEADER_BYTES, header))
 	{
@@ -1866,10 +2291,26 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 		custom_edition_cache_files_close();
 		return NULL;
 	}
+	/* (port: custom_edition_sounds.c's sound cache file and reader) */
+	csstrncpy(globals->map_path, path, sizeof(globals->map_path) - 1);
+	globals->map_path[sizeof(globals->map_path) - 1] = 0;
+	globals->map_from_mods = from_mods;
+	globals->map_from_mcc = mcc_kind != _mcc_content_none;
+	csstrncpy(globals->map_mcc_stem, mcc_stem, sizeof(globals->map_mcc_stem) - 1);
+	globals->map_mcc_stem[sizeof(globals->map_mcc_stem) - 1] = 0;
+	if (globals->map_from_mcc)
+	{
+		/* (MCC keeps every sound of its stock maps in FMOD banks,
+		sound\pc\*.fsb: the sound effects (IMA ADPCM) play from their bank,
+		mcc_sound.h; the CELT banks' dialogue and music do not yet) */
+		error(_error_silent, "mcc: '%s' is MCC's own %s map: its sounds are in MCC's FMOD banks, the sound effects played from sounds_adpcm.fsb and the dialogue and music silent in this version",
+			mcc_stem, mcc_kind == _mcc_content_campaign ? "campaign" : mcc_kind == _mcc_content_menu ? "menu" : "multiplayer");
+	}
+	globals->map_header_crc = cache_file_crc32_update(0, header, CACHE_FILE_HEADER_BYTES);
 	error(_error_silent, "custom edition: loading '%s' (build %s%s)",
 		path,
 		identity.build,
-		identity.has_opensauce_header ? ", OpenSauce" : "");
+		mcc_cea ? ", Halo: CE Anniversary" : identity.has_opensauce_header ? ", OpenSauce" : "");
 	custom_edition_cache_heap_log("before loading");
 	/* the tag cache the map's tags are linked to the start of: at
 	0x40440000 when the platform has it there, else elsewhere and moved
@@ -1883,27 +2324,59 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 		custom_edition_cache_files_close();
 		return NULL;
 	}
-#ifndef HALO_RELOCATABLE_TAG_CACHE
-	if ((uint32_t)(unsigned long)tag_cache != custom_edition_cache_linked_address())
-	{
-		error(_error_silent, "custom edition: this build cannot move the tags of '%s' off 0x40440000", path);
-		custom_edition_cache_load_failure_reason(T("this build cannot move its tags"));
-		halo_custom_edition_tag_cache_release();
-		custom_edition_cache_files_close();
-		return NULL;
-	}
-#endif
 
+	/* (port: a Halo: CE Anniversary map takes no tags from resource maps,
+	only pixels and samples from MCC's bitmaps.map and sounds.map: a mod's
+	own, beside its maps in its folder, never the maps folder's, which are
+	Halo PC's; the map is refused if it names one that is not there) */
 	for (type = _resource_map_bitmaps; type < NUMBER_OF_RESOURCE_MAP_TYPES; type++)
 	{
 		char resource_path[MAP_PATH_SIZE];
 
-		if (!custom_edition_resource_map_path(&identity, (enum resource_map_type)type, resource_path) ||
-			!custom_edition_file_open(&globals->resource_files[type], resource_path))
+		if (mcc_cea && globals->map_from_mcc && type == _resource_map_sounds)
+		{
+			/* (port: MCC's own maps have no sounds.map; the sounds slot of
+			the combined offset space is its sound effects' FSB bank, whose
+			IMA ADPCM streams the permutations are pointed at: mcc_sound.h) */
+			snprintf(resource_path, sizeof(resource_path), "%s%s", MCC_SOUND_DIRECTORY, MCC_SOUND_ADPCM_BANK);
+			if (!file_path_exists(resource_path) || !custom_edition_file_open(&globals->resource_files[type], resource_path))
+			{
+				error(_error_silent, "mcc: no sound effects bank '%s': every sound of the map is silent", resource_path);
+				continue;
+			}
+			csstrncpy(globals->resource_paths[type], resource_path, sizeof(globals->resource_paths[type]) - 1);
+			globals->resource_paths[type][sizeof(globals->resource_paths[type]) - 1] = 0;
+			continue;
+		}
+		if (mcc_cea)
+		{
+			char const *folder_end = strrchr(path, '\\');
+			long folder_length = folder_end ? (long)(folder_end - path) + 1 : 0;
+
+			if (type == _resource_map_locale || !folder_length ||
+				folder_length + strlen(resource_map_type_describe((enum resource_map_type)type)) +
+					strlen(MAP_FILE_EXTENSION) >= MAP_PATH_SIZE)
+			{
+				continue;
+			}
+			sprintf(resource_path, "%.*s%s%s", (int)folder_length, path,
+				resource_map_type_describe((enum resource_map_type)type), MAP_FILE_EXTENSION);
+			if (!file_path_exists(resource_path))
+			{
+				continue;
+			}
+		}
+		else if (!custom_edition_resource_map_path(&identity, (enum resource_map_type)type, resource_path))
+		{
+			continue;
+		}
+		if (!custom_edition_file_open(&globals->resource_files[type], resource_path))
 		{
 			error(_error_silent, "custom edition: no resource map '%s'", resource_path);
 			continue;
 		}
+		csstrncpy(globals->resource_paths[type], resource_path, sizeof(globals->resource_paths[type]) - 1);
+		globals->resource_paths[type][sizeof(globals->resource_paths[type]) - 1] = 0;
 		status = resource_map_open(
 			&globals->resource_files[type].source,
 			(enum resource_map_type)type,
@@ -1940,7 +2413,7 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 		csmemset(&hooks, 0, sizeof(hooks));
 		hooks.source = &globals->map.source;
 		hooks.read_crc = custom_edition_load_read_crc;
-		hooks.defer_model_checksum = TRUE;
+		hooks.defer_model_checksum = !mcc_cea;
 		custom_edition_cache_load_hooks(&hooks);
 	}
 	status = custom_edition_cache_load(
@@ -1948,6 +2421,7 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 		globals->resource_maps,
 		tag_cache,
 		tag_cache_bytes,
+		mcc_cea,
 		&report);
 	custom_edition_cache_load_hooks(NULL);
 	csmemset(&model_checksum, 0, sizeof(model_checksum));
@@ -1978,15 +2452,52 @@ static struct cache_file_tag_header *custom_edition_cache_tags_load_private(
 		return NULL;
 	}
 	custom_edition_cache_report_log(&report);
+	/* (port) a Halo: CE Anniversary map's tags made what this build takes
+	where MCC has more room (cache_file_formats.c), before they are
+	converted; its structure BSPs as it links them, for their loads */
+	if (mcc_cea)
+	{
+		struct mcc_cea_fix_report fix;
+
+		status = mcc_cea_cache_fix(tag_cache, report.tag_data_bytes, &fix);
+		if (status != _cache_file_status_ok)
+		{
+			error(
+				_error_silent,
+				"custom edition: cannot load '%s': %s (tag %ld)",
+				path,
+				cache_file_status_describe(status),
+				(long)fix.problem_tag_index);
+			custom_edition_cache_load_failure_reason(custom_edition_cache_load_status_reason(status, &report));
+			custom_edition_cache_tags_moved(custom_edition_cache_linked_address());
+			halo_custom_edition_tag_cache_release();
+			custom_edition_cache_files_close();
+			return NULL;
+		}
+		error(
+			_error_silent,
+			"custom edition: Halo: CE Anniversary: %ld script syntax nodes packed, %ld object names moved below 512 and %ld past it dropped, %ld DXT bitmaps marked compressed, %ld bitmaps' MCC flags cleared; structure BSPs read at 0x%08lX",
+			(long)fix.script_nodes_packed,
+			(long)fix.object_names_moved,
+			(long)fix.object_names_dropped,
+			(long)fix.bitmaps_marked_compressed,
+			(long)fix.bitmaps_flags_cleared,
+			(unsigned long)report.mcc_cea_structure_bsp_address);
+		globals->mcc_cea = TRUE;
+		tag_validate_structure_vertices_in_file(TRUE);
+		globals->mcc_cea_structure_bsp_count = report.structure_bsp_count;
+		globals->mcc_cea_structure_bsp_address = report.mcc_cea_structure_bsp_address;
+		csmemcpy(globals->mcc_cea_structure_bsps, report.mcc_cea_structure_bsps, sizeof(globals->mcc_cea_structure_bsps));
+	}
 	if (!custom_edition_cache_tags_convert(tag_cache, tag_cache_bytes, &report))
 	{
 		error(_error_silent, "custom edition: cannot run '%s'", path);
 		custom_edition_cache_load_failure_reason(T("its tags could not be converted for this port"));
+		globals->mcc_cea = FALSE;
+		tag_validate_structure_vertices_in_file(FALSE);
 		custom_edition_models_dispose();
 		custom_edition_bitmaps_dispose();
-#ifdef HALO_RELOCATABLE_TAG_CACHE
 		halo_tag_relocate_linked_release();
-#endif
 		custom_edition_cache_tags_moved(custom_edition_cache_linked_address());
 		halo_custom_edition_tag_cache_release();
 		custom_edition_cache_files_close();
@@ -2039,14 +2550,10 @@ struct cache_file_tag_header *custom_edition_cache_tags_load(
 	game_loading_screen_begin();
 	/* (and through the tags' check and move, which take a while each) */
 	tag_validate_progress = custom_edition_load_frame;
-#ifdef HALO_RELOCATABLE_TAG_CACHE
 	halo_tag_relocate_progress = custom_edition_load_frame;
-#endif
 	tag_header = custom_edition_cache_tags_load_private(map_name, header);
 	tag_validate_progress = NULL;
-#ifdef HALO_RELOCATABLE_TAG_CACHE
 	halo_tag_relocate_progress = NULL;
-#endif
 	model_checksum.active = FALSE;
 	custom_edition_cache_load_hooks(NULL);
 	/* (loaded: the screen stays up while scenario_load reads the first
@@ -2098,6 +2605,131 @@ void halo_map_load_refused(
 		reason = T("out of memory: restart the game");
 	}
 	custom_edition_cache_load_failure_reason(reason);
+
+	return;
+}
+
+/* (port) A campaign level the classic menus name as the Xbox's
+("levels\a10\a10") for a machine with no Xbox maps: MCC's own campaign map
+of the Halo content folder as a mod's ("mods\mcc_a10"), written into `out`;
+FALSE (nothing written) for any other name, for a level whose Xbox map is in
+the maps folder (the Xbox install keeps playing its own) and for one the
+content folder does not have. main_set_map_name's. */
+boolean custom_edition_cache_campaign_level_translate(
+	char const *level_name,
+	char *out,
+	long out_size)
+{
+	char stem[MCC_CONTENT_STEM_BYTES];
+	char path[MAP_PATH_SIZE];
+	char const *cursor;
+	long length;
+	static char const prefix[] = "levels\\";
+
+	if (!level_name || !halo_content_library_found())
+	{
+		return FALSE;
+	}
+	for (length = 0; length < (long)sizeof(prefix) - 1; length++)
+	{
+		char character = level_name[length];
+
+		if ((character >= 'A' && character <= 'Z' ? (char)(character - 'A' + 'a') : character) != prefix[length])
+		{
+			return FALSE;
+		}
+	}
+	/* levels\<x>\<x> */
+	cursor = level_name + 7;
+	for (length = 0; cursor[length] && cursor[length] != '\\' && length < MCC_CONTENT_STEM_BYTES - 1; length++)
+	{
+		stem[length] = cursor[length];
+	}
+	stem[length] = 0;
+	if (!length || cursor[length] != '\\' || csstrcasecmp(cursor + length + 1, stem) ||
+		mcc_content_stem_kind(stem) != _mcc_content_campaign)
+	{
+		return FALSE;
+	}
+	snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), stem);
+	if (file_path_exists(path) || !mcc_content_map_path(stem, path, sizeof(path)) || !file_path_exists(path))
+	{
+		return FALSE;
+	}
+	snprintf(out, (size_t)out_size, "mods\\%s%s", MCC_CONTENT_NAME_PREFIX, stem);
+	/* (main_set_map_name takes the stem as the content folder spells it) */
+	{
+		long index;
+
+		for (index = (long)strlen("mods\\") + (long)strlen(MCC_CONTENT_NAME_PREFIX); out[index]; index++)
+		{
+			if (out[index] >= 'A' && out[index] <= 'Z')
+			{
+				out[index] = (char)(out[index] - 'A' + 'a');
+			}
+		}
+	}
+
+	return TRUE;
+}
+
+/* the Xbox's event handler functions (ui_widget_event_handler_functions.c):
+Halo PC's own are numbered from here */
+#define MENU_XBOX_FUNCTION_COUNT 102
+
+/* (ui_widget.c) A handler of a menu widget ran a function that failed:
+with MCC's own ui.map as the menus' map, one of Halo PC's own functions (a
+number past the Xbox's, which this build has no mapping for yet) cancels the
+action as an Xbox function that fails does, and the player is told once in a
+while that the menu is not supported with MCC's menu file yet, the missing
+function logged once for each widget */
+void custom_edition_cache_menu_handler_failed(
+	long definition_tag_index,
+	long function_index)
+{
+	void platform_show_message(char const *title, char const *message);
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
+	static struct
+	{
+		long tag_index;
+		long function_index;
+	} logged[64];
+	static long logged_count;
+	static unsigned long shown_at;
+	unsigned long now = system_milliseconds();
+	char const *name;
+	long index;
+
+	if (!globals->tags_loaded || !globals->map_from_mcc || csstrcmp(globals->map_mcc_stem, "ui"))
+	{
+		return;
+	}
+	for (index = 0; index < logged_count; index++)
+	{
+		if (logged[index].tag_index == definition_tag_index && logged[index].function_index == function_index)
+		{
+			break;
+		}
+	}
+	if (index == logged_count)
+	{
+		name = definition_tag_index != NONE ? tag_get_name(definition_tag_index) : NULL;
+		error(_error_silent, "menus: MCC's ui.map: widget '%s' ran function %ld, %s",
+			name ? name : "?", function_index,
+			function_index >= MENU_XBOX_FUNCTION_COUNT ?
+				"one of Halo PC's own that this build has no mapping for yet (the action is cancelled)" :
+				"which failed (the action is cancelled)");
+		if (logged_count < (long)NUMBEROF(logged))
+		{
+			logged[logged_count].tag_index = definition_tag_index;
+			logged[logged_count++].function_index = function_index;
+		}
+	}
+	if (function_index >= MENU_XBOX_FUNCTION_COUNT && (!shown_at || now - shown_at > 1500))
+	{
+		shown_at = now ? now : 1;
+		platform_show_message(T("MCC's menu file"), T("This menu isn't supported with MCC's menu file yet."));
+	}
 
 	return;
 }
@@ -2273,6 +2905,12 @@ boolean custom_edition_cache_relies_on(
 		((custom_edition_cache_globals.behaviours >> behaviour) & 1);
 }
 
+boolean custom_edition_cache_hud_mcc_canvas(
+	void)
+{
+	return custom_edition_cache_globals.tags_loaded && custom_edition_cache_globals.hud_mcc_canvas;
+}
+
 void *custom_edition_cache_tag_cache(
 	unsigned long *size)
 {
@@ -2295,13 +2933,19 @@ void custom_edition_cache_tags_unload(
 	custom_edition_sounds_stop();
 	custom_edition_cache_files_close();
 	custom_edition_cache_globals.tags_loaded = FALSE;
+	custom_edition_cache_globals.mcc_cea = FALSE;
+	custom_edition_cache_globals.structure_bsp_vertices_known = FALSE;
+	tag_validate_structure_vertices_in_file(FALSE);
 	custom_edition_cache_globals.behaviours = 0;
+	custom_edition_cache_globals.hud_mcc_canvas = FALSE;
+	custom_edition_cache_globals.map_path[0] = 0;
+	custom_edition_cache_globals.map_from_mcc = FALSE;
+	custom_edition_cache_globals.map_mcc_stem[0] = 0;
+	csmemset(custom_edition_cache_globals.resource_paths, 0, sizeof(custom_edition_cache_globals.resource_paths));
 	custom_edition_cache_globals.tag_cache = NULL;
 	custom_edition_cache_globals.loaded_bytes = 0;
 	custom_edition_cache_globals.tag_cache_bytes = 0;
-#ifdef HALO_RELOCATABLE_TAG_CACHE
 	halo_tag_relocate_linked_release();
-#endif
 	custom_edition_cache_tags_moved(custom_edition_cache_linked_address());
 	halo_custom_edition_tag_cache_release();
 
@@ -2310,19 +2954,85 @@ void custom_edition_cache_tags_unload(
 
 void custom_edition_cache_structure_bsp_moved(
 	void *structure_bsp,
-	long size)
+	long size,
+	long file_offset)
 {
-#ifdef HALO_RELOCATABLE_TAG_CACHE
 	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
+	uint8_t *header = structure_bsp;
 
-	if (globals->tags_loaded &&
-		(uint32_t)(unsigned long)globals->tag_cache != custom_edition_cache_linked_address())
+	if (!globals->tags_loaded)
+	{
+		return;
+	}
+	globals->structure_bsp_vertices_known = FALSE;
+	/* (port) a Halo: CE Anniversary map's: read into the room after the tags
+	(cache_file_formats.c moved its reference there), its pointers linked
+	where the map links it, which are moved there first; its header's CEA
+	fields (where its vertices are in the file) taken and made Custom
+	Edition's (no vertex buffer arrays), which the game checks next. Any
+	other is refused here: the map's structure BSPs were each checked as it
+	loaded, and the file read now must be the one checked */
+	if (globals->mcc_cea)
+	{
+		struct mcc_cea_structure_bsp const *found = NULL;
+		int32_t bsp_index;
+
+		for (bsp_index = 0; bsp_index < globals->mcc_cea_structure_bsp_count; bsp_index++)
+		{
+			struct mcc_cea_structure_bsp const *bsp = &globals->mcc_cea_structure_bsps[bsp_index];
+
+			if (bsp->file_offset == (uint32_t)file_offset && bsp->size == (uint32_t)size)
+			{
+				found = bsp;
+				break;
+			}
+		}
+		if (!found ||
+			(uint32_t)(unsigned long)structure_bsp != globals->mcc_cea_structure_bsp_address - custom_edition_cache_linked_address() +
+				(uint32_t)(unsigned long)globals->tag_cache ||
+			(found->vertices_size && (uint32_t)(header[4] | header[5] << 8 | header[6] << 16 | (uint32_t)header[7] << 24) != found->vertices_size))
+		{
+			error(_error_silent, "custom edition: a structure BSP read at 0x%08lX is not one the map was checked with",
+				(unsigned long)file_offset);
+			/* (no header the game takes: refused as damaged next) */
+			csmemset(header, 0, MIN(size, 0x18));
+			return;
+		}
+		csmemset(header + 4, 0, 16);
+		globals->structure_bsp_vertices_known = TRUE;
+		globals->structure_bsp_vertices_offset = found->vertices_offset;
+		globals->structure_bsp_vertices_size = found->vertices_size;
+		halo_tag_relocate_linked_structure_bsp_rebase(structure_bsp, (unsigned long)size, found->linked_address,
+			globals->mcc_cea_structure_bsp_address);
+	}
+	if ((uint32_t)(unsigned long)globals->tag_cache != custom_edition_cache_linked_address())
 	{
 		halo_tag_relocate_linked_structure_bsp(globals->tag_cache, structure_bsp, (unsigned long)size);
 	}
-#endif
 
 	return;
+}
+
+boolean custom_edition_cache_structure_bsp_vertices(
+	unsigned long *offset,
+	unsigned long *size)
+{
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
+
+	if (!globals->tags_loaded || !globals->mcc_cea || !globals->structure_bsp_vertices_known)
+	{
+		return FALSE;
+	}
+	*offset = globals->structure_bsp_vertices_offset;
+	*size = globals->structure_bsp_vertices_size;
+
+	return TRUE;
+}
+
+boolean custom_edition_cache_mcc_cea(
+	void)
+{
+	return custom_edition_cache_globals.tags_loaded && custom_edition_cache_globals.mcc_cea;
 }
 
 boolean custom_edition_cache_read(
@@ -2354,10 +3064,22 @@ boolean custom_edition_cache_read(
 
 	/* (January read its map from its main thread only; the port's tick
 	and render threads both read: read_lock) */
-	while (__atomic_load_n(&globals->read_lock, __ATOMIC_RELAXED) ||
+	if (__atomic_load_n(&globals->read_lock, __ATOMIC_RELAXED) ||
 		__atomic_exchange_n(&globals->read_lock, 1, __ATOMIC_ACQUIRE))
 	{
-		SwitchToThread();
+		/* (port: the time spent waiting for another thread's read, in the
+		frame-hitch line) */
+		unsigned long long wait_started = halo_load_profile_now();
+
+		while (__atomic_load_n(&globals->read_lock, __ATOMIC_RELAXED) ||
+			__atomic_exchange_n(&globals->read_lock, 1, __ATOMIC_ACQUIRE))
+		{
+			SwitchToThread();
+		}
+		if (wait_started)
+		{
+			halo_load_profile_add(_halo_load_custom_read_lock_wait, wait_started, 0);
+		}
 	}
 	read = file->opened && size >= 0;
 	if (size > 0)
@@ -2402,4 +3124,181 @@ boolean custom_edition_cache_read(
 	__atomic_store_n(&globals->read_lock, 0, __ATOMIC_RELEASE);
 
 	return read;
+}
+
+/* (port) the reader custom_edition_sounds.c's thread reads its sounds'
+samples through: the map and sounds.map opened again, read with positioned
+reads and no lock (nothing it reads is converted, and the lock would keep
+the tick's and the render worker's reads waiting behind a thread that, on
+the Vita, runs below them) */
+boolean custom_edition_cache_reader_open(
+	struct custom_edition_cache_reader *reader)
+{
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
+	struct custom_edition_file file;
+
+	csmemset(reader, 0, sizeof(*reader));
+	if (!globals->tags_loaded || !globals->map_path[0] || !custom_edition_file_open(&file, globals->map_path))
+	{
+		return FALSE;
+	}
+	reader->map = file.handle;
+	reader->map_bytes = file.source.size;
+	if (globals->resource_files[_resource_map_sounds].opened &&
+		globals->resource_paths[_resource_map_sounds][0] &&
+		custom_edition_file_open(&file, globals->resource_paths[_resource_map_sounds]))
+	{
+		reader->sounds = file.handle;
+		reader->sounds_bytes = file.source.size;
+	}
+	reader->opened = TRUE;
+
+	return TRUE;
+}
+
+boolean custom_edition_cache_reader_read(
+	struct custom_edition_cache_reader const *reader,
+	unsigned long offset,
+	unsigned long size,
+	void *buffer)
+{
+	void *handle = reader->map;
+	unsigned long file_offset = offset;
+	unsigned long file_bytes = reader->map_bytes;
+
+	if (!reader->opened)
+	{
+		return FALSE;
+	}
+	if (offset >= COMBINED_SOUNDS_OFFSET)
+	{
+		handle = reader->sounds;
+		file_offset = offset - COMBINED_SOUNDS_OFFSET;
+		file_bytes = reader->sounds_bytes;
+	}
+	else if (offset >= COMBINED_BITMAPS_OFFSET)
+	{
+		/* (no sound's samples are in bitmaps.map) */
+		return FALSE;
+	}
+	if (!handle || file_offset > file_bytes || size > file_bytes - file_offset)
+	{
+		return FALSE;
+	}
+	if (!size)
+	{
+		return TRUE;
+	}
+	memory_watch_prepare_write(buffer, size);
+
+	return custom_edition_file_read(handle, (uint32_t)file_offset, (uint32_t)size, buffer) != 0;
+}
+
+void custom_edition_cache_reader_close(
+	struct custom_edition_cache_reader *reader)
+{
+	if (reader->map)
+	{
+		CloseHandle((HANDLE)reader->map);
+	}
+	if (reader->sounds)
+	{
+		CloseHandle((HANDLE)reader->sounds);
+	}
+	csmemset(reader, 0, sizeof(*reader));
+
+	return;
+}
+
+boolean custom_edition_cache_sound_cache_path(
+	char *path,
+	long path_size,
+	char *directory,
+	long directory_size,
+	struct custom_edition_sound_cache_source *source)
+{
+	struct custom_edition_cache_globals *globals = &custom_edition_cache_globals;
+	char const *name = globals->map_path;
+	char const *separator;
+	char stem[CUSTOM_EDITION_SOUND_CACHE_NAME_BYTES];
+	long length;
+	long index;
+
+	if (!globals->tags_loaded || !globals->map_path[0] || path_size <= 0 || directory_size <= 0)
+	{
+		return FALSE;
+	}
+	/* the map file's name without its extension: letters, digits, '_',
+	'-' and '.' only (a maps folder file's name is a stranger's) */
+	for (separator = name; *separator; separator++)
+	{
+		if (*separator == '\\' || *separator == '/')
+		{
+			name = separator + 1;
+		}
+	}
+	for (length = 0; name[length] && name[length] != '.'; length++)
+	{
+		char character = name[length];
+
+		if (length >= (long)sizeof(stem) - 1 ||
+			!((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '_' || character == '-'))
+		{
+			return FALSE;
+		}
+		stem[length] = character >= 'A' && character <= 'Z' ? (char)(character - 'A' + 'a') : character;
+	}
+	stem[length] = 0;
+	if (!length)
+	{
+		return FALSE;
+	}
+	if (globals->map_from_mcc)
+	{
+		/* (port: MCC's own map, d:\mcc\maps\<map>.map: d:\sound_cache\
+		mcc_<map>.sndcache, never in MCC's folder, which is only read) */
+		if (snprintf(stem, sizeof(stem), "%s%s", MCC_CONTENT_NAME_PREFIX, globals->map_mcc_stem) >= (int)sizeof(stem) ||
+			snprintf(directory, (size_t)directory_size, "%s", CUSTOM_EDITION_SOUND_CACHE_DIRECTORY) >= directory_size)
+		{
+			return FALSE;
+		}
+		length = (long)strlen(stem);
+	}
+	else if (globals->map_from_mods)
+	{
+		/* d:\mods\<mod>\maps\<map>.map: d:\mods\<mod>\cache\<map>.sndcache */
+		long folder_end = (long)(name - globals->map_path);
+
+		/* (the maps folder's own name and its separator before the map's) */
+		if (folder_end < 6 || _strnicmp(globals->map_path + folder_end - 5, "maps", 4))
+		{
+			return FALSE;
+		}
+		folder_end -= 5;
+		if (folder_end + (long)sizeof("cache") >= directory_size ||
+			snprintf(directory, (size_t)directory_size, "%.*scache", (int)folder_end, globals->map_path) >= directory_size)
+		{
+			return FALSE;
+		}
+	}
+	else if (snprintf(directory, (size_t)directory_size, "%s", CUSTOM_EDITION_SOUND_CACHE_DIRECTORY) >= directory_size)
+	{
+		return FALSE;
+	}
+	if (snprintf(path, (size_t)path_size, "%s\\%s%s", directory, stem, CUSTOM_EDITION_SOUND_CACHE_EXTENSION) >= path_size)
+	{
+		return FALSE;
+	}
+	csmemset(source, 0, sizeof(*source));
+	for (index = 0; index < length; index++)
+	{
+		source->name[index] = stem[index];
+	}
+	source->map_bytes = globals->map.opened ? globals->map.source.size : 0;
+	source->map_header_crc = globals->map_header_crc;
+	source->sounds_bytes = globals->resource_files[_resource_map_sounds].opened ?
+		globals->resource_files[_resource_map_sounds].source.size : 0;
+
+	return TRUE;
 }

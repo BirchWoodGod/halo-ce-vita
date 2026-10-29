@@ -15,6 +15,7 @@
 
 [**Download**](https://github.com/BirchWoodGod/halo-ce-vita/releases) ·
 [Install](#install) ·
+[PC version](#pc-version) ·
 [Online play](#multiplayer) ·
 [Controls](#controls) ·
 [Performance](#performance) ·
@@ -40,7 +41,7 @@ It is not an emulator: the game's own code is compiled for the Vita's ARM
 processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 > [!NOTE]
-> **[1.1.0](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest) is the current release**, and this README describes it.
+> **[1.1.1](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest) is the current release**, and this README describes it.
 > Install it over 1.0.3 or any 1.1.0 beta: maps, saves and settings carry over.
 
 > [!IMPORTANT]
@@ -70,6 +71,7 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 - [What's new in 1.1](#whats-new-in-11) · [What works](#what-works)
 - [Install](#install): [requirements](#requirements), [Windows tool](#easy-install-windows-tool), [manual install](#manual-install), [updating](#updating), [Halo PC files](#halo-pc-files), [movies](#movies-optional)
+- [PC version](#pc-version): [downloads](#pc-downloads), [game data](#pc-game-data), [first start](#first-start), [keyboard and mouse](#keyboard-and-mouse), [settings](#pc-settings), [playing with Vitas](#playing-with-vitas)
 - [Multiplayer](#multiplayer): [the menus](#the-multiplayer-menus), [co-op campaign](#co-op-campaign), [custom maps](#custom-maps-and-map-sharing), [dedicated servers](#dedicated-servers)
 - [Controls](#controls) · [Settings panel](#settings-panel) · [Performance](#performance) · [Saving](#saving)
 - [Building](#building) · [Contributing](#contributing) · [Reporting a problem](#reporting-a-crash-or-a-problem)
@@ -98,7 +100,7 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 | | |
 | --- | --- |
 | 🎮 **Campaign** | The whole campaign from the menus, with checkpoints, saves and Save and Quit, cinematics, and the movies if you convert them ([optional](#movies-optional)). |
-| 🏁 **Multiplayer** | Between Vitas: same Wi-Fi (system link), online and ad hoc (both experimental), and the multiplayer maps on your own or with bots. Vitas play only Vitas: PCs can't join a Vita's game, nor a Vita a PC's. |
+| 🏁 **Multiplayer** | Between Vitas: same Wi-Fi (system link), online and ad hoc (both experimental), and the multiplayer maps on your own or with bots. The [PC version](#pc-version) of this port plays with them too; OpenCE's PC players join a Vita's game set to **Everyone**. |
 | 🤝 **Co-op** | The campaign over the network for two Vitas, or up to four (experimental). |
 | 🗺️ **Custom maps** | Xbox maps, Custom Edition multiplayer maps and Custom Edition campaign maps (experimental). |
 | ⏱️ **Frame rate** | Up to 30 fps, or up to 60 with frame interpolation. Quiet areas and cinematics hold 25 to 30 fps; the biggest fights drop lower. See [Performance](#performance). |
@@ -139,9 +141,10 @@ Prefer a video? The [install tutorial](https://youtu.be/x46zLnwlRUU) walks throu
 
 Download **`HaloCEVitaInstaller.exe`** from the
 [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases) and run it.
-It takes the game files from your disc image, converts the movies, gets the
-Halo PC files, and copies everything plus `halo.vpk` to the Vita over
-VitaShell's FTP. Then install `ux0:data/halo.vpk` with VitaShell.
+It takes the game files from your disc image (or, for the builds that play
+MCC's maps, from your own Halo: The Master Chief Collection on Steam),
+converts the movies, gets the Halo PC files, and copies everything plus the
+VPK to the Vita over VitaShell's FTP. Then install that VPK from `ux0:data/` with VitaShell.
 
 The tool isn't signed: if Windows says "Windows protected your PC", click
 **More info**, then **Run anyway**. Details:
@@ -149,7 +152,8 @@ The tool isn't signed: if Windows says "Windows protected your PC", click
 
 ### Manual install
 
-1. **Install `halo.vpk`** from the
+1. **Install the VPK** (`halo-ce-vita-<version>-vita.vpk`; `halo.vpk` up to
+   1.1.0) from the
    [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases) with
    VitaShell. The bubble is called **Halo CE**.
 2. **Extract the game files** from your Xbox disc image with
@@ -171,7 +175,7 @@ missing (see Requirements).
 
 ### Updating
 
-Install the new `halo.vpk` over the old one (the whole VPK). Your maps,
+Install the new VPK over the old one (the whole VPK). Your maps,
 saves and settings in `ux0:data/haloce-vita/` are kept. Every Vita in a
 multiplayer or co-op game needs the same version: a Vita joining a game of
 another version is told which one is newer.
@@ -250,12 +254,14 @@ ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p
        -vf scale=640:-2 -c:a aac -b:a 128k intro.mp4
 ```
 
-For better quality at the same size, High profile also plays (thanks to
-maler82, #8):
+For better quality, keep the same Baseline profile and raise the quality
+(larger files). Don't use High or Main profile: the Vita shows their
+B-frames as white frames.
 
 ```
-ffmpeg -i intro.bik -c:v libx264 -profile:v high -level 4.0 -crf 20 -pix_fmt yuv420p \
-       -vf scale=640:-2 -c:a aac -b:a 128k -movflags +faststart intro.mp4
+ffmpeg -i intro.bik -c:v libx264 -profile:v baseline -level 3.1 -bf 0 -preset slow -crf 18 \
+       -maxrate 6M -bufsize 12M -pix_fmt yuv420p -vf scale=640:-2 -c:a aac -b:a 160k \
+       -movflags +faststart intro.mp4
 ```
 
 Movies added or removed later are noticed at the next start. A movie is
@@ -266,13 +272,146 @@ with ffmpeg `-aspect 16:9`). Any size up to 960x544 plays (on 1.1.0 beta 1
 and 2, keep movies 640 wide: wider ones can play without a picture, #38).
 `HALO_MOVIE_ASPECT=16:9` in `env.txt` forces a shape for files without one.
 
+## PC version
+
+> [!WARNING]
+> **Experimental.** The PC builds are new in 1.1.1 and less tested than the
+> Vita build. Expect rough edges, and report problems like any other.
+
+The same port runs on PC, Windows and Linux. It plays online with the
+Vitas: your games show up in their browsers as **VITA (PC)**.
+
+### PC downloads
+
+From the [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases),
+take the file for your system:
+
+| File | For |
+| --- | --- |
+| `halo-ce-vita-<version>-pc-windows.zip` | Windows 10 or later |
+| `halo-ce-vita-<version>-pc-linux.tar.gz` | Linux (a 32-bit build: needs the 32-bit glibc, OpenGL and PipeWire or PulseAudio libraries; SDL3 is included) |
+| `halo-ce-vita-<version>-vita.vpk` | the Vita (see [Install](#install)) |
+
+Unpack it anywhere. To update, unpack the new one over it: your settings,
+game data and saves stay. The PC version doesn't update itself.
+
+### PC game data
+
+No game files are included. **If you have Halo: The Master Chief Collection
+on Steam, just run the game: it finds MCC by itself** and plays its Halo CE
+files (the campaign, the multiplayer maps, the menus and the Halo PC files
+in `halo1/maps/custom_edition`). Nothing is copied: MCC's folder is only
+read. The game looks in:
+
+- **Linux:** `~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, the
+  Flatpak's `~/.var/app/com.valvesoftware.Steam/.local/share/Steam` and the
+  Snap's Steam, and every library their `libraryfolders.vdf` lists.
+- **Windows:** the Steam folder the registry names, Program Files' Steam,
+  every library in its `libraryfolders.vdf`, `SteamLibrary` folders on your
+  other drives, MCC's own uninstall entry, and the Xbox app's
+  `XboxGames\Halo The Master Chief Collection\Content`.
+
+MCC somewhere else? Set `paths.content` in `config.toml` to its folder (the
+one with `halo1` in it). Not found, the main menu says **Halo MCC not
+found**; `paths.content = "none"` turns the search off. MCC's sound effects
+play; its music and dialogue are silent in this version.
+
+Or, the Xbox way:
+
+- **Your Xbox disc image** (`.iso` or `.xiso`) or its `maps/` folder, the
+  same files as the Vita.
+- **Optional: the Halo PC files** (`bitmaps.map`, `sounds.map`, `loc.map`,
+  see [Halo PC files](#halo-pc-files)) in the game's `maps/` folder. They
+  give the PC menus their pictures and let you play Custom Edition maps. On
+  Linux you can also drop the Custom Edition installer
+  (`halocesetup*.exe`) next to `maps/` and the game takes them out itself.
+
+With both, the game uses both: the Xbox `maps/` folder's files come first
+(its menus, its levels), and MCC's levels are listed beside them. Which
+wins, from first to last: what you set in `config.toml` (`paths.data`,
+`paths.content`), then the Xbox `maps/` folder, then the MCC the game found.
+
+### First start
+
+Start `build\windows\halo.exe` (Windows) or `./halo.sh` (Linux). With MCC
+installed it starts right away. With no game data at all it asks for your
+Xbox disc image: pick it and it copies `maps/` next to the game (a few
+minutes). Or put `maps/` there yourself first: `build\windows` on Windows;
+the unpacked folder or `build/linux` on Linux.
+
+### Keyboard and mouse
+
+Keyboard and mouse, or any gamepad. The prompts and menus show the keys you
+use (the keyboard's icons), and switch to the pad's buttons when you pick
+up a pad (`display.button_icons` in `config.toml`: `auto`, `keyboard`,
+`xbox` or `playstation`).
+
+The defaults are Halo: The Master Chief Collection's for Halo: CE on PC (the
+layout as [ChupathingyCE](https://github.com/ChupathingyCE/chupathingyce) set it
+out, with thanks):
+
+| Action | Keys (default) |
+| --- | --- |
+| Move / aim | W A S D / mouse |
+| Fire | Left click |
+| Zoom | Right click, Z |
+| Throw grenade | G |
+| Melee | F, mouse button 4 |
+| Action (get in, pick up; hold: swap weapons) | E |
+| Reload | R |
+| Switch weapon | Tab, mouse wheel |
+| Switch grenade | H, middle click |
+| Flashlight | Q |
+| Jump | Space |
+| Crouch (walking too) | Left Ctrl, C |
+| Scoreboard | Backspace |
+| Pause | Escape |
+| Fullscreen / free the mouse | F11 / F12 |
+
+Rebind any of them in the menus: **KEYBOARD & MOUSE** (Halo 3 menus:
+CUSTOMIZATION, a profile, KEYBOARD & MOUSE; Halo CE menus: SETTINGS, a
+profile, KEYBOARD & MOUSE; ElDewrito menus: CUSTOMIZATION, CONTROLS). Pick
+an action, press A (or click) and then the key or mouse button; Escape
+cancels, Delete clears, X clears the chosen key, Y (or RESET TO MCC
+DEFAULTS) puts every key back. A key another action had is swapped with
+it, and the page says so. The same page has the mouse's sensitivity,
+invert and raw input. Or edit `config.toml`'s `[controls.keyboard]`
+(`throw_grenade = "G, Mouse Right"`: up to four keys each). A file from an
+earlier version gets the new defaults, except for keys you set yourself.
+
+In the menus the mouse moves a pointer: left click picks, right click goes
+back. The full list is in [port/linux/README.md](port/linux/README.md#controls).
+
+### PC settings
+
+Everything is in `config.toml` next to the game (`build/windows` or
+`build/linux` in the folder you unpacked). The game writes it the first time,
+every setting with a line of help. Delete it to get the defaults back.
+
+### Playing with Vitas
+
+Online and on the same network, the PC version plays with Vitas on the
+same version. Its games show up as **VITA (PC)** in the Vitas' browsers, and
+friends and party lists say **(PC)** next to its players.
+
+When you host, **Who can join** has two choices on PC: **Vita PC** (the
+default: Vitas and other PC players of this port) or **Everyone** (also
+OpenCE players on PC). A Vita host can also pick **Vita**, Vitas only: those
+games show as **VITA VITAS ONLY** in your browser and turn you away with
+"This game is for PS Vitas only". That check takes the joining game's word
+for what it is, so it keeps honest players apart, not cheaters.
+
+For Halo PC's own maps and the PC community's servers, see
+[OpenCE](https://github.com/OpenCommunityEdition/OpenCE).
+
 ## Multiplayer
 
-**Vitas play only Vitas**, and every Vita in a game needs the same version
-of this port and Xbox maps of a supported build (NTSC 01.10.12.2276 or
-01.08.15.1749, PAL 01.01.14.2342). Choose how your Vita connects in the
-settings panel (**SELECT + D-pad down**), **Multiplayer**, **Connection**
-(it applies after a restart):
+**Vitas play only Vitas** (and the [PC version](#pc-version) of this port),
+and every Vita in a game needs the same version of this port and Xbox maps
+of a supported build (NTSC 01.10.12.2276 or 01.08.15.1749, PAL
+01.01.14.2342). Choose how your Vita connects in the settings panel
+(**SELECT + D-pad down**), **Multiplayer**, **Connection** (it applies after
+a restart):
 
 | Connection | What it is |
 | --- | --- |
@@ -281,11 +420,10 @@ settings panel (**SELECT + D-pad down**), **Multiplayer**, **Connection**
 | **Ad hoc** (experimental) | Vitas side by side, no router: pick the same **Ad hoc room** on each, then **Join the room** (the system's dialog joins the room's group). Nothing goes to the internet. |
 
 > [!TIP]
-> **Playing on PC?** This port is made for the PS Vita and only Vita builds
-> are released here. On PC, use
-> [OpenCE](https://github.com/OpenCommunityEdition/OpenCE), the community
-> version this port builds on: with **Crossplay** on, the Vita joins OpenCE
-> hosts and servers.
+> **Playing on PC?** 1.1.1 has an experimental [PC version](#pc-version) of
+> this port. [OpenCE](https://github.com/OpenCommunityEdition/OpenCE), the
+> community version this port builds on, is the other option: with
+> **Crossplay** on, the Vita joins OpenCE hosts and servers.
 
 ### The multiplayer menus
 
@@ -416,9 +554,10 @@ The settings panel's **General** tab:
   play (the menus keep Cross / Circle and the D-pad). Its first row, **Button
   icons**, is **Xbox** by default (the game's own icons); **PlayStation**
   makes every prompt in the HUD and the menus show the Vita button that does
-  it now (Cross, Circle, Square and Triangle in the PlayStation's colours, L,
-  R, Start, Select, the D-pad and touch zones by name). The panel keeps the
-  Xbox names either way.
+  it now, in the Halo 3 menus' style (Cross, Circle, Square and Triangle in
+  the PlayStation's colours on a dark round button, and L, R, Start, Select
+  and the D-pad likewise; touch zones by name). The panel keeps the Xbox
+  names either way.
 - **Touch zones**: the front screen's top corners and left and right edges,
   and the rear pad's halves, can each press an Xbox button (all Off until
   set). **Rear touch guard** keeps the hands holding the Vita from pressing
@@ -725,8 +864,10 @@ This port stands on a lot of other people's work:
   Browser, Server Setup, the password and Direct Link screens and their
   header art, read with [Expat](https://libexpat.github.io)), the map
   validator, multiplayer fixes, and much more.
-  Those platforms still build from this tree (`port/linux`, `port/windows`,
-  `port/android`, each with its own README). Campaign co-op over the
+  This port's own [PC version](#pc-version) builds from this tree
+  (`port/linux`, `port/windows`; `port/android` too, each with its own
+  README). For Halo PC's own maps and the PC community's servers, see
+  OpenCE. Campaign co-op over the
   network is theirs too (xshxdex98's and MrBruh's work: `network_coop.c`,
   `coop_spectate.c`, `coop_scripts.c`, `network_actors.c`), brought in with
   its commits' history and authors. Your own legs in first person

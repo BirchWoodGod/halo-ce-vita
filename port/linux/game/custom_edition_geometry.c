@@ -65,6 +65,14 @@ component this far past 1 stays within that after the packing's rounding
 (every vector of the maps examined is within 1.0001) */
 #define MAXIMUM_COMPRESSIBLE_COMPONENT 1.005f
 
+/* (port) the most vertices a structure BSP material has of each kind: what a
+16-bit index reaches (cache_file_formats.c's MAXIMUM_STRUCTURE_MATERIAL_VERTICES) */
+#define MAXIMUM_STRUCTURE_MATERIAL_VERTICES 0xFFFF
+
+/* (port) the most bytes of model strips kept in the window's block of them
+(Extinction's take 996 KB, Halo PC's own maps about 330 KB) */
+#define MAXIMUM_STRIPS_BYTES 0x400000UL
+
 /* ---------- structures */
 
 /* this build's model geometry and part, as models.c and rasterizer.c each
@@ -257,11 +265,23 @@ struct custom_edition_geometry_globals
 	vertices those were made from */
 	struct structure_bsp *structure_bsp;
 	byte *structure_bsp_vertices;
+
+	/* (port) the model parts' strips, in one block of the window, read
+	where they are by the Vita's device (halo_d3d_static_indices) rather
+	than copied into its ring every draw (NULL: without room for them, each
+	strip in its index buffer's own memory, copied every draw as before) */
+	byte *strips;
+	unsigned long strips_bytes;
+	unsigned long strips_used;
 };
 
 /* ---------- globals */
 
 static struct custom_edition_geometry_globals custom_edition_geometry_globals;
+
+/* (port/linux/src/d3d8_resources.c) */
+void *halo_d3d_contiguous_alloc(unsigned long size);
+void halo_d3d_contiguous_free(void *address);
 
 /* ---------- private code */
 
@@ -784,11 +804,32 @@ static boolean custom_edition_model_part_convert(
 	/* (made once: read in place, as an Xbox cache's model vertices are) */
 	halo_d3d_buffer_in_place(part->vertex_buffer.hardware_format, TRUE);
 
-	return rasterizer_triangle_buffer_new(
+	if (!rasterizer_triangle_buffer_new(
 			&part->triangle_buffer,
 			_triangle_buffer_type_precompiled_strip,
 			source->strip_triangle_count,
-			strip);
+			strip))
+	{
+		return FALSE;
+	}
+	{
+		/* (port) the strip's indices in the window's block of strips, read
+		in place as an Xbox cache's strips are: the buffer's own copy, made
+		as the buffer was, is freed (each strip 16-byte aligned; a strip
+		that would not fit stays where it is, copied every draw) */
+		struct custom_edition_geometry_globals *globals = &custom_edition_geometry_globals;
+		unsigned long strip_bytes = (unsigned long)strip_index_count * sizeof(*strip);
+		unsigned long start = (globals->strips_used + 15) & ~15UL;
+
+		if (globals->strips && strip_bytes <= globals->strips_bytes && start <= globals->strips_bytes - strip_bytes)
+		{
+			csmemcpy(globals->strips + start, strip, strip_bytes);
+			halo_d3d_index_buffer_place(part->triangle_buffer.hardware_format, globals->strips + start);
+			globals->strips_used = start + strip_bytes;
+		}
+	}
+
+	return TRUE;
 }
 
 /* Converts every part of `model` (named `name`), repacking each geometry's
@@ -987,17 +1028,19 @@ static void structure_bsp_buffers_release(
 }
 
 /* Gives `material` compressed vertices at `vertices` and buffers made from
-them. Its uncompressed vertices (cache_file_formats.c checked their size and
-place) stay where they are. */
+them, from its uncompressed vertices and lightmap vertices: its own, which
+stay where they are (cache_file_formats.c checked their size and place), or
+(port) a Halo: CE Anniversary map's, read from its file. */
 static boolean structure_material_convert(
 	struct structure_material *material,
-	byte *vertices)
+	byte *vertices,
+	byte const *uncompressed_vertices,
+	byte const *uncompressed_lightmap_vertices)
 {
 	long vertex_count = material->vertices.count;
 	long lightmap_vertex_count = material->lightmap_vertices.count;
 	long vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_environment_compressed);
 	long lightmap_vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_environment_lightmap_compressed);
-	byte *uncompressed_vertices = material->uncompressed_vertex_data.address;
 	byte *lightmap_vertices = vertices + vertex_count * vertex_size;
 	boolean success = TRUE;
 
@@ -1030,7 +1073,7 @@ static boolean structure_material_convert(
 			lightmap_vertex_count,
 			lightmap_vertices,
 			lightmap_vertex_count * lightmap_vertex_size,
-			uncompressed_vertices + vertex_count * rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_environment_uncompressed),
+			uncompressed_lightmap_vertices,
 			lightmap_vertex_count * rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_environment_lightmap_uncompressed));
 		success = rasterizer_vertex_buffer_new(
 			&material->lightmap_vertices,
@@ -1047,6 +1090,125 @@ static boolean structure_material_convert(
 	material->compressed_vertex_data.address = vertices;
 
 	return success;
+}
+
+/* (port) Where a Halo: CE Anniversary map's structure BSP material has its
+vertices: their offsets in the BSP's vertices in the file (the material's
+vertex buffers' offsets, which the conversion clears) */
+struct file_vertices
+{
+	unsigned long offset;
+	unsigned long lightmap_offset;
+};
+
+/* the floats of `count` vertices of `vertex_bytes` at `vertices`, from
+`first_float` of each for `float_count`, all within what the game's vertex
+compressor takes (it asserts on anything further out); a NaN fails */
+static boolean file_vertices_compressible(
+	byte const *vertices,
+	long count,
+	long vertex_bytes,
+	long first_float,
+	long float_count)
+{
+	long vertex_index;
+
+	for (vertex_index = 0; vertex_index < count; vertex_index++)
+	{
+		long float_index;
+
+		for (float_index = 0; float_index < float_count; float_index++)
+		{
+			real value;
+
+			csmemcpy(&value, vertices + vertex_index * vertex_bytes + (first_float + float_index) * sizeof(real), sizeof(value));
+			if (!(fabs(value) <= MAXIMUM_COMPRESSIBLE_COMPONENT))
+			{
+				return FALSE;
+			}
+		}
+	}
+
+	return TRUE;
+}
+
+/* (port) Reads a Halo: CE Anniversary material's uncompressed vertices and
+lightmap vertices from its BSP's vertices in the file (`file_size` bytes at
+`file_offset`), through `window` (`window_bytes` long, its contents from
+*window_start for *window_bytes_held bytes of the BSP's vertices), each
+range checked again (the BSP was read again since the map was checked) and
+each vector checked compressible; FALSE after logging why not. */
+static boolean file_material_vertices_read(
+	struct structure_material const *material,
+	struct file_vertices const *offsets,
+	unsigned long file_offset,
+	unsigned long file_size,
+	byte *window,
+	unsigned long window_bytes,
+	unsigned long *window_start,
+	unsigned long *window_bytes_held,
+	byte const **vertices,
+	byte const **lightmap_vertices)
+{
+	enum { ENVIRONMENT_VERTEX_BYTES = 56, LIGHTMAP_VERTEX_BYTES = 20 };
+	unsigned long vertex_bytes = (unsigned long)material->vertices.count * ENVIRONMENT_VERTEX_BYTES;
+	unsigned long lightmap_vertex_bytes = (unsigned long)material->lightmap_vertices.count * LIGHTMAP_VERTEX_BYTES;
+	unsigned long low;
+	unsigned long high;
+
+	*vertices = NULL;
+	*lightmap_vertices = NULL;
+	if (material->vertices.count < 0 || material->vertices.count > MAXIMUM_STRUCTURE_MATERIAL_VERTICES ||
+		material->lightmap_vertices.count < 0 || material->lightmap_vertices.count > MAXIMUM_STRUCTURE_MATERIAL_VERTICES ||
+		offsets->offset > file_size || vertex_bytes > file_size - offsets->offset ||
+		offsets->lightmap_offset > file_size || lightmap_vertex_bytes > file_size - offsets->lightmap_offset)
+	{
+		error(_error_silent, "custom edition: a structure BSP material's vertices are not in its map's file");
+		return FALSE;
+	}
+	if (!vertex_bytes && !lightmap_vertex_bytes)
+	{
+		return TRUE;
+	}
+	low = vertex_bytes ? offsets->offset : offsets->lightmap_offset;
+	if (lightmap_vertex_bytes && offsets->lightmap_offset < low)
+	{
+		low = offsets->lightmap_offset;
+	}
+	high = MAX(vertex_bytes ? offsets->offset + vertex_bytes : 0,
+		lightmap_vertex_bytes ? offsets->lightmap_offset + lightmap_vertex_bytes : 0);
+	if (high - low > window_bytes)
+	{
+		error(_error_silent, "custom edition: a structure BSP material's vertices are 0x%lX bytes apart", high - low);
+		return FALSE;
+	}
+	if (low < *window_start || high > *window_start + *window_bytes_held)
+	{
+		unsigned long read_bytes = MIN(window_bytes, file_size - low);
+
+		*window_start = low;
+		*window_bytes_held = 0;
+		if (!custom_edition_cache_read(NONE, (long)(file_offset + low), (long)read_bytes, window))
+		{
+			return FALSE;
+		}
+		*window_bytes_held = read_bytes;
+	}
+	/* (none of a kind it has none of: its offset may be anywhere) */
+	*vertices = vertex_bytes ? window + (offsets->offset - *window_start) : NULL;
+	*lightmap_vertices = lightmap_vertex_bytes ? window + (offsets->lightmap_offset - *window_start) : NULL;
+	/* (an environment vertex: its position, then its normal, binormal and
+	tangent; a lightmap vertex: its incident radiosity, then its texture
+	coordinates) */
+	if ((vertex_bytes && !file_vertices_compressible(*vertices, material->vertices.count, ENVIRONMENT_VERTEX_BYTES, 3, 9)) ||
+		(lightmap_vertex_bytes &&
+		!file_vertices_compressible(*lightmap_vertices, material->lightmap_vertices.count, LIGHTMAP_VERTEX_BYTES, 0, 3)))
+	{
+		error(_error_silent, "custom edition: a structure BSP material's vectors are not unit vectors");
+		return FALSE;
+	}
+
+	return TRUE;
 }
 
 /* ---------- public code */
@@ -1096,7 +1258,8 @@ boolean custom_edition_models_convert(
 	/* A part at a time: its vertices and strip read from the model data,
 	checked, compressed and given buffers, which hold copies of their own
 	(rasterizer_vertex_buffer_new and rasterizer_triangle_buffer_new: in the
-	window and the C heap) - so the map's model data (21 MB of Extinction's)
+	window and the C heap, the strips then moved to the window's block of
+	them) - so the map's model data (21 MB of Extinction's)
 	and its compressed geometry (10 MB) are never held whole. The working
 	memory, in a memory block of its own, for as long as this takes. */
 	scratch_bytes = (totals.largest_part_vertex_count * sizeof(*scratch) + 15) & ~15UL;
@@ -1128,6 +1291,22 @@ boolean custom_edition_models_convert(
 		halo_custom_edition_memory_free(working);
 		custom_edition_cache_load_failure_note(T("there is not enough memory for its models"));
 		return FALSE;
+	}
+	{
+		/* (port) the window's block of strips (the counts are checked, a
+		part's strip 16-byte aligned; a map whose strips take more than
+		MAXIMUM_STRIPS_BYTES, or a window without room, keeps them in their
+		index buffers, as before) */
+		unsigned long strips_bytes = (unsigned long)totals.strip_index_count * sizeof(word) +
+			(unsigned long)totals.part_count * 16;
+
+		assert(!globals->strips);
+		if (totals.strip_index_count > 0 && totals.part_count > 0 && strips_bytes <= MAXIMUM_STRIPS_BYTES)
+		{
+			globals->strips = halo_d3d_contiguous_alloc(strips_bytes);
+		}
+		globals->strips_bytes = globals->strips ? strips_bytes : 0;
+		globals->strips_used = 0;
 	}
 	scratch = (struct model_vertex_uncompressed *)working;
 	strip_scratch = (word *)(working + scratch_bytes);
@@ -1165,19 +1344,24 @@ boolean custom_edition_models_convert(
 	}
 	model_data_prefetch_drain(&reader);
 	halo_custom_edition_memory_free(working);
+	if (globals->strips)
+	{
+		halo_d3d_static_indices(globals->strips, globals->strips_used);
+	}
 	if (success)
 	{
 		qsort(globals->palettes, (size_t)globals->palette_count, sizeof(*globals->palettes), part_palette_compare);
 		custom_edition_cache_tags_regroup(tag_cache, loaded_bytes, GBXMODEL_GROUP_TAG, MODELS_GROUP_TAG);
 		error(
 			_error_silent,
-			"custom edition: %ld model parts converted (%ld drawn with their own nodes, %ld vertices, %ld naming a node past them; %ld vertices compressed, %lu KB in their buffers; model data read in %lu buffers, %lu KB, %lu read ahead)",
+			"custom edition: %ld model parts converted (%ld drawn with their own nodes, %ld vertices, %ld naming a node past them; %ld vertices compressed, %lu KB in their buffers, %lu KB of strips read in place; model data read in %lu buffers, %lu KB, %lu read ahead)",
 			totals.part_count,
 			globals->palette_count,
 			globals->palette_vertex_count,
 			globals->palette_vertices_out_of_range,
 			totals.vertex_count,
 			(totals.vertex_count * vertex_size + totals.strip_index_count * sizeof(word)) / 1024,
+			globals->strips_used / 1024,
 			reader.vertices.reads + reader.strips.reads,
 			(reader.vertices.read_bytes + reader.strips.read_bytes) / 1024,
 			reader.prefetch.taken);
@@ -1198,6 +1382,16 @@ void custom_edition_models_dispose(
 		halo_d3d_buffer_in_place(globals->model_parts[part_index]->vertex_buffer.hardware_format, FALSE);
 		rasterizer_vertex_buffer_delete(&globals->model_parts[part_index]->vertex_buffer);
 	}
+	/* (the strips' index buffers released above leave their block, the
+	window's, to be freed here) */
+	if (globals->strips)
+	{
+		halo_d3d_static_indices(NULL, 0);
+		halo_d3d_contiguous_free(globals->strips);
+	}
+	globals->strips = NULL;
+	globals->strips_bytes = 0;
+	globals->strips_used = 0;
 	/* the game's free stops on NULL (cseries.h), and a map can fail before
 	its models are converted */
 	if (globals->model_parts)
@@ -1271,8 +1465,40 @@ boolean custom_edition_structure_bsp_load(
 	unsigned long vertices_offset = 0;
 	boolean success = TRUE;
 	long lightmap_index;
+	/* (port) a Halo: CE Anniversary map's: its materials' vertices in the
+	file, read through a window of it */
+	unsigned long file_offset = 0;
+	unsigned long file_size = 0;
+	boolean vertices_in_file = custom_edition_cache_structure_bsp_vertices(&file_offset, &file_size);
+	struct file_vertices *file_offsets = NULL;
+	long material_total = 0;
+	long material_number = 0;
+	unsigned long window_bytes = 0;
+	unsigned long window_start = 0;
+	unsigned long window_bytes_held = 0;
+	byte *window = NULL;
+	boolean file_vertices_failed = FALSE;
 
 	assert(!globals->structure_bsp);
+	if (vertices_in_file)
+	{
+		for (lightmap_index = 0; lightmap_index < structure_bsp->lightmaps.count; lightmap_index++)
+		{
+			struct structure_lightmap *lightmap = TAG_BLOCK_GET_ELEMENT(
+				&structure_bsp->lightmaps,
+				lightmap_index,
+				struct structure_lightmap);
+
+			material_total += lightmap->materials.count;
+		}
+		file_offsets = halo_custom_edition_memory_alloc((unsigned long)MAX(material_total, 1) * sizeof(*file_offsets));
+		if (!file_offsets)
+		{
+			error(_error_silent, "custom edition: out of memory for the structure BSP's vertex offsets");
+			custom_edition_cache_load_failure_note(T("there is not enough memory for its level geometry"));
+			return FALSE;
+		}
+	}
 	/* the Custom Edition buffer fields name nothing in this process: every
 	material starts with none, so that a failure releases only what was
 	made (cache_file_formats.c checked the counts and sizes) */
@@ -1293,6 +1519,21 @@ boolean custom_edition_structure_bsp_load(
 			long vertex_count = material->vertices.count;
 			long lightmap_vertex_count = material->lightmap_vertices.count;
 
+			if (vertices_in_file)
+			{
+				struct file_vertices *offsets = &file_offsets[material_number++];
+
+				offsets->offset = (unsigned long)material->vertices.offset;
+				offsets->lightmap_offset = (unsigned long)material->lightmap_vertices.offset;
+				/* (the window holds a material's vertices at once: the most
+				any material's span, or a megabyte, within the file's) */
+				window_bytes = MAX(window_bytes, MIN(0x100000UL, file_size));
+				if (vertex_count >= 0 && lightmap_vertex_count >= 0 &&
+					vertex_count <= MAXIMUM_STRUCTURE_MATERIAL_VERTICES && lightmap_vertex_count <= MAXIMUM_STRUCTURE_MATERIAL_VERTICES)
+				{
+					window_bytes = MAX(window_bytes, MIN(file_size, (unsigned long)vertex_count * 56 + (unsigned long)lightmap_vertex_count * 20));
+				}
+			}
 			csmemset(&material->vertices, 0, sizeof(material->vertices));
 			csmemset(&material->lightmap_vertices, 0, sizeof(material->lightmap_vertices));
 			material->vertices.type = _rasterizer_vertex_type_environment_compressed;
@@ -1308,13 +1549,20 @@ boolean custom_edition_structure_bsp_load(
 	with the buffers made from them; neither in the C heap, which the Vita
 	has little of, nor in the window, which the buffers need) */
 	globals->structure_bsp_vertices = halo_custom_edition_memory_alloc(vertices_size);
-	if (!globals->structure_bsp_vertices)
+	if (vertices_in_file && globals->structure_bsp_vertices)
+	{
+		window = halo_custom_edition_memory_alloc(MAX(window_bytes, 1));
+	}
+	if (!globals->structure_bsp_vertices || (vertices_in_file && !window))
 	{
 		error(_error_silent, "custom edition: out of memory for 0x%lX bytes of structure BSP vertices", vertices_size);
+		halo_custom_edition_memory_free(file_offsets);
+		halo_custom_edition_memory_free(window);
 		custom_edition_cache_load_failure_note(T("there is not enough memory for its level geometry"));
 		custom_edition_structure_bsp_unload();
 		return FALSE;
 	}
+	material_number = 0;
 	for (lightmap_index = 0; success && lightmap_index < structure_bsp->lightmaps.count; lightmap_index++)
 	{
 		struct structure_lightmap *lightmap = TAG_BLOCK_GET_ELEMENT(
@@ -1329,12 +1577,32 @@ boolean custom_edition_structure_bsp_load(
 				&lightmap->materials,
 				material_index,
 				struct structure_material);
+			byte const *uncompressed_vertices = material->uncompressed_vertex_data.address;
+			byte const *uncompressed_lightmap_vertices = uncompressed_vertices ?
+				uncompressed_vertices + material->vertices.count * rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_environment_uncompressed) :
+				NULL;
 
-			success = structure_material_convert(material, globals->structure_bsp_vertices + vertices_offset);
+			if (vertices_in_file &&
+				!file_material_vertices_read(material, &file_offsets[material_number++], file_offset, file_size, window,
+					window_bytes, &window_start, &window_bytes_held, &uncompressed_vertices, &uncompressed_lightmap_vertices))
+			{
+				file_vertices_failed = TRUE;
+				success = FALSE;
+				break;
+			}
+			success = structure_material_convert(material, globals->structure_bsp_vertices + vertices_offset,
+				uncompressed_vertices, uncompressed_lightmap_vertices);
 			vertices_offset += material->compressed_vertex_data.size;
 		}
 	}
-	if (success)
+	halo_custom_edition_memory_free(file_offsets);
+	halo_custom_edition_memory_free(window);
+	if (file_vertices_failed)
+	{
+		custom_edition_cache_load_failure_note(T("this map file is damaged or not supported"));
+		custom_edition_structure_bsp_unload();
+	}
+	else if (success)
 	{
 		error(
 			_error_silent,

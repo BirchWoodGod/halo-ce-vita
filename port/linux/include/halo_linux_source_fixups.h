@@ -72,6 +72,17 @@ void *halo_custom_edition_tag_cache(void);
 /* whether Custom Edition maps may run, and a map's tag cache when the
 window above is not there (port/linux/src/xbox_memory.c) */
 int halo_custom_edition_enabled(void);
+/* whether the mods folder's Halo: CE Anniversary maps may be listed and
+played (HALO_MCC_MODS: port/linux/src/xbox_memory.c) */
+int halo_mcc_mods_enabled(void);
+/* (port) the Halo content folder (d:\mcc\, paths.content) and whether it
+holds Halo CE maps: platform.h */
+int halo_content_library_found(void);
+int platform_mcc_root(char *out, unsigned long out_size);
+void platform_mcc_root_forget(void);
+/* (port) the Halo PC resource map <name>.map: the maps folder's, else the content
+folder's halo1 maps custom_edition one (xbox_files.c) */
+int platform_halo_pc_resource_map(const char *maps_directory, const char *name, char *path, unsigned long path_size);
 void *halo_custom_edition_tag_cache_acquire(unsigned long bytes);
 void halo_custom_edition_tag_cache_release(void);
 /* zeroed memory blocks of their own for a Custom Edition map's converted
@@ -106,6 +117,13 @@ device reuses a frame's copy of its indices until that part is locked again
 (port/vita/platform/d3d8_gxm.c) */
 void halo_d3d_indices_tracked(const void *base, unsigned long bytes);
 void halo_d3d_indices_written(const void *data, unsigned long bytes);
+/* indices the game made once in the window (halo_d3d_contiguous_alloc) and
+will not rewrite until it says otherwise (NULL): the Vita's device reads
+them in place (port/vita/platform/d3d8_gxm.c); and an index buffer's
+indices placed there instead of the memory it was made with
+(port/linux/src/d3d8_resources.c) */
+void halo_d3d_static_indices(const void *base, unsigned long bytes);
+void halo_d3d_index_buffer_place(void *buffer, void *indices);
 /* whether a Halo Custom Edition map's multiplayer vehicles are chosen by
 their placements' spawn flags, as in retail Halo, and whether a vehicle
 placement is placed in the running game
@@ -117,6 +135,9 @@ player is told why, and the caller goes back to the menu
 (port/linux/game/custom_edition_cache.c) */
 unsigned char custom_edition_cache_load_failure_show(char const *map_name);
 unsigned char custom_edition_vehicle_placement_allowed(struct scenario_object_datum const *placement);
+/* whether such a map's local game places every type of vehicle its
+placements choose (PC map vehicles: custom_edition_objects.c) */
+unsigned char custom_edition_vehicles_every_type(void);
 
 /* while TRUE, drawing shifts right to center 640-column layouts */
 void halo_screen_ui_offset(unsigned char centered);
@@ -129,6 +150,12 @@ start: memory), not for want of the file: the attract mode tries again
 later (source/interface/attract_mode.c; port/vita/platform/bink_vita.c;
 port/linux/src/bink_null.c: HALO_TEST_MOVIE_FAILS_FOR_NOW) */
 int halo_movie_open_failed_for_now(void);
+/* the movie frame drawn by the platform's renderer this frame, over
+left..right, top..bottom (fractions of the screen) instead of the game's
+quad over its movie texture: nonzero when it is (the Vita's renderer:
+port/vita/platform/bink_vita.c, HALO_MOVIE_PATH; 0 on the OpenGL builds,
+port/linux/src/bink_null.c) */
+int halo_movie_draw_native(float left, float top, float right, float bottom);
 /* the mouse in the menus (source/interface/ui_widget.c) */
 #include "halo_ui_pointer.h"
 

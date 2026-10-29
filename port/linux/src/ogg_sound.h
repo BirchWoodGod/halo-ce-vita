@@ -78,6 +78,13 @@ struct ogg_sound_request
 	what does not fit is left out */
 	void *output;
 	uint32_t output_bytes;
+	/* or, with a sink, the output is never in memory whole: `output` is a
+	staging of `staging_bytes` (at least a block's) and the sink takes the
+	output's pieces in order, silence included, and may stop the decoding
+	(xbox_adpcm_encoder_begin_sink) */
+	int (*sink)(void *context, uint8_t const *bytes, uint32_t size, uint32_t offset);
+	void *sink_context;
+	uint32_t staging_bytes;
 	int channels;
 	/* the rate the sound is played at (Hz): the stream's, half of it (a
 	44 kHz mono sound is played at 22 kHz, the only rate the game plays
@@ -130,6 +137,8 @@ struct ogg_sound_result
 	/* nonzero when the stream had more than the output holds (the rest is
 	left out, not decoded) */
 	int truncated;
+	/* nonzero when the sink stopped the decoding (the output not whole) */
+	int stopped;
 	/* the decoded samples' sum of squares and largest magnitude (16-bit
 	PCM, before the ADPCM encoding; for the logs and the tests) */
 	double sum_of_squares;

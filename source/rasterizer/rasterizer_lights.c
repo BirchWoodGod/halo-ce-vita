@@ -89,6 +89,9 @@ symbols in this file:
 #include "math/periodic_functions.h"
 #include "objects/widgets/widget_types.h"
 #include "render.h"
+#ifdef HALO_LINUX
+#include "render/render_cameras_internal.h" /* port: render_frustum_sphere_visible */
+#endif
 #include "scenario/scenario.h"
 #include "tag_files/tag_groups.h"
 #include "rasterizer_widgets.h"
@@ -355,6 +358,10 @@ static void lens_flare_data_error(
 
 /* ---------- globals */
 
+#ifdef HALO_LINUX
+/* port: rasterizer_xbox.c (field_of_view.c) */
+void rasterizer_first_person_projection(boolean first_person);
+#endif
 static struct lens_flare_occlusion_test_results local_lens_flare_occlusion_test_results[MAXIMUM_LIGHTS_PER_MAP] = {0};
 static byte local_lens_flare_occlusion_test_results2[MAXIMUM_LENS_FLARE_MARKERS_PER_STRUCTURE+MAXIMUM_QUEUED_LENS_FLARES][MAXIMUM_WINDOWS];
 static struct rasterizer_lens_flare_submit_parameters local_lens_flare_parameters[MAXIMUM_LENS_FLARES_PER_FRAME] = {0};
@@ -589,9 +596,28 @@ void rasterizer_lens_flare_submit(
 				&camera_offset);
 			camera_distance= dot_product3d(&global_window_parameters.camera.forward, &camera_offset);
 
+#ifdef HALO_LINUX
+			/* port (from OpenCE 744040c8, xshxdex98, and b1a71709's first-person
+			exception): none out of view either (behind the camera, off the
+			screen). Its occlusion test would count no pixels, so it would not
+			be drawn, yet each test is a draw of its own: a level of many lights
+			submitted hundreds a frame, each a recorded draw and a visibility
+			slot on the Vita (d3d8_gxm.c). The sphere takes in the test's
+			offset point and size (rasterizer_lens_flares_submit_occlusion_tests:
+			the point moved up to 1.41 occlusion radii, the test one radius
+			across). Not the first-person weapon's, which OpenCE draws at the
+			weapon's own projection, not this frustum's: few, and left as they were */
+			if ((parameters->definition->far_fade_distance==0.0f ||
+				camera_distance<parameters->definition->far_fade_distance) &&
+				(parameters->compressed_light_color&LENS_FLARE_LIGHT_COLOR_ALPHA_MASK)>0 &&
+				((parameters->compressed_window_index&_lens_flare_first_person_weapon_flag) ||
+				render_frustum_sphere_visible(&global_window_parameters.frustum, &parameters->position,
+					3.0f * parameters->definition->occlusion_radius)))
+#else
 			if ((parameters->definition->far_fade_distance==0.0f ||
 				camera_distance<parameters->definition->far_fade_distance) &&
 				(parameters->compressed_light_color&LENS_FLARE_LIGHT_COLOR_ALPHA_MASK)>0)
+#endif
 			{
 				struct rasterizer_lens_flare_submit_parameters *lens_flare_parameters=
 					lens_flare_parameters_get((short)local_lens_flare_count++);
@@ -1008,6 +1034,14 @@ void rasterizer_lens_flares_submit_occlusion_tests(
 				real occlusion_radius = definition->occlusion_radius;
 				real_point3d occlusion_point;
 
+#ifdef HALO_LINUX
+				/* port: the first-person weapon's own projection for its
+				lights' flares (field_of_view.c: the weapon at the stock field
+				of view) */
+				rasterizer_first_person_projection(
+					(lens_flare_parameters->compressed_window_index & _lens_flare_first_person_weapon_flag) != 0);
+#endif
+
 				switch (definition->occlusion_offset_direction)
 				{
 				case _lens_flare_occlusion_offset_direction_toward_viewer:
@@ -1043,6 +1077,9 @@ void rasterizer_lens_flares_submit_occlusion_tests(
 						LENS_FLARE_OCCLUSION_TEST_INDEX(lens_flare_parameters, lens_flare_index));
 			}
 		}
+#ifdef HALO_LINUX
+		rasterizer_first_person_projection(FALSE);
+#endif
 
 		rasterizer_widget_end();
 	}
@@ -1103,6 +1140,12 @@ void rasterizer_lens_flares_draw(
 			{
 				struct lens_flare_definition *definition = lens_flare_parameters->definition;
 
+#ifdef HALO_LINUX
+				/* port: (as the occlusion tests) the first-person weapon's
+				flares at its own projection */
+				rasterizer_first_person_projection(
+					(lens_flare_parameters->compressed_window_index & _lens_flare_first_person_weapon_flag) != 0);
+#endif
 				if (lens_flare_parameters->internal__occlusion_pixels > 0 &&
 					LENS_FLARE_LIGHT_COLOR_ALPHA(lens_flare_parameters->compressed_light_color) > 0 &&
 					definition->reflections.count > 0)
@@ -1346,6 +1389,9 @@ void rasterizer_lens_flares_draw(
 			}
 		}
 
+#ifdef HALO_LINUX
+		rasterizer_first_person_projection(FALSE);
+#endif
 		rasterizer_set_stencil_mode(RASTERIZER_STENCIL_MODE_NONE);
 		rasterizer_widget_end();
 

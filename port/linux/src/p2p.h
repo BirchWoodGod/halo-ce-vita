@@ -16,6 +16,12 @@ Addresses and ports are in network byte order.
 its networking; local_address is the address the game's sockets are
 reached at (network.address, else 127.0.0.1) */
 void p2p_initialize(unsigned long local_address);
+/* stops internet play (or ad hoc play's bridge) as if it had never
+started: its thread, sockets, peers and broker connections gone, a public
+listing taken down; p2p_initialize may start it again (the connection
+switched live: port/linux/game/network_connection.c). Only at the menus,
+with no network game: the game's own sockets are not internet play's */
+void p2p_shutdown(void);
 
 /* on the desktop, before anything else: if this process was started with
 an invite link (halo://join/...) and another copy of the game is running,
@@ -23,8 +29,13 @@ passes the link to it and returns nonzero (this one should quit) */
 int p2p_hand_off_invite(void);
 
 /* joins the game an invite link or code leads to; text may hold other
-words around it. Returns nonzero if it held an invite */
+words around it. Returns nonzero if it held an invite. A link's host is
+asked on both wires (network_wire.h: a Vita's game, or a PC's: OpenCE's
+links are the same), the one it answers on kept */
 int p2p_join_invite(const char *text);
+/* ... a link to a game whose wire is known (a friend's presence or invite,
+the party's leader: 0 the legacy wire, 1 the crossplay wire) */
+int p2p_join_invite_on(const char *text, int crossplay);
 
 /* whether internet play (or ad hoc play) runs: its thread started */
 int p2p_running(void);
@@ -41,6 +52,12 @@ is joined by itself when listed (network_game_client_join_invited_game);
 take: forgotten (joined, or given up) */
 enum { P2P_JOINED_HOST_MILLISECONDS = 60000 };
 int p2p_joined_host(unsigned char *identifier, int take);
+/* nonzero while a join of another's game (an invite, a code, the server
+browser) is under way: its host asked for or being reached, or reached and
+its game not yet joined (p2p_joined_host, not taken). The System Link
+list hosts nothing meanwhile (A on it with no game listed yet: the Xbox's
+"start network game if no advertised servers") */
+int p2p_join_under_way(void);
 
 /* a destination the game sends to or connects to (stream: a TCP socket;
 socket: the game's UDP socket connected to it, else -1): 1 if it is a peer's
@@ -110,6 +127,9 @@ const char *p2p_take_clipboard_text(void);
 are shown). The game's server calls it as they change (calling it with the
 same counts again costs little) */
 void p2p_set_game_player_counts(int count, int maximum);
+/* (the dedicated server) of those players, the bots (its listing says so:
+p2p_lobby.c) */
+void p2p_set_game_bot_count(int count);
 
 /* whether the game's server takes other machines (the game's
 network_game_accept_remote_connections, which it sets before it makes its
@@ -207,7 +227,8 @@ enum
 	P2P_LOBBY_NAME_SIZE = 33,
 	P2P_LOBBY_MAP_SIZE = 33,
 	P2P_LOBBY_GAMETYPE_SIZE = 25,
-	P2P_LOBBY_RULES_SIZE = 48,
+	/* (96: a game of another version's says why it is not joined there) */
+	P2P_LOBBY_RULES_SIZE = 96,
 	P2P_LOBBY_PLAYERS_SIZE = 64,
 	/* a password's most characters (and a terminator) */
 	P2P_LOBBY_PASSWORD_SIZE = 33,
@@ -238,8 +259,14 @@ struct p2p_lobby_entry
 	/* "5 of 16: name, name... +3 more" */
 	char players_line[P2P_LOBBY_PLAYERS_SIZE];
 	int players, maximum, score_limit;
-	/* (always: games of another network version are not listed) */
+	/* of the players, a dedicated server's bots (sv_bots_fill; 0 from a
+	host or build that does not say) */
+	int bots;
+	/* 0 for a game of a network version this build does not join
+	(p2p_lobby_other_entries: shown greyed, its rules line saying why; never
+	joined); its version */
 	int compatible;
+	int version;
 	/* this machine's own game */
 	int own;
 	/* it has a password (p2p_lobby_join needs it) */
@@ -252,13 +279,33 @@ struct p2p_lobby_entry
 	host has no player of its own */
 	int dedicated;
 	/* (crossplay_guard.h) co-op on a campaign level (on the crossplay wire:
-	no game engine); a PC game that is co-op, or has more than 16 players in
-	it or a maximum above 16 (the crossplay wire only: joined after asking
-	once) */
+	no game engine); a PC host's game that is co-op, or has more than 16
+	players in it or a maximum above 16 (joined after asking once) */
 	int coop, experimental;
-	/* the badges a row shows (the crossplay wire's, else empty): "PC" or "PC
-	SERVER", then " EXPERIMENTAL" or " CO-OP EXPERIMENTAL" (translated) */
+	/* a co-op game's difficulty (0 to 3), -1 when not said (the crossplay
+	wire's listings do not say it) */
+	int difficulty;
+	/* the game's wire (network_wire.h: joined on it) and what hosts it
+	(crossplay_guard.h's CROSSPLAY_PLATFORM_*: a Vita, or a PC build) */
+	int crossplay, platform;
+	/* this project's marks of its host (crossplay_guard.h's CROSSPLAY_HOST_*:
+	the PC build, Vitas only) */
+	int marks;
+	/* its tag, as every row shows it: VITA, VITA (PC), OPENCE, CHUPA,
+	DAMNATION or PC (crossplay_guard_host_tag) */
+	char tag[12];
+	/* the whole badge a row shows (crossplay_guard_row_badge): the tag, then
+	" SERVER", "+PC" (a Vita's game PC players join too), " EXPERIMENTAL" or
+	" CO-OP EXPERIMENTAL" (translated) */
 	char badge[48];
+	/* nonzero for no game: a group's header row in the menus' browsers
+	(browser_list.h: VITA GAMES, PC GAMES), never joined */
+	int header;
+	/* its host's identifier, as its games' XNADDR abEnet carries it (6
+	bytes, p2p_identifier: from its key's hash); a System Link row's the
+	advertising machine's (menu_functions.c's lan_entries); all zero when
+	not known */
+	unsigned char host[6];
 };
 
 /* joins the game of a code: "ABCD-EFGH", with or without the dash, any
@@ -292,6 +339,10 @@ everyone's server browser (public) or reached only by its code and invite
 (private); going private makes a new invite, so that one seen in a listing
 lets no one in (the code leads to the new one) */
 void p2p_lobby_set_public(int listed);
+/* a game this machine hosts never listed while never is set, whatever
+p2p_lobby_set_public says (a network Forge game: the lobby's friends, party,
+invites and code only; forge_net.inc) */
+void p2p_lobby_set_never_listed(int never);
 /* the same for a co-op game (network.coop_public, OpenCE's: private unless
 chosen; the co-op lobby's choice, port/linux/game/coop_menu.c), which
 p2p_lobby_set_public does not change */
@@ -300,6 +351,10 @@ void p2p_lobby_set_coop_public(int listed);
 network.coop_public; never with the server browser off), and in
 has_password (if not NULL) whether a listing would ask for the password */
 int p2p_lobby_coop_public(int *has_password);
+/* whether the game this machine hosts (co-op's or another) is listed in the
+server browser now, as the listing goes out (the pre-game lobby says it),
+and in has_password whether its listing asks for the password */
+int p2p_lobby_hosting_listed(int *has_password);
 /* the name the browser lists the game under ("": network.lobby_name, else
 the game's own) */
 void p2p_lobby_set_name(const char *name);
@@ -320,8 +375,20 @@ list for all of them; P2P_LOBBY_MAXIMUM_ENTRIES at most): how many */
 enum
 {
 	P2P_LOBBY_MAXIMUM_ENTRIES = 64,
+	/* the games of another network version, at most (p2p_lobby_other_entries) */
+	P2P_LOBBY_MAXIMUM_OTHER_ENTRIES = 48,
 };
 int p2p_lobby_entries(struct p2p_lobby_entry *entries, int maximum_count);
+/* the games of a network version this build does not join (each its host's
+signed listing, checked as the others are: a newer or older OpenCE,
+ChupathingyCE or DamnationCE, a Vita of another build), for the browsers to
+show greyed after the rest: compatible 0, the rules line the reason ("Can't
+join: a newer PC version (network 38)..."), no invite kept. Up to
+maximum_count, the most players first; how many */
+int p2p_lobby_other_entries(struct p2p_lobby_entry *entries, int maximum_count);
+/* (automated tests, HALO_TEST_BROWSER_ODD=1; none in release builds) odd
+listings made into entries as the real ones are: how many */
+int p2p_lobby_test_entries(struct p2p_lobby_entry *entries, int maximum_count);
 /* joins a listed game (id: its entry's), with its password if it is locked
 (the password's key is worked out on a thread of its own); nonzero if the
 game is listed. How it goes: p2p_lobby_join_state */
@@ -337,6 +404,13 @@ enum
 	P2P_LOBBY_JOIN_JOINING = 2,
 };
 int p2p_lobby_join_state(void);
+/* joins a friend's private game with a password (p2p_friends.c: its
+presence's host key and sealed token, the game's wire), as p2p_lobby_join
+joins a locked listing: the password's key worked out on its thread; how it
+goes, p2p_lobby_join_state. 0 if the key is not the host's (key_hash) or a
+join is being opened */
+int p2p_lobby_join_sealed(const unsigned char *key_hash, const unsigned char *signing_key, const unsigned char *sealed,
+	const char *password, int crossplay);
 /* a game the browser could not join: hidden for 5 minutes unless its
 listing changes, then shown marked failed (after the others of as many
 players), for this run (p2p_lobby.c marks a game

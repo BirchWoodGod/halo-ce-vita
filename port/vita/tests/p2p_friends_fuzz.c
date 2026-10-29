@@ -1,0 +1,739 @@
+/*
+P2P_FRIENDS_FUZZ.C
+
+A fuzzer of friends (port/linux/src/p2p_friends.c): every message the
+brokers can carry to a machine's inbox and mailbox, and both of its files,
+with ASan and UBSan (run_p2p_friends_test.sh fuzz). The platform layer is
+32-bit only and this clang has no 32-bit libFuzzer, so main below is its own
+engine (mutations of real messages and files: bit flips, byte and length
+changes, cuts, growth, splices); built with -DUSE_LIBFUZZER,
+LLVMFuzzerTestOneInput serves libFuzzer as it is. The machine under test
+(T) has a friend (F), a request sent to a stranger (S) and S's request
+pending, so that every handler is reached. The input's first byte says how:
+
+	0  the rest, as it came, on T's inbox
+	1  the rest, as it came, on T's mailbox
+	2  the rest as a request's plaintext from S, its header S's, signed by S
+	   and sealed with T's code's key (the request's every layout a sender
+	   could sign)
+	3  the rest as a pair message's plaintext from F (presence, invite,
+	   remove), signed by F and sealed with the pair's key
+	4  the rest as an accept's plaintext from S, signed by S, in a box to T
+	5  the rest as T's list file (its hash made right with the second
+	   byte's 1)
+	6  the rest as T's identity file (its hash made right likewise)
+	7  the rest as a friend card heard on the tunnel (the second byte's 8:
+	   from the host; 16: T hosts the game, relaying)
+	8  the rest as a card's answer from S to an ask T made, signed by S (its
+	   name and key as the input has them)
+	9  the rest as a party message's body from F (T is in F's party, with S,
+	   who is not T's friend): an invite, answer, roster, leave, status,
+	   follow, chat or party presence, signed by F and sealed with the
+	   pair's key
+	10 the rest as a party message's body from S, the member not a friend
+	   (roster, leave, status, follow, chat), sealed with S's and T's pair key
+	11 the rest as a friend identity backup's file, its header checked
+	   (p2p_friends_backup.inc), and as a backup's contents, opened: checked,
+	   then read as a restore reads them (the second byte's 1: with a list;
+	   2: its magic, version, flags and key made right and its sizes
+	   bounded; 4: its list's and marks' magic and hashes made right too)
+
+and its second byte its flags: the clock stepped, the header's type and
+recipient kept from the input, the list read after. After each input the
+lists are read and every text checked bounded and printable (the party's
+members and chat lines too, and its roster's bounds).
+*/
+
+#define P2P_FRIENDS_FUZZ
+#include "p2p_friends_test.c"
+
+#include <stdint.h>
+
+enum
+{
+	T = 0,
+	F = 1,
+	S = 2,
+	MAXIMUM_INPUT = 2 + BACKUP_PLAIN_SIZE + 64,
+	MODES = 12,
+};
+
+/* T's party as setup made it: F leads, T and S members (put back when an
+input ended it) */
+static struct party_state party_saved;
+
+static unsigned long inputs, lists_taken, requests_taken, friends_seen, party_lines, party_follows, backups_read;
+static char fuzz_root[512];
+
+/* the three machines as the fuzz wants them: T and F friends, T's request
+to S pending, S's to T pending */
+static void setup(void)
+{
+	static int count;
+	unsigned char friendship[FRIENDSHIP_LENGTH];
+	int index;
+
+	quiet = 1;
+	for (index = 0; index < MACHINES; index++)
+	{
+		memset(&machines[index], 0, sizeof(machines[index]));
+		snprintf(roots[index], sizeof(roots[index]), "%s/m%d_%d", fuzz_root, index, count & 7);
+		mkdir(roots[index], 0755);
+		hosts[index].online = 1;
+		use(index);
+		/* (the files of a run before are left: each machine starts as read) */
+		{
+			char code[P2P_FRIEND_CODE_SIZE];
+
+			p2p_friends_code(code, sizeof(code));
+		}
+		friends->friend_count = friends->request_count = friends->outgoing_count = 0;
+		friends->blocked_count = friends->tombstone_count = friends->muted_count = friends->invite_count = 0;
+	}
+	count++;
+	memset(friendship, 7, sizeof(friendship));
+	use(T);
+	friend_add(machines[F].key, "Foxtrot", friendship, 0, 0);
+	{
+		struct outgoing_record *record = &machines[T].outgoing[machines[T].outgoing_count++];
+
+		memset(record, 0, sizeof(*record));
+		memcpy(record->code, machines[S].code, sizeof(record->code));
+		memset(record->nonce, 0x33, NONCE_LENGTH);
+	}
+	memcpy(machines[T].requests[0].key, machines[S].key, P2P_KEY_SIZE);
+	snprintf(machines[T].requests[0].name, sizeof(machines[T].requests[0].name), "Sierra");
+	machines[T].request_count = 1;
+	use(F);
+	friend_add(machines[T].key, "Tango", friendship, 0, 0);
+	use(T);
+	/* (T in F's party, with S) */
+	memset(&machines[T].party, 0, sizeof(machines[T].party));
+	memset(machines[T].party.id, 0x5A, PARTY_ID_LENGTH);
+	memcpy(machines[T].party.members[0].key, machines[F].key, P2P_KEY_SIZE);
+	memcpy(machines[T].party.members[1].key, machines[T].key, P2P_KEY_SIZE);
+	memcpy(machines[T].party.members[2].key, machines[S].key, P2P_KEY_SIZE);
+	for (index = 0; index < 3; index++)
+		machines[T].party.members[index].heard_time = clock_now;
+	machines[T].party.count = 3;
+	machines[T].party.leader = 0;
+	machines[T].party.serial = 1;
+	machines[T].party.active = 1;
+	party_saved = machines[T].party;
+	machines[T].party_invite_count = 0;
+	machines[T].chat_count = 0;
+}
+
+static void check_party(void)
+{
+	struct p2p_party_member members[P2P_PARTY_MAXIMUM];
+	struct p2p_party_chat_line lines[P2P_PARTY_CHAT_LINES];
+	struct p2p_party_invite invites[P2P_FRIEND_INVITES_MAXIMUM];
+	char text[160];
+	int count, index, at;
+
+	use(T);
+	if (machines[T].party.count < 0 || machines[T].party.count > P2P_PARTY_MAXIMUM ||
+		(machines[T].party.active && machines[T].party.leader >= machines[T].party.count) ||
+		machines[T].party_invite_count > P2P_FRIEND_INVITES_MAXIMUM || machines[T].chat_count > P2P_PARTY_CHAT_LINES ||
+		machines[T].party.sent_count > P2P_PARTY_MAXIMUM)
+	{
+		__builtin_trap();
+	}
+	count = p2p_party_members(members, P2P_PARTY_MAXIMUM);
+	for (index = 0; index < count; index++)
+	{
+		const char *texts[4] = { members[index].id, members[index].name, members[index].code, members[index].note };
+		int which;
+
+		for (which = 0; which < 4; which++)
+			for (at = 0; texts[which][at]; at++)
+				if (texts[which][at] < 0x20 || texts[which][at] > 0x7E)
+					__builtin_trap();
+	}
+	count = p2p_party_chat_lines(lines, P2P_PARTY_CHAT_LINES, 0);
+	party_lines += count > 0;
+	party_follows += machines[T].party.follow_heard != 0;
+	for (index = 0; index < count; index++)
+	{
+		if (memchr(lines[index].text, 0, sizeof(lines[index].text)) == NULL || strlen(lines[index].text) >
+			P2P_PARTY_CHAT_LENGTH + 40)
+		{
+			__builtin_trap();
+		}
+		for (at = 0; lines[index].text[at]; at++)
+			if (lines[index].text[at] < 0x20 || lines[index].text[at] > 0x7E ||
+				(!lines[index].notice && strchr("|%^<>\\`", lines[index].text[at])))
+				__builtin_trap();
+		for (at = 0; lines[index].name[at]; at++)
+			if (lines[index].name[at] < 0x20 || lines[index].name[at] > 0x7E)
+				__builtin_trap();
+	}
+	count = p2p_party_invites(invites, P2P_FRIEND_INVITES_MAXIMUM);
+	for (index = 0; index < count; index++)
+		for (at = 0; invites[index].name[at]; at++)
+			if (invites[index].name[at] < 0x20 || invites[index].name[at] > 0x7E)
+				__builtin_trap();
+	p2p_party_status(text, sizeof(text));
+	p2p_party_follow_pending(NULL);
+}
+
+static void check_entries(void)
+{
+	struct p2p_friend_entry entries[P2P_FRIEND_ENTRIES_MAXIMUM];
+	char text[128];
+	int count, index, at;
+
+	use(T);
+	count = p2p_friends_list(entries, P2P_FRIEND_ENTRIES_MAXIMUM);
+	if (count < 0 || count > P2P_FRIEND_ENTRIES_MAXIMUM)
+		__builtin_trap();
+	friends_seen += count;
+	for (index = 0; index < count; index++)
+	{
+		const struct p2p_friend_entry *entry = &entries[index];
+		const char *texts[4];
+		int which;
+
+		texts[0] = entry->id;
+		texts[1] = entry->name;
+		texts[2] = entry->code;
+		texts[3] = entry->activity;
+		if (memchr(entry->id, 0, sizeof(entry->id)) == NULL || memchr(entry->name, 0, sizeof(entry->name)) == NULL ||
+			memchr(entry->code, 0, sizeof(entry->code)) == NULL || memchr(entry->activity, 0, sizeof(entry->activity)) == NULL)
+			__builtin_trap();
+		for (which = 0; which < 4; which++)
+			for (at = 0; texts[which][at]; at++)
+				if (texts[which][at] < 0x20 || texts[which][at] > 0x7E)
+					__builtin_trap();
+		if (entry->kind < 0 || entry->kind >= P2P_FRIEND_KIND_COUNT || entry->state < 0 ||
+			entry->state >= P2P_FRIEND_STATE_COUNT || entry->players > entry->maximum)
+			__builtin_trap();
+	}
+	p2p_friends_status(text, sizeof(text));
+	if (p2p_friends_take_invite(&entries[0]) && entries[0].kind != P2P_FRIEND_KIND_INVITE)
+		__builtin_trap();
+	if (machines[T].friend_count > P2P_FRIENDS_MAXIMUM || machines[T].request_count > P2P_FRIEND_REQUESTS_MAXIMUM ||
+		machines[T].invite_count > P2P_FRIEND_INVITES_MAXIMUM || machines[T].inbound_count > MAXIMUM_INBOUND ||
+		machines[T].outbound_count > MAXIMUM_OUTBOUND)
+		__builtin_trap();
+}
+
+/* a plaintext from the input, its header the sender's (with the flag: the
+input's type and recipient kept), signed by the sender */
+static int plain_from(int sender, int type, const unsigned char *recipient, const uint8_t *data, size_t size,
+	int keep, unsigned char *plain)
+{
+	int body = size > MAXIMUM_BODY_SIZE + 16 ? MAXIMUM_BODY_SIZE + 16 : (int)size;
+	int plain_size = PLAIN_HEADER_SIZE + body;
+	unsigned char signed_data[sizeof(signature_label) + MAXIMUM_PLAIN_SIZE + 64];
+
+	memset(plain, 0, PLAIN_HEADER_SIZE);
+	plain[0] = (unsigned char)type;
+	memcpy(plain + 1, machines[sender].key, P2P_KEY_SIZE);
+	if (recipient)
+		memcpy(plain + 1 + P2P_KEY_SIZE, recipient, P2P_KEY_SIZE);
+	put_u64(plain + 1 + 2 * P2P_KEY_SIZE, machines[sender].epoch);
+	put_u32(plain + 1 + 2 * P2P_KEY_SIZE + 8, ++machines[sender].counter);
+	if (keep && size > PLAIN_HEADER_SIZE)
+	{
+		plain[0] = data[0];
+		memcpy(plain + 1 + P2P_KEY_SIZE, data + 1, P2P_KEY_SIZE);
+	}
+	memcpy(plain + PLAIN_HEADER_SIZE, data, (size_t)body);
+	memcpy(signed_data, signature_label, sizeof(signature_label) - 1);
+	memcpy(signed_data + sizeof(signature_label) - 1, plain, (size_t)plain_size);
+	p2p_ed25519_sign(machines[sender].seed, machines[sender].key, signed_data,
+		(int)sizeof(signature_label) - 1 + plain_size, plain + plain_size);
+	return plain_size + P2P_SIGNATURE_SIZE;
+}
+
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+{
+	unsigned char plain[MAXIMUM_PLAIN_SIZE + 128], payload[MAXIMUM_PAYLOAD_SIZE + 256];
+	int mode, flags, payload_size = 0, which = P2P_FRIENDS_MAILBOX;
+
+	if (!fuzz_root[0])
+		snprintf(fuzz_root, sizeof(fuzz_root), "%s", getenv("FRIENDS_TEST_ROOT") ? getenv("FRIENDS_TEST_ROOT") : ".");
+	if (inputs++ % 5000 == 0)
+		setup();
+	if (size < 2)
+		return 0;
+	mode = data[0] % MODES;
+	flags = data[1];
+	data += 2;
+	size -= 2;
+	use(T);
+	switch (mode)
+	{
+	case 0:
+	case 1:
+		which = mode == 0 ? P2P_FRIENDS_INBOX : P2P_FRIENDS_MAILBOX;
+		payload_size = size > sizeof(payload) ? (int)sizeof(payload) : (int)size;
+		memcpy(payload, data, (size_t)payload_size);
+		break;
+	case 2:
+	{
+		int plain_size = plain_from(S, TYPE_REQUEST, machines[T].code_recipient, data, size, flags & 2, plain);
+
+		use(T);
+		payload_size = envelope_seal(KIND_REQUEST, machines[T].inbox_key, plain, plain_size > MAXIMUM_PLAIN_SIZE ?
+			MAXIMUM_PLAIN_SIZE : plain_size, payload);
+		which = P2P_FRIENDS_INBOX;
+		break;
+	}
+	case 3:
+	{
+		static const unsigned char none[P2P_KEY_SIZE];
+		int types[3] = { TYPE_PRESENCE, TYPE_INVITE, TYPE_REMOVE };
+		int type = types[(flags >> 4) % 3];
+		int plain_size = plain_from(F, type, type == TYPE_PRESENCE ? none : machines[T].key, data, size, flags & 2, plain);
+
+		use(F);
+		if (!machines[F].friend_count || !friend_keys(&machines[F].friends[0]))
+			return 0;
+		payload_size = envelope_seal(KIND_PAIR, machines[F].friends[0].send_key, plain, plain_size > MAXIMUM_PLAIN_SIZE ?
+			MAXIMUM_PLAIN_SIZE : plain_size, payload);
+		use(T);
+		break;
+	}
+	case 9:
+	case 10:
+	{
+		static const unsigned char none[P2P_KEY_SIZE];
+		static const int from_friend[8] = { TYPE_PARTY_INVITE, TYPE_PARTY_ANSWER, TYPE_PARTY_ROSTER, TYPE_PARTY_LEAVE,
+			TYPE_PARTY_STATUS, TYPE_PARTY_FOLLOW, TYPE_PARTY_CHAT, TYPE_PARTY_PRESENCE };
+		static const int from_member[5] = { TYPE_PARTY_ROSTER, TYPE_PARTY_LEAVE, TYPE_PARTY_STATUS, TYPE_PARTY_FOLLOW,
+			TYPE_PARTY_CHAT };
+		int type = mode == 9 ? from_friend[(flags >> 4) % 8] : from_member[(flags >> 4) % 5];
+		int directed = type == TYPE_PARTY_INVITE || type == TYPE_PARTY_ANSWER;
+		int sender = mode == 9 ? F : S;
+		int plain_size;
+		unsigned char send_key[P2P_SHA256_SIZE], receive_key[P2P_SHA256_SIZE];
+
+		/* (the party back as setup made it, if an input ended it) */
+		if (!machines[T].party.active)
+		{
+			machines[T].party = party_saved;
+			for (plain_size = 0; plain_size < 3; plain_size++)
+				machines[T].party.members[plain_size].heard_time = clock_now;
+		}
+		plain_size = plain_from(sender, type, directed ? machines[T].key : none, data, size, flags & 2, plain);
+		use(sender);
+		if (!pair_keys(machines[T].key, send_key, receive_key))
+			return 0;
+		payload_size = envelope_seal(KIND_PAIR, send_key, plain, plain_size > MAXIMUM_PLAIN_SIZE ? MAXIMUM_PLAIN_SIZE :
+			plain_size, payload);
+		use(T);
+		if (payload_size > 0)
+			p2p_friends_heard(P2P_FRIENDS_MAILBOX, payload, payload_size);
+		clock_now += flags & 1 ? 4000 : 50;
+		p2p_friends_update(&hosts[T]);
+		machines[T].outbound_count = 0;
+		check_party();
+		if (flags & 4)
+			check_entries();
+		return 0;
+	}
+	case 4:
+	{
+		int plain_size = plain_from(S, TYPE_ACCEPT, machines[T].key, data, size, flags & 2, plain);
+
+		use(S);
+		payload_size = box_seal(machines[T].key, plain, plain_size > MAXIMUM_PLAIN_SIZE ? MAXIMUM_PLAIN_SIZE : plain_size,
+			payload);
+		use(T);
+		break;
+	}
+	case 7:
+	case 8:
+	{
+		unsigned long addresses[CARD_MACHINES];
+		unsigned char card[CARD_ANSWER_SIZE + 8];
+		int length = size > sizeof(card) ? (int)sizeof(card) : (int)size, index;
+
+		for (index = 0; index < CARD_MACHINES; index++)
+			addresses[index] = 100UL | 64UL << 8 | (unsigned long)(index + 2) << 24;
+		use(T);
+		if (flags & 16)
+			p2p_friends_set_game(0, 1, addresses, CARD_MACHINES);
+		else
+			p2p_friends_set_game(1, 0, NULL, 0);
+		memset(card, 0, sizeof(card));
+		memcpy(card, data, (size_t)length);
+		if (mode == 8 && !(flags & 16))
+		{
+			/* (an ask of machine 2, answered by S as a host relays it) */
+			unsigned char signed_data[64 + CARD_ANSWER_SIZE];
+			int signed_size;
+
+			machines[T].machines[2].asked_time = 0;
+			machines[T].machines[2].asking = 0;
+			machines[T].machines[2].has_card = 0;
+			p2p_friends_player_ask(2, flags & 32 ? P2P_FRIENDS_PLAYER_BLOCK : P2P_FRIENDS_PLAYER_ADD);
+			machines[T].card_outbound_count = 0;
+			memset(card, 0, sizeof(card));
+			memcpy(card + CARD_HEADER_SIZE + P2P_KEY_SIZE, data, (size_t)(length > 1 + NAME_LENGTH ? 1 + NAME_LENGTH : length));
+			card[0] = CARD_VERSION;
+			card[1] = CARD_ANSWER;
+			card[2] = 2;
+			card[3] = 1;
+			memcpy(card + 4, machines[T].machines[2].nonce, NONCE_LENGTH);
+			memcpy(card + CARD_HEADER_SIZE, machines[S].key, P2P_KEY_SIZE);
+			use(S);
+			card_signed_data(card, signed_data, &signed_size, card_nonce_bound(card + 4) && (flags & 64) == 0);
+			p2p_ed25519_sign(machines[S].seed, machines[S].key, signed_data, signed_size,
+				card + CARD_ANSWER_SIZE - P2P_SIGNATURE_SIZE);
+			length = CARD_ANSWER_SIZE;
+			use(T);
+		}
+		if (mode == 7 && (flags & 128))
+		{
+			/* (the flaming helmet's, in the game's messages: every machine
+			claims it, the packet an ask or an answer of its size, the rest
+			the input's, from the host or a joiner as the host reads it) */
+			static int claims[CARD_MACHINES];
+			static unsigned short names[CARD_MACHINES * 12];
+
+			for (index = 0; index < CARD_MACHINES; index++)
+				claims[index] = 1;
+			p2p_flame_set_players(claims, claims, names, CARD_MACHINES, names);
+			card[0] = CARD_VERSION;
+			card[1] = flags & 1 ? CARD_FLAME_ANSWER : CARD_FLAME_ASK;
+			length = flags & 1 ? FLAME_ANSWER_SIZE : CARD_HEADER_SIZE;
+			if (flags & 64)
+				machines[T].machines[card[2] % CARD_MACHINES].flame_asking = 1;
+			p2p_flame_heard(flags & 8 ? -1 : (flags >> 2) % CARD_MACHINES, card, length);
+			p2p_flame_update();
+			machines[T].flame_outbound_count = 0;
+			return 0;
+		}
+		p2p_friends_tunnel_heard(addresses[(flags >> 2) % 4], (flags & 8) != 0, card, length);
+		clock_now += 50;
+		p2p_friends_update(&hosts[T]);
+		machines[T].outbound_count = 0;
+		machines[T].card_outbound_count = 0;
+		if (flags & 4)
+			check_entries();
+		p2p_friends_player_state((flags >> 1) % CARD_MACHINES);
+		return 0;
+	}
+	case 5:
+	case 6:
+	{
+		unsigned char bytes[MAXIMUM_LIST_SIZE + 64];
+		int length = size > sizeof(bytes) - P2P_SHA256_SIZE ? (int)(sizeof(bytes) - P2P_SHA256_SIZE) : (int)size;
+		struct friends_state saved = machines[T];
+
+		memcpy(bytes, data, (size_t)length);
+		if ((flags & 1) && length >= P2P_SHA256_SIZE + 5)
+		{
+			memcpy(bytes, mode == 5 ? "HFRL" : "HFID", 4);
+			bytes[4] = mode == 5 ? LIST_VERSION : IDENTITY_VERSION;
+			p2p_sha256(bytes, length - P2P_SHA256_SIZE, bytes + length - P2P_SHA256_SIZE);
+		}
+		use(T);
+		if (mode == 5)
+		{
+			lists_taken += list_decode(bytes, length);
+			check_entries();
+		}
+		else
+		{
+			unsigned char seed[P2P_SEED_SIZE];
+			unsigned long long epoch;
+
+			identity_decode(bytes, length, seed, &epoch);
+		}
+		machines[T] = saved;
+		return 0;
+	}
+	case 11:
+	{
+		unsigned char *contents = calloc(1, BACKUP_PLAIN_SIZE);
+		struct friends_state *restored = calloc(1, sizeof(*restored));
+		int length = size > BACKUP_PLAIN_SIZE ? BACKUP_PLAIN_SIZE : (int)size, list = flags & 1 ? BACKUP_FLAG_LIST : 0;
+		int file_flags, plain_size, friend_count, index;
+		unsigned long blocks, passes;
+
+		if (!contents || !restored)
+			abort();
+		backup_header_check(data, (int)size, &file_flags, &blocks, &passes, &plain_size);
+		memcpy(contents, data, (size_t)length);
+		if (flags & 2)
+		{
+			unsigned long list_size = get_u32(contents + 88) % (MAXIMUM_LIST_SIZE + 1);
+			unsigned long marks_size = get_u32(contents + 92) % (MAXIMUM_MARKS_SIZE + 1);
+
+			memcpy(contents, "HFBP", 4);
+			contents[4] = BACKUP_VERSION;
+			contents[5] = (unsigned char)list;
+			contents[6] = contents[7] = 0;
+			p2p_ed25519_public(contents + 8, contents + 40, NULL);
+			if (!list)
+				list_size = marks_size = 0;
+			put_u32(contents + 88, list_size);
+			put_u32(contents + 92, marks_size);
+			if ((flags & 4) && list_size >= LIST_HEADER_SIZE + P2P_SHA256_SIZE)
+			{
+				memcpy(contents + BACKUP_PLAIN_HEADER_SIZE, "HFRL", 4);
+				contents[BACKUP_PLAIN_HEADER_SIZE + 4] = LIST_VERSION;
+				p2p_sha256(contents + BACKUP_PLAIN_HEADER_SIZE, (int)list_size - P2P_SHA256_SIZE,
+					contents + BACKUP_PLAIN_HEADER_SIZE + list_size - P2P_SHA256_SIZE);
+			}
+			if ((flags & 4) && marks_size >= MARKS_HEADER_SIZE + P2P_SHA256_SIZE)
+			{
+				unsigned char *marks = contents + BACKUP_PLAIN_HEADER_SIZE + list_size;
+
+				memcpy(marks, "HFRM", 4);
+				marks[4] = MARKS_VERSION;
+				p2p_sha256(marks, (int)marks_size - P2P_SHA256_SIZE, marks + marks_size - P2P_SHA256_SIZE);
+			}
+			for (index = BACKUP_PLAIN_HEADER_SIZE + (int)(list_size + marks_size); index < BACKUP_PLAIN_SIZE; index++)
+				contents[index] = 0;
+		}
+		use(T);
+		if (backup_plain_check(contents, BACKUP_PLAIN_SIZE, list, &friend_count) == P2P_FRIENDS_BACKUP_IDLE)
+		{
+			pthread_mutex_lock(&friends_lock);
+			backups_read += backup_read_plain(contents, list, restored);
+			pthread_mutex_unlock(&friends_lock);
+			check(friends == &machines[T], "a backup read: the machine's state its own again");
+			for (index = 0; index < restored->friend_count; index++)
+				check(strlen(restored->friends[index].name) <= NAME_LENGTH, "a backup's friend's name bounded");
+		}
+		free(contents);
+		free(restored);
+		return 0;
+	}
+	}
+	if (payload_size > 0)
+		p2p_friends_heard(which, payload, payload_size);
+	clock_now += flags & 1 ? 4000 : 50;
+	use(T);
+	p2p_friends_update(&hosts[T]);
+	requests_taken += machines[T].request_count;
+	machines[T].outbound_count = 0;
+	if (flags & 4)
+		check_entries();
+	return 0;
+}
+
+/* ---------- the engine (without libFuzzer), and the seeds */
+
+#ifndef USE_LIBFUZZER
+static unsigned long long state = 88172645463325252ULL;
+
+static unsigned int next_random(void)
+{
+	state ^= state << 13;
+	state ^= state >> 7;
+	state ^= state << 17;
+	return (unsigned int)(state >> 11);
+}
+
+enum
+{
+	SEEDS = 48,
+};
+
+static unsigned char seeds[SEEDS][MAXIMUM_INPUT];
+static int seed_sizes[SEEDS];
+
+/* the bodies of real messages (each mode's plaintext after its header), and
+real files */
+static void make_seeds(void)
+{
+	struct message message;
+	unsigned char plain[MAXIMUM_PLAIN_SIZE], bytes[MAXIMUM_LIST_SIZE];
+	int index, size;
+
+	setup();
+	for (index = 0; index < SEEDS; index++)
+	{
+		int mode = index % MODES;
+
+		seeds[index][0] = (unsigned char)mode;
+		seeds[index][1] = (unsigned char)(index * 37);
+		use(F);
+		memset(&message, 0, sizeof(message));
+		message.game.difficulty = -1;
+		snprintf(message.name, sizeof(message.name), index & 1 ? "Name|x" : "Foxtrot");
+		snprintf(message.game.map, sizeof(message.game.map), index & 2 ? "bloodgulch" : "a10");
+		snprintf(message.game.gametype, sizeof(message.game.gametype), "Slayer");
+		switch (mode)
+		{
+		case 2:
+			message.type = TYPE_REQUEST;
+			break;
+		case 3:
+			message.type = index & 4 ? TYPE_PRESENCE : index & 8 ? TYPE_INVITE : TYPE_REMOVE;
+			message.flags = PRESENCE_ONLINE | (index & 16 ? PRESENCE_JOINABLE : 0);
+			message.game.state = P2P_FRIEND_STATE_MULTIPLAYER;
+			message.game.maximum = 16;
+			memset(message.friendship, 7, FRIENDSHIP_LENGTH);
+			seeds[index][1] = (unsigned char)((message.type == TYPE_PRESENCE ? 0 : message.type == TYPE_INVITE ? 1 : 2) << 4);
+			break;
+		case 4:
+			message.type = TYPE_ACCEPT;
+			memset(message.nonce, 0x33, NONCE_LENGTH);
+			break;
+		case 9:
+		case 10:
+		{
+			/* (each party message's body, as F or S would send it) */
+			static const int types[8] = { TYPE_PARTY_INVITE, TYPE_PARTY_ANSWER, TYPE_PARTY_ROSTER, TYPE_PARTY_LEAVE,
+				TYPE_PARTY_STATUS, TYPE_PARTY_FOLLOW, TYPE_PARTY_CHAT, TYPE_PARTY_PRESENCE };
+			int nth = (index / MODES) % (mode == 9 ? 8 : 5);
+
+			message.type = mode == 9 ? types[nth] : types[2 + nth];
+			memset(message.party_id, 0x5A, PARTY_ID_LENGTH);
+			message.party_serial = 7;
+			message.party_count = 3;
+			message.party_leader = mode == 9 ? 0 : 2;
+			memcpy(message.party_keys[0], machines[F].key, P2P_KEY_SIZE);
+			memcpy(message.party_keys[1], machines[T].key, P2P_KEY_SIZE);
+			memcpy(message.party_keys[2], machines[S].key, P2P_KEY_SIZE);
+			message.party_value = message.type == TYPE_PARTY_FOLLOW ? 2 : message.type == TYPE_PARTY_ANSWER ? 1 : 0;
+			message.game.state = P2P_FRIEND_STATE_MULTIPLAYER;
+			message.game.maximum = 16;
+			message.game.version = HALO_PORT_NETWORK_VERSION;
+			snprintf(message.chat, sizeof(message.chat), index & 1 ? "gg |%%^<b>" : "hello party");
+			seeds[index][1] = (unsigned char)(nth << 4);
+			break;
+		}
+		default:
+			message.type = TYPE_PRESENCE;
+			break;
+		}
+		size = body_encode(&message, plain);
+		if (mode == 5)
+		{
+			use(T);
+			size = list_encode(bytes);
+			memcpy(plain, bytes, (size_t)size);
+		}
+		else if (mode == 6)
+			size = identity_encode(machines[T].seed, 12345, plain);
+		else if (mode == 11)
+		{
+			/* (a real backup's contents, T's, its list in it: the input's own
+			buffer, too big for plain) */
+			unsigned long list_size, marks_size;
+
+			use(T);
+			memset(seeds[index] + 2, 0, BACKUP_PLAIN_SIZE);
+			memcpy(seeds[index] + 2, "HFBP", 4);
+			seeds[index][2 + 4] = BACKUP_VERSION;
+			seeds[index][2 + 5] = BACKUP_FLAG_LIST;
+			memcpy(seeds[index] + 2 + 8, machines[T].seed, P2P_SEED_SIZE);
+			memcpy(seeds[index] + 2 + 40, machines[T].key, P2P_KEY_SIZE);
+			list_size = (unsigned long)list_encode(seeds[index] + 2 + BACKUP_PLAIN_HEADER_SIZE);
+			marks_size = (unsigned long)marks_encode(seeds[index] + 2 + BACKUP_PLAIN_HEADER_SIZE + list_size);
+			put_u32(seeds[index] + 2 + 88, list_size);
+			put_u32(seeds[index] + 2 + 92, marks_size);
+			seeds[index][1] = (unsigned char)(1 | (index & 2) | (index & 4));
+			seed_sizes[index] = 2 + BACKUP_PLAIN_HEADER_SIZE + (int)(list_size + marks_size) + 16;
+			continue;
+		}
+		else if (mode < 2)
+		{
+			/* (a real sealed message, as T would hear it) */
+			use(F);
+			message_start(&message, TYPE_PRESENCE, NULL);
+			message.flags = PRESENCE_ONLINE;
+			message.game.difficulty = -1;
+			size = plain_encode(&message, plain);
+			friend_keys(&machines[F].friends[0]);
+			size = envelope_seal(KIND_PAIR, machines[F].friends[0].send_key, plain, size, bytes);
+			memcpy(plain, bytes, (size_t)size);
+		}
+		memcpy(seeds[index] + 2, plain, (size_t)size);
+		seed_sizes[index] = 2 + size;
+	}
+}
+
+int main(int count, char **arguments)
+{
+	unsigned long runs = count > 1 ? strtoul(arguments[1], NULL, 10) : 300000;
+	unsigned long run;
+	static unsigned char input[MAXIMUM_INPUT];
+
+	snprintf(fuzz_root, sizeof(fuzz_root), "%s", getenv("FRIENDS_TEST_ROOT") ? getenv("FRIENDS_TEST_ROOT") : ".");
+	make_seeds();
+	for (run = 0; run < runs; run++)
+	{
+		int size, mutations, index;
+		int seed = (int)(next_random() % SEEDS);
+
+		memcpy(input, seeds[seed], (size_t)seed_sizes[seed]);
+		size = seed_sizes[seed];
+		mutations = 1 + (int)(next_random() % 8);
+		for (index = 0; index < mutations; index++)
+		{
+			unsigned int at = size ? next_random() % (unsigned int)size : 0;
+
+			switch (next_random() % 8)
+			{
+			case 0:
+				if (size)
+					input[at] ^= (unsigned char)(1 << (next_random() % 8));
+				break;
+			case 1:
+				if (size)
+					input[at] = (unsigned char)next_random();
+				break;
+			case 2:
+				/* (a length byte's worth: 0, 255, one past) */
+				if (size)
+					input[at] = (unsigned char)(next_random() & 1 ? 0xFF : next_random() % 40);
+				break;
+			case 3:
+				size = at;
+				break;
+			case 4:
+				if (size < MAXIMUM_INPUT - 16)
+				{
+					int grow = 1 + (int)(next_random() % 16);
+
+					memmove(input + at + grow, input + at, (size_t)(size - (int)at));
+					for (; grow > 0; grow--, size++)
+						input[at + (unsigned int)grow - 1] = (unsigned char)next_random();
+				}
+				break;
+			case 5:
+			{
+				/* (a splice from another seed) */
+				int other = (int)(next_random() % SEEDS);
+				unsigned int from = seed_sizes[other] > 2 ? 2 + next_random() % (unsigned int)(seed_sizes[other] - 2) : 0;
+				int length = (int)(next_random() % 32);
+
+				if (from + (unsigned int)length <= (unsigned int)seed_sizes[other] && at + (unsigned int)length < MAXIMUM_INPUT)
+				{
+					memcpy(input + at, seeds[other] + from, (size_t)length);
+					if ((int)at + length > size)
+						size = (int)at + length;
+				}
+				break;
+			}
+			case 6:
+				input[1] = (unsigned char)next_random();
+				break;
+			default:
+				if (size > 2)
+					input[0] = (unsigned char)(next_random() % MODES);
+				break;
+			}
+		}
+		if (size < 0)
+			size = 0;
+		LLVMFuzzerTestOneInput(input, (size_t)size);
+		if (run % 100000 == 99999)
+			fprintf(stderr, "%lu inputs\n", run + 1);
+	}
+	printf("PASS (%lu inputs; lists read whole %lu times, %lu entries checked; party chat shown after %lu inputs, a follow "
+		"taken after %lu; backups' contents read whole %lu times)\n", runs, lists_taken, friends_seen, party_lines,
+		party_follows, backups_read);
+	return 0;
+}
+#endif

@@ -145,6 +145,8 @@ int halo_epoch_on_mutator(void);
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
 #include "tag_schema.h" /* port: tag_validate.c */
+#include "texture_cache.h" /* port: texture_cache_loads_pending */
+#include "cache_files_decompress_windows.h" /* port: cache_copy_compressed_file_complete */
 /* port: the port's text in the player's language (port/linux/src/lang.h,
 through the -iquote port/linux/game path) */
 #include "../src/lang.h"
@@ -467,6 +469,17 @@ static boolean cache_file_structure_bsp_reference_verify(
 	}
 
 	read_size = (reference->file_size + CACHE_FILE_SECTOR_SIZE - 1) & ~(CACHE_FILE_SECTOR_SIZE - 1);
+#ifdef HALO_LINUX
+	/* port: and past the scene packs' bytes after the tags
+	(port/linux/game/scene_packs.c) */
+	{
+		unsigned long scene_packs_reserved_bytes(void);
+
+		tag_data_size += (long)scene_packs_reserved_bytes();
+		if (tag_data_size > TAG_CACHE_SIZE)
+			tag_data_size = TAG_CACHE_SIZE;
+	}
+#endif
 	if (!cache_file_region_contains(
 		tag_cache_base_address + tag_data_size,
 		TAG_CACHE_SIZE - tag_data_size,
@@ -500,6 +513,13 @@ static boolean cache_file_structure_bsp_reference_verify(
 	return TRUE;
 }
 
+#ifdef HALO_LINUX
+/* (cache_files_map_directory: the folder found, and the language's folder
+it was found for) */
+static char const *volatile cache_files_map_directory_found;
+static char const *volatile cache_files_map_directory_found_for;
+#endif
+
 /* ---------- public code */
 
 char const *cache_files_map_directory(
@@ -528,6 +548,21 @@ char const *cache_files_map_directory(
 		break;
 	}
 
+#ifdef HALO_LINUX
+	/* port: the folder found, by the language it was found for: every map
+	path the game makes asks (a dozen times a join, every few seconds in a
+	lobby), and each look was a file call on the game thread, which on the
+	Vita waits for the memory card behind a map copy's writes (an insider.10
+	lobby's 485 ms for one). The maps folder is the game's data's: it is not
+	made or taken away while the game runs. */
+	if (cache_files_map_directory_found && cache_files_map_directory_found_for == map_directory)
+	{
+		return cache_files_map_directory_found;
+	}
+	{
+		char const *language_directory = map_directory;
+		boolean found = TRUE;
+#endif
 	if (!file_exists(file_reference_create_from_path(&reference, map_directory, TRUE)))
 	{
 		for (directory_index = 0; data_00316820[directory_index]; directory_index++)
@@ -547,7 +582,20 @@ char const *cache_files_map_directory(
 			60,
 			data_00316820[directory_index],
 			"no valid map directory exists");
+#ifdef HALO_LINUX
+		found = data_00316820[directory_index] != NULL;
+#endif
 	}
+#ifdef HALO_LINUX
+	/* (none found: looked for again next time) */
+	if (found)
+	{
+		cache_files_map_directory_found = NULL;
+		cache_files_map_directory_found_for = language_directory;
+		cache_files_map_directory_found = map_directory;
+	}
+	}
+#endif
 
 	return map_directory;
 }
@@ -578,6 +626,20 @@ void scenario_tags_unload(
 	sound_cache_close();
 	texture_cache_close();
 #ifdef HALO_LINUX
+	/* port: the menus' live backdrop let go, ui.map's scenario as it was,
+	before the packs it was of (port/linux/game/menu_backdrop.c) */
+	{
+		extern void menu_backdrop_unloaded(void);
+
+		menu_backdrop_unloaded();
+	}
+	/* port: the scene packs loaded beside the map go, their table before
+	them back (port/linux/game/scene_packs.c), before the menus' */
+	{
+		extern void scene_packs_unloaded(void);
+
+		scene_packs_unloaded();
+	}
 	/* port: the menus' tags go, and the map's own table comes back
 	(port/linux/game/menu_tags.c): after the texture cache, which writes to
 	the bitmaps it has loaded as it closes */
@@ -1287,6 +1349,17 @@ boolean cache_files_precache_failed(
 	}
 	cache_files_precache_failure_describe(map_name, why, sizeof(why));
 	platform_log("map: %s could not be precached: %s", name, why);
+	/* (the menus' map lists show it as unusable from now on when it was the
+	file's fault: map_checks.c) */
+	{
+		void map_checks_unusable(char const *level_name);
+		void map_checks_forget(void);
+
+		if (cache_files_precache_failure_the_file())
+			map_checks_unusable(map_name);
+		else
+			map_checks_forget();
+	}
 	error(_error_silent, "cache: '%s' could not be precached: %s", map_name, why);
 	csstrncpy(cache_files_precache_failed_map, map_name, sizeof(cache_files_precache_failed_map) - 1);
 	cache_files_precache_failed_map[sizeof(cache_files_precache_failed_map) - 1] = 0;
@@ -1311,6 +1384,42 @@ boolean cache_files_precache_failed(
 }
 #endif
 
+#ifdef HALO_LINUX
+/* (cache_files_give_time_to_precache: since when a precache's start has
+waited for the textures' loads, and for how long it may; the map it is for) */
+static unsigned long cache_files_precache_deferred_since;
+static char cache_files_precache_deferred_map[256];
+#define PRECACHE_TEXTURE_DEFER_MILLISECONDS 30000UL
+
+/* (the precache of `map_name` waits to start) */
+static void cache_files_precache_defer(
+	char const *map_name)
+{
+	if (!cache_files_precache_deferred_since || csstrcmp(cache_files_precache_deferred_map, map_name))
+	{
+		cache_files_precache_deferred_since = system_milliseconds() | 1;
+		csstrncpy(cache_files_precache_deferred_map, map_name, sizeof(cache_files_precache_deferred_map) - 1);
+		cache_files_precache_deferred_map[sizeof(cache_files_precache_deferred_map) - 1] = 0;
+	}
+
+	return;
+}
+
+/* port: whether the precache of `map_name` waits to start - for another
+map's copy to stop, or for the textures' loads - and may now (the copy has
+stopped; the loads are done, or its wait is over): main.c then gives it time
+again */
+boolean cache_files_precache_deferred(
+	char const *map_name)
+{
+	return cache_files_precache_deferred_since && map_name && map_name[0] &&
+		!csstrcmp(cache_files_precache_deferred_map, map_name) &&
+		(!cache_files_precache_in_progress() || cache_copy_compressed_file_complete()) &&
+		(!texture_cache_loads_pending() ||
+			system_milliseconds() - cache_files_precache_deferred_since >= PRECACHE_TEXTURE_DEFER_MILLISECONDS);
+}
+#endif
+
 boolean cache_files_give_time_to_precache(
 	char const *map_name)
 {
@@ -1328,6 +1437,9 @@ boolean cache_files_give_time_to_precache(
 	if (cache_files_precache_map_loaded(map_name))
 	{
 		result = TRUE;
+#ifdef HALO_LINUX
+		cache_files_precache_deferred_since = 0;
+#endif
 	}
 #ifdef HALO_LINUX
 	/* (port: one that failed is not tried again each second) */
@@ -1335,6 +1447,20 @@ boolean cache_files_give_time_to_precache(
 		!csstrcasecmp(cache_files_precache_failed_map, map_name) &&
 		!cache_files_precache_in_progress())
 	{
+		cache_files_precache_deferred_since = 0;
+	}
+#endif
+#if defined(HALO_LINUX) && !defined(HALO_DEDICATED_SERVER)
+	/* port: another map's copy under way is asked to stop, and its end
+	waited for by a later ask (main.c's, the next frame: the precache waits,
+	cache_files_precache_deferred), not here: the copy stops between its
+	pieces of the memory card's (xbox_files.c), and the game thread waited
+	for the piece in progress */
+	else if (cache_files_precache_in_progress() && !cache_files_precache_is_copying_map(map_name) &&
+		!cache_copy_compressed_file_complete())
+	{
+		cache_files_precache_map_queue_end();
+		cache_files_precache_defer(map_name);
 	}
 #endif
 	else
@@ -1369,8 +1495,27 @@ boolean cache_files_give_time_to_precache(
 			else if (status == 1)
 				cache_files_precache_map_end();
 		}
+#ifdef HALO_LINUX
+		/* port: not while a texture's load is under way: a copy's start
+		takes the texture cache's memory once every load is done
+		(texture_cache_steal_memory), and the game thread waited for them -
+		1.7 s of a lobby's frame on the harness's memory card as the menus
+		came back after a game and the host chose the next map. The lobby
+		asks again each second (network_game_client_update_precache_status);
+		after PRECACHE_TEXTURE_DEFER_MILLISECONDS of loads it waits for them,
+		as before (the menus' loads end: a screen's textures are finite). */
+		else if (texture_cache_loads_pending() &&
+			(!cache_files_precache_deferred_since || csstrcmp(cache_files_precache_deferred_map, map_name) ||
+				system_milliseconds() - cache_files_precache_deferred_since < PRECACHE_TEXTURE_DEFER_MILLISECONDS))
+		{
+			cache_files_precache_defer(map_name);
+		}
+#endif
 		else
 		{
+#ifdef HALO_LINUX
+			cache_files_precache_deferred_since = 0;
+#endif
 			cache_files_precache_set_priority(0);
 			if (!cache_files_precache_map_begin(map_name, FALSE))
 #ifdef HALO_LINUX
@@ -1428,9 +1573,26 @@ long scenario_tags_load(
 			halo_loaded_tag_count = cache_file_globals.tag_header->tag_count;
 			cache_file_globals.tags_loaded = TRUE;
 			result = cache_file_globals.tag_header->scenario_tag_index;
-			/* (its sounds too long for a permutation made chains of them:
-			custom_edition_sounds.c) */
+			/* (port: its sounds too long for a permutation made chains of
+			them, and its Ogg Vorbis sounds' sound cache file opened on the
+			decoding thread: custom_edition_sounds.c) */
 			custom_edition_sounds_map_loaded();
+			/* (port: MCC's own ui.map as the menus' map: the PC menus' XML
+			screens are built into its tags as an Xbox ui.map's are. A
+			multiplayer map - the header's type 1 - gets the in-game set as
+			an Xbox level does: the ElDewrito carnage report and scoreboard,
+			the Halo 3 pause. Without it a game on a Custom Edition map, a
+			host's of any version, ended on the game's own report whatever
+			the player chose - RC2, Oct 25 2026. A campaign map keeps the
+			game's own screens) */
+			{
+				extern void menu_tags_loaded(char const *map_name);
+				short map_type;
+
+				csmemcpy(&map_type, cache_file_globals.header.reserved60, sizeof(map_type));
+				if (!csstrcasecmp(stripped_scenario_name, "ui") || map_type == 1)
+					menu_tags_loaded(stripped_scenario_name);
+			}
 		}
 		else
 		{
@@ -1575,6 +1737,20 @@ long scenario_tags_load(
 
 				menu_tags_loaded(stripped_scenario_name);
 			}
+			/* port: Forge (port/linux/game/forge.c): a Forge game asked
+			for on this map starts; anything of the last map's is gone */
+			{
+				extern void forge_map_loaded(char const *scenario_name);
+
+				forge_map_loaded(tag_get_name(result));
+			}
+			/* port: the first local player's model from a Custom Edition
+			map, in a local multiplayer game (port/linux/game/player_models.c) */
+			{
+				extern void player_models_map_loaded(long scenario_index);
+
+				player_models_map_loaded(result);
+			}
 #endif
 		}
 		/* port: a map refused is closed for the next to open */
@@ -1606,6 +1782,22 @@ boolean scenario_structure_bsp_load(
 #endif
 	/* port: the bsp's header, once read and checked */
 	struct cache_file_structure_bsp_header *structure_bsp_header;
+
+#ifdef HALO_LINUX
+	/* port: the menus' live backdrop's bsp (port/linux/game/menu_backdrop.c),
+	a scene pack's: nothing read, its header the backdrop's */
+	{
+		extern int menu_backdrop_structure_bsp_load(struct scenario_structure_bsp_reference const *reference,
+			void **header);
+		void *backdrop_header = NULL;
+
+		if (menu_backdrop_structure_bsp_load(reference, &backdrop_header))
+		{
+			cache_file_globals.structure_bsp_header = backdrop_header;
+			return backdrop_header != NULL;
+		}
+	}
+#endif
 
 	/* port (from OpenCE, MrBruh's "Harden map and network input"): the tag
 	data's size was checked as the map loaded (cache_file_header_verify);
@@ -1652,10 +1844,18 @@ boolean scenario_structure_bsp_load(
 	}
 	if (!custom_edition_cache_tags_loaded())
 	{
+		/* (port: but the scene packs' bytes after the tags,
+		port/linux/game/scene_packs.c, where the bsp never loads:
+		cache_file_structure_bsp_reference_verify) */
+		unsigned long scene_packs_reserved_bytes(void);
+		long kept = cache_file_globals.header.tag_data_size + (long)scene_packs_reserved_bytes();
+
+		if (kept > 0x01600000)
+			kept = 0x01600000;
 		csmemset(
-			tag_cache_base_address + cache_file_globals.header.tag_data_size,
+			tag_cache_base_address + kept,
 			0xCD,
-			0x01600000 - cache_file_globals.header.tag_data_size);
+			0x01600000 - kept);
 	}
 #else
 	csmemset(
@@ -1726,7 +1926,12 @@ boolean scenario_structure_bsp_load(
 		}
 	}
 	else
-		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size);
+		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size, reference->file_offset);
+#elif defined(HALO_LINUX)
+	/* (port: a Custom Edition map's tags may be linked elsewhere than they
+	are in every build: a Halo: CE Anniversary map's always are) */
+	if (custom_edition_cache_tags_loaded())
+		custom_edition_cache_structure_bsp_moved(reference->base_address, reference->file_size, reference->file_offset);
 #endif
 #ifdef HALO_LINUX
 	halo_load_profile_add(_halo_load_bsp_relocate, started, 0);
@@ -1857,6 +2062,19 @@ void scenario_structure_bsp_unload(
 		custom_edition_structure_bsp_unload();
 	}
 #endif
+#ifdef HALO_LINUX
+	/* port: the menus' live backdrop's bsp keeps its root: its pack's
+	(port/linux/game/menu_backdrop.c) */
+	{
+		extern int menu_backdrop_structure_bsp_is(struct scenario_structure_bsp_reference const *reference);
+
+		if (menu_backdrop_structure_bsp_is(reference))
+		{
+			cache_file_globals.structure_bsp_header = NULL;
+			return;
+		}
+	}
+#endif
 	tag_instance = cache_get_tag_instance(reference->structure_bsp.index);
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files.c",
@@ -1949,6 +2167,16 @@ char *tag_get_name(
 	return cache_get_tag_instance(tag_index)->name;
 }
 
+#ifdef HALO_LINUX
+/* (port) the loaded map's tag data's bytes, at the tag cache's start (the
+structure bsp loaded after them: Forge's probe, port/linux/game/forge.c) */
+long cache_file_tag_data_size(
+	void)
+{
+	return cache_file_globals.header.tag_data_size;
+}
+
+#endif
 unsigned long tag_get_group_tag(
 	long tag_index)
 {

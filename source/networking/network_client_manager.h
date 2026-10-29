@@ -43,6 +43,85 @@ void const *network_game_client_listed_game_of(
 #endif
 short network_game_client_listed_game_count(
 	void);
+#ifdef HALO_LINUX
+/* port: a game the System Link list shows, as the Halo 3 menus' LAN browser
+lists it (port/linux/game/menu_functions.c): every field read from a
+datagram any machine on the network can send, so each is checked here -
+the name and map printable, cut to their sizes, the counts and the game
+type in range */
+enum
+{
+	NETWORK_LISTED_GAME_ID_SIZE = 17,
+	NETWORK_LISTED_GAME_NAME_SIZE = 33,
+	NETWORK_LISTED_GAME_MAP_SIZE = 33,
+};
+struct network_listed_game
+{
+	/* the advertisement's nonce, as hex: the game's own while the list
+	changes (network_game_client_listed_game_by_id) */
+	char id[NETWORK_LISTED_GAME_ID_SIZE];
+	/* the host's game name (printable ASCII and Latin-1, as UTF-8; "???"
+	when none of it is) and the map's scenario name (its path's last part,
+	printable ASCII) */
+	char name[NETWORK_LISTED_GAME_NAME_SIZE];
+	char map[NETWORK_LISTED_GAME_MAP_SIZE];
+	/* the game engine (game_engine.h; game_engine_none when out of range),
+	the players in it and the most it takes (1 to the session limit) */
+	short engine_type;
+	short players;
+	short maximum;
+	/* co-op on a campaign level, and its difficulty (0 to 3) */
+	short difficulty;
+	boolean open;
+	boolean has_teams;
+	boolean cooperative;
+	/* the game's wire (network_wire.h: its host's version), what hosts it
+	(crossplay_guard.h's CROSSPLAY_PLATFORM_*), and whether it is a PC
+	host's co-op game (no game engine, as OpenCE hosts co-op) */
+	boolean crossplay;
+	short platform;
+	boolean pc_coop;
+	/* its advertisement says a dedicated server hosts it (OpenCE 39's 0x04:
+	crossplay_guard_advertised_dedicated; a label alone) */
+	boolean dedicated;
+	byte pad[2];
+	/* this project's marks of its host (crossplay_guard.h's
+	CROSSPLAY_HOST_*: the PC build; Vitas only) */
+	short marks;
+	/* the host's XNADDR abEnet (an internet play machine's identifier,
+	xnet.c: the same host's online listing carries it, p2p_lobby_entry's
+	host) */
+	byte host[6];
+};
+/* the games the System Link list shows now (valid, of this platform: the
+open ones first, as it orders them), up to maximum: how many; 0 without a
+client searching */
+short network_game_client_listed_games(
+	struct network_listed_game *games,
+	short maximum);
+#ifdef HALO_LINUX
+/* (port: the server browser's network tabs) the games listed so far let go,
+and the advertisements arriving just after (the network before's) */
+void network_game_client_forget_listed_games(void);
+#endif
+/* the advertised game's tag (crossplay_guard.h: VITA, VITA+PC, OPENCE,
+CHUPA, PC) into badge, and whether the game lists show it
+(network.browser_filter) */
+void network_game_client_advertised_game_tag(
+	struct network_advertised_game const *game,
+	char *badge,
+	long size);
+boolean network_game_client_advertised_game_shown(
+	struct network_advertised_game const *game);
+/* whether the advertised game's host is a Vita (the lists show the Vitas'
+games first) */
+boolean network_game_client_advertised_game_vita(
+	struct network_advertised_game const *game);
+/* the advertised game of a listed game's id while it is still listed, or
+NULL (for ui_widget_port_join_advertised_game) */
+void const *network_game_client_listed_game_by_id(
+	char const *id);
+#endif
 boolean network_game_client_set_team(
 	char team_index);
 /* whether the advertised game's host has this machine's network version

@@ -212,6 +212,14 @@ symbols in this file:
 
 #include "real_math.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#ifdef HALO_LINUX
+/* port: the tests' "@aim" (player_control_aim_test_command) */
+#include "camera/observer.h"
+#include "game/game_allegiance.h"
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+#endif
 
 /* ---------- constants */
 
@@ -348,6 +356,28 @@ limits were stepped once per input update, a tick on the Xbox, so they step
 by the ticks the frame lasted; an impulse applied from a tick steps by one. */
 static real player_control_angle_step_ticks = 1.f;
 static real player_control_autolevel_time[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+/* port: a local player who asked for no aim assist at all (the Vita's gyro
+on with its Gyro aim assist setting off: halo_linux_aim_assist_off,
+port/linux/src/xinput_sdl.c), read with its input every frame: no friction
+or adhesion on its look, the stick's or the gyro's, and no autoaim on its
+shots (player_aim_projectile, aim_assist.c, through
+player_control_aim_assist_off). Only this machine's own players: a host
+never has it for a client's player, whose shots the client's own game
+aims (port/linux/game/network_damage.c) */
+static boolean player_control_unassisted[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+/* port: (tests, main.c's "@aim log") what the aim assist did for each
+local player: frames with a target under the reticle (the magnetism), the
+stick's look slowed and pulled, the gyro's slowed and pulled, shots bent
+towards a target by the autoaim, shots whose autoaim was left out */
+static struct player_control_aim_assist_counts
+{
+	long targeted;
+	long stick;
+	long gyro_friction;
+	long gyro_adhesion;
+	long autoaimed;
+	long autoaim_skipped;
+} player_control_aim_assist_counts[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
 #endif
 
 /* ---------- public code */
@@ -362,6 +392,162 @@ short unit_get_local_player_index(
 
 	return NONE;
 }
+
+#ifdef HALO_LINUX
+/* port: whether this machine's local player has no aim assist at all now
+(player_control_unassisted); FALSE for NONE (no local player: a client's
+player on its host, a bot) */
+boolean player_control_aim_assist_off(
+	short local_player_index)
+{
+	return local_player_index >= 0 && local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS &&
+		player_control_unassisted[local_player_index];
+}
+
+/* port: (aim_assist.c's player_aim_projectile, for the tests' counts) a
+local player's shot, bent towards a target by the autoaim or its autoaim
+left out */
+void player_control_aim_assist_note_shot(
+	short local_player_index,
+	boolean autoaimed,
+	boolean skipped)
+{
+	if (local_player_index >= 0 && local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+	{
+		player_control_aim_assist_counts[local_player_index].autoaimed += autoaimed ? 1 : 0;
+		player_control_aim_assist_counts[local_player_index].autoaim_skipped += skipped ? 1 : 0;
+	}
+}
+
+/* port: (main.c's "@aim log") the counts in the log, then cleared */
+void player_control_aim_assist_log(
+	void)
+{
+	short local_player_index;
+
+	for (local_player_index = 0; local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; local_player_index++)
+	{
+		struct player_control_aim_assist_counts *counts = &player_control_aim_assist_counts[local_player_index];
+
+		if (local_player_get_player_index(local_player_index) == NONE)
+			continue;
+		platform_log("aim assist: player %d off %d targeted %ld stick %ld gyro_friction %ld gyro_adhesion %ld "
+			"autoaimed %ld autoaim_skipped %ld", (int)local_player_index,
+			(int)player_control_unassisted[local_player_index], counts->targeted, counts->stick,
+			counts->gyro_friction, counts->gyro_adhesion, counts->autoaimed, counts->autoaim_skipped);
+		csmemset(counts, 0, sizeof(*counts));
+	}
+}
+
+/* port: (main.c's HALO_TEST_COMMANDS "@aim ...", run_gyro_assist_test.sh)
+"log": the counts (player_control_aim_assist_log); "face": the first local
+player turned to the nearest living enemy biped's centre, from its camera;
+on the desktop harness, "gyro yaw pitch": a turn of its stand-in for the
+Vita's gyro (HALO_TEST_GYRO, port/linux/src/xinput_sdl.c), and "pad lx ly
+rx ry rt reads": the sticks and the right trigger held */
+void player_control_aim_test_command(
+	char const *arguments)
+{
+	char word[16] = "";
+
+	sscanf(arguments, " %15s", word);
+	if (!strcmp(word, "log"))
+	{
+		player_control_aim_assist_log();
+	}
+	else if (!strcmp(word, "angles"))
+	{
+		/* (the first local player's facing, in degrees, and on the
+		desktop whether the mouse aims: run_mouse_look_test.sh) */
+		struct player_control *control = player_control_get(0);
+		long player_index = local_player_get_player_index(0);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		struct object_datum *unit = player && player->unit_index != NONE ? object_try_and_get(player->unit_index) : NULL;
+		boolean alive = unit && !TEST_FLAG(unit->object.damage_flags, _object_dead_bit);
+
+		platform_log("aim test: angles %.3f %.3f", (double)RADIANS_TO_DEGREES(control->desired_angles.yaw),
+			(double)RADIANS_TO_DEGREES(control->desired_angles.pitch));
+		/* (whether those are a living player's: a dead one's camera turns
+		nothing, run_mouse_look_test.sh's multiplayer cases) */
+		platform_log("aim test: player alive %d", alive ? 1 : 0);
+#if !defined(HALO_VITA) && !defined(HALO_ANDROID)
+		{
+			void platform_mouse_state_log(void);
+
+			platform_mouse_state_log();
+		}
+#endif
+	}
+	else if (!strcmp(word, "face"))
+	{
+		long player_index = local_player_get_player_index(0);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		struct observer_result const *camera = observer_get_camera(0);
+		struct object_iterator iterator;
+		struct object_datum *object;
+		long nearest_index = NONE;
+		real nearest_distance = 0.f;
+		real_vector3d nearest_direction = {0.f, 0.f, 0.f};
+
+		if (!player || player->unit_index == NONE)
+		{
+			platform_log("aim test: no player to turn");
+			return;
+		}
+		object_iterator_new(&iterator, _object_mask_biped, 0);
+		while ((object = object_iterator_next(&iterator)) != NULL)
+		{
+			real_vector3d direction;
+			real distance;
+
+			if (iterator.index == player->unit_index || TEST_FLAG(object->object.damage_flags, _object_dead_bit) ||
+				!game_team_is_enemy((short)player->team_index, object->object.owner_team_index))
+			{
+				continue;
+			}
+			vector_from_points3d(&camera->position, &object->object.bounding_sphere_center, &direction);
+			distance = normalize3d(&direction);
+			if (distance > 0.f && (nearest_index == NONE || distance < nearest_distance))
+			{
+				nearest_index = iterator.index;
+				nearest_distance = distance;
+				nearest_direction = direction;
+			}
+		}
+		if (nearest_index == NONE)
+		{
+			platform_log("aim test: no enemy to face");
+			return;
+		}
+		player_control_get(0)->desired_angles.yaw = (real)atan2(nearest_direction.j, nearest_direction.i);
+		player_control_get(0)->desired_angles.pitch = (real)asin(PIN(nearest_direction.k, -1.f, 1.f));
+		platform_log("aim test: facing %lx at %.2f", (unsigned long)nearest_index, (double)nearest_distance);
+	}
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+	else if (!strcmp(word, "gyro"))
+	{
+		extern void test_input_gyro_turn(float yaw, float pitch);
+		float yaw = 0.f, pitch = 0.f;
+
+		sscanf(arguments, " %*s %f %f", &yaw, &pitch);
+		test_input_gyro_turn(yaw, pitch);
+	}
+	else if (!strcmp(word, "pad"))
+	{
+		extern void test_input_hold_pad(float lx, float ly, float rx, float ry, int trigger, int reads);
+		float lx = 0.f, ly = 0.f, rx = 0.f, ry = 0.f;
+		int trigger = 0, reads = 1;
+
+		sscanf(arguments, " %*s %f %f %f %f %d %d", &lx, &ly, &rx, &ry, &trigger, &reads);
+		test_input_hold_pad(lx, ly, rx, ry, trigger, reads);
+	}
+#endif
+	else
+	{
+		platform_log("aim test: unknown \"%s\"", arguments);
+	}
+}
+#endif
 
 
 void player_control_initialize(
@@ -1028,6 +1214,83 @@ void player_control_new_unit(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: (get_local_player_input_blob) the keyboard's action key held with
+nothing to act on, this tick */
+static boolean player_control_keyboard_action_only[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+/* (tests only) HALO_TEST_ACTION_LOG=1: the first local player's actions
+as the game takes them, each logged as it starts ("action: fire"): what
+each key of the keyboard does in play (run_pc_controls_test.sh) */
+static void player_control_test_action_log(
+	short local_player_index,
+	struct input_blob const *input,
+	boolean action_only)
+{
+	static struct
+	{
+		unsigned long flag;
+		boolean player_flag;
+		char const *name;
+	} const actions[] =
+	{
+		{ FLAG(_unit_control_weapon_primary_trigger_bit), FALSE, "fire" },
+		{ FLAG(_unit_control_throw_grenade_bit), FALSE, "throw_grenade" },
+		{ FLAG(_player_control_input_zoom_bit), TRUE, "zoom" },
+		{ FLAG(_unit_control_use_equipment_bit), FALSE, "melee" },
+		{ FLAG(_unit_control_action_bit), FALSE, "action" },
+		{ FLAG(_unit_control_weapon_reload_bit), FALSE, "reload" },
+		{ FLAG(_unit_control_jump_bit), FALSE, "jump" },
+		{ FLAG(_unit_control_crouch_modifier_bit), FALSE, "crouch" },
+		{ FLAG(_unit_control_integrated_light_bit), FALSE, "flashlight" },
+		{ FLAG(_player_control_rotate_weapons_bit), TRUE, "switch_weapon" },
+		{ FLAG(_player_control_rotate_grenades_bit), TRUE, "switch_grenade" },
+	};
+	static unsigned long last_unit, last_player;
+	static short last_move;
+	static int checked, wanted;
+	short move = 0, index;
+
+	if (!checked)
+	{
+		char const *setting = getenv("HALO_TEST_ACTION_LOG");
+
+		checked = 1;
+		wanted = setting && atoi(setting);
+	}
+	if (!wanted || local_player_index != 0)
+		return;
+	for (index = 0; index < (short)NUMBEROF(actions); index++)
+	{
+		unsigned long now = actions[index].player_flag ? input->player_control_flags :
+			input->unit_control_flags | (action_only ? FLAG(_unit_control_action_bit) : 0);
+		unsigned long last = actions[index].player_flag ? last_player : last_unit;
+
+		if ((now & actions[index].flag) && !(last & actions[index].flag))
+		{
+			platform_log("action: %s%s", actions[index].name,
+				action_only && actions[index].flag == FLAG(_unit_control_action_bit) && !actions[index].player_flag ?
+				" (nothing to act on: no reload)" : "");
+		}
+	}
+	if (input->throttle.i > 0.5f) move = 1;
+	else if (input->throttle.i < -0.5f) move = 2;
+	else if (input->throttle.j > 0.5f) move = 3;
+	else if (input->throttle.j < -0.5f) move = 4;
+	if (move && move != last_move)
+	{
+		static char const *const moves[] = { "", "move_forward", "move_backward", "strafe_left", "strafe_right" };
+
+		platform_log("action: %s", moves[move]);
+	}
+	last_move = move;
+	last_unit = input->unit_control_flags | (action_only ? FLAG(_unit_control_action_bit) : 0);
+	last_player = input->player_control_flags;
+}
+#endif
+#endif
+
 static void get_local_player_input_blob(
 	short local_player_index,
 	real time_delta_sec,
@@ -1036,6 +1299,13 @@ static void get_local_player_input_blob(
 	long player_index = local_player_get_player_index(local_player_index);
 
 	player_action_clear(input);
+#ifdef HALO_LINUX
+	player_control_keyboard_action_only[local_player_index] = FALSE;
+#endif
+#ifdef HALO_LINUX
+	/* port: (player_control_unassisted) none unless its pad says so */
+	player_control_unassisted[local_player_index] = FALSE;
+#endif
 	if (player_index != NONE)
 	{
 		struct player_control *control = player_control_get(local_player_index);
@@ -1045,6 +1315,11 @@ static void get_local_player_input_blob(
 
 		if (gamepad_index != NONE && input_has_gamepad(gamepad_index))
 		{
+#ifdef HALO_LINUX
+			extern int halo_linux_aim_assist_off(short gamepad_index);
+
+			player_control_unassisted[local_player_index] = halo_linux_aim_assist_off(gamepad_index) != 0;
+#endif
 			struct game_globals_player_control *constants = TAG_BLOCK_GET_ELEMENT(
 				&scenario_get_game_globals()->player_control,
 				0,
@@ -1123,6 +1398,13 @@ static void get_local_player_input_blob(
 					real yaw_spin_scale;
 					real pitch_spin_scale;
 					real_euler_angles2d look_delta;
+#ifdef HALO_LINUX
+					/* port: the aim assist's target motion and whether the
+					stick's look took its adhesion, for the direct aim below
+					(the Vita's gyro, halo_linux_look_assist) */
+					real_euler_angles2d look_assist_velocity = {0.f, 0.f};
+					boolean look_assist_applied = FALSE;
+#endif
 
 					if (input_state->buttons[_button_scope_zoom] &&
 						controls_enable_doubled_spin)
@@ -1212,7 +1494,22 @@ static void get_local_player_input_blob(
 							&control->magnetism_level,
 							&target_angular_position,
 							&target_angular_velocity);
+#ifdef HALO_LINUX
+						look_assist_velocity = target_angular_velocity;
+						if (control->magnetism_level > 0.f)
+						{
+							player_control_aim_assist_counts[local_player_index].targeted++;
+						}
+#endif
 						if (player_magnetism_flag && control->magnetism_level > 0.f &&
+#ifdef HALO_LINUX
+							/* port: no friction or adhesion on the stick's look
+							either for a player who asked for no aim assist
+							(player_control_unassisted: the Vita's gyro on, its
+							Gyro aim assist off). The target is still found: the
+							reticle still shows it, as with player_magnetism off */
+							!player_control_unassisted[local_player_index] &&
+#endif
 							(fabs(clamped_yaw) > _real_epsilon ||
 							fabs(clamped_pitch) > _real_epsilon ||
 							fabs(input->throttle.i) > _real_epsilon ||
@@ -1242,6 +1539,10 @@ static void get_local_player_input_blob(
 								look_delta.yaw * input_scale;
 							look_delta.pitch = target_angular_velocity.pitch * magnetism_scale +
 								look_delta.pitch * input_scale;
+#ifdef HALO_LINUX
+							look_assist_applied = TRUE;
+							player_control_aim_assist_counts[local_player_index].stick++;
+#endif
 						}
 					}
 
@@ -1255,10 +1556,14 @@ static void get_local_player_input_blob(
 					{
 						/* direct mouse aim (port/linux/src/xinput_sdl.c) */
 						extern int halo_linux_mouse_look(short gamepad_index, real *yaw, real *pitch);
+						extern int halo_linux_look_assist(short gamepad_index);
 						real mouse_yaw;
 						real mouse_pitch;
 
-						if (halo_linux_mouse_look(gamepad_index, &mouse_yaw, &mouse_pitch))
+						/* (not while the director's flying camera turns by
+						the mouse: director_update_controls reads it then) */
+						if (!director_inhibited_facing(local_player_index) &&
+							halo_linux_mouse_look(gamepad_index, &mouse_yaw, &mouse_pitch))
 						{
 							if (player->unit_index != NONE && control->zoom_level != NONE)
 							{
@@ -1268,6 +1573,47 @@ static void get_local_player_input_blob(
 
 								mouse_yaw *= inverse_zoom;
 								mouse_pitch *= inverse_zoom;
+							}
+							/* port: the stick's aim assist on these turns too when
+							the source asks for it (the Vita's gyro, its Gyro aim
+							assist setting; a desktop mouse never): the friction
+							slows them as it slows the stick, and the adhesion
+							follows the target when the stick's look did not take
+							it this frame, with the stick's game speed and limits */
+							if (halo_linux_look_assist(gamepad_index) && !player_control_unassisted[local_player_index] &&
+								player_magnetism_flag && control->magnetism_level > 0.f)
+							{
+								real input_scale = 1.f - control->magnetism_level *
+									PIN(constants->magnetism_friction, 0.f, 1.f);
+
+								mouse_yaw *= input_scale;
+								mouse_pitch *= input_scale;
+								if (fabs(mouse_yaw) > _real_epsilon || fabs(mouse_pitch) > _real_epsilon)
+								{
+									player_control_aim_assist_counts[local_player_index].gyro_friction++;
+								}
+								if (!look_assist_applied &&
+									(fabs(mouse_yaw) > _real_epsilon || fabs(mouse_pitch) > _real_epsilon))
+								{
+									real game_speed = game_time_get_speed();
+									real magnetism_scale = control->magnetism_level *
+										PIN(constants->magnetism_adhesion, 0.f, 1.f);
+									real facing_scale = time_delta_sec * TICKS_PER_SECOND;
+
+									if (game_players_are_double_speed())
+									{
+										game_speed *= 0.5f;
+									}
+									mouse_yaw += facing_scale * magnetism_scale * PIN(
+										look_assist_velocity.yaw * game_speed,
+										-DEGREES_TO_RADIANS(6.f),
+										DEGREES_TO_RADIANS(6.f));
+									mouse_pitch += facing_scale * magnetism_scale * PIN(
+										look_assist_velocity.pitch * game_speed,
+										-DEGREES_TO_RADIANS(3.f),
+										DEGREES_TO_RADIANS(3.f));
+									player_control_aim_assist_counts[local_player_index].gyro_adhesion++;
+								}
 							}
 							input->facing_delta.yaw += mouse_yaw;
 							input->facing_delta.pitch += mouse_pitch;
@@ -1326,9 +1672,19 @@ static void get_local_player_input_blob(
 				{
 					struct biped_datum *biped = biped_try_and_get(player->unit_index);
 
+#ifdef HALO_LINUX
+					/* port: the keyboard's crouch key crouches while walking too,
+					as Halo PC's: its keys always push the stick all the way, past
+					where the controller's crouch stops counting
+					(port/linux/src/xinput_sdl.c) */
+					extern int halo_keyboard_crouch_held(short gamepad_index);
+#endif
 					if (biped &&
 						(controls_enable_crouch ||
 						TEST_FLAG(biped->biped.flags, _biped_airborne_bit) ||
+#ifdef HALO_LINUX
+						halo_keyboard_crouch_held(gamepad_index) ||
+#endif
 						magnitude_squared2d(&input->throttle) < 0.98f * 0.98f))
 					{
 						SET_FLAG(
@@ -1360,6 +1716,32 @@ static void get_local_player_input_blob(
 					input->unit_control_flags,
 					_unit_control_action_bit,
 					effective_buttons[_button_action_reload]);
+#ifdef HALO_LINUX
+				{
+					/* port: the keyboard's RELOAD and ACTION apart, as on Halo PC
+					(port/linux/include/halo_key_bindings.h): its reload key
+					reloads, and its action key acts, never reloading when there is
+					nothing to act on (the controller's X falls back to reloading:
+					players.c). The action is still the scripts' to see (the
+					tutorial's "press the action"): it is taken off after they
+					have (player_control_keyboard_action_only, below) */
+					extern int halo_keyboard_reload_held(short gamepad_index);
+					extern int halo_keyboard_action_held(short gamepad_index);
+
+					if (!TEST_FLAG(control->inhibited_button_bit_vector, _button_action_reload) &&
+						halo_keyboard_reload_held(gamepad_index))
+					{
+						SET_FLAG(input->unit_control_flags, _unit_control_weapon_reload_bit, TRUE);
+					}
+					if (TEST_FLAG(input->unit_control_flags, _unit_control_action_bit) &&
+						halo_keyboard_action_held(gamepad_index) && player->unit_index != NONE &&
+						player->action_result == _player_action_result_reload &&
+						unit_get(player->unit_index)->object.parent_object_index == NONE)
+					{
+						player_control_keyboard_action_only[local_player_index] = TRUE;
+					}
+				}
+#endif
 				SET_FLAG(
 					input->unit_control_flags,
 					_unit_control_swap_weapons_bit,
@@ -1503,6 +1885,15 @@ static void get_local_player_input_blob(
 	}
 
 	player_control_action_test_check_reset_input_blob(input);
+#ifdef HALO_LINUX
+	/* port: (the keyboard's action key with nothing to act on) the scripts
+	have seen it; the unit is not to reload for it */
+	if (player_control_keyboard_action_only[local_player_index])
+		SET_FLAG(input->unit_control_flags, _unit_control_action_bit, FALSE);
+#if !defined(HALO_RELEASE) && !defined(HALO_VITA)
+	player_control_test_action_log(local_player_index, input, player_control_keyboard_action_only[local_player_index]);
+#endif
+#endif
 	match_assert_valid_real(
 		"c:\\halo\\SOURCE\\game\\player_control.c",
 		0x2B6,
@@ -1699,6 +2090,28 @@ void player_control_action_test_note(
 	}
 }
 
+/* port: the reverts there had been when the skip button was last seen up:
+a press skips a cinematic only if the button has been let go since the last
+revert. A cinematic is skipped by reverting to its checkpoint, and a revert
+takes the game back to the cinematic it skips (a10's start checkpoint is its
+opening cinematic's): the press held on - the skip's own, or Cross/A that
+took the pause's REVERT TO CHECKPOINT - skipped it again each tick it was
+held, ~9 reverts for one (both menu styles, insider.20 and .21) */
+static unsigned long player_control_skip_up_reverts;
+
+static boolean player_control_skip_press_new(
+	boolean held)
+{
+	unsigned long reverts = game_state_port_revert_count();
+
+	if (!held)
+	{
+		player_control_skip_up_reverts = reverts;
+		return FALSE;
+	}
+	return player_control_skip_up_reverts == reverts;
+}
+
 static void player_control_action_test_check_reset_input_blob(
 	struct input_blob *input)
 {
@@ -1711,8 +2124,9 @@ static void player_control_action_test_check_reset_input_blob(
 	(network_coop.c). */
 	{
 		const struct gamepad_state *gamepad = input_get_gamepad_state(0);
+		boolean fresh = player_control_skip_press_new(gamepad && gamepad->buttons[_gamepad_binary_button_start]);
 
-		if (gamepad && gamepad->buttons[_gamepad_binary_button_start] == 1 &&
+		if (fresh && gamepad->buttons[_gamepad_binary_button_start] == 1 &&
 			(cinematic_can_be_skipped() || network_coop_skip_offered()))
 		{
 			if (!network_coop_vote_skip())
@@ -1720,7 +2134,8 @@ static void player_control_action_test_check_reset_input_blob(
 		}
 	}
 #else
-	if (input->accept && (cinematic_can_be_skipped() || network_coop_skip_offered()))
+	if (player_control_skip_press_new(input->accept != 0) &&
+		(cinematic_can_be_skipped() || network_coop_skip_offered()))
 	{
 		/* port: in network co-op the players vote to skip (network_coop.c) */
 		if (!network_coop_vote_skip())

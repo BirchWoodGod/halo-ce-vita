@@ -48,6 +48,10 @@ def main() -> int:
     args = parser.parse_args()
 
     configure = [sys.executable, "configure.py", "--portable"]
+    # the PC builds play with the Vitas (HALO_NET_AS_VITA), as the released
+    # PC build does: tools/package_pc.py packs them as the release's files
+    if args.platform in ("linux", "windows"):
+        configure.append("--linux-net-vita")
     if args.config == "release":
         configure.append("--release")
     else:
@@ -57,8 +61,13 @@ def main() -> int:
         configure += ["--compiler-launcher", launcher]
     # a build of main knows its number, which names its release (build-<n>),
     # for the self-updater (port/linux/src/updater.c, and the Android app);
-    # other builds have none, and never look for updates
-    if os.environ.get("GITHUB_REF") == "refs/heads/main" and os.environ.get("GITHUB_RUN_NUMBER", "").isdigit():
+    # other builds have none, and never look for updates. Only the upstream
+    # port's (cybersecurity/halo-ce-universal), whose releases those are: this
+    # project's are tagged v<version> and its PC builds named
+    # halo-ce-vita-<version>-pc-<platform> (tools/package_pc.py), which that
+    # updater does not know, so its builds never ask the upstream's releases
+    if (os.environ.get("GITHUB_REF") == "refs/heads/main" and os.environ.get("GITHUB_RUN_NUMBER", "").isdigit() and
+            os.environ.get("GITHUB_REPOSITORY") == "cybersecurity/halo-ce-universal"):
         os.environ["HALO_BUILD_NUMBER"] = os.environ["GITHUB_RUN_NUMBER"]
         print(f"build number {os.environ['HALO_BUILD_NUMBER']}", flush=True)
     run(configure)

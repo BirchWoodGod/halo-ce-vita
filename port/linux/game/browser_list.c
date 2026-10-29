@@ -5,7 +5,9 @@ The Server Browser's list: its sorts and its scrolling rows (browser_list.h).
 */
 
 #include "browser_list.h"
+#include "../src/crossplay_guard.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -54,6 +56,17 @@ static int entry_order(
 	struct p2p_lobby_entry const *a = first, *b = second;
 	int order = 0;
 
+	/* (the groups: the Vitas' games first) */
+	if (browser_list_vita(a) != browser_list_vita(b))
+		return browser_list_vita(b) - browser_list_vita(a);
+	/* (in each, the games this build joins before those of another network
+	version, greyed: p2p_lobby_other_entries) */
+	if ((a->compatible != 0) != (b->compatible != 0))
+		return (b->compatible != 0) - (a->compatible != 0);
+	/* (those by players: the newest version first - a host announcing one
+	server under many versions, ChupathingyCE's, shows its old ones last) */
+	if (!a->compatible && sort_chosen == _browser_sort_players && a->version != b->version)
+		return b->version - a->version;
 	switch (sort_chosen)
 	{
 	case _browser_sort_name:
@@ -81,6 +94,171 @@ static int clamp(
 }
 
 /* ---------- public code */
+
+int browser_list_vita(
+	struct p2p_lobby_entry const *entry)
+{
+	/* (the PC build's games, VITA (PC), are the PCs') */
+	return crossplay_guard_vita_game(entry->platform, entry->marks);
+}
+
+int browser_list_group(
+	struct p2p_lobby_entry *entries,
+	int count,
+	int capacity,
+	char const *vita_format,
+	char const *pc_format)
+{
+	int index, kept = 0, vita = 0, group;
+
+	if (!entries || count <= 0)
+		return 0;
+	/* (any header there already out, the games in their order) */
+	for (index = 0; index < count; index++)
+	{
+		if (entries[index].header)
+			continue;
+		if (kept != index)
+			entries[kept] = entries[index];
+		vita += browser_list_vita(&entries[kept]);
+		kept++;
+	}
+	count = kept;
+	/* (each group's header before its first game: the PCs' first, so that
+	the Vitas' stay where they are until theirs goes in) */
+	for (group = 1; group >= 0; group--)
+	{
+		int games = group ? count - vita : vita;
+		int at = group ? vita : 0;
+		struct p2p_lobby_entry *header;
+
+		if (!games || count >= capacity)
+			continue;
+		memmove(&entries[at + 1], &entries[at], (size_t)(count - at) * sizeof(*entries));
+		count++;
+		header = &entries[at];
+		memset(header, 0, sizeof(*header));
+		header->header = 1;
+		header->platform = group ? CROSSPLAY_PLATFORM_PC : CROSSPLAY_PLATFORM_VITA;
+		header->difficulty = -1;
+		snprintf(header->id, sizeof(header->id), "#%s", group ? "pc" : "vita");
+		snprintf(header->name, sizeof(header->name), group ? pc_format : vita_format, games);
+	}
+	return count;
+}
+
+int browser_list_header_count(
+	struct p2p_lobby_entry const *entries,
+	int count)
+{
+	int index, headers = 0;
+
+	for (index = 0; entries && index < count; index++)
+		headers += entries[index].header != 0;
+	return headers;
+}
+
+int browser_list_game_number(
+	struct p2p_lobby_entry const *entries,
+	int count,
+	int index)
+{
+	if (!entries || index < 0 || index >= count || entries[index].header)
+		return 0;
+	return index + 1 - browser_list_header_count(entries, index);
+}
+
+int browser_list_skip_header(
+	struct p2p_lobby_entry const *entries,
+	int count,
+	int target,
+	int previous,
+	int page)
+{
+	int step, tries;
+
+	if (!entries || count <= 0 || target < 0 || target >= count)
+		return -1;
+	if (!entries[target].header)
+		return target;
+	/* the way the player went: a page's; at the top (the first header) down,
+	unless they stepped up from the first game (the rows wrap to the end);
+	from the last game to the top (wrapped) down; else from the game before */
+	if (target == 0)
+		step = previous == 1 && !page ? -1 : 1;
+	else if (page)
+		step = page > 0 ? 1 : -1;
+	else if (previous < 0)
+		step = 1;
+	else if (target == count - 1 && previous == 0)
+		step = -1;
+	else
+		step = target >= previous ? 1 : -1;
+	for (tries = 0; tries < count; tries++)
+	{
+		target = (target + step + count) % count;
+		if (!entries[target].header)
+			return target;
+	}
+	return -1;
+}
+
+static int host_known(
+	unsigned char const *host)
+{
+	int index;
+
+	for (index = 0; index < 6; index++)
+	{
+		if (host[index])
+			return 1;
+	}
+	return 0;
+}
+
+int browser_list_merge_lan(
+	struct p2p_lobby_entry *entries,
+	int count,
+	int *lan_count)
+{
+	int lan, index, online, kept = 0;
+
+	if (!entries || count <= 0 || !lan_count)
+		return entries && count > 0 ? count : 0;
+	lan = clamp(*lan_count, 0, count);
+	for (index = 0; index < lan; index++)
+	{
+		int listed = 0;
+
+		for (online = lan; host_known(entries[index].host) && !listed && online < count; online++)
+			listed = !entries[online].header && !memcmp(entries[index].host, entries[online].host, sizeof(entries[index].host));
+		if (listed)
+			continue;
+		if (kept != index)
+			entries[kept] = entries[index];
+		kept++;
+	}
+	*lan_count = kept;
+	if (kept != lan)
+		memmove(&entries[kept], &entries[lan], (size_t)(count - lan) * sizeof(*entries));
+	return kept + count - lan;
+}
+
+void browser_view_show_header(
+	struct browser_view *view,
+	struct p2p_lobby_entry const *entries,
+	int rows,
+	int count)
+{
+	if (!view || !entries || view->offset <= 0 || view->offset >= count || !entries[view->offset - 1].header ||
+		view->row + 1 >= rows)
+	{
+		return;
+	}
+	view->offset--;
+	view->row++;
+	view->visible = count - view->offset < rows ? count - view->offset : rows;
+}
 
 void browser_list_sort(
 	struct p2p_lobby_entry *entries,
@@ -144,5 +322,26 @@ int browser_view_follow(
 	view->offset = clamp(view->offset, 0, count > rows ? count - rows : 0);
 	view->visible = count - view->offset < rows ? count - view->offset : rows;
 	view->row = target - view->offset;
+	return target;
+}
+
+int browser_view_follow_groups(
+	struct browser_view *view,
+	struct p2p_lobby_entry const *entries,
+	int rows,
+	int count,
+	int focused_row,
+	int chosen,
+	int page)
+{
+	int target = browser_view_follow(view, rows, count, focused_row, chosen, page);
+	int game = browser_list_skip_header(entries, count, target, chosen, page);
+
+	if (game >= 0 && game != target)
+		target = browser_view_follow(view, rows, count, -1, game, 0);
+	else if (game < 0)
+		target = -1;
+	if (target >= 0)
+		browser_view_show_header(view, entries, rows, count);
 	return target;
 }

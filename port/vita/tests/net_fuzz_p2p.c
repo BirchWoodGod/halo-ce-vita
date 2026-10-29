@@ -48,7 +48,7 @@ void p2p_signal_update(const int *read, int read_count, const int *write, int wr
 {
 	(void)read; (void)read_count; (void)write; (void)write_count;
 }
-void p2p_signal_host(const unsigned char *token, const char *code) { (void)token; (void)code; }
+void p2p_signal_host(const unsigned char *token, const char *code, int crossplay) { (void)token; (void)code; (void)crossplay; }
 void p2p_signal_stop_hosting(void) {}
 /* (the server browser's, p2p_lobby.c, and its signalling: nothing listed) */
 void p2p_lobby_update(const unsigned char *token, int player_count, int maximum_player_count)
@@ -58,6 +58,7 @@ void p2p_lobby_update(const unsigned char *token, int player_count, int maximum_
 int p2p_lobby_listed(void) { return 0; }
 int p2p_lobby_browsing(void) { return 0; }
 int p2p_lobby_brokers_wanted(void) { return 0; }
+int p2p_lobby_pending(void) { return 0; }
 int p2p_lobby_hosting_status_locked(char *text, int size)
 {
 	if (size > 0)
@@ -71,7 +72,7 @@ void p2p_lobby_game_sent(const unsigned char *identifier) { (void)identifier; }
 void p2p_lobby_game_heard(const unsigned char *identifier) { (void)identifier; }
 void p2p_signal_lookup_code(const char *code, const unsigned char *host) { (void)code; (void)host; }
 void p2p_signal_stop_lookup(void) {}
-void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token) { (void)host_hash; (void)token; }
+void p2p_signal_join(const unsigned char *host_hash, const unsigned char *token, int crossplay) { (void)host_hash; (void)token; (void)crossplay; }
 void p2p_signal_stop_joining(void) {}
 int p2p_signal_connected(void) { return 1; }
 int p2p_list_setting(const char *override_setting, const char *file_setting, char *text, size_t size)
@@ -82,6 +83,29 @@ int p2p_list_setting(const char *override_setting, const char *file_setting, cha
 	return 0;
 }
 void p2p_adhoc_start(unsigned short tunnel_port) { (void)tunnel_port; }
+/* friends (p2p_friends.c): a players' card packet read whole, as its queue
+copies it */
+void p2p_friends_tunnel_heard(unsigned long address, int from_host, const unsigned char *bytes, int size)
+{
+	volatile unsigned char sum = 0;
+	int index;
+
+	(void)address;
+	(void)from_host;
+	for (index = 0; index < size; index++)
+		sum ^= bytes[index];
+}
+int p2p_friends_tunnel_outgoing(int index, unsigned long *address, unsigned char *bytes, int capacity)
+{
+	(void)index; (void)address; (void)bytes; (void)capacity;
+	return 0;
+}
+void p2p_friends_tunnel_sent(void) {}
+void p2p_friends_update(const struct p2p_friends_host *host) { (void)host; }
+int p2p_friends_wanted(void) { return 0; }
+void p2p_friends_stopping(int quitting) { (void)quitting; }
+void p2p_lobby_friends_view(struct p2p_friends_host *host) { (void)host; }
+void p2p_signal_friends_flush(void) {}
 void p2p_adhoc_update(void) {}
 void p2p_discord_update(void) {}
 void p2p_discord_user(char *id, int id_size, char *name, int name_size)
@@ -318,7 +342,7 @@ static void fuzz_record(int kind, const unsigned char *data, int size)
 		if (p2p.lookup_requested)
 		{
 			p2p.looking_up = 1;
-			p2p_code_found(text);
+			p2p_code_found(text, 0);
 		}
 		break;
 	}

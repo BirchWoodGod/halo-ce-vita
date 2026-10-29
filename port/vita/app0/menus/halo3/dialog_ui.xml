@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Xbox message boxes of the main menu (ui.map) the Halo 3 dialog stands for while Menu
+style is Halo 3 (halo3/dialog.xml's screens; menu_tags.c menu_tags_screen); with Menu style
+Halo CE the Xbox's own open -->
+<menus>
+	<screen root="h3/dlg/error/screen" replaces="ui\shell\error\error_modal_fullscreen"/>
+	<screen root="h3/dlg/notice/screen" replaces="ui\shell\error\error_nonmodal_fullscreen"/>
+	<screen root="h3/dlg/abort/screen" replaces="ui\shell\error\error_abort_to_dashboard"/>
+	<screen root="h3/dlg/abort_final/screen" replaces="ui\shell\error\error_abort_to_dashboard_you_have_no_choice"/>
+	<screen root="h3/dlg/exit/screen" replaces="ui\shell\error\aborting_to_dashboard_please_wait"/>
+	<screen root="h3/dlg/delprof/screen" replaces="ui\shell\error\confirm_delete_profile_modal_fullscreen"/>
+	<screen root="h3/dlg/delgt/screen" replaces="ui\shell\error\confirm_delete_gametype_modal_fullscreen"/>
+	<screen root="h3/dlg/saving/screen" replaces="ui\shell\error\warning_saving_file_screen"/>
+	<screen root="h3/dlg/creating/screen" replaces="ui\shell\error\warning_creating_player_profile_screen"/>
+</menus>

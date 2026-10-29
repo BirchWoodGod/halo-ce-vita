@@ -4,9 +4,11 @@ VITA_SETTINGS_TEST.C
 A desktop test of the settings panel (port/vita/host/vita_settings.c,
 included whole), with the calls it makes into internet play (p2p.h), ad hoc
 play (vita_net.c) and the renderer (vgxm_menu_set) recorded instead: the
-panel opened with SELECT+START, its four tabs (and Dev) switched with L and
-R, no page longer than a screen (ten rows on a tab at most, the values in
-a column, a help line and a line of the panel's buttons), the pages a row
+panel opened with SELECT+START on its first tab, its five tabs (Game,
+Controls, Video, Sound, Multiplayer, as Halo Online's settings; and Dev)
+switched with L and R, each tab's rows under its headings (not chosen: up
+and down step over them), no page longer than a screen (the values in a
+column, a help line and a line of the panel's buttons), the pages a row
 opens and circle going back; the Multiplayer tab and its Play page (the
 rows each Connection has, Host a game's steps, the lobby name and password
 typed on the system's keyboard and kept as printable ASCII, Max players,
@@ -16,10 +18,15 @@ joined, Games on this network, an ad hoc group joined first, the game
 seeing no buttons while a system dialog is up; 1.0.3's co-op choice loading
 as Off), its Modded
 maps page (a folder of fake maps: listed, turned off and on, deleted after
-a confirmation, the map in play kept; Map downloads' three choices), the
+a confirmation, the map in play kept; Map downloads' three choices), its Mod
+manager page (the game's look answered by the test: each entry with On or
+Error, its size and kind, why it failed or what it needs on the help line,
+maps and mods turned off and on and kept in settings.txt, the details, a
+delete asked of the game after a question, in use, a name the game does not
+take never deleted; the game's lists set through vita_settings_set), the
 Dev tab behind its switch (switches saved only while on, the timing
 variables, Save report's folder),
-General' pages (Button layout and Touch zones in Xbox terms, Gyro
+Controls' pages (Button layout and Touch zones in Xbox terms, Gyro
 settings with the gyroscope's line, saved and read back), Button icons
 (PlayStation at once, the panel then naming the Xbox buttons by what they
 do and the guide the Vita's buttons, a remap followed by the game's icon,
@@ -35,12 +42,82 @@ in a folder of its own, with ux0:data/haloce-vita made there.
 Run port/vita/tests/run_vita_settings_test.sh.
 */
 
+/* (a memory card's slowness, test_save_off_thread: settings.txt put in
+place takes test_card_delay_us, as ux0's file calls took 27-137 ms a save
+on the testers' Vitas; the saves put in place counted) */
+static volatile unsigned long test_card_delay_us;
+static volatile int test_settings_renames;
+static int test_rename(const char *from, const char *to);
+/* (the Vita's rule for the threads vita_host_thread_start_* makes: theirs
+is sceKernelCreateThread's, and such a thread has no pthread data - vitasdk
+makes it only for pthread_create's threads and for a thread that has called
+pthread_create itself - while pthread_cond_wait and pthread_cond_timedwait,
+cancellation points, read it: a data abort in
+pte_osSemaphoreCancellablePend. insider.19's settings.txt writer waited so
+and the game crashed at the first change of any setting (LadyCassie's and
+xal's core dumps, Oct 21 2026). Here such a thread is marked, and a wait on
+a condition from one stops the test as the Vita would.) */
+#include <pthread.h>
+static __thread int test_sce_thread;
+static int test_pthread_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex);
+static int test_pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
+	const struct timespec *deadline);
+#define rename test_rename
+#define pthread_cond_wait test_pthread_cond_wait
+#define pthread_cond_timedwait test_pthread_cond_timedwait
+/* (the shipped Menu style row offers Halo CE and ElDewrito; the checks below
+were written for the Halo 3 panel, kept as a hidden style) */
+#define VITA_SETTINGS_TEST_HALO3_STYLE
 #include "../host/vita_settings.c"
+#undef rename
+#undef pthread_cond_wait
+#undef pthread_cond_timedwait
+/* (stdio.h's, which the macro renamed) */
+int rename(const char *from, const char *to);
 
+#include <psp2/kernel/threadmgr.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include <utime.h>
+
+/* (a thread of sceKernelCreateThread's waiting on a condition: the Vita's
+data abort) */
+static void test_sce_thread_wait(const char *call)
+{
+	if (test_sce_thread)
+	{
+		printf("FAIL: %s on a thread vita_host_thread_start_* made (sceKernelCreateThread's: no pthread data on the "
+			"Vita, a data abort - insider.19's crash at a setting's change)\n", call);
+		fflush(stdout);
+		abort();
+	}
+}
+
+static int test_pthread_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex)
+{
+	test_sce_thread_wait("pthread_cond_wait");
+	return pthread_cond_wait(condition, mutex);
+}
+
+static int test_pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
+	const struct timespec *deadline)
+{
+	test_sce_thread_wait("pthread_cond_timedwait");
+	return pthread_cond_timedwait(condition, mutex, deadline);
+}
+
+static int test_rename(const char *from, const char *to)
+{
+	if (!strcmp(to, SETTINGS_FILE))
+	{
+		if (test_card_delay_us)
+			usleep(test_card_delay_us);
+		__atomic_add_fetch(&test_settings_renames, 1, __ATOMIC_RELAXED);
+	}
+	return rename(from, to);
+}
 
 volatile unsigned long halo_settings_generation;
 /* (the game's side of Host a game and Join a game: system_link_shortcut.c) */
@@ -49,17 +126,142 @@ volatile int halo_system_link_answer;
 volatile int halo_multiplayer_status[SYSTEM_LINK_STATUS_COUNT];
 volatile int halo_pc_menus_state;
 volatile int halo_text_input_state;
+volatile int halo_settings_panel_request;
+volatile int halo_adhoc_request;
+volatile int halo_adhoc_group;
+volatile int halo_network_connection = -1;
+volatile int halo_network_phase;
 char halo_text_input_title[HALO_TEXT_INPUT_SIZE];
 char halo_text_input_text[HALO_TEXT_INPUT_SIZE];
 int halo_text_input_maximum;
 int halo_text_input_password;
 int (*halo_test_setting_hook)(const char *variable, const char *value);
 int halo_screen_restart_needed(void) { return 0; }
-/* (port/linux/src/network_wire.c's: the wire the game runs, a test's) */
-static int test_crossplay_wire;
+/* (the game's side of the Mod manager page: mod_manager.c; the test answers) */
+volatile int halo_mods_request;
+volatile int halo_mods_answer;
+volatile int halo_mods_target_kind;
+char halo_mods_target[HALO_MODS_NAME_BYTES];
+struct halo_mods_inventory halo_mods_inventory;
+/* (the restart offer, close_panel) the game at its main menu, idle: off but
+in test_restart_offer; the restarts asked for (none of them returns here) */
+static int main_menu_idle_now, restarts_asked;
+int halo_main_menu_idle(void) { return main_menu_idle_now; }
+int vita_host_restart_game(void) { restarts_asked++; return 0x80010013; }
+/* (port/linux/src/network_wire.c's: the wire of the game hosted or joined,
+a test's; and whether the public games list PC games, a test's) */
+static int test_crossplay_wire, test_pc_games;
 int network_wire_crossplay(void) { return test_crossplay_wire; }
 /* (the map in play: never deleted) */
 int halo_cache_map_in_use(const char *name) { return !strcmp(name, "inplay"); }
+
+/* (the Forge page's: forge.c's maps - three, the last two in the maps
+folder - the Forge game asked for, and forge_store.c's map variants, a
+test's) */
+volatile int halo_forge_request_map = -1;
+char halo_forge_request_variant[HALO_FORGE_VARIANT_SIZE];
+volatile int halo_forge_request_network;
+volatile int halo_forge_net_hosting;
+/* (the Players page's: the hosted game's players as the main loop publishes
+them, network_anticheat.c; none hosted unless a test says so) */
+volatile int halo_host_players_serial;
+volatile int halo_host_players_count = -1;
+volatile int halo_host_players_machines[HALO_HOST_PLAYERS_MAXIMUM];
+char halo_host_players_names[HALO_HOST_PLAYERS_MAXIMUM][HALO_HOST_PLAYER_NAME_SIZE];
+volatile int halo_host_session_bans;
+volatile int halo_host_player_request;
+volatile int halo_host_player_answer;
+/* (the Chat page's and SELECT + D-pad left's: the in-game chat's side,
+game_chat.c, as it publishes; no network game unless a test says so) */
+volatile int halo_game_chat_active;
+volatile int halo_chat_players_serial;
+volatile int halo_chat_players_count = -1;
+volatile int halo_chat_players_muted[HALO_CHAT_PLAYERS_MAXIMUM];
+volatile int halo_chat_players_local[HALO_CHAT_PLAYERS_MAXIMUM];
+char halo_chat_players_names[HALO_CHAT_PLAYERS_MAXIMUM][HALO_CHAT_PLAYER_NAME_SIZE];
+volatile int halo_chat_mute_request;
+char halo_chat_mute_request_name[HALO_CHAT_PLAYER_NAME_SIZE];
+static const char *const test_forge_maps[3][2] = {
+	{ "Battle Creek", "beavercreek" }, { "Blood Gulch", "bloodgulch" }, { "Chill Out", "chillout" },
+};
+/* (the Player model row's: player_models.c's models - none found unless a
+test says so - and the profile's choice, as the game keeps it) */
+static int test_model_count = 1, test_model_chosen, test_model_choice = -2;
+static const char *const test_model_names[3] = { "Spartan", "Spartan (Extinction)", "Covenant V Marines Beta 5" };
+int player_models_panel_count(void) { return test_model_count; }
+const char *player_models_panel_name(int index) { return index >= 0 && index < 3 ? test_model_names[index] : "Spartan"; }
+int player_models_panel_chosen(void) { return test_model_chosen; }
+void player_models_panel_choose(int index) { test_model_choice = test_model_chosen = index; }
+/* (the models on: off, 1.1.1's default, the row shows N/A) */
+static int test_models_enabled = 1;
+int player_models_panel_enabled(void) { return test_models_enabled; }
+/* (player_cosmetics.c's rows: the profile's colour and visor) */
+static int test_color_chosen, test_visor_chosen;
+int player_cosmetics_panel_color_count(void) { return 43; }
+const char *player_cosmetics_panel_color_name(int index) { return index ? "SKY" : "RANDOM"; }
+int player_cosmetics_panel_visor_count(void) { return 12; }
+const char *player_cosmetics_panel_visor_name(int index) { return index ? "BLUE" : "GOLD"; }
+int player_cosmetics_panel_color_chosen(void) { return test_color_chosen; }
+int player_cosmetics_panel_visor_chosen(void) { return test_visor_chosen; }
+void player_cosmetics_panel_choose_color(int index) { test_color_chosen = index; }
+void player_cosmetics_panel_choose_visor(int index) { test_visor_chosen = index; }
+int forge_panel_map_count(void) { return 3; }
+const char *forge_panel_map_name(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][0] : ""; }
+const char *forge_panel_map_short(int map_index) { return map_index >= 0 && map_index < 3 ? test_forge_maps[map_index][1] : ""; }
+int forge_panel_map_available(int map_index) { return map_index == 1 || map_index == 2; }
+/* (port/linux/game/map_checks.c: the map lists' looks forgotten as a map is deleted) */
+void map_checks_forget(void) { }
+/* (a Forge game played, with its placed characters alive and dead; what
+the panel asked cleared: -1 nothing, 0 the dead, 1 all) */
+static int test_forge_playing, test_forge_alive, test_forge_dead, test_forge_cleared = -1;
+int forge_panel_ai_counts(int *alive, int *dead)
+{
+	if (alive)
+		*alive = test_forge_alive;
+	if (dead)
+		*dead = test_forge_dead;
+	return test_forge_playing;
+}
+void forge_panel_clear_ai(int all) { test_forge_cleared = all; }
+static struct forge_store_entry test_forge_entries[4];
+static int test_forge_count, test_forge_deleted;
+int forge_store_list(const char *map_name, struct forge_store_entry *entries, int capacity)
+{
+	int index, count = 0;
+
+	(void)map_name;
+	for (index = 0; index < test_forge_count && count < capacity; index++)
+		entries[count++] = test_forge_entries[index];
+	return count;
+}
+int forge_store_delete(const char *map_name, const char *file_name)
+{
+	int index;
+
+	for (index = 0; index < test_forge_count; index++)
+		if (!strcmp(test_forge_entries[index].map_name, map_name) && !strcmp(test_forge_entries[index].file_name, file_name))
+		{
+			memmove(&test_forge_entries[index], &test_forge_entries[index + 1],
+				sizeof(test_forge_entries[0]) * (size_t)(test_forge_count - index - 1));
+			test_forge_count--;
+			test_forge_deleted++;
+			return 1;
+		}
+	return 0;
+}
+
+static void test_forge_entry(const char *map_name, const char *file_name, const char *title, int objects, int damaged)
+{
+	struct forge_store_entry *entry = &test_forge_entries[test_forge_count++];
+
+	memset(entry, 0, sizeof(*entry));
+	snprintf(entry->map_name, sizeof(entry->map_name), "%s", map_name);
+	snprintf(entry->file_name, sizeof(entry->file_name), "%s", file_name);
+	snprintf(entry->title, sizeof(entry->title), "%s", damaged ? file_name : title);
+	snprintf(entry->date, sizeof(entry->date), "2026-10-18 12:00");
+	entry->objects = (short)objects;
+	entry->damaged = damaged;
+}
 static char log_text[16384];
 static int overlay_level = -1;
 
@@ -124,9 +326,126 @@ void vita_gyro_status(char *text, int size) { snprintf(text, (size_t)size, "Gyro
 
 int vita_host_thread_start(const char *name, void (*function)(void *), void *argument, int core)
 {
+	/* (run here and now, as a thread of sceKernelCreateThread's: Save
+	report's, the CE installer's) */
+	int was = test_sce_thread;
+
 	(void)name;
 	(void)core;
+	test_sce_thread = 1;
 	function(argument);
+	test_sce_thread = was;
+	return 0;
+}
+
+/* (a thread that stays: settings.txt's writer, a real one here) */
+struct test_thread
+{
+	void (*function)(void *);
+	void *argument;
+};
+
+static void *test_thread_main(void *argument)
+{
+	struct test_thread start = *(struct test_thread *)argument;
+
+	free(argument);
+	/* (sceKernelCreateThread's on the Vita: no pthread data) */
+	test_sce_thread = 1;
+	start.function(start.argument);
+	return NULL;
+}
+
+int vita_host_thread_start_stack(const char *name, void (*function)(void *), void *argument, int core, int priority,
+	int stack_size)
+{
+	struct test_thread *start = malloc(sizeof(*start));
+	pthread_t thread;
+
+	(void)name;
+	(void)core;
+	(void)priority;
+	(void)stack_size;
+	if (!start)
+		return -1;
+	start->function = function;
+	start->argument = argument;
+	if (pthread_create(&thread, NULL, test_thread_main, start) != 0)
+	{
+		free(start);
+		return -1;
+	}
+	pthread_detach(thread);
+	return 0;
+}
+
+/* (vita_main.c's: the memory window made, threads allowed) */
+int vita_host_memory_window_made(void) { return 1; }
+
+void vita_host_sleep_us(unsigned long microseconds) { usleep((useconds_t)microseconds); }
+
+/* (the Vita's kernel semaphores, which any thread may wait on) */
+static struct
+{
+	pthread_mutex_t lock;
+	pthread_cond_t signal;
+	int count, most;
+} test_semas[8];
+static int test_sema_count;
+
+SceUID sceKernelCreateSema(const char *name, SceUInt attr, int initVal, int maxVal, SceKernelSemaOptParam *option)
+{
+	int index = __atomic_fetch_add(&test_sema_count, 1, __ATOMIC_RELAXED);
+
+	(void)name;
+	(void)attr;
+	(void)option;
+	if (index >= (int)(sizeof(test_semas) / sizeof(test_semas[0])))
+		return -1;
+	pthread_mutex_init(&test_semas[index].lock, NULL);
+	pthread_cond_init(&test_semas[index].signal, NULL);
+	test_semas[index].count = initVal;
+	test_semas[index].most = maxVal;
+	return 0x40010000 + index;
+}
+
+int sceKernelDeleteSema(SceUID semaid)
+{
+	(void)semaid;
+	return 0;
+}
+
+int sceKernelSignalSema(SceUID semaid, int signal)
+{
+	int index = semaid - 0x40010000, result = 0;
+
+	if (index < 0 || index >= test_sema_count)
+		return -1;
+	pthread_mutex_lock(&test_semas[index].lock);
+	/* (over the most: refused, SCE_KERNEL_ERROR_SEMA_OVF) */
+	if (test_semas[index].count + signal > test_semas[index].most)
+		result = (int)0x80028184;
+	else
+	{
+		test_semas[index].count += signal;
+		pthread_cond_broadcast(&test_semas[index].signal);
+	}
+	pthread_mutex_unlock(&test_semas[index].lock);
+	return result;
+}
+
+int sceKernelWaitSema(SceUID semaid, int signal, SceUInt *timeout)
+{
+	int index = semaid - 0x40010000;
+
+	(void)timeout;
+	if (index < 0 || index >= test_sema_count)
+		return -1;
+	pthread_mutex_lock(&test_semas[index].lock);
+	while (test_semas[index].count < signal)
+		pthread_cond_wait(&test_semas[index].signal, &test_semas[index].lock);
+	test_semas[index].count -= signal;
+	pthread_mutex_unlock(&test_semas[index].lock);
 	return 0;
 }
 
@@ -195,9 +514,14 @@ void vgxm_overlay_enable(int enabled) { overlay_level = enabled; }
 void vgxm_upscale_filter_set(int filter) { (void)filter; }
 void vita_host_log(const char *line)
 {
-	size_t used = strlen(log_text);
+	/* (settings.txt's writer logs from its own thread) */
+	static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+	size_t used;
 
+	pthread_mutex_lock(&lock);
+	used = strlen(log_text);
 	snprintf(log_text + used, sizeof(log_text) - used, "%s\n", line);
+	pthread_mutex_unlock(&lock);
 }
 
 int p2p_join_code(const char *code)
@@ -206,11 +530,302 @@ int p2p_join_code(const char *code)
 	return 1;
 }
 
+/* (friends, p2p_friends.h: the test's list, and what the panel asked) */
+static struct p2p_friend_entry test_friends[8];
+static int test_friend_count;
+static char friend_added[64], friend_acted_id[P2P_FRIEND_ID_SIZE];
+static int friend_acted_kind = -1, friend_acted_action = -1, friend_act_outcome;
+
+static void test_friend(const char *id, int kind, const char *name, const char *code, int online, int joinable,
+	const char *activity)
+{
+	struct p2p_friend_entry *entry = &test_friends[test_friend_count++];
+
+	memset(entry, 0, sizeof(*entry));
+	snprintf(entry->id, sizeof(entry->id), "%s", id);
+	entry->kind = kind;
+	snprintf(entry->name, sizeof(entry->name), "%s", name);
+	snprintf(entry->code, sizeof(entry->code), "%s", code);
+	entry->online = online;
+	entry->joinable = joinable;
+	entry->invitable = online;
+	entry->players = joinable ? 5 : 0;
+	entry->maximum = joinable ? 16 : 0;
+	snprintf(entry->activity, sizeof(entry->activity), "%s", activity);
+}
+/* (the flaming helmet, p2p_friends.h: whether this machine is a listed
+tester, the test's) */
+static int test_flame_listed;
+int p2p_flame_listed(void)
+{
+	return test_flame_listed;
+}
+int p2p_friends_code(char *code, int size)
+{
+	snprintf(code, (size_t)size, "KQ7M-3XPA-T9WE");
+	return 1;
+}
+int p2p_friends_list(struct p2p_friend_entry *entries, int maximum_count)
+{
+	int count = test_friend_count < maximum_count ? test_friend_count : maximum_count;
+
+	memcpy(entries, test_friends, sizeof(entries[0]) * (size_t)count);
+	return count;
+}
+int p2p_friends_status(char *text, int size)
+{
+	snprintf(text, (size_t)size, "1 of 2 friends online");
+	return 1;
+}
+int p2p_friends_add(const char *code)
+{
+	snprintf(friend_added, sizeof(friend_added), "%s", code);
+	return P2P_FRIENDS_ADD_SENT;
+}
+int p2p_friends_act(const char *id, int kind, int action)
+{
+	snprintf(friend_acted_id, sizeof(friend_acted_id), "%s", id);
+	friend_acted_kind = kind;
+	friend_acted_action = action;
+	return friend_act_outcome;
+}
+/* (a friend's game with a password: the password typed) */
+static char friend_password_typed[64];
+int p2p_friends_join_password(const char *id, const char *password)
+{
+	snprintf(friend_acted_id, sizeof(friend_acted_id), "%s", id);
+	snprintf(friend_password_typed, sizeof(friend_password_typed), "%s", password);
+	return P2P_FRIENDS_DONE;
+}
+const char *p2p_friends_outcome_text(int outcome)
+{
+	return outcome == P2P_FRIENDS_DONE ? "Done" : outcome == P2P_FRIENDS_OFFLINE ? "Go online first" : "Not for this one";
+}
+const char *p2p_friends_add_text(int result)
+{
+	return result == P2P_FRIENDS_ADD_SENT ? "Friend request sent" : "That's not a friend code";
+}
+/* (the friend code's backup, p2p_friends_backup.inc: what the panel asked;
+the work done at the next look, its outcome the test's) */
+static char backup_name_asked[64], backup_password_asked[80];
+static int backup_list_asked = -1, backup_state_now, backup_outcome = P2P_FRIENDS_BACKUP_SAVED, backup_confirms,
+	backup_cancels;
+int p2p_friends_backup_name(const char *typed, char *name)
+{
+	int length = 0;
+
+	for (; *typed; typed++)
+	{
+		if (!((*typed >= 'a' && *typed <= 'z') || (*typed >= '0' && *typed <= '9') || *typed == '-') || length >= 32)
+			return 0;
+		name[length++] = *typed;
+	}
+	name[length] = 0;
+	return length > 0;
+}
+int p2p_friends_backup_password_check(const char *password)
+{
+	return strlen(password) < 8 ? P2P_FRIENDS_BACKUP_SHORT_PASSWORD : P2P_FRIENDS_BACKUP_IDLE;
+}
+int p2p_friends_backup_export(const char *name, const char *password, int with_list)
+{
+	snprintf(backup_name_asked, sizeof(backup_name_asked), "%s", name);
+	snprintf(backup_password_asked, sizeof(backup_password_asked), "%s", password);
+	backup_list_asked = with_list;
+	backup_state_now = P2P_FRIENDS_BACKUP_WORKING;
+	return P2P_FRIENDS_BACKUP_WORKING;
+}
+int p2p_friends_backup_restore(const char *name, const char *password)
+{
+	snprintf(backup_name_asked, sizeof(backup_name_asked), "%s", name);
+	snprintf(backup_password_asked, sizeof(backup_password_asked), "%s", password);
+	backup_state_now = P2P_FRIENDS_BACKUP_WORKING;
+	return P2P_FRIENDS_BACKUP_WORKING;
+}
+const char *p2p_friends_backup_text(int outcome)
+{
+	switch (outcome)
+	{
+	case P2P_FRIENDS_BACKUP_WORKING:
+		return "Working on it: a few seconds...";
+	case P2P_FRIENDS_BACKUP_MISMATCH:
+		return "The passwords don't match";
+	case P2P_FRIENDS_BACKUP_WRONG_PASSWORD:
+		return "Wrong password, or the file was changed";
+	case P2P_FRIENDS_BACKUP_SHORT_PASSWORD:
+		return "The password needs 8 characters or more";
+	}
+	return "Done";
+}
+int p2p_friends_backup_state(char *text, int size)
+{
+	int state = backup_state_now;
+
+	/* (the work: done at the next look) */
+	if (state == P2P_FRIENDS_BACKUP_WORKING)
+	{
+		backup_state_now = backup_outcome;
+		return state;
+	}
+	if (text)
+		snprintf(text, (size_t)size, "%s", p2p_friends_backup_text(state));
+	if (state != P2P_FRIENDS_BACKUP_READY)
+		backup_state_now = P2P_FRIENDS_BACKUP_IDLE;
+	return state;
+}
+int p2p_friends_backup_found(char *code, char *current_code, int code_size, int *friend_count)
+{
+	if (backup_state_now != P2P_FRIENDS_BACKUP_READY)
+		return 0;
+	snprintf(code, (size_t)code_size, "WXYZ-2345-6789");
+	snprintf(current_code, (size_t)code_size, "KQ7M-3XPA-T9WE");
+	*friend_count = 12;
+	return 1;
+}
+int p2p_friends_backup_confirm(void)
+{
+	backup_confirms++;
+	backup_state_now = P2P_FRIENDS_BACKUP_IDLE;
+	return P2P_FRIENDS_BACKUP_RESTORED;
+}
+void p2p_friends_backup_cancel(void)
+{
+	backup_cancels++;
+	backup_state_now = P2P_FRIENDS_BACKUP_IDLE;
+}
+
+/* (the party, p2p_party.h: the test's. Room for twelve and more: test_party_page's
+leader warned before a game with too few slots counts a party of twelve,
+which wrote past an array of eight - harmless while what followed it was
+not read, a crash once the Chat page's globals came after it) */
+static struct p2p_party_member test_party[2 * P2P_PARTY_MAXIMUM];
+static int test_party_count, test_party_leading;
+static struct p2p_party_invite test_party_invites[2];
+static int test_party_invite_count;
+static char party_acted[64];
+int p2p_party_members(struct p2p_party_member *members, int maximum_count)
+{
+	int count = test_party_count < maximum_count ? test_party_count : maximum_count;
+
+	memcpy(members, test_party, sizeof(members[0]) * (size_t)count);
+	return count;
+}
+int p2p_party_invites(struct p2p_party_invite *invites, int maximum_count)
+{
+	int count = test_party_invite_count < maximum_count ? test_party_invite_count : maximum_count;
+
+	memcpy(invites, test_party_invites, sizeof(invites[0]) * (size_t)count);
+	return count;
+}
+int p2p_party_status(char *text, int size)
+{
+	snprintf(text, (size_t)size, test_party_count > 1 ? "Party: %d of 8 (Alpha leads)" : "Not in a party: invite a friend",
+		test_party_count);
+	return test_party_count > 1 ? test_party_count : 0;
+}
+int p2p_party_leading(void)
+{
+	return test_party_leading;
+}
+int p2p_party_in_party(void)
+{
+	return test_party_count > 1;
+}
+int p2p_party_friend_state(const char *friend_id)
+{
+	int index;
+
+	for (index = 0; index < test_party_count; index++)
+		if (!strcmp(test_party[index].id, friend_id))
+			return 1;
+	return 0;
+}
+int p2p_party_invite(const char *friend_id)
+{
+	snprintf(party_acted, sizeof(party_acted), "invite %s", friend_id);
+	return P2P_PARTY_DONE;
+}
+int p2p_party_kick(const char *member_id)
+{
+	snprintf(party_acted, sizeof(party_acted), "kick %s", member_id);
+	return P2P_PARTY_DONE;
+}
+int p2p_party_mute(const char *member_id, int muted)
+{
+	snprintf(party_acted, sizeof(party_acted), "%s %s", muted ? "mute" : "unmute", member_id);
+	return P2P_PARTY_DONE;
+}
+int p2p_party_leave(void)
+{
+	snprintf(party_acted, sizeof(party_acted), "leave");
+	return P2P_PARTY_DONE;
+}
+int p2p_party_answer(const char *invite_id, int accept)
+{
+	snprintf(party_acted, sizeof(party_acted), "%s %s", accept ? "accept" : "decline", invite_id);
+	return P2P_PARTY_DONE;
+}
+int p2p_party_join_warning(int players, int maximum, char *text, int size)
+{
+	if (test_party_count < 2 || !test_party_leading || maximum - players >= test_party_count)
+		return 0;
+	snprintf(text, (size_t)size, "Your party has %d players but this game has %d open slots", test_party_count,
+		maximum - players);
+	return 1;
+}
+const char *p2p_party_outcome_text(int outcome)
+{
+	return outcome == P2P_PARTY_DONE ? "Done" : outcome == P2P_PARTY_NOT_IN_PARTY ? "Not in a party" : "Not for this one";
+}
+static char party_said[P2P_PARTY_CHAT_SIZE];
+int p2p_party_chat_lines(struct p2p_party_chat_line *lines, int maximum_count, unsigned long after)
+{
+	static const char *const said[][2] = { { "Bravo", "hi" }, { "Delta #K7QX", "ready?" }, { "", "Echo joined the party" },
+		{ "Bravo", "go go" } };
+	int count = 0, index;
+
+	(void)after;
+	for (index = 0; index < 4 && count < maximum_count && test_party_count > 1; index++)
+	{
+		memset(&lines[count], 0, sizeof(lines[count]));
+		lines[count].number = (unsigned long)index + 1;
+		snprintf(lines[count].name, sizeof(lines[count].name), "%s", said[index][0]);
+		snprintf(lines[count].text, sizeof(lines[count].text), "%s", said[index][1]);
+		lines[count].notice = !said[index][0][0];
+		count++;
+	}
+	return count;
+}
+const char *p2p_party_chat_preset_text(int preset)
+{
+	static const char *const presets[P2P_PARTY_PRESETS] = { "Ready!", "Wait for me", "Let's go", "Good game", "Join me",
+		"Back in a minute", "Yes", "No" };
+
+	return preset >= 0 && preset < P2P_PARTY_PRESETS ? presets[preset] : "";
+}
+int p2p_party_chat_preset(int preset)
+{
+	snprintf(party_said, sizeof(party_said), "preset %d", preset);
+	return P2P_PARTY_DONE;
+}
+int p2p_party_chat_send(const char *text)
+{
+	snprintf(party_said, sizeof(party_said), "text %s", text);
+	return P2P_PARTY_DONE;
+}
+
 int p2p_hosting_code(char *code, int size)
 {
 	if (!hosting)
 		return 0;
 	snprintf(code, (size_t)size, "QX7K-M2PA");
+	return 1;
+}
+int p2p_hosting_invite(char *invite, int size)
+{
+	if (!hosting)
+		return 0;
+	snprintf(invite, (size_t)size, "halo://join/%064d", 7);
 	return 1;
 }
 
@@ -253,12 +868,13 @@ int p2p_lobby_join(const char *id, const char *password)
 
 int p2p_lobby_join_state(void) { return P2P_LOBBY_JOIN_IDLE; }
 
-/* this Vita's own game, an open one and a locked Halo PC one; with
-Crossplay on, PC games (p2p_lobby.c's badges, crossplay_guard.h): a large
-one, a co-op one and a server */
+/* this Vita's own game, an open one and a locked Halo PC one; with PC
+games listed too (test_pc_games), PC games (p2p_lobby.c's tags and badges,
+crossplay_guard.h): a large OpenCE one, a co-op one and a ChupathingyCE
+server */
 int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 {
-	if (test_crossplay_wire && browsing && index > 0 && index < 4)
+	if (test_pc_games && browsing && index > 0 && index < 4)
 	{
 		static const char *const names[] = { "", "pc host", "pc coop", "pc server" };
 
@@ -274,8 +890,11 @@ int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 		entry->experimental = index == 1 || index == 2;
 		entry->coop = index == 2;
 		entry->dedicated = index == 3;
-		snprintf(entry->badge, sizeof(entry->badge), "%s", index == 1 ? "PC EXPERIMENTAL" : index == 2 ? "PC CO-OP" :
-			"PC SERVER");
+		entry->crossplay = 1;
+		entry->platform = index == 1 ? CROSSPLAY_PLATFORM_OPENCE : index == 2 ? CROSSPLAY_PLATFORM_PC : CROSSPLAY_PLATFORM_CHUPA;
+		snprintf(entry->tag, sizeof(entry->tag), "%s", crossplay_guard_tag(entry->platform));
+		snprintf(entry->badge, sizeof(entry->badge), "%s", index == 1 ? "OPENCE EXPERIMENTAL" : index == 2 ?
+			"PC CO-OP EXPERIMENTAL" : "CHUPA SERVER");
 		return 1;
 	}
 	if (!browsing || index >= 3)
@@ -310,6 +929,16 @@ int p2p_lobby_entry(int index, struct p2p_lobby_entry *entry)
 		entry->pc_map = 1;
 	}
 	return 1;
+}
+
+/* the list at once, as p2p_lobby.c's: the entries above, in order */
+int p2p_lobby_entries(struct p2p_lobby_entry *entries, int maximum_count)
+{
+	int count = 0;
+
+	while (count < maximum_count && p2p_lobby_entry(count, &entries[count]))
+		count++;
+	return count;
 }
 
 /* (vita_ime.c's keyboard: opened, then closed with ime_result and
@@ -422,13 +1051,16 @@ static const char *menu_line(int wanted, char *line, int size)
 	return line;
 }
 
-/* the file's text ("" if there is none) */
+/* the file's text ("" if there is none; settings.txt once its writer has
+written what was asked) */
 static const char *file_text(const char *path)
 {
 	static char text[4096];
-	FILE *file = fopen(path, "r");
+	FILE *file;
 	size_t size = 0;
 
+	vita_settings_save_wait();
+	file = fopen(path, "r");
 	if (file)
 	{
 		size = fread(text, 1, sizeof(text) - 1, file);
@@ -440,10 +1072,24 @@ static const char *file_text(const char *path)
 
 static void write_file(const char *path, const void *data, size_t size)
 {
-	FILE *file = fopen(path, "wb");
+	FILE *file;
 
+	/* (not a settings.txt the writer then puts its own in place of) */
+	vita_settings_save_wait();
+	file = fopen(path, "wb");
 	fwrite(data, 1, size, file);
 	fclose(file);
+}
+
+/* settings.txt deleted, once its writer is done */
+static void settings_file_delete(void)
+{
+	vita_settings_save_wait();
+	unlink(SETTINGS_FILE);
+	/* (and the copies the writer keeps, which the load reads when
+	settings.txt is not there) */
+	unlink(SETTINGS_FILE ".bak");
+	unlink(SETTINGS_FILE ".new");
 }
 
 /* a fake map: the cache header's signature, version and scenario type
@@ -574,7 +1220,7 @@ static int menu_fits(void)
 		else if (label < length)
 			fits = label <= 22 && length - label - 1 <= 24;
 		else
-			fits = length - (at[0] == '\x03' || at[0] == '\x04' || at[0] == '!') <= 46;
+			fits = length - (at[0] == '\x03' || at[0] == '\x04' || at[0] == '\x08' || at[0] == '!') <= 46;
 		if (!fits)
 		{
 			printf("too long: %.*s\n", bytes, at);
@@ -585,11 +1231,13 @@ static int menu_fits(void)
 	return 1;
 }
 
-/* the settings panel's lines fit its height (vita_gxm.c menu_build, at
-960x544: the rows from 76 pixels down, 28 a row, 36 for a page's title,
-14 for a gap; the chosen row's bar, 22 pixels under its line's top, above
-the rule at 468 over the help and the buttons): 14 lines on a tab, 12 on a
-page; a screen without a tab bar fits by its own height */
+/* the settings panel's lines fit its height (vita_gxm.c menu_build, the
+classic panel, at 960x544: the rows from 76 pixels down, 28 a row, 22 for a
+heading ('\x08'), 36 for a page's title, 14 for a gap; the chosen row's
+bar, 22 pixels under its line's top, above the rule at 468 over the help
+and the buttons: 392 pixels for the lines; the Halo 3 menus' panel fits its
+rows to its height, so a page that fits this fits both); a screen without a
+tab bar fits by its own height */
 static int menu_height_fits(void)
 {
 	const char *at = menu;
@@ -607,6 +1255,8 @@ static int menu_height_fits(void)
 			;
 		else if (at[0] == '\x03')
 			y += 36;
+		else if (at[0] == '\x08')
+			y += 22;
 		else if (!bytes)
 			y += 14;
 		else
@@ -653,7 +1303,76 @@ static int open_page(const char *label)
 	return strstr(menu, title) != NULL;
 }
 
-/* ---------- the General tab and its pages */
+/* the page's headings and rows in order, "|" between them: a heading
+('\x08') as "=" and its name, a row by its label (a '*' after it: a
+restart's); the lines that are not rows left out. Its headings only with
+`headings_only` */
+static const char *outline_of(char *text, int size, int headings_only)
+{
+	const char *at = menu;
+	int used = 0, first = 1;
+
+	text[0] = 0;
+	while (*at)
+	{
+		int length = (int)strcspn(at, "\n");
+		int label = (int)strcspn(at, "\x02\n");
+
+		if (used < size && at[0] == '\x08')
+		{
+			used += snprintf(text + used, (size_t)(size - used), "%s%s%.*s", first ? "" : "|", headings_only ? "" : "=",
+				length - 1, at + 1);
+			first = 0;
+		}
+		else if (used < size && !headings_only && label < length)
+		{
+			used += snprintf(text + used, (size_t)(size - used), "%s%.*s", first ? "" : "|", label, at);
+			first = 0;
+		}
+		at += length + (at[length] == '\n');
+	}
+	return text;
+}
+
+/* down through the page's rows as many times as it has them, then up as
+many: each press on a row (never a heading, nor a line that is not a row),
+every row chosen once each way, and back on the row it started on */
+static int steps_skip_headings(void)
+{
+	char line[128];
+	int rows = menu_rows(), start = menu_selected, pass, index, good = 1;
+
+	for (pass = 0; pass < 2; pass++)
+	{
+		unsigned long long chosen = 0;
+		int count = 0;
+
+		for (index = 0; index < rows; index++)
+		{
+			press(pass ? VITA_BUTTON_UP : VITA_BUTTON_DOWN);
+			menu_line(menu_selected, line, sizeof(line));
+			if (menu_selected < 1 || menu_selected > 63 || line[0] == '\x08' || !strchr(line, '\x02'))
+			{
+				printf("chosen: line %d, %s\n", menu_selected, line);
+				good = 0;
+			}
+			else if (!(chosen & (1ULL << menu_selected)))
+			{
+				chosen |= 1ULL << menu_selected;
+				count++;
+			}
+		}
+		if (count != rows || menu_selected != start)
+		{
+			printf("%s: %d of %d rows chosen, on line %d (from %d)\n", pass ? "up" : "down", count, rows, menu_selected,
+				start);
+			good = 0;
+		}
+	}
+	return good;
+}
+
+/* ---------- the Controls tab and its pages */
 
 /* one frame with these buttons held and these touch zones */
 static int frame_touch(unsigned long buttons, unsigned long touch)
@@ -680,40 +1399,62 @@ static void test_controls_tab(void)
 		!strcmp(getenv("HALO_XBOX_A"), "cross") && !strcmp(getenv("HALO_XBOX_WHITE"), "right") &&
 		!strcmp(getenv("HALO_XBOX_BACK"), "select"), "a 1.0 settings.txt: touch zones Off, Xbox buttons as shipped");
 	open_panel();
-	to_tab("General");
+	to_tab("Controls");
 	count = menu_lines(&longest, diagram, sizeof(diagram));
 	printf("%s\n--\n", menu);
-	check(!strcmp(menu_line(1, line, sizeof(line)), "Check for updates\x02  >") &&
-		!strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
-		!strcmp(menu_line(3, line, sizeof(line)), "") &&
-		!strncmp(menu_line(4, line, sizeof(line)), "Look sensitivity\x02", 17) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Invert look\x02", 12) &&
+	check(!strcmp(menu_line(1, line, sizeof(line)), "\x08Look") &&
+		!strncmp(menu_line(2, line, sizeof(line)), "Look sensitivity\x02", 17) &&
+		!strncmp(menu_line(3, line, sizeof(line)), "Invert look\x02", 12) &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Stick deadzone\x02< 10% >") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "\x08" "Buttons") &&
 		!strncmp(menu_line(6, line, sizeof(line)), "Crouch\x02", 7) &&
-		!strncmp(menu_line(7, line, sizeof(line)), "Gyro aiming\x02", 12) &&
-		!strncmp(menu_line(8, line, sizeof(line)), "Rear touch guard\x02", 17) &&
-		!strcmp(menu_line(9, line, sizeof(line)), "Button layout\x02  As shipped  >") &&
-		!strcmp(menu_line(10, line, sizeof(line)), "Touch zones\x02  Off  >") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "Button layout\x02  As shipped  >") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Reset controls\x02  >") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "\x08Gyro") &&
+		!strncmp(menu_line(10, line, sizeof(line)), "Gyro aiming\x02", 12) &&
 		!strcmp(menu_line(11, line, sizeof(line)), "Gyro settings\x02  >") &&
-		!strcmp(menu_line(12, line, sizeof(line)), "Advanced\x02  >"),
-		"General: Check for updates, the version under it, a gap; look, invert, crouch, gyro aiming, rear guard; "
-		"then Button layout, Touch zones, Gyro settings, Advanced");
-	check(to_line("Check for updates") && menu_selected == 1 &&
-		strstr(menu, "\n\x05" "Asks GitHub for the newest version; again to download it\n") &&
-		strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: close"), "Check for updates: its help, cross presses it");
-	check(!strstr(menu, "\nTouch top left\x02") && !strstr(menu, "\nA\x02") && !strstr(menu, "\nGyro sensitivity\x02") &&
-		!strstr(menu, "\nStick deadzone\x02") && !strstr(menu, "\nShow dev settings\x02"),
-		"General: the zones, the buttons, the gyro's details and the rare rows on their pages");
-	check(menu_rows() == 10 && count == 15 && menu_fits() && menu_height_fits(),
-		"General: 10 rows, the version line and a gap (and the tab bar, help, buttons), each fits");
+		!strcmp(menu_line(12, line, sizeof(line)), "\x08Touch") &&
+		!strncmp(menu_line(13, line, sizeof(line)), "Rear touch guard\x02", 17) &&
+		!strcmp(menu_line(14, line, sizeof(line)), "Touch zones\x02  Off  >") &&
+		menu_line(15, line, sizeof(line))[0] == '\x05' && menu_line(16, line, sizeof(line))[0] == '\x06',
+		"Controls: Look (sensitivity, invert, Stick deadzone 10%: the 1.0 file's), Buttons (Crouch, Button layout, "
+		"Reset controls), Gyro (Gyro aiming, Gyro settings), Touch (Rear touch guard, Touch zones)");
+	check(menu_selected == 2 && strstr(menu, "\n\x05Right stick turning speed\n") &&
+		strstr(menu, "\n\x06L/R: tabs   Left/right: change   Circle: close"),
+		"Controls opens on Look sensitivity, its first row (not the heading over it)");
+	check(!strstr(menu, "\nTouch top left\x02") && !strstr(menu, "\nA (jump)\x02") && !strstr(menu, "\nGyro sensitivity\x02") &&
+		!strstr(menu, "Check for updates") && !strstr(menu, "Version ") && !strstr(menu, "\nShow dev settings\x02") &&
+		!strstr(menu, "\nUpdate channel\x02") && !strstr(menu, "\nButton icons\x02") && !strstr(menu, "\nAdvanced\x02"),
+		"Controls: the zones, the buttons, the gyro's details on their pages; the update check, Update channel, "
+		"Show dev settings and Button icons on Game (no Advanced page)");
+	check(menu_rows() == 10 && count == 17 && menu_fits() && menu_height_fits(),
+		"Controls: 10 rows, 4 headings (and the tab bar, help, buttons), each fits");
 	check(strstr(menu, "\nRear touch guard\x02< Normal >") && !strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "normal"),
 		"Rear touch guard: Normal as shipped (a 1.0 settings.txt has none)");
-	check(!diagram[0], "General: no zone diagram");
+	check(!diagram[0], "Controls: no zone diagram");
+	/* (the headings stepped over: down from Stick deadzone, Crouch; up from
+	Gyro aiming, Reset controls; up from the first row, the last) */
+	to_line("Stick deadzone");
+	check(menu_selected == 4 && strstr(menu, "\n\x05Raise if the sticks drift\n"), "Stick deadzone: on the tab, its help");
+	press(VITA_BUTTON_DOWN);
+	check(menu_selected == 6 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Crouch\x02", 7),
+		"down from Stick deadzone: Crouch (the Buttons heading stepped over)");
+	to_line("Gyro aiming");
+	press(VITA_BUTTON_UP);
+	check(menu_selected == 8 && !strcmp(menu_line(menu_selected, line, sizeof(line)), "Reset controls\x02  >"),
+		"up from Gyro aiming: Reset controls (the Gyro heading stepped over)");
 	to_line("Look sensitivity");
+	press(VITA_BUTTON_UP);
+	check(menu_selected == 14 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Touch zones\x02", 12),
+		"up from the first row: the last, Touch zones (not the Look heading)");
+	press(VITA_BUTTON_DOWN);
+	check(menu_selected == 2, "down from the last row: the first, Look sensitivity (not the Look heading)");
 	check(strstr(menu, "\n\x06L/R: tabs   Left/right: change   Circle: close") != NULL,
 		"the panel's buttons on one line: a value row's, on a tab");
 
 	/* Touch zones: its page, the zones drawn beside */
-	check(open_page("Touch zones") && strstr(menu, "\n\x03" "General > Touch zones\n"), "Touch zones opens its page");
+	check(open_page("Touch zones") && strstr(menu, "\n\x03" "Controls > Touch zones\n") && !strchr(menu, '\x08'),
+		"Touch zones opens its page (no headings on it)");
 	count = menu_lines(&longest, diagram, sizeof(diagram));
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "\nTouch top left\x02") && strstr(menu, "\nTouch top right\x02") &&
@@ -728,23 +1469,34 @@ static void test_controls_tab(void)
 	check(frame_touch(0, 1UL << VITA_ZONE_REAR_LEFT) == 1, "panel open: a touch zone held does not reach the game");
 	press(VITA_BUTTON_RIGHT);
 	menu_lines(&longest, diagram, sizeof(diagram));
-	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "< A >") &&
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "< A (jump) >") &&
 		strstr(file_text(SETTINGS_FILE), "HALO_TOUCH_REAR_LEFT=a\n") && !strcmp(diagram, "----S- aaaaba"),
 		"Rear touch left: A, in the environment and settings.txt; the diagram shows it set");
 	for (index = 0; index < 4; index++)
 		press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "y"), "Rear touch left: Y");
+	/* (zoom by its name: testers looked for a zoom choice to put on the
+	rear pad, and did not know it is the right stick's click) */
+	to_line("Rear touch right");
+	for (index = 0; index < VITA_XBOX_RIGHT_STICK; index++)
+		press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_TOUCH_REAR_RIGHT"), "rs") && strstr(menu, "\nRear touch right\x02< Right stick (zoom) >") &&
+		menu_fits(), "Rear touch right: Right stick (zoom), the choice that zooms says so, and fits");
+	for (index = 0; index < VITA_XBOX_RIGHT_STICK; index++)
+		press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_TOUCH_REAR_RIGHT"), "off"), "Rear touch right: Off again");
 	to_line("Touch top right");
 	for (index = 0; index < 20; index++)
 		press(VITA_BUTTON_RIGHT);
 	menu_lines(&longest, diagram, sizeof(diagram));
-	check(!strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "back") && strstr(menu, "< Back  ") && !strcmp(diagram, "-S--A- alaaea"),
+	check(!strcmp(getenv("HALO_TOUCH_TOP_RIGHT"), "back") && strstr(menu, "< Back (scoreboard)  ") &&
+		!strcmp(diagram, "-S--A- alaaea"),
 		"Touch top right: Back, the last choice; the rear zone still marked set");
 	press(VITA_BUTTON_CIRCLE);
-	check(menu_visible && strstr(menu, "*General") && !strstr(menu, "\n\x03") &&
+	check(menu_visible && strstr(menu, "*Controls") && !strstr(menu, "\n\x03") &&
 		!strncmp(menu_line(menu_selected, line, sizeof(line)), "Touch zones\x02  2 on  >", 21),
-		"circle: back to General, on Touch zones, which says two are on");
+		"circle: back to Controls, on Touch zones, which says two are on");
 
 	/* the rear guard, on the tab */
 	to_line("Rear touch guard");
@@ -763,15 +1515,19 @@ static void test_controls_tab(void)
 		VITA_REAR_GUARD_LIGHT, "Rear touch guard: Light, as the touch reader takes it");
 
 	/* Button layout: the Xbox buttons by name */
-	check(open_page("Button layout") && strstr(menu, "\n\x03" "General > Button layout\n"), "Button layout opens its page");
+	check(open_page("Button layout") && strstr(menu, "\n\x03" "Controls > Button layout\n"), "Button layout opens its page");
 	printf("%s\n--\n", menu);
-	check(strstr(menu, "\nA\x02") && strstr(menu, "\nB\x02") && strstr(menu, "\nX\x02") && strstr(menu, "\nY\x02") &&
-		strstr(menu, "\nBlack\x02") && strstr(menu, "\nWhite\x02") && strstr(menu, "\nLeft trigger\x02") &&
-		strstr(menu, "\nRight trigger\x02") && strstr(menu, "\nLeft stick click\x02") &&
-		strstr(menu, "\nRight stick click\x02") && strstr(menu, "\nBack\x02") && menu_rows() == 12 &&
-		!strstr(menu, " button") && menu_fits(), "Button layout: the eleven Xbox buttons by name, each fits");
-	check(!strcmp(menu_line(2, line, sizeof(line)), "Button icons\x02  Xbox >") &&
-		vita_button_icons_playstation() == 0, "Button layout: Button icons first, Xbox as shipped");
+	check(strstr(menu, "\nA (jump)\x02") && strstr(menu, "\nB (melee)\x02") && strstr(menu, "\nX (reload, action)\x02") &&
+		strstr(menu, "\nY (switch weapon)\x02") && strstr(menu, "\nBlack (grenade type)\x02") &&
+		strstr(menu, "\nWhite (flashlight)\x02") && strstr(menu, "\nLeft trigger (grenade)\x02") &&
+		strstr(menu, "\nRight trigger (fire)\x02") && strstr(menu, "\nLeft stick (crouch)\x02") &&
+		strstr(menu, "\nRight stick (zoom)\x02") && strstr(menu, "\nBack (scoreboard)\x02") && menu_rows() == 11 &&
+		!strstr(menu, " button") && !strchr(menu, '\x08') && menu_fits() && menu_height_fits(),
+		"Button layout: the eleven Xbox buttons by name, each with what it does in play (Right stick (zoom)), "
+		"no headings, each fits");
+	check(!strncmp(menu_line(2, line, sizeof(line)), "A (jump)\x02", 9) && !strstr(menu, "Button icons") &&
+		vita_button_icons_playstation() == (VITA_BUTTON_ICONS_DEFAULT == 1),
+		"Button layout: A first, Button icons on Game (as shipped: VITA_BUTTON_ICONS_DEFAULT)");
 	to_line("White");
 	menu_lines(&longest, diagram, sizeof(diagram));
 	check(!diagram[0], "a button's row: no zone diagram");
@@ -782,7 +1538,7 @@ static void test_controls_tab(void)
 	check(config.zone_xbox[VITA_ZONE_REAR_LEFT] == VITA_XBOX_Y && config.zone_xbox[VITA_ZONE_TOP_RIGHT] == VITA_XBOX_BACK &&
 		config.xbox_button[VITA_XBOX_WHITE] == VITA_BUTTON_LEFT, "the pad reads the panel's choices");
 	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "\nButton layout\x02  Custom  >") != NULL, "back on General: Button layout says Custom");
+	check(strstr(menu, "\nButton layout\x02  Custom  >") != NULL, "back on Controls: Button layout says Custom");
 	press(VITA_BUTTON_CIRCLE);
 	check(!menu_visible && frame_touch(0, 1UL << VITA_ZONE_REAR_LEFT) == 0,
 		"circle on a tab closes the panel: the touch zones reach the game");
@@ -801,23 +1557,20 @@ static void test_controls_tab(void)
 		!strcmp(getenv("HALO_XBOX_RIGHT_TRIGGER"), "r") && !strcmp(getenv("HALO_TOUCH_REAR_GUARD"), "light"),
 		"settings.txt round trip: zones, the rear guard and buttons back at start-up");
 
-	/* Advanced: the deadzone, Reset controls (Show dev settings kept) */
+	/* the deadzone and Reset controls, on the tab (Show dev settings, on
+	Game, kept) */
 	open_panel();
-	check(strstr(menu, "*General") && !strstr(menu, "\n\x03"), "the panel opens again on the tab's own page");
-	to_line("Advanced");
-	check(strstr(menu, "\n\x05" "Stick deadzone, Reset controls, dev settings, Update channel\n") != NULL,
-		"the Advanced row's help says what is there");
-	check(open_page("Advanced") && strstr(menu, "\n\x03" "General > Advanced\n") &&
-		!strncmp(menu_line(2, line, sizeof(line)), "Stick deadzone\x02", 15) &&
-		!strcmp(menu_line(3, line, sizeof(line)), "Reset controls\x02  >") &&
-		!strncmp(menu_line(4, line, sizeof(line)), "Show dev settings\x02", 18) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Update channel\x02", 15) && menu_rows() == 4 && menu_fits() &&
-		!strstr(menu, "Check for updates") && !strstr(menu, "Version "),
-		"General, Advanced: Stick deadzone, Reset controls, Show dev settings, Update channel (Check for updates and "
-		"the version on the tab)");
+	check(strstr(menu, "*Controls") && !strstr(menu, "\n\x03"), "the panel opens again on the tab's own page");
+	to_line("Stick deadzone");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("XV_DEADZONE"), "15") && strstr(file_text(SETTINGS_FILE), "XV_DEADZONE=15\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Stick deadzone\x02< 15%  "),
+		"Stick deadzone 15%: in the environment and settings.txt, the last");
 	to_line("Reset controls");
-	check(strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: back") != NULL, "an action row's buttons: cross selects");
-	/* (the Update channel, on the same page, is no control: kept) */
+	check(menu_selected == 8 && strstr(menu, "\n\x05" "Look, crouch, buttons, touch as shipped (gyro kept)\n") &&
+		strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: close") != NULL,
+		"Reset controls: under Buttons, its help; an action row's buttons: cross selects");
+	/* (the Update channel, on Game, is no control: kept) */
 	channel = setting_named("HALO_UPDATE_CHANNEL");
 	channel_kept = channel->choice;
 	channel->choice = !shipped_choice[channel - settings];
@@ -836,13 +1589,14 @@ static void test_controls_tab(void)
 		strstr(file_text(SETTINGS_FILE), "HALO_TOUCH_REAR_GUARD=normal\n"),
 		"Reset controls: zones Off, the rear guard Normal, buttons, look, crouch, deadzone as shipped, saved");
 	check(!strcmp(getenv("HALO_DEV_SETTINGS"), "1") && strstr(menu, "|Dev"), "Reset controls keeps Show dev settings");
+	check(strstr(menu, "\nButton layout\x02  As shipped  >") && strstr(menu, "\nTouch zones\x02  Off  >") &&
+		strstr(menu, "\nStick deadzone\x02  Off >") && menu_fits() && menu_height_fits(),
+		"on Controls: buttons as shipped, touch zones Off, the deadzone Off");
 	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "\nButton layout\x02  As shipped  >") && strstr(menu, "\nTouch zones\x02  Off  >"),
-		"back on General: buttons as shipped, touch zones Off");
-	press(VITA_BUTTON_CIRCLE);
+	check(!menu_visible, "circle on Controls closes the panel");
 }
 
-/* ---------- gyro aiming: its row on General, its page */
+/* ---------- gyro aiming: its row on Controls, its page */
 
 static void test_gyro_page(void)
 {
@@ -853,11 +1607,15 @@ static void test_gyro_page(void)
 	/* (a 1.0 settings.txt was loaded: no gyro lines in it) */
 	check(!strcmp(getenv("HALO_GYRO"), "off") && !strcmp(getenv("HALO_GYRO_BUTTON"), "l") &&
 		!strcmp(getenv("HALO_GYRO_SENS"), "150") && !strcmp(getenv("HALO_GYRO_INVERT_Y"), "0") &&
-		!strcmp(getenv("HALO_GYRO_TURN"), "yaw"), "a 1.0 settings.txt: gyro Off, button L, 1.5x, normal, yaw");
+		!strcmp(getenv("HALO_GYRO_TURN"), "yaw") && !strcmp(getenv("HALO_GYRO_ASSIST"), "1"),
+		"a 1.0 settings.txt: gyro Off, button L, 1.5x, normal, yaw, aim assist on");
 	open_panel();
-	to_tab("General");
+	to_tab("Controls");
+	/* (Reset controls' notice, on the help line for 4 s, gone) */
+	clock_us += 5000000;
 	to_line("Gyro aiming");
-	check(strstr(menu, "Turn the Vita to aim") != NULL, "Gyro aiming's help line");
+	check(strstr(menu, "Turn the Vita to aim") != NULL && !strcmp(menu_line(menu_selected - 1, line, sizeof(line)), "\x08Gyro"),
+		"Gyro aiming's help line; the Gyro heading over it");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_GYRO"), "on") && strstr(file_text(SETTINGS_FILE), "HALO_GYRO=on\n"),
 		"Gyro aiming On: in the environment and settings.txt");
@@ -867,19 +1625,20 @@ static void test_gyro_page(void)
 	check(open_page("Gyro settings"), "Gyro settings opens its page");
 	count = menu_lines(&longest, diagram, sizeof(diagram));
 	printf("%s\n--\n", menu);
-	check(!strcmp(menu_line(1, line, sizeof(line)), "\x03" "General > Gyro settings") &&
+	check(!strcmp(menu_line(1, line, sizeof(line)), "\x03" "Controls > Gyro settings") &&
 		strstr(menu_line(2, line, sizeof(line)), "Gyro button\x02") && strstr(line, "< L >") &&
 		strstr(menu_line(3, line, sizeof(line)), "Gyro sensitivity\x02") && strstr(line, "< 1.5x >") &&
 		strstr(menu_line(4, line, sizeof(line)), "Gyro vertical\x02") && strstr(line, "Normal") &&
 		strstr(menu_line(5, line, sizeof(line)), "Gyro turning\x02") && strstr(line, "Turn (yaw)") &&
-		!strncmp(menu_line(6, line, sizeof(line)), "\x04Gyro: yaw -999 pitch -999 roll -999", 36),
-		"Gyro settings: button, sensitivity, vertical, turning, the gyroscope's line");
-	check(count == 9 && menu_fits() && !diagram[0],
-		"Gyro settings: 9 lines (tab bar, title, 4 rows, the line, help, buttons), each fits");
-	for (index = 0; index < 4; index++)
+		strstr(menu_line(6, line, sizeof(line)), "Gyro aim assist\x02") && strstr(line, "On") &&
+		!strncmp(menu_line(7, line, sizeof(line)), "\x04Gyro: yaw -999 pitch -999 roll -999", 36),
+		"Gyro settings: button, sensitivity, vertical, turning, aim assist, the gyroscope's line");
+	check(count == 10 && menu_fits() && !diagram[0],
+		"Gyro settings: 10 lines (tab bar, title, 5 rows, the line, help, buttons), each fits");
+	for (index = 0; index < 5; index++)
 		press(VITA_BUTTON_DOWN);
 	check(!strncmp(menu_line(menu_selected, line, sizeof(line)), "Gyro button", 11),
-		"down skips the gyroscope's line (four downs: back to the first row)");
+		"down skips the gyroscope's line (five downs: back to the first row)");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_GYRO_BUTTON"), "r") && strstr(menu, "nothing else in play"), "Gyro button: R");
 	press(VITA_BUTTON_DOWN);
@@ -893,9 +1652,34 @@ static void test_gyro_page(void)
 	check(!strcmp(getenv("HALO_GYRO_INVERT_Y"), "1") && !strcmp(getenv("HALO_GYRO_TURN"), "roll"),
 		"Gyro vertical Inverted, turning Tilt (roll)");
 	vita_gyro_config_load(&config);
+	check(config.assist, "the pad reads Gyro aim assist On by default");
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_GYRO_ASSIST"), "0") && strstr(menu, " Off >") &&
+		strstr(menu, "Off: no aim assist at all while the gyro is on"), "Gyro aim assist: Off, its help line");
+	vita_gyro_config_load(&config);
 	check(config.mode == VITA_GYRO_HOLD && config.button == VITA_BUTTON_R && config.sensitivity > 2.49f &&
-		config.sensitivity < 2.51f && config.invert_y && config.turn == VITA_GYRO_TURN_ROLL,
+		config.sensitivity < 2.51f && config.invert_y && config.turn == VITA_GYRO_TURN_ROLL && !config.assist,
 		"the pad reads the gyro's choices");
+	/* (no aim assist at all: the gyro on in any mode, the switch off;
+	with the gyro off the switch is ignored) */
+	check(vita_gyro_unassisted(&config), "Gyro aim assist Off, gyro While holding: no aim assist (held or not)");
+	{
+		struct vita_gyro_config each = config;
+		int mode, assisted_modes = 0, unassisted_modes = 0;
+
+		for (mode = 0; mode < VITA_GYRO_MODES; mode++)
+		{
+			each.mode = mode;
+			each.assist = 0;
+			unassisted_modes += vita_gyro_unassisted(&each) ? 1 << mode : 0;
+			each.assist = 1;
+			assisted_modes += vita_gyro_unassisted(&each) ? 1 << mode : 0;
+		}
+		check(unassisted_modes == ((1 << VITA_GYRO_ON) | (1 << VITA_GYRO_ZOOMED) | (1 << VITA_GYRO_HOLD)) &&
+			assisted_modes == 0,
+			"no aim assist only with the gyro On, While zoomed or While holding and the switch Off; gyro Off ignores it");
+	}
 	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 
@@ -909,19 +1693,18 @@ static void test_gyro_page(void)
 	vita_settings_load();
 	check(!strcmp(getenv("HALO_GYRO"), "hold") && !strcmp(getenv("HALO_GYRO_BUTTON"), "r") &&
 		!strcmp(getenv("HALO_GYRO_SENS"), "250") && !strcmp(getenv("HALO_GYRO_INVERT_Y"), "1") &&
-		!strcmp(getenv("HALO_GYRO_TURN"), "roll"), "settings.txt round trip: the gyro's rows back at start-up");
+		!strcmp(getenv("HALO_GYRO_TURN"), "roll") && !strcmp(getenv("HALO_GYRO_ASSIST"), "0"),
+		"settings.txt round trip: the gyro's rows back at start-up");
 	check(strstr(file_text(SETTINGS_FILE), "HALO_XBOX_A=") && strstr(file_text(SETTINGS_FILE), "XV_LOOK_SENS="),
 		"the other rows are still saved beside them");
 
 	/* Reset controls leaves the gyro's rows (as when they had a tab) */
 	open_panel();
-	to_tab("General");
-	open_page("Advanced");
-	to_line("Reset controls");
+	to_tab("Controls");
+	check(to_line("Reset controls"), "Controls: Reset controls");
 	press(VITA_BUTTON_CROSS);
 	check(!strcmp(getenv("HALO_GYRO"), "hold") && !strcmp(getenv("HALO_GYRO_SENS"), "250"),
 		"Reset controls leaves gyro aiming and its settings");
-	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 }
 
@@ -991,6 +1774,720 @@ static int rows_of(char *labels, int size, int *info)
 	return rows;
 }
 
+/* ---------- the Mod manager page */
+
+/* the game's look as the test makes it (port/linux/game/mod_manager.c's,
+made up): a modded Xbox map, a corrupt file, a Custom Edition map that
+needs PC maps, an MCC mod with a map that fails, a file of a name the game
+does not take */
+static struct halo_mods_inventory test_inventory;
+
+static void test_entry(const char *name, const char *file, const char *title, int kind, int valid, int kilobytes,
+	int modes, const char *why, const char *needs, int deletable)
+{
+	struct halo_mod_entry *entry = &test_inventory.entries[test_inventory.count++];
+
+	memset(entry, 0, sizeof(*entry));
+	snprintf(entry->name, sizeof(entry->name), "%s", name);
+	snprintf(entry->file, sizeof(entry->file), "%s", file);
+	snprintf(entry->title, sizeof(entry->title), "%s", title);
+	entry->kind = kind;
+	entry->valid = valid;
+	entry->enabled = 1;
+	entry->kilobytes = kilobytes;
+	entry->modes = modes;
+	entry->deletable = deletable;
+	snprintf(entry->why, sizeof(entry->why), "%s", why);
+	snprintf(entry->needs, sizeof(entry->needs), "%s", needs);
+	test_inventory.used_kilobytes += kilobytes;
+}
+
+static void test_inventory_make(void)
+{
+	memset(&test_inventory, 0, sizeof(test_inventory));
+	test_entry("bad name", "bad%name.map", "bad%name", HALO_MOD_KIND_UNKNOWN, 0, 1, 0,
+		"Its file name has characters this game doesn't take", "", 0);
+	test_entry("broken", "broken.map", "broken", HALO_MOD_KIND_UNKNOWN, 0, 69, 0, "Not a Halo map", "", 1);
+	test_entry("cemap", "cemap.map", "cemap", HALO_MOD_KIND_CE_MAP, 1, 3072, HALO_MOD_MODE_MULTIPLAYER, "",
+		"PC maps On (Settings > Multiplayer > Modded maps)", 1);
+	test_entry("mygulch", "mygulch.map", "mygulch", HALO_MOD_KIND_XBOX_MAP, 1, 22042, HALO_MOD_MODE_MULTIPLAYER, "", "", 1);
+	test_inventory.entries[test_inventory.count - 1].source = HALO_MOD_SOURCE_MAP_SHARE;
+	test_entry("testmod", "TestMod", "Test Mod", HALO_MOD_KIND_MCC_MOD, 1, 6, HALO_MOD_MODE_CAMPAIGN,
+		"a30.map: not a campaign map", "", 1);
+	test_inventory.entries[test_inventory.count - 1].maps = 2;
+	test_inventory.entries[test_inventory.count - 1].maps_valid = 1;
+	test_inventory.free_kilobytes = 3 * 1024 * 1024;
+}
+
+/* the game's main loop answering the panel's request (mod_manager_update):
+the request taken, `answer` given, the look's inventory handed over */
+static int game_answers_mods(int answer)
+{
+	int request = halo_mods_request;
+
+	if (request == HALO_MODS_REQUEST_NONE)
+		return 0;
+	memcpy(&halo_mods_inventory, &test_inventory, sizeof(halo_mods_inventory));
+	halo_mods_answer = answer;
+	halo_mods_request = HALO_MODS_REQUEST_NONE;
+	frame(0);
+	return request;
+}
+
+static void test_mod_manager_page(void)
+{
+	char line[256];
+	int index;
+
+	test_inventory_make();
+	/* (none off: as the game's MOD MANAGER would set the lists) */
+	vita_settings_set("HALO_MAPS_DISABLED", "");
+	vita_settings_set("HALO_MODS_DISABLED", "");
+	open_page("Modded maps");
+	check(!strcmp(menu_line(2, line, sizeof(line)), "Mod manager\x02  >"), "Modded maps: Mod manager, its first row");
+	to_line("Mod manager");
+	check(strstr(menu, "\n\x05" "Custom maps and MCC mods: check, on, off, delete\n") != NULL, "Mod manager's help");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "\n\x03Multiplayer > Mod manager\n") && strstr(menu, "\n\x04" "Checking the maps and mods...\n") &&
+		halo_mods_request == HALO_MODS_REQUEST_SCAN && strstr(log_text, "settings: mod manager: asked the game to look"),
+		"cross: the Mod manager page, the game asked to look, the page says so meanwhile");
+	check(game_answers_mods(HALO_MODS_ANSWER_SCANNED) == HALO_MODS_REQUEST_SCAN, "the game answers");
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\n\x04" "5 items: 24.5 MB used, 3.0 GB free\n\n") != NULL, "the totals: 5 items, used and free");
+	check(strstr(menu, "\nbad%name.map\x02  Error     1 KB  ?\n") && strstr(menu, "\nbroken.map\x02  Error    69 KB  ?\n") &&
+		strstr(menu, "\ncemap.map\x02  On      3.0 MB  CE\n") && strstr(menu, "\nmygulch.map\x02  On     21.5 MB  Xbox\n") &&
+		strstr(menu, "\nTest Mod\x02  On        6 KB  MCC\n"), "each entry: its name, On or Error, its size and kind");
+	check(menu_fits() && menu_height_fits(), "the Mod manager page fits");
+	to_line("broken.map");
+	check(strstr(menu, "\n\x05" "Failed: Not a Halo map\n") &&
+		strstr(menu, "\n\x06L/R: tabs   Cross: details   Square: delete   Circle: back"),
+		"a corrupt file: why it failed; the buttons");
+	to_line("cemap.map");
+	check(strstr(menu, "\n\x05Needs: PC maps On (Settings > Multiplayer > Modded maps)\n") != NULL, "what a map needs");
+	to_line("mygulch.map");
+	check(strstr(menu, "\n\x05Xbox map: on or off, or delete it\n") != NULL, "a map that plays: its kind");
+	/* off and on: HALO_MAPS_DISABLED, kept in settings.txt */
+	press(VITA_BUTTON_LEFT);
+	check(strstr(menu, "\nmygulch.map\x02  Off    21.5 MB  Xbox\n") && getenv("HALO_MAPS_DISABLED") &&
+		!strcmp(getenv("HALO_MAPS_DISABLED"), "mygulch") && strstr(file_text(SETTINGS_FILE), "HALO_MAPS_DISABLED=mygulch\n"),
+		"left: mygulch off, in the environment and settings.txt");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nmygulch.map\x02  On ") && (!getenv("HALO_MAPS_DISABLED") || !getenv("HALO_MAPS_DISABLED")[0]) &&
+		!strstr(file_text(SETTINGS_FILE), "HALO_MAPS_DISABLED"), "right: on again, the line gone");
+	/* a mod: HALO_MODS_DISABLED, by its key */
+	to_line("Test Mod");
+	check(strstr(menu, "\n\x05" "Needs") == NULL && strstr(menu, "\n\x05MCC mod: on or off, or delete it\n"),
+		"the mod: its kind");
+	press(VITA_BUTTON_LEFT);
+	check(strstr(menu, "\nTest Mod\x02  Off ") && getenv("HALO_MODS_DISABLED") && !strcmp(getenv("HALO_MODS_DISABLED"), "testmod") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MODS_DISABLED=testmod\n") && strstr(log_text, "settings: mod testmod turned off"),
+		"left: the mod off by its key, saved");
+	/* its details: cross; left and right there too; circle back */
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(!strncmp(menu, "Test Mod", 8) && strstr(menu, "Type: MCC mod") && strstr(menu, "File: mods/TestMod") &&
+		strstr(menu, "Maps: 2, 1 of them play") && strstr(menu, "Check: Passed - a30.map: not a campaign map") &&
+		strstr(menu, "Status: Off: kept, but in no map list"), "cross: the details");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "Status: On: in the map lists") && (!getenv("HALO_MODS_DISABLED") || !getenv("HALO_MODS_DISABLED")[0]),
+		"right in the details: on again");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\n\x03Multiplayer > Mod manager\n") != NULL, "circle: back to the list");
+	to_line("mygulch.map");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "From: Received through map sharing") && strstr(menu, "Works in: Multiplayer"),
+		"the details say where it came from");
+	press(VITA_BUTTON_CIRCLE);
+	/* delete: a question first; circle keeps it; cross asks the game */
+	to_line("broken.map");
+	press(VITA_BUTTON_SQUARE);
+	check(!strncmp(menu, "DELETE MAP", 10) && strstr(menu, "broken.map"), "square asks before deleting");
+	press(VITA_BUTTON_CIRCLE);
+	check(halo_mods_request == HALO_MODS_REQUEST_NONE && strstr(menu, "> Mod manager\n"), "circle keeps it");
+	press(VITA_BUTTON_SQUARE);
+	press(VITA_BUTTON_CROSS);
+	check(halo_mods_request == HALO_MODS_REQUEST_DELETE && !strcmp(halo_mods_target, "broken.map") &&
+		halo_mods_target_kind == HALO_MOD_KIND_UNKNOWN, "cross asks the game to delete broken.map");
+	/* (the game deleted it and looked again) */
+	memmove(&test_inventory.entries[1], &test_inventory.entries[2], sizeof(test_inventory.entries[0]) * 3);
+	test_inventory.count--;
+	game_answers_mods(HALO_MODS_ANSWER_DELETED);
+	check(strstr(menu, "Deleted broken.map") && !strstr(menu, "\nbroken.map\x02") && strstr(menu, "\n\x04" "4 items: "),
+		"deleted: said, gone from the list");
+	/* a mod's delete asks about its folder; the game says it is in use */
+	to_line("Test Mod");
+	press(VITA_BUTTON_SQUARE);
+	check(!strncmp(menu, "DELETE MOD", 10) && strstr(menu, "TestMod") && strstr(menu, "everything in its folder"),
+		"a mod's question names its folder");
+	press(VITA_BUTTON_CROSS);
+	check(halo_mods_request == HALO_MODS_REQUEST_DELETE && !strcmp(halo_mods_target, "TestMod") &&
+		halo_mods_target_kind == HALO_MOD_KIND_MCC_MOD, "cross asks the game to delete the mod's folder");
+	game_answers_mods(HALO_MODS_ANSWER_IN_USE);
+	check(strstr(menu, "TestMod is in play: leave it first") && strstr(menu, "\nTest Mod\x02"), "in use: kept, and said");
+	/* a name the game does not take: never asked about */
+	for (index = 0; index < 10 && strncmp(menu_line(menu_selected, line, sizeof(line)), "bad%name.map", 12); index++)
+		press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_SQUARE);
+	press(VITA_BUTTON_CROSS);
+	check(halo_mods_request == HALO_MODS_REQUEST_NONE && strstr(menu, "Its name isn't one this game takes: use VitaShell"),
+		"a name the game does not take: not deleted, why");
+	press(VITA_BUTTON_LEFT);
+	check(!getenv("HALO_MAPS_DISABLED") || !getenv("HALO_MAPS_DISABLED")[0], "... nor turned off");
+	/* the game's MOD MANAGER sets the lists through the panel
+	(vita_settings_set): kept, a '%' and a line's end left out */
+	check(vita_settings_set("HALO_MAPS_DISABLED", "mygulch,wiz%ard\n") && !strcmp(getenv("HALO_MAPS_DISABLED"), "mygulch,wizard") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MAPS_DISABLED=mygulch,wizard\n"), "the game's list of maps off, kept");
+	check(vita_settings_set("HALO_MODS_DISABLED", "testmod") && !strcmp(getenv("HALO_MODS_DISABLED"), "testmod") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MODS_DISABLED=testmod\n"), "the game's list of mods off, kept");
+	check(vita_settings_set("HALO_MAPS_DISABLED", "") && vita_settings_set("HALO_MODS_DISABLED", "") &&
+		!getenv("HALO_MAPS_DISABLED") && !getenv("HALO_MODS_DISABLED") && !strstr(file_text(SETTINGS_FILE), "_DISABLED"),
+		"empty lists: unset, no lines");
+	/* circle: back to Modded maps, on the Mod manager row */
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\n\x03Multiplayer > Modded maps\n") && strstr(menu, "\nMod manager\x02  4 items  >\n"),
+		"circle: back to Modded maps, the row says how many");
+	press(VITA_BUTTON_CIRCLE);
+}
+
+
+/* Multiplayer > Vita and PC > Players: the hosted game's players (none hosted:
+said), each kicked with cross, banned with triangle and for good with
+square, asked of the main loop (halo_host_player_request) and its answer
+said; Anti-cheat saved; Clear bans asked */
+static void test_players_page(void)
+{
+	check(to_tab("Multiplayer") && open_page("Vita and PC"), "Multiplayer > Vita and PC");
+	if (!open_page("Players"))
+	{
+		check(0, "Vita and PC: the Players row opens its page");
+		printf("%s\n--\n", menu);
+		return;
+	}
+	check(strstr(menu, "\n\x03Multiplayer > Players\n") && strstr(menu, "\n\x04You host no network game\n") &&
+		strstr(menu, "\nAnti-cheat\x02  On >\n") && strstr(menu, "\nClear bans\x02  >\n"),
+		"the Players page: none hosted, Anti-cheat and Clear bans");
+	/* a game hosted: two other machines' players */
+	halo_host_players_serial += 2;
+	halo_host_players_count = 2;
+	halo_host_players_machines[0] = 3;
+	snprintf(halo_host_players_names[0], HALO_HOST_PLAYER_NAME_SIZE, "Cheater");
+	halo_host_players_machines[1] = 5;
+	snprintf(halo_host_players_names[1], HALO_HOST_PLAYER_NAME_SIZE, "Honest");
+	halo_host_session_bans = 1;
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_UP);
+	check(strstr(menu, "\nCheater\x02  In your game\n") && strstr(menu, "\nHonest\x02  In your game\n") &&
+		strstr(menu, "\n\x04" "1 kept out of your games\n"), "the hosted game's players, and the machines kept out");
+	check(menu_fits() && menu_height_fits(), "the Players page fits");
+	to_line("Cheater");
+	check(strstr(menu, "Cross: kick  Triangle: ban  Circle: back") != NULL, "a player: kick and ban in the footer");
+	press(VITA_BUTTON_TRIANGLE);
+	check(halo_host_player_request == (HALO_HOST_PLAYER_BAN << 8 | 3), "triangle: the ban of machine 3 asked");
+	/* (the main loop answers) */
+	halo_host_player_answer = HALO_HOST_ANSWER_DONE;
+	halo_host_player_request = 0;
+	press(VITA_BUTTON_DOWN);
+	check(strstr(menu, "Banned Cheater from your games") != NULL, "the ban said");
+	clock_us += 6000000;
+	to_line("Honest");
+	press(VITA_BUTTON_CROSS);
+	check(halo_host_player_request == (HALO_HOST_PLAYER_KICK << 8 | 5), "cross: the kick of machine 5 asked");
+	halo_host_player_answer = HALO_HOST_ANSWER_GONE;
+	halo_host_player_request = 0;
+	press(VITA_BUTTON_UP);
+	check(strstr(menu, "That player is not in the game") != NULL, "a kick of a player gone: said");
+	clock_us += 6000000;
+	to_line("Cheater");
+	press(VITA_BUTTON_SQUARE);
+	check(halo_host_player_request == 0 && strstr(menu, "BAN FOR GOOD") && strstr(menu, "Cheater"),
+		"square: the ban for good asks first");
+	press(0);
+	press(VITA_BUTTON_CIRCLE);
+	check(halo_host_player_request == 0 && !strstr(menu, "BAN FOR GOOD"), "square, circle: no ban, the list again");
+	press(0);
+	to_line("Cheater");
+	press(VITA_BUTTON_SQUARE);
+	press(0);
+	press(VITA_BUTTON_CROSS);
+	check(halo_host_player_request == (HALO_HOST_PLAYER_BAN_ALWAYS << 8 | 3), "square, cross: the ban for good asked");
+	halo_host_player_request = 0;
+	halo_host_player_answer = HALO_HOST_ANSWER_DONE;
+	clock_us += 6000000;
+	to_line("Clear bans");
+	press(VITA_BUTTON_CROSS);
+	check(halo_host_player_request == HALO_HOST_PLAYER_CLEAR_BANS << 8, "Clear bans asked");
+	halo_host_player_request = 0;
+	to_line("Anti-cheat");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_NET_ANTICHEAT") && !strcmp(getenv("HALO_NET_ANTICHEAT"), "false"), "Anti-cheat off: set");
+	press(VITA_BUTTON_LEFT);
+	halo_host_players_serial += 2;
+	halo_host_players_count = -1;
+	halo_host_session_bans = 0;
+	press(VITA_BUTTON_CIRCLE);
+	check(page == PAGE_CROSSPLAY && strstr(menu, "\n\x03Multiplayer > Vita and PC\n"),
+		"circle: back to Vita and PC, where the Players row is");
+	check(open_page("Infection") && page == PAGE_INFECTION, "Vita and PC > Infection");
+	press(VITA_BUTTON_CIRCLE);
+	check(page == PAGE_CROSSPLAY, "circle on Infection: back to Vita and PC");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "*Multiplayer") && !strstr(menu, "\n\x03"), "circle again: back to Multiplayer");
+}
+
+/* Multiplayer > Friends > Friend code (p2p_friends_backup.inc, the test's
+work): cross on the code's row, then cross backs up - the name, the
+password twice on the keyboard (a password's typing hidden), with the list
+or the code alone, the work, where it went -, square restores - the name,
+the password, the codes before and after asked about, Circle letting it go,
+Cross restoring -; passwords that differ said; each screen fits */
+static void test_friend_backup(void)
+{
+	clock_us += 6000000;
+	check(to_line("Friend code") && strstr(menu, "Back it up to a file with a password, or restore it"),
+		"Friend code: its help");
+	press(VITA_BUTTON_CROSS);
+	check(!strncmp(menu, "FRIEND CODE BACKUP", 18) && strstr(menu, "Cross: back up   Square: restore") &&
+		strstr(menu, "can be you"), "cross: back up or restore, and the warning");
+	check(menu_fits(), "the backup's question fits");
+	/* back up */
+	ime_opens = 0;
+	press(VITA_BUTTON_CROSS);
+	check(ime_opens == 1 && !strcmp(ime_title, "Backup file name") && !strcmp(ime_initial, "friends-backup") &&
+		!ime_password, "cross: the file's name on the keyboard, friends-backup to start from");
+	keyboard_closes("my-code");
+	frame(0);
+	check(ime_opens == 2 && ime_password && ime_maximum == P2P_FRIENDS_BACKUP_PASSWORD_MAXIMUM,
+		"then its password, hidden");
+	keyboard_closes("hunter2hunter2");
+	frame(0);
+	check(ime_opens == 3 && ime_password && !strcmp(ime_title, "The password again"), "then the password again");
+	keyboard_closes("hunter2hunter2");
+	check(!strncmp(menu, "BACK UP FRIEND CODE", 19) && strstr(menu, "Cross: with the list") && menu_fits(),
+		"with the friends list or not");
+	backup_outcome = P2P_FRIENDS_BACKUP_SAVED;
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(backup_name_asked, "my-code") && !strcmp(backup_password_asked, "hunter2hunter2") &&
+		backup_list_asked == 1, "cross: backed up with the list, the name and password typed");
+	frame(0);
+	frame(0);
+	check(strstr(menu, "Backup saved to") && strstr(menu, "ux0:data/haloce-vita/\nmy-code.hfb") && menu_fits(),
+		"where it went said");
+	check(!strstr(log_text, "hunter2"), "the password never logged");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "> Friends\n") != NULL, "circle: the Friends page");
+	/* passwords that differ */
+	to_line("Friend code");
+	press(VITA_BUTTON_CROSS);
+	press(VITA_BUTTON_CROSS);
+	keyboard_closes("my-code");
+	frame(0);
+	keyboard_closes("hunter2hunter2");
+	frame(0);
+	keyboard_closes("hunter2hunter3");
+	check(strstr(menu, "The passwords don't match") != NULL, "passwords that differ: said, nothing backed up");
+	press(VITA_BUTTON_CROSS);
+	/* restore: opened, asked, let go, then restored */
+	to_line("Friend code");
+	press(VITA_BUTTON_CROSS);
+	ime_opens = 0;
+	press(VITA_BUTTON_SQUARE);
+	check(ime_opens == 1 && !strcmp(ime_title, "Backup file name"), "square: the name of the backup to restore");
+	keyboard_closes("my-code");
+	frame(0);
+	check(ime_opens == 2 && ime_password && !strcmp(ime_title, "The backup's password"), "then its password");
+	backup_outcome = P2P_FRIENDS_BACKUP_READY;
+	keyboard_closes("hunter2hunter2");
+	check(!strcmp(backup_password_asked, "hunter2hunter2"), "the backup opened with it");
+	frame(0);
+	frame(0);
+	check(!strncmp(menu, "RESTORE FRIEND CODE", 19) && strstr(menu, "KQ7M-3XPA-T9WE") && strstr(menu, "WXYZ-2345-6789") &&
+		strstr(menu, "12 friends in it") && strstr(menu, "Cross: confirm   Circle: cancel"),
+		"opened: the code now and the backup's, its friends; confirm or cancel");
+	check(menu_fits(), "the restore's question fits");
+	backup_cancels = backup_confirms = 0;
+	press(VITA_BUTTON_CIRCLE);
+	check(backup_cancels == 1 && !backup_confirms && strstr(menu, "Not restored"), "circle: let go, nothing restored");
+	press(VITA_BUTTON_CIRCLE);
+	to_line("Friend code");
+	press(VITA_BUTTON_CROSS);
+	press(VITA_BUTTON_SQUARE);
+	keyboard_closes("my-code");
+	frame(0);
+	keyboard_closes("hunter2hunter2");
+	frame(0);
+	frame(0);
+	press(VITA_BUTTON_CROSS);
+	check(backup_confirms == 1 && strstr(menu, "Friend code restored:") && menu_fits(), "cross: restored, said");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "> Friends\n") != NULL, "back on the Friends page");
+	/* the keyboard cancelled: the question again */
+	to_line("Friend code");
+	press(VITA_BUTTON_CROSS);
+	press(VITA_BUTTON_CROSS);
+	keyboard_closes(NULL);
+	check(!strncmp(menu, "FRIEND CODE BACKUP", 18) && strstr(menu, "Cross: back up"), "the keyboard cancelled: the question");
+	press(VITA_BUTTON_CIRCLE);
+	check(!strstr(log_text, "hunter2"), "no password in the log");
+}
+
+/* Multiplayer > Friends (p2p_friends.h, the test's list): the code and the
+status, Add a friend (typed with the D-pad), Appear offline and Friends can
+join (saved), each entry with a word of its state, its doing on the help
+line and its buttons in the footer; cross, square and triangle do what the
+footer says, a join going on to Join's steps, a removal asked first */
+/* Multiplayer > Friends > Chat: the in-game chat's rows (Chat, Chat
+filter: on by default, live), its line on the combo, and the game's
+players (published by game_chat.c), Cross muting and unmuting one here */
+static void test_chat_page(void)
+{
+	check(to_tab("Multiplayer") && open_page("Vita and PC"), "Multiplayer > Vita and PC");
+	if (!open_page("Chat"))
+	{
+		check(0, "Vita and PC: the Chat row opens its page");
+		printf("%s\n--\n", menu);
+		return;
+	}
+	check(strstr(menu, "\n\x03Multiplayer > Chat\n") && strstr(menu, "\nChat\x02  On >\n") &&
+		strstr(menu, "\nChat filter\x02  On >\n") && strstr(menu, "\n\x04In play: SELECT + D-pad left, quick chat\n") &&
+		strstr(menu, "\n\x04Mute players: in a network game\n"), "the Chat page: Chat and Chat filter on, the combo, no game");
+	to_line("Chat filter");
+	check(strstr(menu, "On: slurs others type shown as ****; only you see it") != NULL, "Chat filter's help");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_CHAT_FILTER") && !strcmp(getenv("HALO_CHAT_FILTER"), "0") &&
+		strstr(menu, "\nChat filter\x02< Off  \n"), "Chat filter off: set");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_CHAT_FILTER"), "1"), "Chat filter on again");
+	to_line("Chat\x02");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_CHAT") && !strcmp(getenv("HALO_CHAT"), "0"), "Chat off: set");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_CHAT"), "1"), "Chat on again");
+	/* a network game: its players, this Vita's own marked */
+	halo_chat_players_serial += 2;
+	halo_chat_players_count = 3;
+	snprintf(halo_chat_players_names[0], HALO_CHAT_PLAYER_NAME_SIZE, "Alpha");
+	halo_chat_players_local[0] = 1;
+	snprintf(halo_chat_players_names[1], HALO_CHAT_PLAYER_NAME_SIZE, "Bravo");
+	snprintf(halo_chat_players_names[2], HALO_CHAT_PLAYER_NAME_SIZE, "Charlie");
+	halo_chat_players_muted[2] = 1;
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_UP);
+	check(strstr(menu, "\nAlpha\x02  You\n") && strstr(menu, "\nBravo\x02  Chat shown\n") &&
+		strstr(menu, "\nCharlie\x02  Muted\n") && strstr(menu, "\n\x04" "Cross mutes a player's chat here\n"),
+		"the game's players: shown, muted, this Vita's");
+	check(menu_fits() && menu_height_fits(), "the Chat page fits");
+	to_line("Bravo");
+	check(strstr(menu, "Cross: mute  Circle: back") != NULL, "a player: mute in the footer");
+	press(VITA_BUTTON_CROSS);
+	check(halo_chat_mute_request == (2 | HALO_CHAT_MUTE_REQUEST_MUTE) && !strcmp(halo_chat_mute_request_name, "Bravo") &&
+		strstr(menu, "Bravo muted: their chat is hidden here"), "cross: Bravo's mute asked of the game");
+	/* (the game takes it, and publishes them again) */
+	halo_chat_mute_request = 0;
+	halo_chat_players_muted[1] = 1;
+	halo_chat_players_serial += 2;
+	clock_us += 6000000;
+	to_line("Charlie");
+	press(VITA_BUTTON_CROSS);
+	check(halo_chat_mute_request == 3 && !strcmp(halo_chat_mute_request_name, "Charlie"), "cross: Charlie unmuted");
+	halo_chat_mute_request = 0;
+	halo_chat_players_muted[2] = 0;
+	halo_chat_players_serial += 2;
+	clock_us += 6000000;
+	to_line("Alpha");
+	press(VITA_BUTTON_CROSS);
+	check(halo_chat_mute_request == 0, "this Vita's own player: never muted");
+	halo_chat_players_serial += 2;
+	halo_chat_players_count = -1;
+	halo_chat_players_muted[1] = 0;
+	halo_chat_players_local[0] = 0;
+	press(VITA_BUTTON_CIRCLE);
+	check(page == PAGE_CROSSPLAY && strstr(menu, "\n\x03Multiplayer > Vita and PC\n"),
+		"circle: back to Vita and PC, where the Chat row is");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "*Multiplayer") && !strstr(menu, "\n\x03"), "circle again: back to Multiplayer");
+}
+
+static void test_friends_page(void)
+{
+	char line[256], network_before[16];
+
+	test_friend_count = 0;
+	test_friend("d1", P2P_FRIEND_KIND_REQUEST, "Delta", "TBJV-CX9K-Y47D", 0, 0, "Wants to be your friend");
+	test_friend("b1", P2P_FRIEND_KIND_FRIEND, "Bravo", "RYQS-BU47-4JPF", 1, 1, "Slayer on Blood Gulch");
+	test_friend("c1", P2P_FRIEND_KIND_FRIEND, "Charlie", "AAZQ-L3GC-JLTL", 0, 0, "Offline");
+	test_friend("o1", P2P_FRIEND_KIND_OUTGOING, "A7ES-DA9D-2NMR", "A7ES-DA9D-2NMR", 0, 0, "Request sent");
+	test_friend("e1", P2P_FRIEND_KIND_BLOCKED, "Echo", "9YHX-JQPH-CWC9", 0, 0, "Blocked");
+	friend_act_outcome = P2P_FRIENDS_DONE;
+	/* (the row in the code row's place: a game with the PC menus, a session
+	started Online) */
+	snprintf(network_before, sizeof(network_before), "%s", getenv("HALO_VITA_NETWORK") ? getenv("HALO_VITA_NETWORK") :
+		"wifi");
+	vita_settings_set("HALO_VITA_NETWORK", "online");
+	restart_pending = 0;
+	vita_settings_load();
+	halo_pc_menus_state = 1;
+	check(to_tab("Multiplayer"), "Multiplayer tab");
+	if (!to_line("Friends"))
+	{
+		check(0, "Multiplayer: the Friends row (Online, the PC menus)");
+		printf("%s\n--\n", menu);
+		return;
+	}
+	check(strstr(menu, "\nFriends\x02  1 online, 1 new  >\n") != NULL,
+		"Multiplayer: the Friends row says who is online and what is new");
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\n\x03Multiplayer > Friends\n") != NULL, "cross: the Friends page");
+	check(strstr(menu, "\nAdd a friend\x02  >\n") && strstr(menu, "\nAppear offline\x02  Off >\n") &&
+		strstr(menu, "\nFriends can join\x02  On >\n"), "its rows: Add a friend, Appear offline, Friends can join");
+	check(strstr(menu, "\nFriend code\x02  KQ7M-3XPA-T9WE  >\n") && strstr(menu, "\n\x04" "1 of 2 friends online\n"),
+		"the code (the Friend code row's value) and the status");
+	/* (four entries shown at once, with the Party row: the fifth scrolled to) */
+	check(strstr(menu, "\nDelta\x02  Request\n") && strstr(menu, "\nBravo\x02  Joinable\n") &&
+		strstr(menu, "\nCharlie\x02  Offline\n") && strstr(menu, "\nA7ES-DA9D-2NMR\x02  Sent\n"),
+		"each entry: its name and a word of its state");
+	check(menu_fits() && menu_height_fits(), "the Friends page fits");
+	/* Appear offline, Friends can join: saved */
+	to_line("Appear offline");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_FRIENDS_APPEAR_OFFLINE") && !strcmp(getenv("HALO_FRIENDS_APPEAR_OFFLINE"), "true") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_FRIENDS_APPEAR_OFFLINE=true\n"), "Appear offline on: saved");
+	press(VITA_BUTTON_LEFT);
+	to_line("Friends can join");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_FRIENDS_JOIN") && !strcmp(getenv("HALO_FRIENDS_JOIN"), "false"), "Friends can join off");
+	press(VITA_BUTTON_LEFT);
+	/* Add a friend: the code typed */
+	to_line("Add a friend");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "ADD A FRIEND") && strstr(menu, "A A A A - A A A A - A A A A"), "Add a friend: the code screen");
+	press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_UP);
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(friend_added, "BCAAAAAAAAAA") && strstr(menu, "Friend request sent"), "cross: the request sent, said");
+	/* the request: accept, decline, block (the notice gone first) */
+	clock_us += 6000000;
+	to_line("Delta");
+	check(strstr(menu, "\n\x05" "Delta: Wants to be your friend\n") &&
+		strstr(menu, "\n\x06L/R: tabs   Cross: accept  Square: decline  Circle: back"),
+		"a request: its help and buttons");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(friend_acted_id, "d1") && friend_acted_kind == P2P_FRIEND_KIND_REQUEST &&
+		friend_acted_action == P2P_FRIENDS_ACCEPT, "cross: accepted");
+	press(VITA_BUTTON_SQUARE);
+	check(friend_acted_action == P2P_FRIENDS_DECLINE, "square: declined");
+	press(VITA_BUTTON_TRIANGLE);
+	check(!strncmp(menu, "BLOCK", 5) && strstr(menu, "Delta"), "triangle: the question before blocking");
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == P2P_FRIENDS_BLOCK && strstr(menu, "> Friends\n"), "cross: blocked, back to the page");
+	/* a friend: join (Join's steps next), invite, remove after a question */
+	clock_us += 6000000;
+	to_line("Bravo");
+	check(strstr(menu, "\n\x05" "Bravo: Slayer on Blood Gulch, 5 of 16\n") &&
+		strstr(menu, "Cross: join  Square: invite  Circle: back") && strstr(menu, "\n\x04Triangle: remove a friend, block a request\n"),
+		"a friend: what they do, their game's players; the buttons");
+	press(VITA_BUTTON_SQUARE);
+	check(friend_acted_action == P2P_FRIENDS_INVITE && strstr(menu, "Invited Bravo"), "square: invited");
+	press(VITA_BUTTON_TRIANGLE);
+	check(!strncmp(menu, "REMOVE FRIEND", 13) && strstr(menu, "RYQS-BU47-4JPF"), "triangle: the question before removing");
+	friend_acted_action = -1;
+	press(VITA_BUTTON_CIRCLE);
+	check(friend_acted_action == -1 && strstr(menu, "> Friends\n"), "circle keeps the friend");
+	press(VITA_BUTTON_TRIANGLE);
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == P2P_FRIENDS_REMOVE && !strcmp(friend_acted_id, "b1"), "cross: removed");
+	to_line("Bravo");
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == P2P_FRIENDS_JOIN && !strncmp(menu, "JOIN A GAME\n", 12),
+		"cross: joining the friend's game, Join's steps next (as a code's)");
+	press(VITA_BUTTON_CIRCLE);
+	friend_act_outcome = P2P_FRIENDS_OFFLINE;
+	to_line("Bravo");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "Go online first") != NULL, "a join refused: why");
+	friend_act_outcome = P2P_FRIENDS_DONE;
+	/* the request sent: cancel; the blocked: unblock */
+	to_line("A7ES-DA9D-2NMR");
+	check(strstr(menu, "Square: cancel") != NULL, "a request sent: square cancels");
+	press(VITA_BUTTON_SQUARE);
+	check(friend_acted_action == P2P_FRIENDS_CANCEL && !strcmp(friend_acted_id, "o1"), "square: cancelled");
+	to_line("Echo");
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == P2P_FRIENDS_UNBLOCK && !strcmp(friend_acted_id, "e1"), "cross: unblocked");
+	(void)line;
+	test_friend_backup();
+	press(VITA_BUTTON_CIRCLE);
+	halo_pc_menus_state = -1;
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	check(to_tab("Multiplayer") && !strstr(menu, "\nFriends\x02") && strstr(menu, "\nJoin with a code\x02"),
+		"the Xbox's menus: the code row, no Friends row");
+	/* (the session as it was) */
+	vita_settings_set("HALO_VITA_NETWORK", network_before);
+	restart_pending = 0;
+	vita_settings_load();
+	to_tab("Multiplayer");
+}
+
+/* Multiplayer > Friends > Party (p2p_party.h, the test's party): its row on
+the Friends page, the page's status, invites, members (a word each), the
+friends online to invite; cross on a friend invites, on an invite joins,
+square declines, cross on a member mutes, triangle (the leader's) removes
+after a question; Leave the party; the leader warned before joining a
+friend's game with too few open slots */
+static void add_party_member(const char *id, const char *name, int leader, int self)
+{
+	struct p2p_party_member *member = &test_party[test_party_count++];
+
+	memset(member, 0, sizeof(*member));
+	snprintf(member->id, sizeof(member->id), "%s", id);
+	snprintf(member->name, sizeof(member->name), "%s", name);
+	snprintf(member->code, sizeof(member->code), "AAAA-BBBB-CCCC");
+	member->leader = leader;
+	member->self = self;
+	member->online = 1;
+	member->is_friend = !self;
+}
+
+static void test_party_page(void)
+{
+	char network_before[16];
+
+	test_friend_count = 0;
+	test_friend("b1", P2P_FRIEND_KIND_FRIEND, "Bravo", "RYQS-BU47-4JPF", 1, 1, "Slayer on Blood Gulch");
+	test_friend("c1", P2P_FRIEND_KIND_FRIEND, "Charlie", "AAZQ-L3GC-JLTL", 1, 0, "In the menus");
+	test_party_count = 0;
+	add_party_member("a0", "Alpha", 1, 1);
+	add_party_member("d1", "Delta #K7QX", 0, 0);
+	test_party_leading = 1;
+	test_party_invite_count = 1;
+	snprintf(test_party_invites[0].id, sizeof(test_party_invites[0].id), "inv1");
+	snprintf(test_party_invites[0].name, sizeof(test_party_invites[0].name), "Echo");
+	test_party_invites[0].size = 3;
+	snprintf(network_before, sizeof(network_before), "%s", getenv("HALO_VITA_NETWORK") ? getenv("HALO_VITA_NETWORK") :
+		"wifi");
+	vita_settings_set("HALO_VITA_NETWORK", "online");
+	restart_pending = 0;
+	vita_settings_load();
+	halo_pc_menus_state = 1;
+	check(to_tab("Multiplayer") && to_line("Friends"), "the Friends row");
+	press(VITA_BUTTON_CROSS);
+	check(to_line("Party") && strstr(menu, "\nParty\x02  2 of 8  >\n") != NULL, "the Friends page's Party row: its size");
+	check(menu_fits() && menu_height_fits(), "the Friends page fits with its Party row");
+	press(VITA_BUTTON_CROSS);
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\n\x03Multiplayer > Party\n") != NULL, "cross: the Party page");
+	check(strstr(menu, "\nLeave the party\x02  >\n") && strstr(menu, "\n\x04Party: 2 of 8 (Alpha leads)\n"),
+		"Leave the party, the party's status");
+	check(strstr(menu, "\nEcho\x02  Party invite\n") && strstr(menu, "\nAlpha\x02  You, leader\n") &&
+		strstr(menu, "\nDelta #K7QX\x02  In party\n"), "the invite, the members, a word each");
+	check(strstr(menu, "\nBravo\x02  Invite\n") && strstr(menu, "\nCharlie\x02  Invite\n"), "the friends online to invite");
+	check(menu_fits() && menu_height_fits(), "the Party page fits");
+	to_line("Bravo");
+	check(strstr(menu, "Cross: invite to party") != NULL, "a friend: cross invites");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_acted, "invite b1") && strstr(menu, "Invited Bravo to your party"), "cross: invited");
+	clock_us += 6000000;
+	to_line("Echo");
+	press(VITA_BUTTON_SQUARE);
+	check(!strcmp(party_acted, "decline inv1"), "square: the invite declined");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_acted, "accept inv1"), "cross: the invite accepted");
+	clock_us += 6000000;
+	to_line("Delta #K7QX");
+	check(strstr(menu, "Cross: mute  Triangle: remove") != NULL, "a member, for the leader: mute, remove");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_acted, "mute d1"), "cross: muted");
+	press(VITA_BUTTON_TRIANGLE);
+	check(!strncmp(menu, "REMOVE FROM PARTY", 17) && strstr(menu, "Delta #K7QX"), "triangle: the question before removing");
+	party_acted[0] = 0;
+	press(VITA_BUTTON_CIRCLE);
+	check(!party_acted[0] && strstr(menu, "> Party\n"), "circle keeps the member");
+	press(VITA_BUTTON_TRIANGLE);
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_acted, "kick d1"), "cross: removed");
+	/* party chat: the newest lines, quick chat, a message typed */
+	check(strstr(menu, "\n\x04" "Delta #K7QX: ready?\n") && strstr(menu, "\n\x04" "Echo joined the party\n") &&
+		strstr(menu, "\n\x04" "Bravo: go go\n") && !strstr(menu, ": hi\n"), "the chat's three newest lines");
+	check(to_line("Quick chat") && strstr(menu, "\nQuick chat\x02< Ready! >\n"), "quick chat: its preset");
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nQuick chat\x02< Let's go >\n") != NULL, "right: the next presets");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_said, "preset 2") && strstr(menu, "Sent to your party"), "cross: the preset sent");
+	clock_us += 6000000;
+	to_line("Send a message");
+	press(VITA_BUTTON_CROSS);
+	check(ime_open_now && !strcmp(ime_title, "Party chat") && ime_maximum == P2P_PARTY_CHAT_LENGTH,
+		"Send a message: the keyboard, 120 characters");
+	snprintf(ime_typed, sizeof(ime_typed), "see you there");
+	ime_result = 1;
+	press(0);
+	check(!strcmp(party_said, "text see you there") && strstr(menu, "Sent to your party"), "the message typed: sent");
+	/* SELECT + D-pad left: the Party page at once, again: closed */
+	press(VITA_BUTTON_CIRCLE);
+	press(VITA_BUTTON_CIRCLE);
+	check(!panel_open, "the panel closed");
+	press(VITA_BUTTON_SELECT | VITA_BUTTON_LEFT);
+	check(panel_open && page == PAGE_PARTY && strstr(menu, "\n\x03Multiplayer > Party\n"), "SELECT + left: the Party page");
+	press(0);
+	press(VITA_BUTTON_SELECT | VITA_BUTTON_LEFT);
+	check(!panel_open, "SELECT + left again: closed");
+	press(0);
+	/* (in play with the in-game chat: the combo is the chat's, the game's,
+	the panel shut) */
+	halo_game_chat_active = 1;
+	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_LEFT) == 0 && !panel_open,
+		"SELECT + left in a network game: the chat's (to the game), no panel");
+	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_LEFT) == 0 && !panel_open, "held: still the game's");
+	press(0);
+	halo_game_chat_active = 0;
+	panel_begin();
+	to_tab("Multiplayer");
+	to_line("Friends");
+	press(VITA_BUTTON_CROSS);
+	to_line("Party");
+	press(VITA_BUTTON_CROSS);
+	clock_us += 6000000;
+	to_line("Leave the party");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(party_acted, "leave"), "Leave the party");
+	/* the leader warned before a friend's game with too few open slots: a
+	second press joins */
+	press(VITA_BUTTON_CIRCLE);
+	to_line("Friends");
+	press(VITA_BUTTON_CROSS);
+	test_party_count = 0;
+	add_party_member("a0", "Alpha", 1, 1);
+	add_party_member("d1", "Delta", 0, 0);
+	add_party_member("e1", "Echo", 0, 0);
+	add_party_member("f1", "Foxtrot", 0, 0);
+	add_party_member("g1", "Golf", 0, 0);
+	add_party_member("h1", "Hotel", 0, 0);
+	add_party_member("i1", "India", 0, 0);
+	add_party_member("j1", "Juliet", 0, 0);
+	add_party_member("k1", "Kilo", 0, 0);
+	add_party_member("l1", "Lima", 0, 0);
+	add_party_member("m1", "Mike", 0, 0);
+	add_party_member("n1", "November", 0, 0);
+	test_party_count = 12;
+	friend_acted_action = -1;
+	to_line("Bravo");
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == -1 && strstr(menu, "open slots"), "a friend's game with too few slots: the leader warned");
+	press(VITA_BUTTON_CROSS);
+	check(friend_acted_action == P2P_FRIENDS_JOIN, "cross again: joined anyway");
+	press(VITA_BUTTON_CIRCLE);
+	test_party_count = 0;
+	test_party_invite_count = 0;
+	halo_pc_menus_state = -1;
+	vita_settings_set("HALO_VITA_NETWORK", network_before);
+	restart_pending = 0;
+	vita_settings_load();
+	to_tab("Multiplayer");
+}
+
 static void test_multiplayer_tab(void)
 {
 	char line[128], labels[512];
@@ -999,7 +2496,7 @@ static void test_multiplayer_tab(void)
 	/* (the network this session runs: Online, from the environment; the
 	game has not said yet whether its menus have OpenCE's screens) */
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && strstr(menu, "< Online"),
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && strstr(menu, "< Online"),
 		"Multiplayer: Connection, Join with a code (Online), Modded maps; no Play page (no ad hoc room: Online)");
 	check(!strstr(menu, "Play") && !strstr(menu, "Host a game") && !strstr(menu, "Lobby name") &&
 		!strstr(menu, "Max players") && !strstr(menu, "Visibility") && !strstr(menu, "Browse public games") &&
@@ -1009,15 +2506,22 @@ static void test_multiplayer_tab(void)
 		strstr(menu, "\n\x04Online: ready") && !strstr(menu, "Online menus"),
 		"before the game says: this Vita's name, no game, internet play's line");
 	check(menu_rows() == 8 && menu_fits(), "Multiplayer: eight rows, 46 characters a line");
+	check(!strcmp(outline_of(labels, sizeof(labels), 0), "=Network|Connection|Vita and PC|Join with a code|=Bots|Bots|"
+		"=Games|Co-op players|Unseen players|Modded maps|Latency meter") && menu_height_fits(),
+		"Multiplayer: Network over Connection, Bots over Bots, Games over Co-op players ... Latency meter; it fits the "
+		"panel's height");
 	/* the offline bots: Bots on, its skill and teams rows below it, live */
 	to_line("Bots");
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|  Bot routes|  Bot playlist|Co-op players|Unseen players|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|  Bot skill|  Bot teams|  Bot vehicles|  Bot routes|  Bot playlist|Co-op players|Unseen players|Modded maps|Latency meter") &&
 		getenv("HALO_BOTS") && !strcmp(getenv("HALO_BOTS"), "3") && !strstr(menu, "Restart the game") && menu_fits(),
 		"Bots 3: Bot skill, Bot teams, Bot vehicles, Bot routes and Bot playlist below it, live");
+	check(!strcmp(outline_of(labels, sizeof(labels), 0), "=Network|Connection|Vita and PC|Join with a code|=Bots|Bots|"
+		"  Bot skill|  Bot teams|  Bot vehicles|  Bot routes|  Bot playlist|=Games|Co-op players|Unseen players|"
+		"Modded maps|Latency meter"), "Bots 3: the bot rows under the Bots heading, Games after them");
 	to_line("  Bot skill");
 	press(VITA_BUTTON_RIGHT);
 	check(getenv("HALO_BOT_SKILL") && !strcmp(getenv("HALO_BOT_SKILL"), "heroic"), "Bot skill: Normal, then Heroic");
@@ -1054,7 +2558,7 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && !strcmp(getenv("HALO_BOTS"), "0"),
 		"Bots Off: the bot rows hidden again");
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	check(strstr(menu, "\n\x04This Vita: vitauser  192.168.1.23\n") != NULL, "this Vita's address, as the others reach it");
@@ -1064,15 +2568,27 @@ static void test_multiplayer_tab(void)
 	halo_pc_menus_state = 1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay*|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && !strstr(menu, "Online menus"),
-		"the PC menus in the game: Connection and Modded maps only");
+	check(!strcmp(labels, "Connection|Vita and PC|Friends|Bots|Co-op players|Unseen players|Modded maps|Latency meter") &&
+		!strstr(menu, "Online menus") && menu_height_fits(),
+		"the PC menus in the game: Connection, Friends (in the code row's place) and Modded maps; it fits");
 	halo_pc_menus_state = -1;
 	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
 	printf("%s\n--\n", menu);
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") &&
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") &&
 		strstr(menu, "\n\x04Online menus need bitmaps.map, loc.map: README\n") && menu_fits(),
 		"the Xbox's menus (no bitmaps.map, loc.map): one line says what the online menus need; Join with a code stays");
+	/* (that line too, on the classic panel - the Halo CE menus' -: short of
+	room, the first heading, Network, gives way; the Halo 3 menus' panel
+	fits its rows to its height, every heading kept) */
+	vita_settings_set("HALO_MENU_STYLE", "classic");
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	check(menu_height_fits() && !strstr(menu, "Network") && !strncmp(menu_line(1, line, sizeof(line)), "Connection\x02", 11) &&
+		!strcmp(outline_of(labels, sizeof(labels), 1), "Bots|Games"),
+		"the classic panel with that line: Network gives way, Bots and Games stay; the tab fits its height");
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
+	game_status(SYSTEM_LINK_STATE_MENUS, 0, 0, 0);
+	check(!strcmp(outline_of(labels, sizeof(labels), 1), "Network|Bots|Games"), "the Halo 3 panel: every heading kept");
 
 	/* the hosted game's settings, as the game's Server Setup sets them
 	(vita_settings_set): applied at once and kept in settings.txt */
@@ -1081,8 +2597,8 @@ static void test_multiplayer_tab(void)
 		strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_NAME=Birch's game of\n"),
 		"Server Setup's name: printable ASCII, trimmed, 15 at most; in the environment, the listing and settings.txt");
 	vita_settings_set("HALO_NET_LOBBY_NAME", "\x01\x02   ");
-	check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "vitauser") && !strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_NAME"),
-		"nothing printable: the Vita's user name again, not saved");
+	check(!getenv("HALO_NET_LOBBY_NAME")[0] && !lobby_name[0] && !strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_NAME"),
+		"nothing printable: none (the game's own name, the profile's), not saved");
 	vita_settings_set("HALO_NET_LOBBY_NAME", "Birch's game");
 	vita_settings_set("HALO_NET_MAX_PLAYERS", "2");
 	check(!strcmp(getenv("HALO_NET_MAX_PLAYERS"), "2") && strstr(file_text(SETTINGS_FILE), "HALO_NET_MAX_PLAYERS=2\n"),
@@ -1167,24 +2683,43 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_VITA_NETWORK"), "online") && strstr(menu_line(menu_selected, line, sizeof(line)), "< Online  "),
 		"Connection: Online is the last");
+	/* (in a party: Online alone, said why) */
+	test_party_count = 3;
 	press(VITA_BUTTON_LEFT);
-	check(!strcmp(getenv("HALO_VITA_NETWORK"), "adhoc") && strstr(menu, "Restart the game"),
-		"Connection: Ad hoc asks for a restart");
+	check(!strcmp(getenv("HALO_VITA_NETWORK"), "online") && strstr(menu, "In a party: Online only (leave the party first)"),
+		"Connection in a party: Ad hoc refused, Online kept, the notice says why");
+	test_party_count = 0;
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_VITA_NETWORK"), "adhoc") && !strstr(menu, "Restart the game") && !restart_pending,
+		"Connection: Ad hoc asks for no restart (the game switches live)");
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_VITA_NETWORK"), "adhoc") && strstr(menu_line(menu_selected, line, sizeof(line)),
 		"< Ad hoc >"), "... Same Wi-Fi and back: Online offered on either side (no dev setting needed)");
 	clock_us += 5000000;
-	press(VITA_BUTTON_DOWN);
-	check(!strstr(menu, "Restart the game"), "the other lines' help again after a few seconds");
-	press(VITA_BUTTON_UP);
-	check(strstr(menu, "Restart the game") != NULL, "the Connection line still says it");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter"),
+	check(!strcmp(labels, "Connection|Ad hoc room|Join the room|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter"),
 		"Ad hoc chosen: the room's rows on the tab (the code's too, while Online runs)");
+	check(!strcmp(outline_of(labels, sizeof(labels), 0), "=Network|Connection|Ad hoc room|Join the room|Join with a code|"
+		"=Bots|Bots|=Games|Co-op players|Unseen players|Modded maps|Latency meter"),
+		"Ad hoc chosen: the room's rows under Network");
+	/* (the classic panel: nine rows and four lines - the headings give way
+	till the tab fits) */
+	vita_settings_set("HALO_MENU_STYLE", "classic");
+	clock_us += 5000000;
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_UP);
+	check(menu_height_fits() && menu_rows() == 9 && strstr(menu_line(menu_selected, line, sizeof(line)), "Connection\x02"),
+		"the classic panel, Ad hoc chosen while Online runs: the tab fits its height (headings given way), Connection "
+		"still chosen");
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
+	press(VITA_BUTTON_DOWN);
+	press(VITA_BUTTON_UP);
+	check(!strcmp(outline_of(labels, sizeof(labels), 1), "Network|Bots|Games"), "... the Halo 3 panel: every heading kept");
 	to_line("Join the room");
 	press(VITA_BUTTON_CROSS);
-	check(adhoc_connects == 0 && strstr(menu, "Restart the game for Ad hoc first"), "Join the room waits for the restart");
+	check(adhoc_connects == 0 && strstr(menu, "First the game switches to Ad hoc, at its menus"),
+		"Join the room waits for the game to switch");
 
 	/* the next start, in ad hoc play */
 	restart_pending = 0;
@@ -1196,7 +2731,7 @@ static void test_multiplayer_tab(void)
 	check(strstr(menu, "\n\x04This Vita: vitauser, ad hoc room 1\n") && strstr(menu, "\n\x04" "Ad hoc: not in a group\n"),
 		"ad hoc: this Vita's room, not in a group");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Ad hoc room|Join the room|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && menu_fits(),
+	check(!strcmp(labels, "Connection|Ad hoc room|Join the room|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && menu_fits(),
 		"ad hoc: Connection, the room, Join the room, Modded maps (no internet play rows)");
 	clock_us += 5000000;
 	to_line("Ad hoc room");
@@ -1220,6 +2755,38 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_CROSS);
 	check(adhoc_connects == 1 && strstr(menu, "In room 2's group already"), "in the group already: it says so");
 	press(VITA_BUTTON_CIRCLE);
+	/* the game's Halo 3 menus (AD HOC): the group's state each frame, and
+	their join - the dialog, as the panel's own, the panel closed - asked
+	once (system_link_shortcut.h) */
+	check(halo_adhoc_group == HALO_ADHOC_GROUP_IN, "the game's menus see the group joined");
+	adhoc_state_value = 0;
+	frame(0);
+	check(halo_adhoc_group == HALO_ADHOC_GROUP_NONE, "... and left");
+	open_panel();
+	halo_adhoc_request = HALO_ADHOC_REQUEST_JOIN;
+	frame(0);
+	check(adhoc_connects == 2 && adhoc_room == 2 && !menu_visible && halo_adhoc_request == HALO_ADHOC_REQUEST_NONE &&
+		halo_adhoc_group == HALO_ADHOC_GROUP_JOINING, "the game's menus' join: the dialog (room 2), the panel closed");
+	halo_adhoc_request = HALO_ADHOC_REQUEST_JOIN;
+	frame(0);
+	check(adhoc_connects == 2 && halo_adhoc_request == HALO_ADHOC_REQUEST_NONE, "... not again while the dialog is up");
+	adhoc_state_value = 2;
+	frame(0);
+	check(halo_adhoc_group == HALO_ADHOC_GROUP_IN, "... then in the group");
+	/* the game left Ad hoc: the group left (the Wi-Fi back), the panel's
+	running connection the game's (network_connection.c, live) */
+	halo_network_connection = HALO_NETWORK_WIFI;
+	halo_adhoc_request = HALO_ADHOC_REQUEST_LEAVE;
+	frame(0);
+	check(adhoc_state_value == 0 && halo_adhoc_request == HALO_ADHOC_REQUEST_NONE && !strcmp(running_network, "wifi") &&
+		halo_adhoc_group == HALO_ADHOC_GROUP_OFF, "the game left Ad hoc: the group left, the panel's connection Same Wi-Fi");
+	halo_network_connection = HALO_NETWORK_ADHOC;
+	frame(0);
+	check(!strcmp(running_network, "adhoc") && halo_adhoc_group == HALO_ADHOC_GROUP_NONE,
+		"... and Ad hoc again: the panel follows, not in a group");
+	adhoc_state_value = 2;
+	frame(0);
+	halo_network_connection = -1;
 
 	/* Same Wi-Fi: Connection and Modded maps */
 	vita_settings_set("HALO_VITA_NETWORK", "wifi");
@@ -1228,7 +2795,7 @@ static void test_multiplayer_tab(void)
 	open_panel();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay*|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
+	check(!strcmp(labels, "Connection|Vita and PC|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && menu_fits(), "Same Wi-Fi: Connection, Modded maps");
 	/* Latency meter (latency_meter.c): On as shipped, Off and back, live */
 	to_line("Latency meter");
 	check(strstr(menu, "\nLatency meter\x02  On >") && setting_named("HALO_LATENCY_METER") &&
@@ -1255,18 +2822,88 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_LEFT);
 	check(getenv("HALO_NET_REMOTE_LOD") && !strcmp(getenv("HALO_NET_REMOTE_LOD"), "auto"), "Unseen players Auto again: auto");
-	/* Crossplay (docs/crossplay.md): Off as shipped, On and back */
-	to_line("Crossplay");
-	check(strstr(menu, "\nCrossplay*\x02  Off >") && setting_named("HALO_CROSSPLAY") &&
-		strstr(setting_named("HALO_CROSSPLAY")->help, "play PCs (OpenCE)"), "Crossplay: Off as shipped, its help");
+	/* no Crossplay switch (docs/crossplay.md, Oct 19 2026): Browser shows
+	(all as shipped, Vita, PC) and Who can join (Vita as shipped, Vita PC -
+	the port's PC build too - and Everyone, OpenCE's players too: the owner,
+	Oct 20 2026), live: no restart */
+	check(open_page("Vita and PC") && strstr(menu, "\n\x03Multiplayer > Vita and PC\n"),
+		"Multiplayer's Vita and PC page, in the old Crossplay row's place");
+	to_line("Browser shows");
+	check(strstr(menu, "\nBrowser shows\x02  All games >") && setting_named("HALO_NET_BROWSER_FILTER") &&
+		!setting_named("HALO_NET_BROWSER_FILTER")->restart && !setting_named("HALO_CROSSPLAY") &&
+		strstr(setting_named("HALO_NET_BROWSER_FILTER")->help, "each tagged"),
+		"Browser shows: All games as shipped, live, its help; no Crossplay row");
 	press(VITA_BUTTON_RIGHT);
-	check(strstr(menu, "\nCrossplay*\x02< On  ") && getenv("HALO_CROSSPLAY") && !strcmp(getenv("HALO_CROSSPLAY"), "1"),
-		"Crossplay On: HALO_CROSSPLAY 1");
+	check(strstr(menu, "\nBrowser shows\x02< Vita games >") && getenv("HALO_NET_BROWSER_FILTER") &&
+		!strcmp(getenv("HALO_NET_BROWSER_FILTER"), "vita"), "Browser shows Vita games: HALO_NET_BROWSER_FILTER vita");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nBrowser shows\x02< PC games  ") && !strcmp(getenv("HALO_NET_BROWSER_FILTER"), "pc"),
+		"Browser shows PC games: pc");
 	press(VITA_BUTTON_LEFT);
-	check(getenv("HALO_CROSSPLAY") && !strcmp(getenv("HALO_CROSSPLAY"), "0"), "Crossplay Off again: 0");
-	/* (after a restart: the game reads it once; with it on the Vita hosts
-	nothing, Host a game and Host co-op campaign say why) */
-	check(setting_named("HALO_CROSSPLAY")->restart, "Crossplay: after a restart");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_NET_BROWSER_FILTER"), "all"), "Browser shows all games again");
+	to_line("Who can join");
+	check(strstr(menu, "\nWho can join\x02  Vita >") && !setting_named("HALO_NET_WHO_CAN_JOIN")->restart &&
+		!setting_named("HALO_NET_HOST_CROSSPLAY") && strstr(setting_named("HALO_NET_WHO_CAN_JOIN")->help, "OpenCE") &&
+		strstr(setting_named("HALO_NET_WHO_CAN_JOIN")->help, "Halo CE Vita on PC"),
+		"Who can join: Vita as shipped, live, its help (Vita PC, Everyone)");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nWho can join\x02< Vita PC >") && getenv("HALO_NET_WHO_CAN_JOIN") &&
+		!strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "vita_pc"), "Who can join Vita PC: HALO_NET_WHO_CAN_JOIN vita_pc");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nWho can join\x02< Everyone  ") && !strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "everyone"),
+		"Who can join Everyone: everyone");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "vita"), "Who can join Vita again: vita");
+	/* (OpenCE 32's mouse aim assist policy, for a game hosted for
+	everyone: network.block_mouse_aim_assist, live) */
+	to_line("PC mouse aim assist");
+	check(strstr(menu, "\nPC mouse aim assist\x02  Their choice >") &&
+		!setting_named("HALO_NET_BLOCK_MOUSE_AIM_ASSIST")->restart,
+		"PC mouse aim assist: their choice as shipped, live");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nPC mouse aim assist\x02< Off  ") && getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST") &&
+		!strcmp(getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST"), "true"), "PC mouse aim assist Off: HALO_NET_BLOCK_MOUSE_AIM_ASSIST true");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST"), "false"), "PC mouse aim assist their choice again: false");
+	/* (bots.online: on this page with the other rows of the games hosted
+	online, not on the tab - the tab is a screen's height; while it fills,
+	the bots' skill, vehicles and routes under it, the tab's own rows) */
+	to_line("Online bots");
+	{
+		const char *aim = strstr(menu, "\nPC mouse aim assist\x02"), *bots = strstr(menu, "\nOnline bots\x02  Full >");
+
+		check(aim && bots && aim < bots && !setting_named("HALO_BOTS_ONLINE")->restart &&
+			strstr(menu, "\n  Bot skill\x02") && strstr(menu, "\n  Bot vehicles\x02") &&
+			strstr(menu, "\n  Bot routes\x02") && bots < strstr(menu, "\n  Bot skill\x02") &&
+			!strstr(menu, "Bot teams") && !strstr(menu, "Bot playlist") && menu_fits() && menu_height_fits(),
+			"Online bots: on Vita and PC under PC mouse aim assist, Full as shipped, live; skill, vehicles and "
+			"routes under it; the page fits");
+	}
+	to_line("  Bot skill");
+	{
+		int skill = choice_of("HALO_BOT_SKILL");
+
+		press(skill < 3 ? VITA_BUTTON_RIGHT : VITA_BUTTON_LEFT);
+		check(choice_of("HALO_BOT_SKILL") == (skill < 3 ? skill + 1 : skill - 1) && getenv("HALO_BOT_SKILL"),
+			"Online bots' skill set from this page");
+		press(skill < 3 ? VITA_BUTTON_LEFT : VITA_BUTTON_RIGHT);
+		check(choice_of("HALO_BOT_SKILL") == skill, "the skill as it was again");
+	}
+	to_line("Online bots");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nOnline bots\x02< Off >") && getenv("HALO_BOTS_ONLINE") &&
+		!strcmp(getenv("HALO_BOTS_ONLINE"), "off") && !strstr(menu, "Bot skill") && !strstr(menu, "Bot routes"),
+		"Online bots Off: HALO_BOTS_ONLINE off, the bot rows gone from the page");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_BOTS_ONLINE"), "full") && strstr(menu, "\n  Bot skill\x02"),
+		"Online bots Full again: full, the bot rows back");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "*Multiplayer") && !strstr(menu, "Online bots") &&
+		(choice_of("HALO_BOTS") != 0 || !strstr(menu, "Bot skill")) && menu_height_fits(),
+		"the Multiplayer tab: no Online bots row, the bot rows only with Bots on; it fits");
+	/* (hosting is never blocked by the wire now: Host a game opens as ever) */
 	{
 		char saved_network[sizeof(running_network)];
 		int saved_action = guide_action;
@@ -1275,14 +2912,10 @@ static void test_multiplayer_tab(void)
 		snprintf(running_network, sizeof(running_network), "%s", chosen_network());
 		test_crossplay_wire = 1;
 		guide_action = ACTION_HOST;
-		check(guide_blocker() && strstr(guide_blocker(), "Crossplay is on"), "Crossplay on: Host a game says to turn it off");
+		check(!guide_blocker() || !strstr(guide_blocker(), "Crossplay"), "a crossplay game had: Host a game not blocked");
 		guide_action = ACTION_CAMPAIGN;
-		check(guide_blocker() && strstr(guide_blocker(), "Crossplay is on"), "Crossplay on: Host co-op campaign too");
-		guide_action = ACTION_JOIN;
-		check(!guide_blocker() || !strstr(guide_blocker(), "Crossplay"), "Crossplay on: Join a game is not blocked by it");
+		check(!guide_blocker() || !strstr(guide_blocker(), "Crossplay"), "nor Host co-op campaign");
 		test_crossplay_wire = 0;
-		guide_action = ACTION_HOST;
-		check(!guide_blocker() || !strstr(guide_blocker(), "Crossplay"), "Crossplay off: Host a game is not blocked by it");
 		guide_action = saved_action;
 		snprintf(running_network, sizeof(running_network), "%s", saved_network);
 	}
@@ -1307,6 +2940,222 @@ static int menu_lines_fit(void);
 
 /* the public games with Crossplay on (crossplay_guard.h, docs/crossplay.md
 6): badges; a large or co-op PC game asked about once */
+/* Multiplayer's Forge page (Forge and File Share for the Halo CE menus too):
+the map (those in the maps folder), its map variants, Start Forge asking the
+game; File Share's list, square deleting one after a question */
+static void test_forge_page(void)
+{
+	char line[128];
+
+	test_forge_count = 0;
+	test_forge_entry("bloodgulch", "gulch_a.hmv", "Gulch A", 3, 0);
+	test_forge_entry("bloodgulch", "gulch_b.hmv", "Gulch B", 12, 0);
+	test_forge_entry("bloodgulch", "bad.hmv", NULL, 0, 1);
+	test_forge_entry("chillout", "cold.hmv", "Cold", 5, 0);
+	open_panel();
+	check(to_tab("Game") && !strstr(menu, "\nForge"), "Menu style Halo 3: no Forge row (the Halo 3 main menu has FORGE)");
+	vita_settings_set("HALO_MENU_STYLE", "classic");
+	press(VITA_BUTTON_R);
+	press(VITA_BUTTON_L);
+	check(to_tab("Game") && strstr(menu, "\nMenus\x02  Halo CE  >\nForge and File Share\x02  4 variants  >") &&
+		menu_height_fits(), "Menu style Halo CE: Forge and File Share under Menus (Interface, not Updates), how many map "
+		"variants; the tab fits");
+	check(open_page("Forge") && strstr(menu, "\n\x03Game > Forge and File Share\n"), "the Forge page");
+	printf("%s\n--\n", menu);
+	check(!strcmp(menu_line(2, line, sizeof(line)), "Map\x02  Blood Gulch") &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Map variant\x02  None >") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Network\x02  Local >") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Start Forge\x02  >") && !menu_line(6, line, sizeof(line))[0] &&
+		!strcmp(menu_line(7, line, sizeof(line)), "\x08" "File Share") &&
+		strstr(menu, "\nGulch A\x02  Blood Gulch\n") && strstr(menu, "\nDamaged file\x02  Blood Gulch\n") &&
+		strstr(menu, "\nCold\x02  Chill Out\n") && menu_fits() && menu_height_fits(),
+		"Forge: Map (Blood Gulch first), Map variant (None), Network (Local), Start Forge; File Share's map variants, each fits");
+	check(menu_selected == 2 && strstr(menu, "\n\x05The multiplayer map to edit\n") &&
+		strstr(menu, "Left/right: change"), "Map chosen first, its help");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nMap\x02  Chill Out\n") != NULL, "right: Chill Out (Battle Creek is not in the maps folder)");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nMap\x02  Blood Gulch\n") != NULL, "right again: Blood Gulch, past Battle Creek");
+	to_line("Map variant");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nMap variant\x02< Gulch A >\n") != NULL, "Map variant right: Gulch A");
+	press(VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nMap variant\x02< Gulch B  \n") != NULL, "right: Gulch B, the last (the damaged one is not offered)");
+	press(VITA_BUTTON_LEFT);
+	/* Network: Local, or the connection the game runs (a network Forge game) */
+	to_line("Network");
+	check(strstr(menu, "\n\x05Local: alone. Network: friends forge with you (8, never listed online)\n") != NULL, "Network's help");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nNetwork\x02< Same Wi-Fi  \n") != NULL, "Network right: the network (Same Wi-Fi, the game's connection)");
+	press(VITA_BUTTON_LEFT);
+	check(strstr(menu, "\nNetwork\x02  Local >\n") != NULL, "Network left: Local again");
+	/* in a level: not started */
+	halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE] = SYSTEM_LINK_STATE_PLAYING;
+	to_line("Start Forge");
+	check(strstr(menu, "\n\x05" "A local game: you fly as the monitor and place objects\n") && strstr(menu, "Cross: select"),
+		"Start Forge's help");
+	press(VITA_BUTTON_CROSS);
+	check(menu_visible && halo_system_link_request == SYSTEM_LINK_REQUEST_NONE &&
+		strstr(menu, "Leave the level first: Start, then Quit"), "in a level: Start Forge says to leave it first");
+	halo_multiplayer_status[SYSTEM_LINK_STATUS_STATE] = SYSTEM_LINK_STATE_MENUS;
+	press(VITA_BUTTON_CROSS);
+	check(!menu_visible && halo_system_link_request == SYSTEM_LINK_REQUEST_FORGE && halo_forge_request_map == 1 &&
+		!strcmp(halo_forge_request_variant, "gulch_a.hmv") && !halo_forge_request_network,
+		"at the menus: the game asked for Forge on Blood Gulch, Gulch A, a local game; closed");
+	halo_system_link_request = SYSTEM_LINK_REQUEST_NONE;
+	frame(0);
+	/* File Share: delete, asked first */
+	open_panel();
+	check(to_tab("Game") && strstr(menu, "\nForge and File Share\x02  4 variants  >") && open_page("Forge"), "the Forge page again");
+	to_line("Cold");
+	check(strstr(menu, "\n\x05" "5 objects, saved 2026-10-18 12:00\n") && strstr(menu, "Square: delete"),
+		"a map variant's help and buttons");
+	press(VITA_BUTTON_SQUARE);
+	check(!strncmp(menu, "DELETE MAP VARIANT", 18) && strstr(menu, "Cold  (Chill Out)"), "square asks before deleting");
+	press(VITA_BUTTON_CIRCLE);
+	check(test_forge_count == 4 && strstr(menu, "\nCold\x02"), "circle keeps it");
+	press(VITA_BUTTON_SQUARE);
+	press(VITA_BUTTON_CROSS);
+	check(test_forge_deleted == 1 && test_forge_count == 3 && !strstr(menu, "\nCold\x02") && strstr(menu, "Deleted \"Cold\"."),
+		"cross deletes it");
+	to_line("Damaged file");
+	clock_us += 20000000;
+	frame(0);
+	check(strstr(menu, "Damaged: it can't be used. Square deletes it") != NULL, "a damaged one: its help");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\nForge and File Share\x02  3 variants  >") != NULL, "back on Game: three now");
+	/* in a Forge game: Clear dead AI and Clear all AI (asked first) */
+	check(open_page("Forge") && !strstr(menu, "Clear dead AI"), "no Forge game: no Clear AI rows");
+	press(VITA_BUTTON_CIRCLE);
+	test_forge_playing = 1;
+	test_forge_alive = 5;
+	test_forge_dead = 3;
+	check(open_page("Forge") && strstr(menu, "\nStart Forge\x02  >\nClear dead AI\x02  3  >\nClear all AI\x02  8  >\n") &&
+		menu_fits() && menu_height_fits(), "a Forge game: Clear dead AI (3) and Clear all AI (8) under Start Forge; it fits");
+	to_line("Clear dead AI");
+	check(strstr(menu, "\n\x05" "Dead AI you placed, out of the layout: room for more\n") && strstr(menu, "Cross: select"),
+		"Clear dead AI's help");
+	press(VITA_BUTTON_CROSS);
+	check(test_forge_cleared == 0 && strstr(menu, "3 dead AI cleared"), "cross: the dead cleared, said");
+	test_forge_cleared = -1;
+	test_forge_dead = 0;
+	to_line("Clear all AI");
+	press(VITA_BUTTON_CROSS);
+	check(!strncmp(menu, "CLEAR ALL AI", 12) && strstr(menu, "5 alive and 0 dead") && test_forge_cleared == -1,
+		"Clear all AI asks first");
+	press(VITA_BUTTON_CIRCLE);
+	check(test_forge_cleared == -1 && strstr(menu, "\nClear all AI\x02"), "circle keeps them");
+	press(VITA_BUTTON_CROSS);
+	press(VITA_BUTTON_CROSS);
+	check(test_forge_cleared == 1 && strstr(menu, "All AI cleared"), "cross, cross: all cleared, said");
+	test_forge_playing = 0;
+	test_forge_cleared = -1;
+	press(VITA_BUTTON_CIRCLE);
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(!menu_visible, "closed");
+}
+
+/* Game > Appearance's Player model (port/linux/game/player_models.c): shown
+while the maps folder's Custom Edition maps have a player model, the Spartan
+first, the profile's choice; changed with left and right, for the game to
+keep for the profile, never in settings.txt; the page fits */
+static void test_player_model_row(void)
+{
+	char line[128];
+
+	if (menu_visible)
+		open_panel();
+	test_model_count = 1;
+	open_panel();
+	check(to_tab("Game") && open_page("Appearance") && !strstr(menu, "\nPlayer model"),
+		"no player model found: no Player model row");
+	/* (the models off, 1.1.1's default - the owner, RC4: the row kept, N/A,
+	not changed) */
+	open_panel();
+	test_models_enabled = 0;
+	test_model_choice = -2;
+	open_panel();
+	{
+		char const *row;
+
+		check(to_tab("Game") && open_page("Appearance") && (row = strstr(menu, "\nPlayer model\x02")) != NULL &&
+			strstr(row, "N/A") && strstr(row, "N/A") < strchr(row + 1, '\n'),
+			"the models off: the Player model row shown, N/A");
+	}
+	check(to_line("Player model"), "the N/A row is chosen");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_RIGHT);
+	check(test_model_choice == -2, "the models off: left and right change nothing");
+	test_models_enabled = 1;
+	open_panel();
+	test_model_count = 3;
+	test_model_chosen = 2;
+	test_model_choice = -2;
+	open_panel();
+	check(to_tab("Game") && open_page("Appearance") && strstr(menu, "\nPlayer model\x02< Covenant V Marines Beta 5  \n") &&
+		menu_height_fits(),
+		"two found: Player model, the profile's choice (the last), its map's own name; the page fits");
+	check(to_line("Player model"), "the row is chosen");
+	press(VITA_BUTTON_LEFT);
+	check(test_model_choice == 1 && strstr(menu, "\nPlayer model\x02< Spartan (Extinction) >\n"),
+		"left: Spartan (Extinction), given to the game for the profile");
+	press(VITA_BUTTON_LEFT);
+	check(test_model_choice == 0 && strstr(menu, "\nPlayer model\x02  Spartan >\n"), "left again: the Spartan");
+	press(VITA_BUTTON_LEFT);
+	check(test_model_choice == 0 && strstr(menu, "\nPlayer model\x02  Spartan >\n"), "no further left than the Spartan");
+	press(VITA_BUTTON_RIGHT);
+	check(test_model_choice == 1, "right: Spartan (Extinction) again");
+	open_panel();
+	check(!strstr(file_text(SETTINGS_FILE), "HALO_PLAYER_MODEL"), "the choice is the profile's: never in settings.txt");
+	(void)line;
+	test_model_count = 1;
+	test_model_chosen = 0;
+}
+
+/* Game > Appearance (RC2, the owner: "Why is the armor color and visor
+color there?" of the two rows on Game's Menus page): the profile's armour
+and visor colours (player_cosmetics.c) on a page of their own, the player's
+look, its help in plain words; changed with left and right, for the game to
+keep in the profile, never in settings.txt; the Game tab's row shows the
+armour colour */
+static void test_appearance_page(void)
+{
+	char line[128];
+
+	if (menu_visible)
+		open_panel();
+	test_color_chosen = test_visor_chosen = 0;
+	open_panel();
+	check(to_tab("Game") && strstr(menu, "\nAppearance\x02  RANDOM  >\n") && to_line("Appearance") &&
+		strstr(menu, "\n\x05Your armor and visor colors\n") && menu_fits(),
+		"Game: Appearance, the armor color beside it, its help");
+	check(open_page("Appearance") && strstr(menu, "\n\x03" "Game > Appearance\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Armor color\x02  RANDOM >") &&
+		strstr(menu, "\nVisor color\x02  GOLD >\n") &&
+		strstr(menu, "\n\x05Players on older versions see the closest standard color\n") && menu_fits() &&
+		menu_height_fits(), "Appearance: Armor color (chosen first) and Visor color, the help in plain words");
+	press(VITA_BUTTON_RIGHT);
+	check(test_color_chosen == 1 && strstr(menu, "\nArmor color\x02< SKY >\n"), "Armor color right: given to the game");
+	press(VITA_BUTTON_DOWN);
+	check(strstr(menu, "\n\x05Players on older versions see the standard gold\n") != NULL, "Visor color: its help");
+	press(VITA_BUTTON_RIGHT);
+	check(test_visor_chosen == 1 && strstr(menu, "\nVisor color\x02< BLUE >\n"), "Visor color right: given to the game");
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "\t*Game|") && strstr(menu, "\nAppearance\x02  SKY  >\n") &&
+		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Appearance\x02  SKY  >"),
+		"circle: back on Game, on Appearance, the new armor color beside it");
+	check(!strstr(file_text(SETTINGS_FILE), "HALO_ARMOR_COLOR") && !strstr(file_text(SETTINGS_FILE), "HALO_VISOR_COLOR"),
+		"the colors are the profile's: never in settings.txt");
+	to_tab("Game");
+	check(open_page("Menus") && !strstr(menu, "Armor color") && !strstr(menu, "Visor color"), "Menus: no colors");
+	press(VITA_BUTTON_CIRCLE);
+	test_color_chosen = test_visor_chosen = 0;
+	open_panel();
+}
+
 static void test_crossplay_browser(void)
 {
 	int saved_screen = screen;
@@ -1318,12 +3167,12 @@ static void test_crossplay_browser(void)
 	browse_count = browse_selected = 0;
 	browse_refresh();
 	show();
-	check(browse_count == 3 && strstr(menu, "\npc host         20/128 Blood Gulch  PC EXP\n") &&
-		strstr(menu, "\npc coop          2/16 Halo         PC COOP EXP\n") &&
-		strstr(menu, "\npc server        2/16 Blood Gulch  SRV\n") &&
-		strstr(menu, "\nExperimental: over 16 players may lag\n") && menu_lines_fit(),
-		"Crossplay: the public games badged: PC or SRV, EXP (more than 16), COOP EXP; the chosen one's in words");
-	if (!strstr(menu, "pc host         20/128"))
+	check(browse_count == 3 && strstr(menu, "\nOPENCE pc host      20/128 Blood Gulc EXP\n") &&
+		strstr(menu, "\nPC     pc coop       2/16 Halo       EXP\n") &&
+		strstr(menu, "\nCHUPA  pc server     2/16 Blood Gulc SRV\n") &&
+		strstr(menu, "\nHosted on PC (OpenCE)\n") && strstr(menu, "\nExperimental: over 16 players may lag\n") &&
+		menu_lines_fit(), "the public games tagged: their PC build (OPENCE, CHUPA, PC), SRV, EXP; the chosen one's in words");
+	if (!strstr(menu, "pc host      20/128"))
 		printf("%s\n--\n", menu);
 	/* a PC co-op game: experimental, asked about once (no: not joined; yes:
 	joined, remembered) */
@@ -1331,7 +3180,8 @@ static void test_crossplay_browser(void)
 	message_pending = 0;
 	browse_selected = 1;
 	show();
-	check(strstr(menu, "\nPC co-op: experimental on the Vita\n") != NULL, "a PC co-op game: experimental, it says");
+	check(strstr(menu, "\nPC co-op: experimental on the Vita\n") != NULL && strstr(menu, "\nHosted on PC\n"),
+		"a PC co-op game: experimental, it says; hosted on PC (its build not told)");
 	browse_input(VITA_BUTTON_CROSS);
 	show();
 	check(screen == SCREEN_LARGE && !joined_id[0] && !message_pending && strstr(menu, "PC co-op game") &&
@@ -1401,7 +3251,7 @@ static void test_online_rows(void)
 	vita_settings_load();
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter") && !strstr(menu, "Ad hoc dialog"),
 		"Online: the code row back (the ad hoc dialog stays in Dev)");
 
 	/* a code typed with the D-pad: B (up from A) on the first, 9 (down
@@ -1445,72 +3295,54 @@ static void test_online_rows(void)
 	hosting_listing = P2P_LOBBY_HOSTING_NONE;
 	hosting = 0;
 
-	/* Crossplay on (the wire the game runs): no code row, codes join Vita
-	games (docs/crossplay.md T11); the public games are PCs' */
+	/* hosting a game for Vitas and PC: the code (Vitas) and the OpenCE
+	join link (PC players), in lines that fit (docs/crossplay.md T16) */
+	hosting = 1;
 	test_crossplay_wire = 1;
+	clock_us += 5000000;
+	frame(0);
+	check(strstr(menu, "\n\x04Your code: QX7K-M2PA") && strstr(menu, "\n\x04PC players (OpenCE) join with:\n\x04halo://join/") &&
+		menu_fits(), "hosting for Vitas and PC: the code, and the PC players' join link in two lines that fit");
+	hosting = 0;
+	clock_us += 5000000;
+	frame(0);
+	check(!strstr(menu, "join with:"), "not hosting: no link");
+	/* a crossplay game had: the code row and the public games as ever */
 	to_tab("Dev");
 	to_tab("Multiplayer");
 	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay*|Bots|Co-op players|Unseen players|Modded maps|Latency meter"),
-		"Crossplay on: no Join with a code row (codes join Vita games)");
+	check(!strcmp(labels, "Connection|Vita and PC|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter"),
+		"a crossplay game: Join with a code still (codes join Vitas' games on either wire)");
+	test_pc_games = 1;
 	test_crossplay_browser();
+	test_pc_games = 0;
 	test_crossplay_wire = 0;
-	to_tab("Dev");
-	to_tab("Multiplayer");
-	rows_of(labels, sizeof(labels), &info);
-	check(!strcmp(labels, "Connection*|Crossplay*|Join with a code|Bots|Co-op players|Unseen players|Modded maps|Latency meter"),
-		"Crossplay off: Join with a code back");
 	to_tab("Dev");
 	to_line("Save report");
 }
 
-/* the Graphics tab and its pages (the owner's layout, 1.1.0-beta.5): the
-tab's six rows and four pages - Screen, First person, Detail, Performance -
-each page's rows in order; every row with its variable, values, default and
-restart as before the regrouping (the profiles' rows: test_bruno_rows,
-test_particles_row), nothing else on them */
-static void test_graphics_layout(void)
+/* the tabs' rows in order (Halo Online's settings' arrangement, the owner's,
+Oct 18 2026; the headings over them: test_headings): each with its variable,
+values, default and restart as before the regrouping, nothing else on the
+tab; Video's two pages, Detail and Performance, with theirs (the profiles'
+rows: test_bruno_rows, test_particles_row). A page's row has no variable
+and names the page it opens; an action's, its action */
+struct layout_row
 {
-	static const struct
-	{
-		int page;
-		const char *label, *variable, *values;
-		int restart;
-		const char *shipped;
-	} rows[] = {
-		{ TAB_GRAPHICS, "Profile", "HALO_PROFILE", "performance|balanced|quality|custom", 0, "balanced" },
-		{ TAB_GRAPHICS, "Render resolution", "HALO_RENDER_SCALE", "1|0.875|0.75|0.625|0.5|dynamic", 0, "dynamic" },
-		{ TAB_GRAPHICS, "Dynamic minimum", "HALO_DYNAMIC_RES_MIN", "0.5|0.625|0.75", 0, "0.625" },
-		{ TAB_GRAPHICS, "Frame limit", "HALO_FRAME_CAP", "30|60|0", 0, "30" },
-		{ TAB_GRAPHICS, "Frame interpolation", "HALO_INTERPOLATION", "false|true", 0, "false" },
-		{ TAB_GRAPHICS, "FPS counter", "HALO_FRAMERATE_COUNTER", "0|1", 0, "0" },
-		{ TAB_GRAPHICS, "Screen", NULL, NULL, 0, NULL },
-		{ PAGE_GRAPHICS_SCREEN, "Aspect ratio", "HALO_DISPLAY_WIDTH", "848|640", 0, "848" },
-		{ PAGE_GRAPHICS_SCREEN, "Upscale filter", "HALO_UPSCALE_FILTER", "0|1", 0, "0" },
-		{ TAB_GRAPHICS, "First person", NULL, NULL, 0, NULL },
-		{ PAGE_GRAPHICS_FIRST_PERSON, "First-person legs", "HALO_FIRST_PERSON_LEGS", "0|1", 0, "1" },
-		{ PAGE_GRAPHICS_FIRST_PERSON, "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", "1|0", 0, "1" },
-		{ TAB_GRAPHICS, "Detail", NULL, NULL, 0, NULL },
-		{ PAGE_GRAPHICS_DETAIL, "Model detail", "HALO_MODEL_LOD_SCALE", "1|0.75|0.5|0.35", 0, "0.75" },
-		{ PAGE_GRAPHICS_DETAIL, "Hide distant objects", "HALO_MIN_OBJECT_PIXELS", "0|4|8|12", 0, "8" },
-		{ PAGE_GRAPHICS_DETAIL, "Object shadows", "HALO_VITA_SHADOWS", "2|1|0", 0, "0" },
-		{ PAGE_GRAPHICS_DETAIL, "Dynamic lights", "HALO_MAX_SCENE_LIGHTS", "0|8|4|2", 0, "4" },
-		{ PAGE_GRAPHICS_DETAIL, "Effects quality", "HALO_VITA_EFFECTS_QUALITY", "2|1|0", 0, "2" },
-		{ PAGE_GRAPHICS_DETAIL, "Sun rays", "HALO_SUN_RAYS", "1|0", 0, "0" },
-		{ PAGE_GRAPHICS_DETAIL, "Tiny decals", "HALO_DECAL_MIN_PIXELS", "0|2", 0, "0" },
-		{ PAGE_GRAPHICS_DETAIL, "Particles", "HALO_PARTICLE_BUDGET", "full|reduced|low", 0, "reduced" },
-		{ PAGE_GRAPHICS_DETAIL, "Particle density", "HALO_PARTICLE_RENDER_DIVISOR", "1|2|3|4", 0, "1" },
-		{ TAB_GRAPHICS, "Performance", NULL, NULL, 0, NULL },
-		{ PAGE_GRAPHICS_PERFORMANCE, "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", "1|2|4", 0, "4" },
-		{ PAGE_GRAPHICS_PERFORMANCE, "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", "1|2|3", 0, "3" },
-		{ PAGE_GRAPHICS_PERFORMANCE, "AI think rate", "HALO_AI_THINK_DIVISOR", "1|0|2|3", 0, "0" },
-		{ PAGE_GRAPHICS_PERFORMANCE, "Fourth core helpers", "HALO_CPU3_AUX", "0|1|2", 1, "2" },
-	};
-	static const int opened[] = { PAGE_GRAPHICS_SCREEN, PAGE_GRAPHICS_FIRST_PERSON, PAGE_GRAPHICS_DETAIL,
-		PAGE_GRAPHICS_PERFORMANCE };
-	static const char *const names[] = { "Screen", "First person", "Detail", "Performance" };
-	int count = (int)(sizeof(rows) / sizeof(rows[0]));
-	int index, row = 0, all = 1, pages_opened = 0;
+	int page;
+	const char *label, *variable, *values;
+	int restart;
+	const char *shipped;
+	/* (a row with no variable: ACTION_PAGE and the page it opens, or the
+	action) */
+	int action, opens;
+};
+
+/* the rows on tab `tab_index` (and, with `with_pages`, on the pages it
+opens), in settings[]'s order, are `rows` */
+static int layout_is(int tab_index, int with_pages, const struct layout_row *rows, int count)
+{
+	int index, row = 0, all = 1;
 
 	for (index = 0; index < SETTING_COUNT; index++)
 	{
@@ -1518,27 +3350,25 @@ static void test_graphics_layout(void)
 		char values[160];
 		int choice, length = 0;
 
-		if (setting->page != TAB_GRAPHICS && pages[setting->page].tab != TAB_GRAPHICS)
+		if (pages[setting->page].tab != tab_index || (!with_pages && setting->page != tab_index))
 			continue;
 		if (row >= count || strcmp(setting->label, rows[row].label) != 0 || setting->page != rows[row].page)
 		{
-			printf("graphics row %d: %s (page %d)\n", row, setting->label, setting->page);
+			printf("%s row %d: %s (page %d)\n", pages[tab_index].name, row, setting->label, setting->page);
 			all = 0;
 			row++;
 			continue;
 		}
 		if (!rows[row].variable)
 		{
-			/* (a page's row) */
-			if (setting->kind != KIND_ACTION || setting->action != ACTION_PAGE || setting->variable ||
-				pages_opened >= 4 || setting->opens != opened[pages_opened] ||
-				strcmp(pages[setting->opens].name, names[pages_opened]) != 0 ||
-				pages[setting->opens].tab != TAB_GRAPHICS || !setting->help)
+			/* (a page's row, or an action's) */
+			if (setting->kind != KIND_ACTION || setting->action != rows[row].action || setting->variable ||
+				!setting->help || (rows[row].action == ACTION_PAGE && (setting->opens != rows[row].opens ||
+				pages[setting->opens].tab != tab_index)))
 			{
-				printf("graphics page row: %s\n", setting->label);
+				printf("%s action or page row: %s\n", pages[tab_index].name, setting->label);
 				all = 0;
 			}
-			pages_opened++;
 			row++;
 			continue;
 		}
@@ -1550,19 +3380,320 @@ static void test_graphics_layout(void)
 			strcmp(values, rows[row].values) != 0 || setting->restart != rows[row].restart || setting->dev ||
 			strcmp(setting->values[shipped_choice[index]], rows[row].shipped) != 0)
 		{
-			printf("graphics row: %s (%s, %s, default %s)\n", setting->label, setting->variable ? setting->variable : "-",
-				values, setting->values[shipped_choice[index]]);
+			printf("%s row: %s (%s, %s, default %s)\n", pages[tab_index].name, setting->label,
+				setting->variable ? setting->variable : "-", values, setting->values[shipped_choice[index]]);
 			all = 0;
 		}
 		row++;
 	}
-	check(all && row == count && pages_opened == 4,
-		"Graphics: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, FPS counter; "
-		"Screen (Aspect ratio, Upscale filter), First person (First-person legs, Smooth weapon motion), Detail "
-		"(Model detail ... Particles, Particle density), Performance (Scenery updates, Object lighting, AI think "
-		"rate, Fourth core helpers*): each row's variable, values, default and restart as before");
+	if (row != count)
+		printf("%s: %d rows, not %d\n", pages[tab_index].name, row, count);
+	return all && row == count;
+}
+
+static void test_tab_layouts(void)
+{
+	/* (the Update channel a build starts on: a pre-release's Experimental) */
+	const char *channel = update_build_is_prerelease(HALO_VITA_VERSION) ? "experimental" : "stable";
+	char languages[64];
+	const struct layout_row game[] = {
+		/* (Halo 3's menus as shipped from 1.1.1: the owner's) */
+		{ TAB_GAME, "Menus", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_MENUS },
+		{ PAGE_MENUS, "Menu style", "HALO_MENU_STYLE", "classic|halo3|online|original", 0, "halo3" },
+		/* (shown with Menu style Halo 3) */
+		{ PAGE_MENUS, "Carnage report", "HALO_CARNAGE_REPORT", "classic|halo3", 0, "halo3" },
+		{ PAGE_MENUS, "Scoreboard", "HALO_SCOREBOARD", "classic|halo3", 0, "halo3" },
+		/* (shown with Menu style Online) */
+		{ PAGE_MENUS, "Menu background", "HALO_MENU_BACKDROP", "0|1", 0, "1" },
+		/* (shown with Menu style Halo CE: the original by default) */
+		{ PAGE_MENUS, "Carnage report", "HALO_CLASSIC_CARNAGE_REPORT", "classic|halo3", 0, "classic" },
+		{ PAGE_MENUS, "Scoreboard", "HALO_CLASSIC_SCOREBOARD", "classic|halo3", 0, "classic" },
+		/* (Forge and File Share, shown with Menu style Halo CE: under Menus) */
+		{ TAB_GAME, "Forge and File Share", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_FORGE },
+		{ TAB_GAME, "Button icons", "HALO_BUTTON_ICONS", "xbox|playstation", 0,
+			VITA_BUTTON_ICONS_DEFAULT ? "playstation" : "xbox" },
+		{ TAB_GAME, "Language", "HALO_LANGUAGE", languages, 0, "auto" },
+		{ TAB_GAME, "FPS counter", "HALO_FRAMERATE_COUNTER", "0|1", 0, "0" },
+		{ TAB_GAME, "First-person legs", "HALO_FIRST_PERSON_LEGS", "0|1", 0, "1" },
+		{ TAB_GAME, "Smooth weapon motion", "HALO_INTERPOLATE_FIRST_PERSON", "1|0", 0, "1" },
+		/* (the player's look on a page of its own - RC2: the colours were on
+		Menus -: the model, shown while the maps folder has a Custom Edition
+		player model; the profile's armour and visor colours,
+		player_cosmetics.c; the flame, shown to a listed tester alone:
+		p2p_flame_listed) */
+		{ TAB_GAME, "Appearance", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_APPEARANCE },
+		{ PAGE_APPEARANCE, "Player model", "HALO_PLAYER_MODEL", "0", 0, "0" },
+		{ PAGE_APPEARANCE, "Armor color", "HALO_ARMOR_COLOR", "0", 0, "0" },
+		{ PAGE_APPEARANCE, "Visor color", "HALO_VISOR_COLOR", "0", 0, "0" },
+		{ PAGE_APPEARANCE, "Flaming helmet", "HALO_FLAMING_HELMET", "false|true", 0, "true" },
+		{ TAB_GAME, "Check for updates", NULL, NULL, 0, NULL, ACTION_UPDATE_CHECK },
+		{ TAB_GAME, "Update channel", "HALO_UPDATE_CHANNEL", "experimental|stable", 0, channel },
+		{ TAB_GAME, "Show dev settings", "HALO_DEV_SETTINGS", "0|1", 0, "0" },
+	};
+	static const struct layout_row controls[] = {
+		{ TAB_CONTROLS, "Look sensitivity", "XV_LOOK_SENS", "50|75|100|125|150|200", 0, "100" },
+		{ TAB_CONTROLS, "Invert look", "XV_INVERT_Y", "0|1", 0, "0" },
+		{ TAB_CONTROLS, "Stick deadzone", "XV_DEADZONE", "0|5|10|15", 0, "0" },
+		{ TAB_CONTROLS, "Crouch", "HALO_CROUCH_TOGGLE", "1|0", 0, "1" },
+		{ TAB_CONTROLS, "Button layout", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_BUTTONS },
+		{ TAB_CONTROLS, "Reset controls", NULL, NULL, 0, NULL, ACTION_RESET_CONTROLS },
+		{ TAB_CONTROLS, "Gyro aiming", "HALO_GYRO", "off|on|zoomed|hold", 0, "off" },
+		{ TAB_CONTROLS, "Gyro settings", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_GYRO },
+		{ TAB_CONTROLS, "Rear touch guard", "HALO_TOUCH_REAR_GUARD", "off|light|normal|strong", 0, "normal" },
+		{ TAB_CONTROLS, "Touch zones", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_TOUCH },
+	};
+	static const struct layout_row video[] = {
+		{ TAB_GRAPHICS, "Profile", "HALO_PROFILE", "performance|balanced|quality|custom", 0, "balanced" },
+		{ TAB_GRAPHICS, "Render resolution", "HALO_RENDER_SCALE", "1|0.875|0.75|0.625|0.5|dynamic", 0, "dynamic" },
+		{ TAB_GRAPHICS, "Dynamic minimum", "HALO_DYNAMIC_RES_MIN", "0.5|0.625|0.75", 0, "0.625" },
+		{ TAB_GRAPHICS, "Frame limit", "HALO_FRAME_CAP", "30|60|0", 0, "30" },
+		{ TAB_GRAPHICS, "Frame interpolation", "HALO_INTERPOLATION", "false|true", 0, "false" },
+		{ TAB_GRAPHICS, "Aspect ratio", "HALO_DISPLAY_WIDTH", "848|640", 0, "848" },
+		{ TAB_GRAPHICS, "Field of view", "HALO_FIELD_OF_VIEW", "70|75|80|85|90|95|100", 0, "70" },
+		{ TAB_GRAPHICS, "Upscale filter", "HALO_UPSCALE_FILTER", "0|1", 0, "0" },
+		{ TAB_GRAPHICS, "Sharp interface", "HALO_SHARP_UI", "1|0", 0, "1" },
+		{ TAB_GRAPHICS, "Brightness", "HALO_BRIGHTNESS", "0|1|2|3|4|5|6|7|8|9|10", 0, "5" },
+		{ TAB_GRAPHICS, "Detail", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_GRAPHICS_DETAIL },
+		{ TAB_GRAPHICS, "Performance", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_GRAPHICS_PERFORMANCE },
+		{ PAGE_GRAPHICS_DETAIL, "Model detail", "HALO_MODEL_LOD_SCALE", "1|0.75|0.5|0.35", 0, "0.75" },
+		{ PAGE_GRAPHICS_DETAIL, "Hide distant objects", "HALO_MIN_OBJECT_PIXELS", "0|4|8|12", 0, "8" },
+		{ PAGE_GRAPHICS_DETAIL, "Object shadows", "HALO_VITA_SHADOWS", "2|1|0", 0, "0" },
+		{ PAGE_GRAPHICS_DETAIL, "Dynamic lights", "HALO_MAX_SCENE_LIGHTS", "0|8|4|2", 0, "4" },
+		{ PAGE_GRAPHICS_DETAIL, "Effects quality", "HALO_VITA_EFFECTS_QUALITY", "2|1|0", 0, "2" },
+		{ PAGE_GRAPHICS_DETAIL, "Sun rays", "HALO_SUN_RAYS", "1|0", 0, "0" },
+		{ PAGE_GRAPHICS_DETAIL, "Tiny decals", "HALO_DECAL_MIN_PIXELS", "0|2", 0, "0" },
+		{ PAGE_GRAPHICS_DETAIL, "Particles", "HALO_PARTICLE_BUDGET", "full|reduced|low", 0, "reduced" },
+		{ PAGE_GRAPHICS_DETAIL, "Particle density", "HALO_PARTICLE_RENDER_DIVISOR", "1|2|3|4", 0, "1" },
+		{ PAGE_GRAPHICS_DETAIL, "Ragdolls", "HALO_RAGDOLLS", "0|1", 0, "1" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "Scenery updates", "HALO_SCENERY_UPDATE_DIVISOR", "1|2|4", 0, "4" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "Object lighting", "HALO_LIGHTING_REFRESH_DIVISOR", "1|2|3", 0, "3" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "AI think rate", "HALO_AI_THINK_DIVISOR", "1|0|2|3", 0, "0" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "Fourth core helpers", "HALO_CPU3_AUX", "0|1|2", 1, "2" },
+		{ PAGE_GRAPHICS_PERFORMANCE, "Battery saver in menus", "HALO_CLOCK_GOVERNOR", "1|0", 0, "1" },
+	};
+	static const struct layout_row sound[] = {
+		/* (shown with Menu style ElDewrito) */
+		{ TAB_AUDIO, "Menu music", "HALO_MENU_MUSIC", "100|70|50|40|30|20|0", 0, "30" },
+		{ TAB_AUDIO, "Sound voices", "HALO_SOUND_CHANNELS", "16|24|32|0", 1, "0" },
+		{ TAB_AUDIO, "Sound occlusion", "HALO_SOUND_OBSTRUCTION_TICKS", "1|3|6", 0, "3" },
+		{ TAB_AUDIO, "Sound updates", "HALO_SOUND_MANAGER_DIVISOR", "1|2|3", 0, "2" },
+	};
+	int index, length = snprintf(languages, sizeof(languages), "auto|en");
+
+	/* (the Language row's choices: Automatic, English, then each language
+	file's code) */
+	for (index = 1; index < lang_count(); index++)
+		length += snprintf(languages + length, sizeof(languages) - length, "|%s", lang_code(index));
+	check(TAB_GAME == 0 && TAB_CONTROLS == 1 && TAB_GRAPHICS == 2 && TAB_AUDIO == 3 && TAB_MULTIPLAYER == 4 &&
+		TAB_DEV == 5 && TAB_COUNT == 6 && !strcmp(pages[TAB_GAME].name, "Game") &&
+		!strcmp(pages[TAB_CONTROLS].name, "Controls") && !strcmp(pages[TAB_GRAPHICS].name, "Video") &&
+		!strcmp(pages[TAB_AUDIO].name, "Sound") && !strcmp(pages[TAB_MULTIPLAYER].name, "Multiplayer") &&
+		!strcmp(pages[TAB_DEV].name, "Dev"), "the tabs in order: Game, Controls, Video, Sound, Multiplayer, Dev");
+	check(layout_is(TAB_GAME, 1, game, (int)(sizeof(game) / sizeof(game[0]))),
+		"Game: Menus (Menu style, Carnage report, Scoreboard), Button icons, Language, FPS counter; First-person legs, Smooth weapon "
+		"motion, Appearance (Player model, Armor color, Visor color, Flaming helmet); Check for updates, Update channel, "
+		"Show dev settings: each row's variable, values, default and restart as before");
+	check(layout_is(TAB_CONTROLS, 0, controls, (int)(sizeof(controls) / sizeof(controls[0]))),
+		"Controls: Look sensitivity, Invert look, Stick deadzone; Crouch, Button layout, Reset controls; Gyro aiming, "
+		"Gyro settings; Rear touch guard, Touch zones: each row's variable, values, default and restart as before");
+	check(layout_is(TAB_GRAPHICS, 1, video, (int)(sizeof(video) / sizeof(video[0]))),
+		"Video: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, Aspect ratio, Field of "
+		"view (70), Upscale filter, Sharp interface (on), Detail, Performance; Detail (Model detail ... Particles, Particle density, Ragdolls), Performance "
+		"(Scenery updates, Object lighting, AI think rate, Fourth core helpers*, Battery saver in menus): each row's "
+		"variable, values, default "
+		"and restart as before");
+	check(layout_is(TAB_AUDIO, 1, sound, (int)(sizeof(sound) / sizeof(sound[0]))),
+		"Sound: Menu music (ElDewrito), Sound voices*, Sound occlusion, Sound updates (Language on Game): as before");
+	{
+		/* (the Controls tab's pages: their rows only theirs) */
+		int buttons = 0, touch = 0, gyro = 0, other = 0;
+
+		for (index = 0; index < SETTING_COUNT; index++)
+			if (pages[settings[index].page].tab == TAB_CONTROLS && settings[index].page != TAB_CONTROLS)
+			{
+				buttons += settings[index].page == PAGE_BUTTONS && !strncmp(settings[index].variable, "HALO_XBOX_", 10);
+				touch += settings[index].page == PAGE_TOUCH && !strncmp(settings[index].variable, "HALO_TOUCH_", 11);
+				gyro += settings[index].page == PAGE_GYRO && !strncmp(settings[index].variable, "HALO_GYRO_", 10);
+				other += settings[index].page != PAGE_BUTTONS && settings[index].page != PAGE_TOUCH &&
+					settings[index].page != PAGE_GYRO;
+			}
+		check(buttons == 11 && touch == 6 && gyro == 5 && !other && setting_named("HALO_BUTTON_ICONS")->page == TAB_GAME,
+			"Controls' pages: Button layout the eleven Xbox buttons (Button icons on Game), Touch zones the six zones, "
+			"Gyro settings the gyro's five");
+	}
+	{
+		/* (the old layout's names: no page or tab has them) */
+		int old = 0;
+
+		for (index = 0; index < PAGE_COUNT; index++)
+			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
+				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
+				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 18 &&
+			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
+			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
+			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
+			!strcmp(pages[PAGE_MAPS].name, "Modded maps") && !strcmp(pages[PAGE_DEV_AB].name, "A/B switches") &&
+			!strcmp(pages[PAGE_FORGE].name, "Forge and File Share") && !strcmp(pages[PAGE_MODS].name, "Mod manager") &&
+			!strcmp(pages[PAGE_FRIENDS].name, "Friends") && !strcmp(pages[PAGE_PARTY].name, "Party") &&
+			!strcmp(pages[PAGE_CROSSPLAY].name, "Vita and PC") && !strcmp(pages[PAGE_PLAYERS].name, "Players") &&
+			!strcmp(pages[PAGE_INFECTION].name, "Infection") && !strcmp(pages[PAGE_MENUS].name, "Menus") &&
+			!strcmp(pages[PAGE_CHAT].name, "Chat") && !strcmp(pages[PAGE_APPEARANCE].name, "Appearance") &&
+			pages[PAGE_APPEARANCE].tab == TAB_GAME,
+			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, Vita and PC, A/B "
+			"switches, Forge and File Share, Mod manager, Friends, Party, Players, Infection, Menus, Chat, Appearance (Game's; no "
+			"Screen, First person or Advanced page; no General, Graphics or Audio tab)");
+	}
+	{
+		/* (Infection's page: its six rows, on it alone, each default the
+		game's own, infection.c's infection_settings_default and
+		port_config.c's) */
+		static const struct { const char *variable, *value; } rows[] = {
+			{ "HALO_INFECTION_ZOMBIES", "8" }, { "HALO_INFECTION_SPEED", "115" }, { "HALO_INFECTION_TIME", "6" },
+			{ "HALO_INFECTION_RESPAWN", "3" }, { "HALO_INFECTION_SHIELDS", "1" }, { "HALO_INFECTION_TOUGH", "0" },
+		};
+		int good = 1, row, on_page = 0;
+
+		for (row = 0; row < (int)(sizeof(rows) / sizeof(rows[0])); row++)
+		{
+			struct setting *setting = setting_named(rows[row].variable);
+
+			good &= setting && setting->page == PAGE_INFECTION &&
+				!strcmp(setting->values[setting->choice], rows[row].value);
+		}
+		for (index = 0; index < SETTING_COUNT; index++)
+			on_page += settings[index].page == PAGE_INFECTION;
+		check(good && on_page == 6 && pages[PAGE_INFECTION].tab == TAB_MULTIPLAYER,
+			"Infection: First zombies 1 per 8, Zombie speed 115%, Round time 6 minutes, Zombie respawn 3 s, shields On, "
+			"Tough zombies Off, on its page alone");
+	}
 	check(settings[0].variable && !strcmp(settings[0].variable, "HALO_PROFILE") && !strcmp(settings[1].variable, "HALO_RENDER_SCALE") &&
 		!strcmp(settings[2].variable, "HALO_DYNAMIC_RES_MIN"), "Profile still settings[0], Render resolution and its minimum after it");
+}
+
+/* the headings over a tab's rows (Halo Online's, headings[]): each above
+the row it names, on that row's tab, a line of its own marked '\x08' in the
+panel's text (vita_gxm.c draws it smaller: 22 pixels); never chosen, up and
+down step over them; none on Sound, Dev or a page a row opens */
+static void test_headings(void)
+{
+	static const struct
+	{
+		const char *tab, *outline;
+	} tabs[] = {
+		{ "Game", "=Interface|Menus|Button icons|Language|FPS counter|=First person|First-person legs|"
+			"Smooth weapon motion|Appearance|=Updates|Check for updates|Update channel|Show dev settings" },
+		{ "Controls", "=Look|Look sensitivity|Invert look|Stick deadzone|=Buttons|Crouch|Button layout|Reset controls|"
+			"=Gyro|Gyro aiming|Gyro settings|=Touch|Rear touch guard|Touch zones" },
+		{ "Video", "=Quality|Profile|Render resolution|Dynamic minimum|Frame limit|Frame interpolation|=Screen|"
+			"Aspect ratio|Field of view|Upscale filter|Sharp interface|Brightness|Detail|Performance" },
+		{ "Sound", "Sound voices*|Sound occlusion|Sound updates" },
+		{ "Multiplayer", "=Network|Connection|Vita and PC|Join with a code|=Bots|Bots|=Games|Co-op players|"
+			"Unseen players|Modded maps|Latency meter" },
+	};
+	char outline[512], line[128];
+	int index, all = 1, steps = 1, fits = 1, marked = 1;
+
+	/* (the table: each heading over a row of its tab) */
+	for (index = 0; index < (int)(sizeof(headings) / sizeof(headings[0])); index++)
+	{
+		int setting, rows = 0;
+
+		for (setting = 0; setting < SETTING_COUNT; setting++)
+			rows += settings[setting].page == headings[index].page && !strcmp(settings[setting].label, headings[index].row);
+		if (rows != 1 || headings[index].page >= TAB_COUNT || headings[index].page == TAB_AUDIO ||
+			headings[index].page == TAB_DEV || !headings[index].name[0])
+		{
+			printf("heading %s: over %s, page %d\n", headings[index].name, headings[index].row, headings[index].page);
+			all = 0;
+		}
+	}
+	check(all && (int)(sizeof(headings) / sizeof(headings[0])) == 12,
+		"the headings: twelve, each over one row of its tab (none on Sound, Dev or a page a row opens)");
+	/* each tab: its headings and rows in order, each heading a line of its
+	own, the page fitting the panel; down and up through it */
+	all = 1;
+	for (index = 0; index < (int)(sizeof(tabs) / sizeof(tabs[0])); index++)
+	{
+		const char *at;
+
+		if (!to_tab(tabs[index].tab) || strcmp(outline_of(outline, sizeof(outline), 0), tabs[index].outline) != 0)
+		{
+			printf("%s: %s\n%s\n--\n", tabs[index].tab, outline, menu);
+			all = 0;
+		}
+		for (at = strstr(menu, "\n\x08"); at; at = strstr(at + 1, "\n\x08"))
+		{
+			int length = (int)strcspn(at + 1, "\n");
+
+			/* (a name, not a row: no value; a row under it) */
+			if (length < 2 || memchr(at + 1, '\x02', (size_t)length) || !at[1 + length] ||
+				!memchr(at + 2 + length, '\x02', strcspn(at + 2 + length, "\n")))
+				marked = 0;
+		}
+		if (!menu_fits() || !menu_height_fits())
+			fits = 0;
+		if (!steps_skip_headings())
+		{
+			printf("(%s)\n", tabs[index].tab);
+			steps = 0;
+		}
+	}
+	check(all, "each tab's headings and rows in order: Game (Interface, First person, Updates), Controls (Look, Buttons, "
+		"Gyro, Touch), Video (Quality, Screen, More), Sound (none), Multiplayer (Network, Bots, Games)");
+	check(marked, "a heading: '\\n\\x08' and its name, a line of its own with no value, a row right under it");
+	check(fits, "each tab with its headings: every line fits, and the page the panel's height");
+	check(steps, "down and up through each tab: every row chosen once each way, never a heading");
+	/* (the tester's flaming helmet: a listed tester's Appearance page has it,
+	under the colours; the Game tab is as anyone's, Appearance opening it) */
+	test_flame_listed = 1;
+	check(to_tab("Game") && !strcmp(outline_of(outline, sizeof(outline), 0), "=Interface|Menus|Button icons|Language|"
+		"FPS counter|=First person|First-person legs|Smooth weapon motion|Appearance|=Updates|Check for updates|"
+		"Update channel|Show dev settings") && menu_fits() && menu_height_fits() && steps_skip_headings() &&
+		!strstr(menu, "Flaming helmet"), "a listed tester: the Game tab as anyone's (no Flaming helmet row on it)");
+	check(open_page("Appearance") && !strcmp(outline_of(outline, sizeof(outline), 0), "Armor color|Visor color|Flaming helmet") &&
+		(strstr(menu, "\nFlaming helmet\x02< On  ") || strstr(menu, "\nFlaming helmet\x02  On >") ||
+		strstr(menu, "\nFlaming helmet\x02< On >")) && menu_fits() && menu_height_fits(),
+		"a listed tester: Flaming helmet on Appearance, under the colours, On by default");
+	press(VITA_BUTTON_CIRCLE);
+	test_flame_listed = 0;
+	check(to_tab("Controls") && to_tab("Game") && open_page("Appearance") && !strstr(menu, "Flaming helmet"),
+		"not a listed tester: no Flaming helmet row");
+	press(VITA_BUTTON_CIRCLE);
+	to_tab("Game");
+	check(strstr(menu, "\t*Game|") && strstr(menu, "\n\x08Interface\nMenus\x02") &&
+		strstr(menu, "\nFPS counter\x02  Off >\n\x08" "First person\nFirst-person legs\x02") &&
+		strstr(menu, "\nSmooth weapon motion\x02  On >\nAppearance\x02  RANDOM  >\n\x08Updates\nCheck for updates\x02"),
+		"Game's text: Interface, First person and Updates each on a line of its own, marked '\\x08', over its rows");
+	{
+		/* (the lines a page has: a heading's passive, right before its row) */
+		struct line lines[MAXIMUM_LINES];
+		int count, at, good = 1, found = 0;
+
+		to_tab("Controls");
+		count = page_lines(lines);
+		for (at = 0; at < count; at++)
+			if (lines[at].type == LINE_HEADING)
+			{
+				found++;
+				if (!line_passive(&lines[at]) || at + 1 >= count || lines[at + 1].type != LINE_SETTING)
+					good = 0;
+			}
+		check(good && found == 4 && lines[0].type == LINE_HEADING && !strcmp(lines[0].text, "Look") &&
+			lines[4].type == LINE_HEADING && !strcmp(lines[4].text, "Buttons"),
+			"Controls' lines: four headings (Look first), each not chosen (passive), each right before its row");
+		/* (a heading remembered as the line chosen - a row hidden since -:
+		the panel chooses a row instead) */
+		page_selected[page] = 4;
+		show();
+		check(page_selected[page] == 1 && menu_selected == 2 &&
+			!strncmp(menu_line(menu_selected, line, sizeof(line)), "Look sensitivity\x02", 17),
+			"a heading remembered as the chosen line: the panel chooses the first row, never the heading");
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("XV_LOOK_SENS"), "125"), "... and a press changes that row");
+		press(VITA_BUTTON_LEFT);
+	}
+	to_tab("Game");
 }
 
 /* every settings variable 1.0.3 had (its settings.txt) is still a row,
@@ -1570,7 +3701,9 @@ with the values it saved, but the co-op pair (gone: co-op is hosted from
 the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
-First-person legs; the Play page's two texts) */
+First-person legs, MCC mods, PC map vehicles, Sharp interface, Player model,
+PC mouse aim assist, Carnage report, Field of view, Chat, Chat filter, Online
+bots, Scoreboard; the Play page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -1583,7 +3716,7 @@ static void test_variables_kept(void)
 		"HALO_XBOX_A", "HALO_XBOX_B", "HALO_XBOX_X", "HALO_XBOX_Y", "HALO_XBOX_BLACK", "HALO_XBOX_WHITE",
 		"HALO_XBOX_LEFT_TRIGGER", "HALO_XBOX_RIGHT_TRIGGER", "HALO_XBOX_LEFT_STICK", "HALO_XBOX_RIGHT_STICK",
 		"HALO_XBOX_BACK", "HALO_DEV_SETTINGS", "HALO_GYRO", "HALO_GYRO_BUTTON", "HALO_GYRO_SENS",
-		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_VITA_NETWORK", "HALO_CROSSPLAY",
+		"HALO_GYRO_INVERT_Y", "HALO_GYRO_TURN", "HALO_GYRO_ASSIST", "HALO_MENU_STYLE", "HALO_VITA_NETWORK", "HALO_NET_BROWSER_FILTER", "HALO_NET_WHO_CAN_JOIN",
 		"HALO_ADHOC_ROOM", "HALO_CUSTOM_EDITION", PERFORMANCE_LOG, "HALO_HANG_CRASH",
 		"XV_FPS", "HALO_DEBUG_CAMERA", "HALO_GXM_WCLAMP", "HALO_TARGET_CHAIN_MIN_SIZE", "HALO_FRAME_PHASE_LOCK",
 		"HALO_GXM_RTT_SYNC", "HALO_ADHOC_DIALOG_MODE", "HALO_SUN_RAYS",
@@ -1592,7 +3725,15 @@ static void test_variables_kept(void)
 		"HALO_VITA_SHADOWS", "HALO_MAX_SCENE_LIGHTS", "HALO_VITA_EFFECTS_QUALITY", "HALO_PARTICLE_RENDER_DIVISOR",
 		"HALO_AI_THINK_DIVISOR", "HALO_SOUND_MANAGER_DIVISOR", "HALO_INTERPOLATION", "HALO_LATENCY_METER", "HALO_BOTS", "HALO_BOT_SKILL", "HALO_BOT_TEAMS",
 		"HALO_BOT_VEHICLES", "HALO_BOT_ROUTES", "HALO_BOT_PLAYLIST", "HALO_NET_COOP_PLAYERS", "HALO_NET_REMOTE_LOD",
-		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS",
+		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
+		"HALO_MCC_MODS", "HALO_CONTENT_ROOT", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL", "HALO_ARMOR_COLOR", "HALO_VISOR_COLOR",
+		"HALO_FRIENDS_APPEAR_OFFLINE",
+		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
+		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
+		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
+		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_BRIGHTNESS", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",
+		"HALO_CHAT", "HALO_CHAT_FILTER", "HALO_BOTS_ONLINE", "HALO_SCOREBOARD", "HALO_MENU_BACKDROP", "HALO_MENU_MUSIC",
+		"HALO_CLASSIC_CARNAGE_REPORT", "HALO_CLASSIC_SCOREBOARD",
 	};
 	int index, all = 1, choices = 0;
 
@@ -1682,7 +3823,7 @@ static int profile_rows_are(int profile, char *report, int size)
 	return 1;
 }
 
-/* Bruno Santana's settings (Graphics > Detail and Performance, and Audio's
+/* Bruno Santana's settings (Video > Detail and Performance, and Sound's
 Sound updates):
 his variables and values, so his build's settings.txt carries over; each in
 the profiles (1.1.0-beta.4's redone Balanced and Quality: Balanced without
@@ -1779,13 +3920,13 @@ static void test_bruno_rows(void)
 	vita_settings_set("HALO_PROFILE", "balanced");
 }
 
-/* Fourth core helpers (Graphics > Performance; vita_fourth_core.c): Bruno
+/* Fourth core helpers (Video > Performance; vita_fourth_core.c): Bruno
 Santana's levels and variable (HALO_CPU3_AUX: Off, Audio, All async), Off
 by default and in no profile, a level saved and in the environment the next
 start reads, a restart's row, the profile left as it was; his build's
 settings.txt line read; back Off */
 /* Particles (the particle budget, port/linux/game/particle_budget.c): on
-Graphics > Detail, Full, Reduced, Low; Reduced by default and in every profile
+Video > Detail, Full, Reduced, Low; Reduced by default and in every profile
 (Full cost Quality 16% more CPU in a 15-bot Chill Out fight); live (no restart), saved as a word; a change by
 hand makes the profile Custom */
 static void test_particles_row(void)
@@ -1803,7 +3944,7 @@ static void test_particles_row(void)
 		!strcmp(row->values[0], "full") && !strcmp(row->values[1], "reduced") && !strcmp(row->values[2], "low") &&
 		!strcmp(row->values[shipped_choice[row - settings]], "reduced") && getenv("HALO_PARTICLE_BUDGET") &&
 		!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced"),
-		"Particles: on Graphics > Detail, Full, Reduced, Low (full, reduced, low); Reduced by default, in the environment, live");
+		"Particles: on Video > Detail, Full, Reduced, Low (full, reduced, low); Reduced by default, in the environment, live");
 	check(in_profile >= 0 && !strcmp(profile_values[0][in_profile], "reduced") &&
 		!strcmp(profile_values[1][in_profile], "reduced") && !strcmp(profile_values[2][in_profile], "reduced"),
 		"Particles in the profiles: Reduced in all three");
@@ -1833,7 +3974,9 @@ static void test_particles_row(void)
 	vita_settings_set("HALO_PROFILE", "balanced");
 	check(!strcmp(getenv("HALO_PARTICLE_BUDGET"), "reduced") && !strcmp(settings[0].names[settings[0].choice], "Balanced"),
 		"Balanced: Reduced particles");
-	while (menu_selected > 2)
+	/* (back up to the page's first row: bounded, so a row gone cannot
+	loop) */
+	for (index = 0; index < 20 && menu_selected > 2; index++)
 		press(VITA_BUTTON_UP);
 }
 
@@ -1842,22 +3985,22 @@ static void test_fourth_core(void)
 	struct setting *row = setting_named("HALO_CPU3_AUX");
 	int profile = settings[0].choice;
 	char line[128];
+	int index;
 
 	check(row && row->page == PAGE_GRAPHICS_PERFORMANCE && row->restart && row->count == 3 &&
 		!strcmp(row->values[row->choice], "2") && !strcmp(row->names[0], "Off") && !strcmp(row->names[1], "Audio") &&
 		!strcmp(row->names[2], "All async") && !strcmp(row->values[1], "1") && !strcmp(row->values[2], "2") &&
 		getenv("HALO_CPU3_AUX") && !strcmp(getenv("HALO_CPU3_AUX"), "2"),
-		"Fourth core helpers: on Graphics > Performance, Off, Audio, All async; All async by default (HALO_CPU3_AUX=2: without CapUnlocker the helpers stay where they are), after a restart");
+		"Fourth core helpers: on Video > Performance, Off, Audio, All async; All async by default (HALO_CPU3_AUX=2: without CapUnlocker the helpers stay where they are), after a restart");
 	check(strstr(row->help, "Needs CapUnlocker") && strstr(row->help, "background work"), "Fourth core helpers: the help names the plugin (the README's words)");
 	{
-		int index, in_profile = 0;
+		int in_profile = 0;
 
 		for (index = 0; index < PROFILE_ROWS; index++)
 			in_profile |= !strcmp(profile_variables[index], "HALO_CPU3_AUX");
 		check(!in_profile, "no profile sets Fourth core helpers");
 	}
-	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers", 19) != 0 && menu_selected < 13)
-		press(VITA_BUTTON_DOWN);
+	check(to_line("Fourth core helpers"), "Fourth core helpers: its row on Performance");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_CPU3_AUX"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_CPU3_AUX=1\n") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Fourth core helpers*\x02< Audio >") &&
@@ -1877,7 +4020,7 @@ static void test_fourth_core(void)
 	press(VITA_BUTTON_RIGHT);
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_CPU3_AUX"), "2"), "Fourth core helpers back to All async");
-	while (menu_selected > 2)
+	for (index = 0; index < 20 && menu_selected > 2; index++)
 		press(VITA_BUTTON_UP);
 	/* (as after the restart it asked for: the rows after this one say
 	what they do, not that a restart waits) */
@@ -1916,19 +4059,51 @@ static void test_game_text_input(void)
 		"typing: a password's keyboard, cancelled");
 	halo_text_input_state = HALO_TEXT_INPUT_IDLE;
 	check(frame(0) == 0, "typing: then the game has the pad again");
+	/* the Halo 3 main menu's Start asks for the panel ("port settings panel") */
+	halo_settings_panel_request = 1;
+	check(frame(VITA_BUTTON_START) == 1 && panel_open && menu_visible && !halo_settings_panel_request,
+		"settings request: the game's menus open the panel, the request taken");
+	check(frame(VITA_BUTTON_START) == 1 && panel_open, "settings request: the Start still held does not close it");
+	frame(0);
+	check(frame(VITA_BUTTON_CIRCLE) == 1 && !panel_open, "settings request: circle closes it as ever");
+	frame(0);
+	check(frame(0) == 0, "settings request: then the game has the pad again");
+	/* the Halo 3 multiplayer pause's PARTY asks for the Party page ("port h3 mp pause party"); the
+	tab and page it was on put back after (the panel opens where it was left) */
+	{
+		int was_tab = tab, was_page = page, was_screen = screen;
+
+		halo_settings_panel_request = HALO_SETTINGS_PANEL_PARTY;
+		check(frame(0) == 1 && panel_open && page == PAGE_PARTY && strstr(menu, "\n\x03Multiplayer > Party\n") &&
+			!halo_settings_panel_request, "settings request: the multiplayer pause's PARTY opens the Party page");
+		frame(0);
+		press(VITA_BUTTON_CIRCLE);
+		press(VITA_BUTTON_CIRCLE);
+		check(!panel_open, "settings request: circle twice closes the Party page's panel");
+		check(frame(0) == 0, "settings request: then the game has the pad again (the Party page)");
+		tab = was_tab;
+		page = was_page;
+		screen = was_screen;
+	}
 }
 
 static void test_button_icons(void)
 {
+	/* (the row as shipped: VITA_BUTTON_ICONS_DEFAULT's choice) */
+	const char *shipped_row = VITA_BUTTON_ICONS_DEFAULT ? "Button icons\x02< PlayStation  " : "Button icons\x02  Xbox >";
 	struct vita_controls_config config;
 	char diagram[16], line[128];
 	unsigned long generation;
 	int longest;
 
 	open_panel();
-	to_tab("General");
-	check(open_page("Button layout") && to_line("Button icons") &&
-		strstr(menu, "\n\x05Halo's prompts: Xbox icons, or the Vita's\n"), "Button icons: its row and help");
+	to_tab("Game");
+	check(to_line("Button icons") && !strcmp(menu_line(menu_selected, line, sizeof(line)), shipped_row) &&
+		strstr(menu, "\n\x05Halo's prompts: Xbox icons, or the Vita's\n"),
+		"Button icons: its row on Game, under Interface (as shipped: VITA_BUTTON_ICONS_DEFAULT), its help");
+	/* (from Xbox on, whichever is the default) */
+	if (VITA_BUTTON_ICONS_DEFAULT)
+		press(VITA_BUTTON_LEFT);
 	generation = halo_settings_generation;
 	press(VITA_BUTTON_RIGHT);
 	printf("%s\n--\n", menu);
@@ -1939,31 +4114,33 @@ static void test_button_icons(void)
 	check(!strstr(menu, "Button icons*"), "Button icons: live, no *");
 	/* (the panel keeps the Xbox controller's names with either: the icons
 	change in the game only) */
-	check(strstr(menu, "\nA\x02  Cross >") && strstr(menu, "\nBlack\x02") && !strstr(menu, "\nJump\x02") &&
-		menu_rows() == 12 && menu_fits(), "PlayStation: the Button layout's rows keep the Xbox's names, each fits");
+	to_tab("Controls");
+	check(open_page("Button layout") && strstr(menu, "\nA (jump)\x02  Cross >") && strstr(menu, "\nBlack (grenade type)\x02") &&
+		!strstr(menu, "\nJump\x02") && menu_rows() == 11 && menu_fits(),
+		"PlayStation: the Button layout's rows keep the Xbox's names, each fits");
 	/* a remap: the game's icon follows (vita_controls.c) */
 	to_line("X");
 	press(VITA_BUTTON_RIGHT);
 	vita_controls_config_load(&config);
-	check(!strcmp(getenv("HALO_XBOX_X"), "triangle") && strstr(menu, "\nX\x02< Triangle >") &&
+	check(!strcmp(getenv("HALO_XBOX_X"), "triangle") && strstr(menu, "\nX (reload, action)\x02< Triangle >") &&
 		vita_button_glyph(&config, 2, 0) == VITA_GLYPH_TRIANGLE && vita_button_glyph(&config, 2, 1) == VITA_GLYPH_SQUARE,
 		"X on Triangle: the game's X icon shows Triangle in play (Square in the menus)");
 	press(VITA_BUTTON_LEFT);
 	press(VITA_BUTTON_CIRCLE);
 	check(strstr(menu, "\nButton layout\x02  As shipped  >") != NULL,
-		"back on General: Button icons is not the layout (As shipped)");
-	check(strstr(menu, "\nCrouch\x02") != NULL, "General: Crouch keeps its label");
+		"back on Controls: Button icons is not the layout (As shipped)");
+	check(strstr(menu, "\nCrouch\x02") != NULL, "Controls: Crouch keeps its label");
 
 	/* the touch zones: the Xbox's names too */
 	check(open_page("Touch zones") && to_line("Rear touch left"), "Touch zones opens");
 	press(VITA_BUTTON_RIGHT);
 	menu_lines(&longest, diagram, sizeof(diagram));
-	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "\nRear touch left\x02< A >") && menu_fits(),
+	check(!strcmp(getenv("HALO_TOUCH_REAR_LEFT"), "a") && strstr(menu, "\nRear touch left\x02< A (jump) >") && menu_fits(),
 		"PlayStation: a zone's choice keeps the Xbox's name");
 	vita_controls_config_load(&config);
 	check(vita_button_glyph(&config, 0, 0) == VITA_GLYPH_CROSS, "A on Cross and a zone: Cross shows");
 	press(VITA_BUTTON_LEFT);
-	to_tab("General");
+	to_tab("Controls");
 
 	/* the guide's steps: the menus' Xbox buttons, and which Vita button each is */
 	to_tab("Multiplayer");
@@ -1976,17 +4153,19 @@ static void test_button_icons(void)
 	press(VITA_BUTTON_CIRCLE);
 
 	/* Reset controls keeps it; Xbox again puts the Xbox's terms back */
-	to_tab("General");
-	check(open_page("Advanced") && to_line("Reset controls"), "Advanced: Reset controls");
+	to_tab("Controls");
+	check(to_line("Reset controls"), "Controls: Reset controls");
 	press(VITA_BUTTON_CROSS);
 	check(!strcmp(getenv("HALO_BUTTON_ICONS"), "playstation"), "Reset controls keeps the Button icons");
-	to_tab("General");
-	check(open_page("Button layout") && to_line("Button icons"), "Button layout again");
+	to_tab("Game");
+	check(to_line("Button icons"), "Game: Button icons again");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_BUTTON_ICONS"), "xbox") && !vita_button_icons_playstation() &&
-		strstr(menu, "\nA\x02  Cross >") && strstr(menu, "\nBlack\x02") && !strstr(menu, "\nJump\x02") &&
-		strstr(file_text(SETTINGS_FILE), "HALO_BUTTON_ICONS=xbox\n"), "Xbox again: the Xbox's names");
-	(void)line;
+		strstr(menu, "\nButton icons\x02  Xbox >") && strstr(file_text(SETTINGS_FILE), "HALO_BUTTON_ICONS=xbox\n"),
+		"Button icons Xbox again: saved");
+	to_tab("Controls");
+	check(open_page("Button layout") && strstr(menu, "\nA (jump)\x02  Cross >") && strstr(menu, "\nBlack (grenade type)\x02") &&
+		!strstr(menu, "\nJump\x02"), "Xbox again: the Xbox's names");
 	press(VITA_BUTTON_CIRCLE);
 	press(VITA_BUTTON_CIRCLE);
 }
@@ -2004,11 +4183,11 @@ the pages' names included. */
 
 /* the tab bar fits between L and R at the narrower spacing the renderer
 falls back to (vita_gxm.c menu_tabs: a name and a character, 8 pixels
-between, in the 880 - 104 pixels there are) */
+between two, in the 880 - 104 pixels from the first tab to the R) */
 static int tab_bar_fits(void)
 {
 	const char *at = menu + 1;
-	int width = 0;
+	int width = -8;
 
 	while (*at && *at != '\n')
 	{
@@ -2042,7 +4221,8 @@ static int menu_lines_fit(void)
 	return 1;
 }
 
-/* each page, each line of it chosen, each value of each row: fits */
+/* each page, each line of it chosen, each value of each row: fits; a
+heading chosen is not (the panel chooses a row instead) */
 static int every_page_fits(int *shown)
 {
 	int fits = 1, page_index;
@@ -2063,6 +4243,17 @@ static int every_page_fits(int *shown)
 			(*shown)++;
 			if (!menu_fits() || !tab_bar_fits() || !menu_height_fits())
 				fits = 0;
+			if (lines[line].type == LINE_HEADING)
+			{
+				char chosen[128];
+
+				menu_line(menu_selected, chosen, sizeof(chosen));
+				if (page_selected[page] == line || chosen[0] == '\x08' || !strchr(chosen, '\x02'))
+				{
+					printf("a heading chosen: %s, page %d\n", lines[line].text, page);
+					fits = 0;
+				}
+			}
 			if (lines[line].type == LINE_SETTING && settings[lines[line].index].kind == KIND_CHOICE)
 			{
 				struct setting *setting = &settings[lines[line].index];
@@ -2083,7 +4274,7 @@ static int every_page_fits(int *shown)
 			}
 		}
 	}
-	tab = page = TAB_GRAPHICS;
+	tab = page = TAB_GAME;
 	return fits;
 }
 
@@ -2112,36 +4303,72 @@ static void test_languages(void)
 	tab = page = TAB_GRAPHICS;
 	show();
 	printf("%s\n--\n", menu);
-	check(!strncmp(menu, "\t*Gráficos|General|Audio|Multijugador", sizeof("\t*Gráficos|General|Audio|Multijugador") - 1) && strstr(menu, "\nPerfil\x02") &&
-		menu_fits() && tab_bar_fits(), "the panel in Spanish at once: Gráficos, Perfil ...");
-	tab = page = TAB_AUDIO;
+	check(!strncmp(menu, "\tJuego|Controles|*Vídeo|Sonido|Multijugador", sizeof("\tJuego|Controles|*Vídeo|Sonido|Multijugador") - 1) &&
+		strstr(menu, "\n\x08" "Calidad\nPerfil\x02") && menu_fits() && tab_bar_fits(),
+		"the panel in Spanish at once: Juego, Controles, Vídeo, Sonido, Multijugador; Calidad over Perfil ...");
+	{
+		/* the headings in Spanish, each tab's in order (es.txt) */
+		static const struct
+		{
+			int tab;
+			const char *headings;
+		} spanish[] = {
+			{ TAB_GAME, "Interfaz|Primera persona|Actualizaciones" },
+			{ TAB_CONTROLS, "Mirar|Botones|Giroscopio|Táctil" },
+			{ TAB_GRAPHICS, "Calidad|Pantalla" },
+			{ TAB_AUDIO, "" },
+			{ TAB_MULTIPLAYER, "Red|Bots|Partidas" },
+		};
+		char headings_shown[128];
+		int all = 1;
+
+		for (index = 0; index < (int)(sizeof(spanish) / sizeof(spanish[0])); index++)
+		{
+			tab = page = spanish[index].tab;
+			page_selected[page] = 0;
+			show();
+			if (strcmp(outline_of(headings_shown, sizeof(headings_shown), 1), spanish[index].headings) != 0 ||
+				!menu_fits() || !tab_bar_fits())
+			{
+				printf("%s\n--\n", menu);
+				all = 0;
+			}
+		}
+		check(all, "Spanish headings: Interfaz, Primera persona, Actualizaciones; Mirar, Botones, Giroscopio, Táctil; "
+			"Calidad, Pantalla; Red, Bots, Partidas (none on Sonido); each fits");
+	}
+	tab = page = TAB_GAME;
 	show();
-	check(strstr(menu, "\nIdioma\x02< Español ") != NULL, "Audio: Idioma, Español (its own name)");
+	check(!strncmp(menu, "\t*Juego|", 8) && strstr(menu, "\nIdioma\x02< Español ") != NULL,
+		"Juego: Idioma, Español (its own name)");
 	lang_missing(NULL, 0);
 
 	/* every page, line and value; with Show dev settings, the Dev tab's
-	too */
+	too; on the classic panel (the Halo CE menus), whose height
+	menu_height_fits checks */
+	vita_settings_set("HALO_MENU_STYLE", "classic");
 	vita_settings_set("HALO_DEV_SETTINGS", "1");
 	check(every_page_fits(&shown), "Spanish: every page, each line chosen, each row's every value fits");
 	printf("(%d pages shown)\n", shown);
 	vita_settings_set("HALO_DEV_SETTINGS", "0");
-	/* (General with each answer of the update check: the version and the
+	/* (Game with each answer of the update check: the version and the
 	answer still fit, beside each other or not, and so do the tab's rows) */
 	{
 		static const int statuses[] = { UPDATE_STATUS_NONE, UPDATE_STATUS_CHECKING, UPDATE_STATUS_UP_TO_DATE,
 			UPDATE_STATUS_AVAILABLE, UPDATE_STATUS_NO_CONNECTION, UPDATE_STATUS_FAILED };
 		int fits = 1;
 
-		tab = page = TAB_CONTROLS;
+		tab = page = TAB_GAME;
 		page_selected[page] = 0;
 		snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.10");
 		for (index = 0; index < (int)(sizeof(statuses) / sizeof(statuses[0])); index++)
 		{
 			update_status_value = statuses[index];
 			show();
-			if (!menu_fits() || !menu_height_fits() || menu_rows() != 10 ||
-				strncmp(menu_line(1, line, sizeof(line)), "Buscar actualizaciones\x02", 23) ||
-				strncmp(menu_line(2, line, sizeof(line)), "\x04Versión ", 10))
+			/* (on the classic panel: the headings giving way, Interfaz first,
+			when the lines run to three) */
+			if (!menu_fits() || !menu_height_fits() || menu_rows() != 11 ||
+				!strstr(menu, "Buscar actualizaciones\x02  >\n\x04Versión "))
 			{
 				printf("(update status %d)\n%s\n--\n", statuses[index], menu);
 				fits = 0;
@@ -2150,8 +4377,9 @@ static void test_languages(void)
 				printf("%s\n--\n", menu);
 		}
 		check(fits && update_status_value == UPDATE_STATUS_FAILED &&
-			strstr(menu, "No se pudo comprobar ahora\n\n"),
-			"Spanish: General with each answer of the update check fits, Buscar actualizaciones first");
+			strstr(menu, "No se pudo comprobar ahora\nCanal de actualización\x02"),
+			"Spanish: Juego with each answer of the update check fits (Apariencia's row too), Buscar actualizaciones over "
+			"its lines, Canal de actualización under them");
 		update_status_value = UPDATE_STATUS_UP_TO_DATE;
 		show();
 		check(strstr(menu, "\n\x04Versión " HALO_VITA_VERSION " - Actualizado\n") != NULL,
@@ -2159,6 +4387,7 @@ static void test_languages(void)
 		update_status_value = UPDATE_STATUS_NONE;
 		update_version_value[0] = 0;
 	}
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
 	/* (the screens actions open, and the messages over the game) */
 	tab = page = TAB_MULTIPLAYER;
 	screen = SCREEN_CODE;
@@ -2169,9 +4398,9 @@ static void test_languages(void)
 	browse_count = 0;
 	show();
 	check(menu_lines_fit(), "Spanish: the public games, none");
-	/* (with Crossplay on: the PC games' badges, a co-op one chosen, a large
-	one's question) */
-	test_crossplay_wire = 1;
+	/* (the PC games' tags and badges, a co-op one chosen, a large one's
+	question) */
+	test_pc_games = 1;
 	browsing = 1;
 	browse_refresh();
 	for (index = 0; index < browse_count; index++)
@@ -2188,7 +4417,7 @@ static void test_languages(void)
 	printf("%s\n--\n", menu);
 	check(menu_lines_fit() && strstr(menu, "Cruz"), "Spanish: the large PC game's question fits");
 	screen = SCREEN_BROWSE;
-	test_crossplay_wire = 0;
+	test_pc_games = 0;
 	browsing = 0;
 	browse_count = browse_selected = 0;
 	screen = SCREEN_GUIDE;
@@ -2212,7 +4441,7 @@ static void test_languages(void)
 	snprintf(running_network, sizeof(running_network), "online");
 	screen = SCREEN_LIST;
 	close_panel();
-	vita_settings_message(T("Host a game"), T("The Vita did not join the ad hoc group. Try again, or another Ad hoc dialog way (Dev tab)."));
+	vita_settings_message(T("Host a game"), T("The Vita did not join the ad hoc group. Try again, or Game > Show dev settings: On, then Dev > Ad hoc dialog."));
 	frame(0);
 	check(menu_visible && menu_lines_fit() && strstr(menu, "Crear una partida"), "Spanish: a message, in lines of 46 characters");
 	printf("%s\n--\n", menu);
@@ -2225,7 +4454,7 @@ static void test_languages(void)
 	frame(0);
 
 	/* every string the panel has: its rows' labels, values and help, the
-	pages' names, each with a Spanish entry */
+	pages' names and the headings, each with a Spanish entry */
 	for (index = 0; index < SETTING_COUNT; index++)
 	{
 		const struct setting *setting = &settings[index];
@@ -2240,6 +4469,8 @@ static void test_languages(void)
 	}
 	for (index = 0; index < PAGE_COUNT; index++)
 		T(pages[index].name);
+	for (index = 0; index < (int)(sizeof(headings) / sizeof(headings[0])); index++)
+		T(headings[index].name);
 	for (index = 0; index < 3; index++)
 		T(map_downloads_help[index]);
 	missing = lang_missing(report, sizeof(report));
@@ -2261,17 +4492,17 @@ static void test_languages(void)
 	snprintf(system_language, sizeof(system_language), "en");
 	language_apply();
 	vita_settings_set("HALO_LANGUAGE", "en");
-	tab = page = TAB_GRAPHICS;
+	tab = page = TAB_GAME;
 	open_panel();
-	check(!strcmp(lang_current(), "en") && strstr(menu, "\t*Graphics|") && strstr(menu, "\nProfile\x02"),
-		"English again, at once");
+	check(!strcmp(lang_current(), "en") && strstr(menu, "\t*Game|Controls|Video|Sound|Multiplayer") &&
+		strstr(menu, "\n\x08Interface\nMenus\x02"), "English again, at once");
 	menu_line(0, line, sizeof(line));
 	close_panel();
 	vita_settings_set("HALO_LANGUAGE", "auto");
 }
 
-/* ---------- the update check: General's first rows, its channel on General >
-Advanced */
+/* ---------- the update check: Game's Updates rows, Check for updates and
+its lines, then its channel */
 
 /* the page redrawn (a frame after half a second) */
 static void redraw(void)
@@ -2285,10 +4516,12 @@ static void test_updates(void)
 	char line[160];
 	int prerelease = update_build_is_prerelease(HALO_VITA_VERSION);
 
+	/* (the Halo CE menus: the classic panel, the one whose height
+	menu_height_fits checks; the Halo 3 menus' again at the end) */
+	vita_settings_set("HALO_MENU_STYLE", "classic");
 	open_panel();
-	to_tab("General");
-	check(open_page("Advanced"), "General, Advanced opens");
-	check(to_line("Update channel"), "the Update channel row, on Advanced");
+	to_tab("Game");
+	check(to_line("Update channel") && !strstr(menu, "\n\x03"), "the Update channel row, on Game");
 	printf("%s\n--\n", menu);
 	if (prerelease)
 	{
@@ -2350,30 +4583,52 @@ static void test_updates(void)
 			"a release-written settings.txt keeps Experimental");
 		vita_settings_set("HALO_UPDATE_CHANNEL", "stable");
 	}
-	/* Check for updates: General's first row, in the background, its
-	answer beside the version under it; the controls' rows after a gap */
-	press(VITA_BUTTON_CIRCLE);
-	check(strstr(menu, "*General") && !strstr(menu, "\n\x03") && to_line("Check for updates") && menu_selected == 1 &&
-		!update_requests, "back on General: Check for updates its first row, nothing asked before the press");
-	check(!strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
-		!strcmp(menu_line(3, line, sizeof(line)), "") && !strncmp(menu_line(4, line, sizeof(line)), "Look sensitivity\x02", 17),
-		"no look yet: the version alone under it, then a gap and the controls");
+	/* Check for updates: the first row under Updates, in the background,
+	its answer beside the version under it; the Update channel and Show dev
+	settings under its lines */
+	check(strstr(menu, "\t*Game|") && !strstr(menu, "\n\x03") && to_line("Check for updates") && menu_selected == 11 &&
+		!strcmp(menu_line(10, line, sizeof(line)), "\x08Updates") && !update_requests,
+		"Game: Check for updates under the Updates heading, nothing asked before the press");
+	check(strstr(menu, "\n\x05" "Asks GitHub for the newest version; again to download it\n") &&
+		strstr(menu, "\n\x06L/R: tabs   Cross: select   Circle: close"), "Check for updates: its help, cross presses it");
+	check(!strcmp(menu_line(12, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
+		!strncmp(menu_line(13, line, sizeof(line)), "Update channel\x02", 15) &&
+		!strncmp(menu_line(14, line, sizeof(line)), "Show dev settings\x02", 18),
+		"no look yet: the version alone under it, then Update channel and Show dev settings (no gap)");
+	press(VITA_BUTTON_UP);
+	check(menu_selected == 9 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Appearance\x02", 11),
+		"up from Check for updates: Appearance (the Updates heading stepped over)");
+	press(VITA_BUTTON_DOWN);
+	check(menu_selected == 11, "... and down: Check for updates again");
 	press(VITA_BUTTON_CROSS);
 	redraw();
-	check(update_requests == 1 && !strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Checking...") &&
+	check(update_requests == 1 && !strcmp(menu_line(12, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Checking...") &&
 		menu_fits() && menu_height_fits(), "pressed: Checking..., beside the version");
 	update_status_value = UPDATE_STATUS_AVAILABLE;
 	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
 	redraw();
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "\nCheck for updates\x02  >\n\x04" "Version " HALO_VITA_VERSION "\n"
-		"!Update available: 1.1.0-beta.4\n!github.com/BirchWoodGod/halo-ce-vita/releases\n\nLook sensitivity\x02") &&
-		menu_fits() && menu_height_fits() && menu_rows() == 10,
-		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits");
+		"!Update available: 1.1.0-beta.4\n!github.com/BirchWoodGod/halo-ce-vita/releases\nUpdate channel\x02") &&
+		menu_fits() && menu_height_fits() && menu_rows() == 11,
+		"an update: under the version, in amber, the new version and where to get it; all of the tab still fits (eleven "
+		"rows on the classic panel: Forge and File Share's too)");
+	check(!strstr(menu, "Interface") && !strncmp(menu_line(1, line, sizeof(line)), "Menus\x02", 6) &&
+		!strstr(menu, "\n\x08" "First person\n") && !strstr(menu, "\n\x08Updates\n") && menu_selected == 9,
+		"the classic panel, short of room: the headings, Interface, First person and Updates, give way (the tab bar over "
+		"Menu style); Check for updates still chosen");
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
+	redraw();
+	/* (the chosen line is the page's line number: Forge and File Share,
+	the classic panel's under Menus, gone above it, so chosen again) */
+	check(strstr(menu, "\n\x08Interface\nMenus\x02") && strstr(menu, "\n\x08Updates\nCheck for updates\x02") &&
+		to_line("Check for updates") && menu_selected == 11, "the Halo 3 panel (its rows fitted to its height): every heading kept");
+	vita_settings_set("HALO_MENU_STYLE", "classic");
+	redraw();
 	/* (a build with the update key: the next press downloads it) */
 	test_update_key = 1;
 	redraw();
-	check(strstr(menu, "\n!Update available: 1.1.0-beta.4\n!Press again to download it\n\nLook sensitivity\x02") &&
+	check(strstr(menu, "\n!Update available: 1.1.0-beta.4\n!Press again to download it\nUpdate channel\x02") &&
 		menu_fits() && menu_height_fits(), "with the update key: press again to download it");
 	to_line("Check for updates");
 	press(VITA_BUTTON_CROSS);
@@ -2383,7 +4638,7 @@ static void test_updates(void)
 	redraw();
 	printf("%s\n--\n", menu);
 	check(strstr(menu, "\n!VitaShell: ux0:data/haloce-vita/update/\n!halo-1.1.0-beta.4.vpk (verified, to install)\n"
-		"\nLook sensitivity\x02") && menu_fits() && menu_height_fits() && menu_rows() == 10,
+		"Update channel\x02") && menu_fits() && menu_height_fits() && menu_rows() == 11,
 		"downloaded: where the VPK is, for VitaShell; all of the tab still fits");
 	update_status_value = UPDATE_STATUS_NONE;
 	redraw();
@@ -2392,29 +4647,36 @@ static void test_updates(void)
 	update_ready_version[0] = 0;
 	test_update_key = 0;
 	redraw();
-	to_line("Look sensitivity");
+	to_line("Update channel");
 	press(VITA_BUTTON_UP);
-	check(menu_selected == 1, "up from the first control: Check for updates (the info lines are stepped over)");
+	check(!strcmp(menu_line(menu_selected, line, sizeof(line)), "Check for updates\x02  >"),
+		"up from Update channel: Check for updates (the info lines are stepped over)");
 	update_status_value = UPDATE_STATUS_UP_TO_DATE;
 	snprintf(update_version_value, sizeof(update_version_value), "%s", HALO_VITA_VERSION);
 	redraw();
-	check(!strcmp(menu_line(2, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Up to date") &&
-		!strstr(menu, "github.com") && !strcmp(menu_line(3, line, sizeof(line)), "") && menu_fits(), "up to date");
+	check(!strcmp(menu_line(12, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION " - Up to date") &&
+		!strstr(menu, "github.com") && !strncmp(menu_line(13, line, sizeof(line)), "Update channel\x02", 15) && menu_fits(),
+		"up to date");
 	update_status_value = UPDATE_STATUS_NO_CONNECTION;
 	redraw();
 	/* (beside the version while the line is 46 characters at most: a
 	release's short version; else on a line of its own) */
 	check(strstr(menu, sizeof("Version " HALO_VITA_VERSION " - Couldn't check: no connection") - 1 <= 46 ?
-		"\n\x04" "Version " HALO_VITA_VERSION " - Couldn't check: no connection\n\n" :
-		"\n\x04" "Version " HALO_VITA_VERSION "\n\x04" "Couldn't check: no connection\n\n") && menu_fits(),
+		"\n\x04" "Version " HALO_VITA_VERSION " - Couldn't check: no connection\nUpdate channel\x02" :
+		"\n\x04" "Version " HALO_VITA_VERSION "\n\x04" "Couldn't check: no connection\nUpdate channel\x02") && menu_fits(),
 		"no connection: beside the version, or on a line of its own when that is too long");
 	update_status_value = UPDATE_STATUS_FAILED;
 	redraw();
-	check(strstr(menu, "Couldn't check right now\n\n") && menu_fits() && menu_height_fits(), "could not check");
+	check(strstr(menu, "Couldn't check right now\nUpdate channel\x02") && menu_fits() && menu_height_fits(), "could not check");
 	update_status_value = UPDATE_STATUS_NONE;
 	redraw();
 	check(!strstr(menu, "Couldn't") && !strstr(menu, "Checking"), "no look yet: no line");
+	check(!strstr(menu, "Interface") && strstr(menu, "\n\x08" "First person\n") && strstr(menu, "\n\x08Updates\n") &&
+		menu_height_fits(), "room again (the version alone): First person and Updates back (Interface gives way while "
+		"Forge's row is on the classic panel)");
 	press(VITA_BUTTON_CIRCLE);
+	check(!menu_visible, "circle on Game closes the panel");
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
 
 	/* the update download's dialogs as vita_update.c drives them, from its
 	thread: the question, the progress line, then the line withdrawn and the
@@ -2443,8 +4705,621 @@ static void test_updates(void)
 	check(!menu_visible && !strstr(menu, "Checking the download"),
 		"closing it leaves nothing over the game (no progress line again)");
 	open_panel();
-	check(menu_visible && strstr(menu, "*General") != NULL, "the panel opens again as before");
+	check(menu_visible && strstr(menu, "\t*Game|") != NULL, "the panel opens again as before (on Game)");
 	press(VITA_BUTTON_CIRCLE);
+}
+
+/* the Cross (or Circle) that answers a question over the game, or closes a
+message, is not the game's while it is held: the game has it only once let
+go (Neff, 1.1.1 RC6: the Cross that answered Join anyway? on a large PC game
+reached the System Link list the join opened next - empty yet - as its own
+A, which hosted a game of the Vita's own and published it) */
+static void test_answer_press_held(void)
+{
+	vita_settings_question("Halo: large PC game", "Large PC game: more than 16 players can make the Vita lag. Join anyway?");
+	frame(0);
+	check(menu_visible && strstr(menu, "Join anyway?") != NULL, "the large PC game's question over the game");
+	check(frame(VITA_BUTTON_CROSS) != 0, "Cross answers it (the panel's press)");
+	check(vita_settings_question_answer() == 1, "the answer: yes");
+	check(!menu_visible, "the question closed");
+	check(frame(VITA_BUTTON_CROSS) != 0 && frame(VITA_BUTTON_CROSS) != 0,
+		"the answer's Cross, still held, is not the game's (no A for the screen the join opens)");
+	check(frame(0) == 0, "let go: the buttons the game's again");
+	check(frame(VITA_BUTTON_CROSS) == 0, "a new Cross is the game's");
+	frame(0);
+	vita_settings_question("Halo: large PC game", "Join anyway?");
+	frame(0);
+	check(frame(VITA_BUTTON_CIRCLE) != 0 && vita_settings_question_answer() == 0, "Circle answers no");
+	check(frame(VITA_BUTTON_CIRCLE) != 0, "the answer's Circle, still held, is not the game's (no B)");
+	check(frame(0) == 0, "let go: the game's again");
+	vita_settings_message("Halo: cannot join this game", "The game is full.");
+	frame(0);
+	check(menu_visible && strstr(menu, "The game is full.") != NULL, "a message over the game");
+	check(frame(VITA_BUTTON_CROSS) != 0 && !menu_visible, "Cross closes it");
+	check(frame(VITA_BUTTON_CROSS) != 0, "the Cross that closed it, still held, is not the game's");
+	check(frame(0) == 0 && frame(VITA_BUTTON_CROSS) == 0, "let go: a new Cross is the game's");
+	frame(0);
+}
+
+/* ---------- the restart offer: a change that applies after a restart,
+the panel closed at the main menu (close_panel) */
+
+/* the Menu style row (Game, under Interface): the menus as Halo CE's or
+Halo 3's (port/linux/game/menu_tags.c reads HALO_MENU_STYLE each time a
+screen opens): Halo 3 as shipped from 1.1.1 (the owner's), live, no
+restart; a settings.txt that chose Halo CE keeps it */
+static void test_menu_style_row(void)
+{
+	struct setting *style = setting_named("HALO_MENU_STYLE");
+	unsigned long generation;
+	char line[128];
+
+	check(style && style->page == PAGE_MENUS && !strcmp(style->values[shipped_choice[style - settings]], "halo3") &&
+		!strcmp(style->names[shipped_choice[style - settings]], "Halo 3"), "Menu style: Halo 3 as shipped");
+	open_panel();
+	to_tab("Game");
+	check(to_line("Menus") && menu_selected == 2 && !strcmp(menu_line(1, line, sizeof(line)), "\x08Interface") &&
+		strstr(menu, "\nMenus\x02  Halo 3  >\n") && !strstr(menu, "\nMenu style\x02"),
+		"Menus: Game's first row, under Interface, the menus chosen (Halo 3) as its value");
+	check(open_page("Menus") && strstr(menu, "\n\x03Game > Menus\n") && to_line("Menu style") &&
+		strstr(menu, "\n\x05" "ElDewrito: Halo Online style. Halo 3: the ring. Halo CE: the original.\n") && menu_fits() &&
+		menu_height_fits(), "Menu style: the Menus page's first row, and its help");
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && strstr(menu, "\nMenu style\x02< Halo 3 >"),
+		"Menu style: Halo 3 (no settings.txt naming it), in the environment");
+	generation = halo_settings_generation;
+	restart_pending = 0;
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "classic") && halo_settings_generation != generation &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MENU_STYLE=classic\n") && strstr(menu, "\nMenu style\x02  Halo CE >"),
+		"Menu style Halo CE: in the environment and settings.txt at once");
+	check(!strstr(menu, "Menu style*") && !restart_pending, "Menu style: live, no restart");
+	/* (the next start: settings.txt's Halo CE kept) */
+	style->choice = shipped_choice[style - settings];
+	unsetenv("HALO_MENU_STYLE");
+	vita_settings_load();
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "classic") && style->choice == 0, "Menu style Halo CE: read back from settings.txt");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && strstr(menu, "\nMenu style\x02< Halo 3 >") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_MENU_STYLE=halo3\n"), "Menu style back to Halo 3, saved");
+	press(VITA_BUTTON_CIRCLE);
+	check(menu_visible && strstr(menu, "\nMenus\x02  Halo 3  >\n"), "Circle: back to Game, Menus saying Halo 3");
+	press(VITA_BUTTON_CIRCLE);
+}
+
+/* Menu style Classic ("original", insider.25): the Xbox menus as they
+shipped - the panel the classic one, the game's own carnage report and
+scoreboard (their rows left out), and OpenCE's Multiplayer screen not shown,
+so the panel keeps its Direct Link (Join by code) and Friends; Classic+
+("classic", the Halo CE style before the split) as it was */
+static void test_menu_style_original(void)
+{
+	struct setting *report = setting_named("HALO_CLASSIC_CARNAGE_REPORT");
+	struct setting *board = setting_named("HALO_CLASSIC_SCOREBOARD");
+	int saved_state = halo_pc_menus_state;
+
+	vita_settings_set("HALO_MENU_STYLE", "original");
+	halo_pc_menus_state = 1;
+	check(original_style() && classic_panel() && !pc_menus_shown() && !online_panel_style(),
+		"Menu style Classic: the classic panel, the PC menus not shown");
+	check(report && board && !setting_shown(report) && !setting_shown(board),
+		"Menu style Classic: the game's own report and scoreboard, their rows left out");
+	vita_settings_set("HALO_MENU_STYLE", "classic");
+	check(!original_style() && classic_panel() && pc_menus_shown() && setting_shown(report) && setting_shown(board),
+		"Menu style Classic+ (a saved \"classic\"): as Halo CE was - its two rows, the PC menus");
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
+	halo_pc_menus_state = saved_state;
+}
+
+/* the Carnage report row (Game > Menus, under Menu style; menu_functions.c
+h3_carnage_wanted, config.toml's menus.carnage_report): Halo 3's CARNAGE
+REPORT or the game's own at a multiplayer game's end, Halo 3 as shipped,
+live; shown with Menu style Halo 3 only (Halo CE always shows the game's
+own) */
+static void test_carnage_report_row(void)
+{
+	struct setting *report = setting_named("HALO_CARNAGE_REPORT");
+	char line[128];
+
+	check(report && report->page == PAGE_MENUS && !report->restart &&
+		!strcmp(report->values[shipped_choice[report - settings]], "halo3"), "Carnage report: Halo 3 as shipped");
+	open_panel();
+	to_tab("Game");
+	check(open_page("Menus") && !strcmp(menu_line(2, line, sizeof(line)), "Menu style\x02< Halo 3 >") &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Carnage report\x02< ElDewrito  ") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< ElDewrito  ") && menu_rows() == 3 && menu_fits() &&
+		menu_height_fits() && !strstr(menu, "Armor color") && !strstr(menu, "Visor color"),
+		"Game > Menus: Menu style, then Carnage report and Scoreboard (Halo 3); the armor and visor colors on Appearance");
+	check(to_line("Carnage report") &&
+		strstr(menu, "\n\x05" "A multiplayer game's end: ElDewrito's report, or the original\n"), "Carnage report: its help");
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_CARNAGE_REPORT") && !strcmp(getenv("HALO_CARNAGE_REPORT"), "classic") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_CARNAGE_REPORT=classic\n") &&
+		strstr(menu, "\nCarnage report\x02  Original >") && !strstr(menu, "Carnage report*") && !restart_pending,
+		"Carnage report Classic: in the environment and settings.txt at once, no restart");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_CARNAGE_REPORT"), "halo3") && strstr(file_text(SETTINGS_FILE), "HALO_CARNAGE_REPORT=halo3\n"),
+		"Carnage report back to Halo 3, saved");
+	to_line("Menu style");
+	press(VITA_BUTTON_LEFT);
+	/* (Halo CE: its own two rows, the original by default; Halo 3's an option) */
+	check(strstr(menu, "\nCarnage report\x02  Original >") && strstr(menu, "\nScoreboard\x02  Original >") &&
+		menu_rows() == 3 && !strcmp(getenv("HALO_MENU_STYLE"), "classic") && menu_fits(),
+		"Menu style Halo CE: Carnage report and Scoreboard rows, the original (Classic, Halo CE) as shipped");
+	check(to_line("Carnage report") && strstr(menu, "\n\x05" "A multiplayer game's end: the original, or ElDewrito's report\n"),
+		"Halo CE's Carnage report: its help");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_CLASSIC_CARNAGE_REPORT") && !strcmp(getenv("HALO_CLASSIC_CARNAGE_REPORT"), "halo3") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_CLASSIC_CARNAGE_REPORT=halo3\n") && !restart_pending &&
+		!strcmp(getenv("HALO_CARNAGE_REPORT"), "halo3"),
+		"Halo CE's Carnage report Halo 3: saved at once, the Halo 3 style's own row untouched");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_CLASSIC_CARNAGE_REPORT"), "classic") && strstr(file_text(SETTINGS_FILE), "HALO_CLASSIC_CARNAGE_REPORT=classic\n"),
+		"Halo CE's Carnage report back to Classic, saved");
+	check(to_line("Scoreboard") && strstr(menu, "\n\x05" "Scores in a game: the original, or ElDewrito's with player options\n"),
+		"Halo CE's Scoreboard: its help");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_CLASSIC_SCOREBOARD"), "halo3") && strstr(file_text(SETTINGS_FILE), "HALO_CLASSIC_SCOREBOARD=halo3\n"),
+		"Halo CE's Scoreboard Halo 3: saved at once");
+	press(VITA_BUTTON_LEFT);
+	to_line("Menu style");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nCarnage report\x02< ElDewrito  \n") && strstr(menu, "\nScoreboard\x02< ElDewrito  \n") &&
+		!strcmp(getenv("HALO_MENU_STYLE"), "halo3"), "Menu style Halo 3 again: Carnage report and Scoreboard back");
+	press(VITA_BUTTON_CIRCLE);
+	press(VITA_BUTTON_CIRCLE);
+}
+
+/* the Scoreboard row (Game > Menus, under Carnage report; menu_functions.c
+h3_scoreboard_wanted, config.toml's menus.scoreboard): Halo 3's scoreboard
+or the game's own while Back is held in a multiplayer game, Halo 3 as
+shipped, live; shown with Menu style Halo 3 only (Halo CE always shows the
+game's own: the original stays) */
+static void test_scoreboard_row(void)
+{
+	struct setting *board = setting_named("HALO_SCOREBOARD");
+	char line[128];
+
+	check(board && board->page == PAGE_MENUS && !board->restart &&
+		!strcmp(board->values[shipped_choice[board - settings]], "halo3"), "Scoreboard: Halo 3 as shipped");
+	open_panel();
+	to_tab("Game");
+	check(open_page("Menus") && !strcmp(menu_line(4, line, sizeof(line)), "Scoreboard\x02< ElDewrito  ") && menu_fits() &&
+		menu_height_fits(), "Game > Menus: Scoreboard (Halo 3), under Carnage report");
+	check(to_line("Scoreboard") &&
+		strstr(menu, "\n\x05" "Scores in a game: ElDewrito's scoreboard, or the original\n"), "Scoreboard: its help");
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_SCOREBOARD") && !strcmp(getenv("HALO_SCOREBOARD"), "classic") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_SCOREBOARD=classic\n") &&
+		strstr(menu, "\nScoreboard\x02  Original >") && !strstr(menu, "Scoreboard*") && !restart_pending,
+		"Scoreboard Halo CE: in the environment and settings.txt at once, no restart");
+	press(VITA_BUTTON_RIGHT);
+	check(!strcmp(getenv("HALO_SCOREBOARD"), "halo3") && strstr(file_text(SETTINGS_FILE), "HALO_SCOREBOARD=halo3\n"),
+		"Scoreboard back to Halo 3, saved");
+	press(VITA_BUTTON_CIRCLE);
+	press(VITA_BUTTON_CIRCLE);
+}
+
+static void test_restart_offer(void)
+{
+	/* (a row that applies after a restart: Sound voices, its first choice
+	"16" the one moved to and back) */
+	const char *voices = getenv("HALO_SOUND_CHANNELS");
+	char before[8];
+
+	snprintf(before, sizeof(before), "%s", voices ? voices : "0");
+	main_menu_idle_now = 1;
+	open_panel();
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(!menu_visible, "no change that needs a restart: closing asks nothing");
+
+	open_panel();
+	to_tab("Sound");
+	to_line("Sound voices");
+	press(strcmp(before, "16") ? VITA_BUTTON_LEFT : VITA_BUTTON_RIGHT);
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(menu_visible && strstr(menu, "applies after a restart") && strstr(menu, "Cross: yes"),
+		"Sound voices changed, closed at the main menu: the restart is offered");
+	press(VITA_BUTTON_CROSS);
+	frame(0);
+	check(restarts_asked == 1 && strstr(log_text, "settings: restarting the game") &&
+		strstr(menu, "could not restart itself"), "Cross: the game restarts (here it says it could not)");
+	press(VITA_BUTTON_CROSS);
+	frame(0);
+
+	open_panel();
+	to_tab("Sound");
+	to_line("Sound voices");
+	press(strcmp(before, "16") ? VITA_BUTTON_RIGHT : VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(menu_visible && strstr(menu, "applies after a restart"), "changed back: offered again");
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(!menu_visible && restarts_asked == 1, "Circle: later, no restart");
+	open_panel();
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(!menu_visible, "not asked again until another such change");
+
+	main_menu_idle_now = 0;
+	open_panel();
+	to_tab("Sound");
+	to_line("Sound voices");
+	press(strcmp(before, "16") ? VITA_BUTTON_LEFT : VITA_BUTTON_RIGHT);
+	press(strcmp(before, "16") ? VITA_BUTTON_RIGHT : VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	check(!menu_visible && restarts_asked == 1, "in a game: not offered (the help line says it)");
+	check(getenv("HALO_SOUND_CHANNELS") && !strcmp(getenv("HALO_SOUND_CHANNELS"), before), "Sound voices as it was");
+}
+
+/* the milliseconds since start (the real clock) */
+static double real_ms(const struct timespec *start)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (double)(now.tv_sec - start->tv_sec) * 1000.0 + (double)(now.tv_nsec - start->tv_nsec) / 1e6;
+}
+
+/* settings.txt written off the game thread (BlazeRed, 1.1.0-beta.6: the game
+froze changing the performance preset or the gyro; halo.log showed each
+save - fopen, fclose, remove and rename on the memory card, on the game
+thread - holding a frame 104-549 ms): with every save taking 300 ms to put
+in place, as on a busy card, a press on Profile and on Gyro aiming returns
+at once; once the writer is done the file has both; presses in a row are
+written together; a row set to the value it has writes nothing */
+static void test_save_off_thread(void)
+{
+	struct timespec start;
+	char line[160], profile[32];
+	double elapsed;
+	int renames, index;
+
+	main_menu_idle_now = 0;
+	vita_settings_set("HALO_GYRO", "off");
+	vita_settings_save_wait();
+	test_card_delay_us = 300000;
+	open_panel();
+	to_tab("Video");
+	to_line("Profile");
+	renames = test_settings_renames;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	/* (from Custom, Balanced or Quality left; Performance right) */
+	press(strcmp(getenv("HALO_PROFILE"), "performance") ? VITA_BUTTON_LEFT : VITA_BUTTON_RIGHT);
+	elapsed = real_ms(&start);
+	snprintf(profile, sizeof(profile), "HALO_PROFILE=%s\n", getenv("HALO_PROFILE"));
+	check(strcmp(profile, "HALO_PROFILE=custom\n") != 0 && test_settings_renames == renames,
+		"Profile: a profile chosen, nothing put in place yet");
+	snprintf(line, sizeof(line), "Profile changed, the card taking 300 ms a save: the press returns at once (%.2f ms)",
+		elapsed);
+	check(elapsed < 50.0, line);
+	to_tab("Controls");
+	to_line("Gyro aiming");
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	press(VITA_BUTTON_RIGHT);
+	elapsed = real_ms(&start);
+	snprintf(line, sizeof(line), "Gyro aiming On: the press returns at once (%.2f ms)", elapsed);
+	check(elapsed < 50.0 && !strcmp(getenv("HALO_GYRO"), "on"), line);
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	for (index = 0; index < 3; index++)
+		press(index % 2 ? VITA_BUTTON_RIGHT : VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	elapsed = real_ms(&start);
+	snprintf(line, sizeof(line), "Gyro aiming off, on, off, off again (four presses): %.2f ms in all", elapsed);
+	check(elapsed < 50.0 && !strcmp(getenv("HALO_GYRO"), "off"), line);
+	vita_settings_save_wait();
+	snprintf(line, sizeof(line), "settings.txt once written: the profile and the gyro off, in %d writes for five "
+		"changes (one each would be five)", test_settings_renames - renames);
+	check(strstr(file_text(SETTINGS_FILE), profile) && strstr(file_text(SETTINGS_FILE), "HALO_GYRO=off\n") &&
+		test_settings_renames - renames >= 1 && test_settings_renames - renames <= 3, line);
+	/* (the game's Server Setup sets its rows each time it opens: as they
+	are, nothing is written) */
+	renames = test_settings_renames;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	vita_settings_set("HALO_GYRO", "off");
+	vita_settings_save_wait();
+	check(test_settings_renames == renames && real_ms(&start) < 50.0,
+		"a row set to the value it has: settings.txt not written again");
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
+	test_card_delay_us = 0;
+}
+
+/* (test_save_any_thread: a wait for the writer from a thread of
+vita_host_thread_start's, as Save report's and the CE installer's are) */
+static volatile int test_waited;
+
+static void test_wait_thread(void *argument)
+{
+	(void)argument;
+	vita_settings_save_wait();
+	__atomic_store_n(&test_waited, 1, __ATOMIC_RELEASE);
+}
+
+/* insider.19's crash (Oct 21 2026: LadyCassie, xal, the owner): any setting
+changed - the panel's rows, the main menu's Appear offline and the game's
+network rows (vita_settings_set) - and the game gone, settings.txt's writer
+(a thread of sceKernelCreateThread's) waiting on a pthread condition with
+no pthread data on the Vita. The test's threads of vita_host_thread_start_*
+stop it as the Vita would (test_sce_thread_wait): Appear offline as the
+main menu sets it and the network as a game's row does, each written while
+the card is slow; then the writer waited for, while it writes, from a thread
+of its own and from one run as Save report's is */
+static void test_save_any_thread(void)
+{
+	struct timespec start;
+	int renames = test_settings_renames;
+
+	test_card_delay_us = 100000;
+	check(vita_settings_set("HALO_FRIENDS_APPEAR_OFFLINE", "true") &&
+		vita_settings_set("HALO_VITA_NETWORK", "adhoc"), "Appear offline On and the network Ad hoc, as the game sets them");
+	test_waited = 0;
+	check(vita_host_thread_start_stack("test wait", test_wait_thread, NULL, -1, 0x10000100, 64 * 1024) == 0,
+		"a thread of its own waiting for the writer");
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	while (!__atomic_load_n(&test_waited, __ATOMIC_ACQUIRE) && real_ms(&start) < 5000.0)
+		usleep(1000);
+	check(test_waited, "... waits for it, and returns");
+	check(strstr(file_text(SETTINGS_FILE), "HALO_FRIENDS_APPEAR_OFFLINE=true\n") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_VITA_NETWORK=adhoc\n") && test_settings_renames - renames >= 1,
+		"settings.txt has both once written");
+	renames = test_settings_renames;
+	vita_settings_set("HALO_FRIENDS_APPEAR_OFFLINE", "false");
+	vita_settings_set("HALO_VITA_NETWORK", "wifi");
+	test_waited = 0;
+	vita_host_thread_start("test wait", test_wait_thread, NULL, -1);
+	check(test_waited && test_settings_renames - renames >= 1 &&
+		strstr(file_text(SETTINGS_FILE), "HALO_FRIENDS_APPEAR_OFFLINE=false\n") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_VITA_NETWORK=wifi\n"),
+		"Appear offline Off and the network back, waited for as Save report waits: written");
+	test_card_delay_us = 0;
+}
+
+/* ---------- settings.txt read safely (M4J0R_l-l0LL4ND, Oct 21 2026: a
+crash as a setting changed, then every start took the whole Vita down) */
+
+/* the rows a start's screen and GPU set-up read */
+static const char *const start_rows[] = { "HALO_RENDER_SCALE", "HALO_DYNAMIC_RES_MIN", "HALO_DISPLAY_WIDTH",
+	"HALO_FRAME_CAP", "HALO_INTERPOLATION", "HALO_UPSCALE_FILTER", "HALO_SHARP_UI", "HALO_MODEL_LOD_SCALE" };
+#define START_ROWS ((int)(sizeof(start_rows) / sizeof(start_rows[0])))
+
+/* every row as shipped, nothing in the environment: a first start */
+static void rows_fresh(void)
+{
+	int index;
+
+	for (index = 0; index < SETTING_COUNT; index++)
+		if (settings[index].kind == KIND_CHOICE && settings[index].variable && !settings[index].dev)
+		{
+			unsetenv(settings[index].variable);
+			settings[index].choice = shipped_choice[index];
+		}
+}
+
+/* the start rows as shipped, in the environment; the first that is not, in
+`report` */
+static int start_rows_shipped(char *report, size_t size)
+{
+	int row;
+
+	report[0] = 0;
+	for (row = 0; row < START_ROWS; row++)
+	{
+		struct setting *setting = setting_named(start_rows[row]);
+		const char *value = getenv(start_rows[row]);
+		const char *shipped = setting->values[shipped_choice[setting - settings]];
+
+		if (!value || strcmp(value, shipped))
+		{
+			snprintf(report, size, " (%s=%s, shipped %s)", start_rows[row], value ? value : "(none)", shipped);
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* settings.txt as `text` (size bytes), no copies beside it, loaded on a
+first start */
+static void load_settings_text(const void *text, size_t size)
+{
+	settings_file_delete();
+	write_file(SETTINGS_FILE, text, size);
+	rows_fresh();
+	log_text[0] = 0;
+	vita_settings_load();
+}
+
+static void load_settings_string(const char *text)
+{
+	load_settings_text(text, strlen(text));
+}
+
+static void test_settings_load_safe(void)
+{
+	static const char *const bad_scales[] = { "0", "999", "-1", "-0.5", "abc", "nan", "inf", "-inf", "", "0.3", "1.5",
+		"0x1", "1e9", "0.5x", " 0.5", "\x01\x02", "dynamicx", "DYNAMIC" };
+	char report[160], text[2048];
+	int index;
+
+	/* a settings.txt the writer wrote: its last line, the one before it
+	kept as settings.txt.bak */
+	settings_file_delete();
+	rows_fresh();
+	vita_settings_load();
+	vita_settings_set("HALO_RENDER_SCALE", "0.75");
+	vita_settings_save_wait();
+	vita_settings_set("HALO_RENDER_SCALE", "0.5");
+	vita_settings_save_wait();
+	{
+		char now[4096];
+
+		snprintf(now, sizeof(now), "%s", file_text(SETTINGS_FILE));
+		check(strstr(now, "HALO_RENDER_SCALE=0.5\n") && strlen(now) > 20 &&
+			!strcmp(now + strlen(now) - strlen(SETTINGS_END "=1\n"), SETTINGS_END "=1\n") &&
+			strstr(file_text(SETTINGS_FILE ".bak"), "HALO_RENDER_SCALE=0.75\n") &&
+			access(SETTINGS_FILE ".new", F_OK) != 0,
+			"safe load: settings.txt ends with its last line; the one before it is settings.txt.bak; no .new left");
+		/* (every cut of it: the rows it has, the rest the defaults, never a
+		value cut in two read as another - "0.5" cut to "0." is 0, none) */
+		{
+			size_t length = strlen(now), cut;
+			int all = 1;
+
+			for (cut = 0; cut < length; cut++)
+			{
+				const char *scale;
+
+				load_settings_text(now, cut);
+				scale = getenv("HALO_RENDER_SCALE");
+				if (!scale || (strcmp(scale, "0.5") && strcmp(scale, "dynamic")) ||
+					!setting_named("HALO_DISPLAY_WIDTH")->values[choice_of("HALO_DISPLAY_WIDTH")][0])
+				{
+					printf("cut at %zu: HALO_RENDER_SCALE=%s\n", cut, scale ? scale : "(none)");
+					all = 0;
+				}
+			}
+			check(all, "safe load: settings.txt cut short at each of its bytes: what it has, the rest the defaults");
+		}
+	}
+
+	/* values no build wrote: the row's default, said in halo.log - the
+	render resolution and its minimum with every one, the other start rows
+	with ones off their lists */
+	for (index = 0; index < (int)(sizeof(bad_scales) / sizeof(bad_scales[0])); index++)
+	{
+		int length = snprintf(text, sizeof(text), "HALO_RENDER_SCALE=%s\nHALO_DYNAMIC_RES_MIN=%s\nHALO_MODEL_LOD_SCALE=%s\n"
+			SETTINGS_END "=1\n", bad_scales[index], bad_scales[index], bad_scales[index]);
+		int shipped;
+
+		load_settings_text(text, (size_t)length);
+		shipped = start_rows_shipped(report, sizeof(report));
+		if (!shipped)
+			printf("value \"%s\":%s\n", bad_scales[index], report);
+		check(shipped && strstr(log_text, "settings: settings.txt's HALO_RENDER_SCALE=") &&
+			strstr(log_text, "is none of its choices: dynamic"),
+			"safe load: a render resolution off its list (0, 999, -1, abc, nan, inf, empty, 0x1, ' 0.5'...): the default, in halo.log");
+	}
+	{
+		static const char *const others[][2] = {
+			{ "HALO_DISPLAY_WIDTH", "0" }, { "HALO_DISPLAY_WIDTH", "999" }, { "HALO_DISPLAY_WIDTH", "-848" },
+			{ "HALO_DISPLAY_WIDTH", "wide" }, { "HALO_FRAME_CAP", "-1" }, { "HALO_FRAME_CAP", "999" },
+			{ "HALO_FRAME_CAP", "fast" }, { "HALO_INTERPOLATION", "maybe" }, { "HALO_UPSCALE_FILTER", "2" },
+			{ "HALO_UPSCALE_FILTER", "-1" }, { "HALO_SHARP_UI", "on" }, { "HALO_SHARP_UI", "" } };
+		int all = 1;
+
+		for (index = 0; index < (int)(sizeof(others) / sizeof(others[0])); index++)
+		{
+			int length = snprintf(text, sizeof(text), "%s=%s\n" SETTINGS_END "=1\n", others[index][0], others[index][1]);
+
+			load_settings_text(text, (size_t)length);
+			if (!start_rows_shipped(report, sizeof(report)) || !strstr(log_text, "is none of its choices"))
+			{
+				printf("%s=%s:%s\n", others[index][0], others[index][1], report);
+				all = 0;
+			}
+		}
+		check(all, "safe load: the aspect ratio, frame limit, interpolation, filters off their lists: the defaults");
+	}
+	/* (a number between a row's choices, an older build's: the nearest, as
+	before) */
+	load_settings_string("HALO_RENDER_SCALE=0.6\nHALO_DYNAMIC_RES_MIN=0.7\n");
+	check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.625") && !strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75"),
+		"safe load: a number between a row's choices: the nearest");
+	/* (a value on the list stays one; the profile line's garbage is no
+	profile) */
+	load_settings_string("HALO_PROFILE=\xff\xfe\nHALO_RENDER_SCALE=0.875\n");
+	check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.875") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
+		"safe load: a garbage profile line passed over, the rows read");
+
+	/* garbage: binary, a line of 5000 characters, NULs - the defaults */
+	{
+		static unsigned char binary[8192];
+
+		for (index = 0; index < (int)sizeof(binary); index++)
+			binary[index] = (unsigned char)(index * 131 + 7);
+		load_settings_text(binary, sizeof(binary));
+		check(start_rows_shipped(report, sizeof(report)) && strstr(log_text, "has no settings in it, and there is no copy"),
+			"safe load: a settings.txt of binary garbage, no copy: the defaults, in halo.log");
+		memset(binary, 'A', sizeof(binary));
+		memcpy(binary + 5000, "\nHALO_RENDER_SCALE=0.75\n", 24);
+		binary[100] = 0;
+		load_settings_text(binary, 5024);
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.75") && start_rows_shipped(report, sizeof(report)) == 0,
+			"safe load: a 5000-character line with a NUL in it passed over, the line after it read");
+		load_settings_string("");
+		check(start_rows_shipped(report, sizeof(report)), "safe load: an empty settings.txt: the defaults");
+		load_settings_string("=\n==\nHALO_RENDER_SCALE\n=0.5\n\n\r\n");
+		check(start_rows_shipped(report, sizeof(report)), "safe load: lines of no name or no value: the defaults");
+	}
+
+	/* settings.txt gone or garbage, its copies there: the newest whole one */
+	{
+		static const char older[] = "HALO_RENDER_SCALE=0.75\n" SETTINGS_END "=1\n";
+		static const char newer[] = "HALO_RENDER_SCALE=0.5\n" SETTINGS_END "=1\n";
+		static const char newer_cut[] = "HALO_RENDER_SCALE=0.5\nHALO_FRAME";
+
+		settings_file_delete();
+		write_file(SETTINGS_FILE ".bak", older, sizeof(older) - 1);
+		write_file(SETTINGS_FILE ".new", newer, sizeof(newer) - 1);
+		rows_fresh();
+		log_text[0] = 0;
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.5") && strstr(log_text, "settings.txt is not there: read from settings.txt.new"),
+			"safe load: stopped between putting the old one aside and the new one in place: the new one (.new)");
+		settings_file_delete();
+		write_file(SETTINGS_FILE ".bak", older, sizeof(older) - 1);
+		write_file(SETTINGS_FILE ".new", newer_cut, sizeof(newer_cut) - 1);
+		rows_fresh();
+		log_text[0] = 0;
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.75") && strstr(log_text, "read from settings.txt.bak"),
+			"safe load: stopped while the new one was written: the one before it (.bak), not the part");
+		settings_file_delete();
+		write_file(SETTINGS_FILE, "\x00\x01garbage\xff", 11);
+		write_file(SETTINGS_FILE ".bak", older, sizeof(older) - 1);
+		rows_fresh();
+		log_text[0] = 0;
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.75") &&
+			strstr(log_text, "settings.txt has no settings in it: read from settings.txt.bak"),
+			"safe load: settings.txt damaged on the card: settings.txt.bak");
+		/* (zeroed by the card, then a save: the damaged file is kept as .bad
+		and the last good copy stays .bak, not overwritten by it) */
+		{
+			static char zeros[64];
+
+			settings_file_delete();
+			write_file(SETTINGS_FILE, zeros, sizeof(zeros));
+			write_file(SETTINGS_FILE ".bak", older, sizeof(older) - 1);
+			unlink(SETTINGS_FILE ".bad");
+			rows_fresh();
+			vita_settings_load();
+			vita_settings_set("HALO_FRAME_CAP", "30");
+			vita_settings_save_wait();
+			check(strstr(file_text(SETTINGS_FILE ".bak"), "HALO_RENDER_SCALE=0.75\n") &&
+				access(SETTINGS_FILE ".bad", F_OK) == 0 && strstr(file_text(SETTINGS_FILE), SETTINGS_END "=1\n"),
+				"safe load: a zeroed settings.txt is kept as .bad on the next save; the good .bak stays");
+		}
+		/* (an older build's settings.txt, no last line: read, not the copy) */
+		settings_file_delete();
+		write_file(SETTINGS_FILE, "HALO_RENDER_SCALE=0.875\n", 24);
+		write_file(SETTINGS_FILE ".bak", older, sizeof(older) - 1);
+		rows_fresh();
+		log_text[0] = 0;
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.875") && strstr(log_text, "has no last line"),
+			"safe load: an older build's settings.txt (no last line) is read, not the copy");
+		/* (the next save makes it whole again) */
+		vita_settings_set("HALO_FRAME_CAP", "60");
+		check(strstr(file_text(SETTINGS_FILE), "HALO_RENDER_SCALE=0.875\n") &&
+			strstr(file_text(SETTINGS_FILE), SETTINGS_END "=1\n"), "safe load: ... and the next save writes it whole");
+	}
+	settings_file_delete();
+	rows_fresh();
+	vita_settings_load();
 }
 
 int main(void)
@@ -2461,10 +5336,10 @@ int main(void)
 	test_variables_kept();
 	setenv("HALO_VITA_NETWORK", "online", 1);
 	vita_settings_load();
-	test_graphics_layout();
+	test_tab_layouts();
 	check(!strcmp(getenv("HALO_NET_ONLINE"), "true") && !strcmp(getenv("HALO_NET_ALLOW_UPNP"), "false"),
 		"Network Online: internet play on, without UPnP");
-	check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "vitauser"), "the lobby name is the Vita's user name");
+	check(!getenv("HALO_NET_LOBBY_NAME")[0], "no lobby name: the game's own (its player's profile's), not the Vita's user name");
 	check(getenv("HALO_NET_PLAYER_NAME") && !strcmp(getenv("HALO_NET_PLAYER_NAME"), "vitauser"),
 		"a default profile's player name is the Vita's user name");
 	check(!strstr(log_text, "TEST MODE"), "no dev switch on: halo.log does not say test mode");
@@ -2472,7 +5347,7 @@ int main(void)
 	check(!frame(0), "closed: the game gets the buttons");
 	/* SELECT + D-pad down: open at once, neither button the game's; held,
 	once; again, closed; SELECT alone still the game's (Back, the scoreboard) */
-	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_DOWN) && menu_visible && strstr(menu, "\t*Graphics|"),
+	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_DOWN) && menu_visible && strstr(menu, "\t*Game|"),
 		"SELECT + down opens the panel at once, the game gets neither");
 	check(frame(VITA_BUTTON_SELECT | VITA_BUTTON_DOWN) && menu_visible, "SELECT + down held: still open, once per press");
 	frame(0);
@@ -2484,29 +5359,69 @@ int main(void)
 	frame(0);
 	open_panel();
 	printf("%s\n--\n", menu);
-	check(menu_visible && menu[0] == '\t' && strstr(menu, "\t*Graphics|General|Audio|Multiplayer\n"),
-		"SELECT+START opens the Graphics tab; four tabs (Dev hidden)");
-	check(!strncmp(menu_line(1, line, sizeof(line)), "Profile\x02", 8) &&
-		!strncmp(menu_line(2, line, sizeof(line)), "Render resolution\x02", 18) &&
-		!strncmp(menu_line(3, line, sizeof(line)), "Dynamic minimum\x02", 16) &&
-		!strncmp(menu_line(4, line, sizeof(line)), "Frame limit\x02", 12) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Frame interpolation\x02", 20) &&
-		!strcmp(menu_line(6, line, sizeof(line)), "FPS counter\x02  Off >") &&
-		!strcmp(menu_line(7, line, sizeof(line)), "Screen\x02  16:9, Smooth  >") &&
-		!strcmp(menu_line(8, line, sizeof(line)), "First person\x02  >") &&
-		!strcmp(menu_line(9, line, sizeof(line)), "Detail\x02  >") &&
-		!strcmp(menu_line(10, line, sizeof(line)), "Performance\x02  >") &&
-		!strncmp(menu_line(11, line, sizeof(line)), "\x05Sets resolution", 16) &&
-		!strncmp(menu_line(12, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
-		"Graphics: Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation, FPS counter, "
-		"Screen (16:9, Smooth), First person, Detail, Performance; help, buttons");
-	check(menu_fits() && menu_rows() == 10, "Graphics: ten rows with Dynamic minimum shown, each fits");
-	check(!strstr(menu, "Aspect ratio") && !strstr(menu, "Upscale filter") && !strstr(menu, "First-person legs") &&
-		!strstr(menu, "Smooth weapon motion") && !strstr(menu, "Model detail") && !strstr(menu, "\nParticles") &&
+	check(menu_visible && menu[0] == '\t' && strstr(menu, "\t*Game|Controls|Video|Sound|Multiplayer\n"),
+		"SELECT+START opens the Game tab, the first; five tabs: Game, Controls, Video, Sound, Multiplayer (Dev hidden)");
+	/* Game: Halo Online's Interface, First person and Updates */
+	check(!strcmp(menu_line(1, line, sizeof(line)), "\x08Interface") &&
+		!strcmp(menu_line(2, line, sizeof(line)), "Menus\x02  Halo 3  >") &&
+		!strcmp(menu_line(3, line, sizeof(line)),
+			VITA_BUTTON_ICONS_DEFAULT ? "Button icons\x02< PlayStation  " : "Button icons\x02  Xbox >") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Language\x02  Automatic >") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "FPS counter\x02  Off >") &&
+		!strcmp(menu_line(6, line, sizeof(line)), "\x08" "First person") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "First-person legs\x02< On  ") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Smooth weapon motion\x02  On >") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "Appearance\x02  RANDOM  >") &&
+		!strcmp(menu_line(10, line, sizeof(line)), "\x08Updates") &&
+		!strcmp(menu_line(11, line, sizeof(line)), "Check for updates\x02  >") &&
+		!strcmp(menu_line(12, line, sizeof(line)), "\x04" "Version " HALO_VITA_VERSION) &&
+		!strncmp(menu_line(13, line, sizeof(line)), "Update channel\x02", 15) &&
+		!strcmp(menu_line(14, line, sizeof(line)), "Show dev settings\x02  Off >") &&
+		!strcmp(menu_line(15, line, sizeof(line)), "\x05" "Menu style, the carnage report and scoreboard") &&
+		!strncmp(menu_line(16, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits(),
+		"Game: Interface (Menus: Halo 3, Button icons, Language, FPS counter), First person (First-person legs, "
+		"Smooth weapon motion, Appearance: the armor color), Updates (Check for updates and the version, Update channel, "
+		"Show dev settings); help, buttons");
+	check(menu_selected == 2 && menu_fits() && menu_rows() == 10 && !strstr(menu, "*\x02"),
+		"Game: Menus chosen first (not the heading over it); ten rows, each fits, all live (no *)");
+	check(!strstr(menu, "Profile") && !strstr(menu, "Aspect ratio") && !strstr(menu, "Look sensitivity") &&
+		!strstr(menu, "Stick deadzone") && !strstr(menu, "Sound voices") && !strstr(menu, "\nScreen\x02") &&
+		!strstr(menu, "\nFirst person\x02") && !strstr(menu, "\nAdvanced\x02"),
+		"Game: no other tab's rows, no page rows (no Screen, First person or Advanced)");
+	check(!strcmp(getenv("HALO_MENU_STYLE"), "halo3") && !strstr(file_text(SETTINGS_FILE), "HALO_MENU_STYLE"),
+		"no settings.txt naming it: Menu style Halo 3, the shipped default, in the environment the game reads");
+	test_headings();
+
+	/* Video: Quality, Screen, More */
+	check(to_tab("Video") && strstr(menu, "\tGame|Controls|*Video|Sound|Multiplayer\n"), "R: Video");
+	printf("%s\n--\n", menu);
+	check(!strcmp(menu_line(1, line, sizeof(line)), "\x08Quality") &&
+		!strncmp(menu_line(2, line, sizeof(line)), "Profile\x02", 8) &&
+		!strncmp(menu_line(3, line, sizeof(line)), "Render resolution\x02", 18) &&
+		!strncmp(menu_line(4, line, sizeof(line)), "Dynamic minimum\x02", 16) &&
+		!strncmp(menu_line(5, line, sizeof(line)), "Frame limit\x02", 12) &&
+		!strncmp(menu_line(6, line, sizeof(line)), "Frame interpolation\x02", 20) &&
+		!strcmp(menu_line(7, line, sizeof(line)), "\x08Screen") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "Aspect ratio\x02  16:9 >") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "Field of view\x02  70 (original) >") &&
+		!strcmp(menu_line(10, line, sizeof(line)), "Upscale filter\x02  Smooth >") &&
+		!strcmp(menu_line(11, line, sizeof(line)), "Sharp interface\x02  On >") &&
+		!strcmp(menu_line(12, line, sizeof(line)), "Brightness\x02< 5 >") &&
+		!strcmp(menu_line(13, line, sizeof(line)), "Detail\x02  >") &&
+		!strcmp(menu_line(14, line, sizeof(line)), "Performance\x02  >") &&
+		!strncmp(menu_line(15, line, sizeof(line)), "\x05Sets resolution", 16) &&
+		!strncmp(menu_line(16, line, sizeof(line)), "\x06L/R: tabs", 10) && menu_height_fits() && menu_selected == 2,
+		"Video: Quality (Profile, Render resolution, Dynamic minimum, Frame limit, Frame interpolation), Screen (Aspect "
+		"ratio 16:9, Field of view 70 (original), Upscale filter Smooth, Sharp interface On, Brightness 5), Detail, "
+		"Performance; help, buttons; Profile chosen first");
+	check(menu_fits() && menu_rows() == 12, "Video: twelve rows with Dynamic minimum shown, each fits");
+	check(!strstr(menu, "FPS counter") && !strstr(menu, "First-person legs") && !strstr(menu, "Smooth weapon motion") &&
+		!strstr(menu, "Menu style") && !strstr(menu, "Model detail") && !strstr(menu, "\nParticles") &&
 		!strstr(menu, "Particle density") && !strstr(menu, "Scenery updates") && !strstr(menu, "AI think rate") &&
-		!strstr(menu, "Fourth core helpers") && !strstr(menu, "Display") && !strstr(menu, "Advanced"),
-		"Graphics: the aspect ratio and upscale filter under Screen, legs and weapon motion under First person, "
-		"the detail rows and particles under Detail, the update rates under Performance (no Display, no Advanced)");
+		!strstr(menu, "Fourth core helpers") && !strstr(menu, "\nScreen\x02") && !strstr(menu, "First person") &&
+		!strstr(menu, "Display") && !strstr(menu, "Advanced"),
+		"Video: the detail rows and particles under Detail, the update rates under Performance; FPS counter, first "
+		"person and Menu style on Game (no Screen, First person, Display or Advanced page)");
 	check(strstr(menu, "\nProfile\x02< Balanced >") && strstr(menu, "\nRender resolution\x02< Dynamic  ") &&
 		strstr(menu, "\nDynamic minimum\x02< 63% >") && strstr(menu, "\nFrame limit\x02  30 FPS >"),
 		"values in a column: '< ' or two spaces before each; Balanced: Dynamic, from 63%");
@@ -2529,8 +5444,8 @@ int main(void)
 			"Render resolution 75%: in the environment and settings.txt at once (the minimum kept), the profile Custom");
 		press(VITA_BUTTON_DOWN);
 		press(VITA_BUTTON_UP);
-		check(!strstr(menu, "Dynamic minimum") && !strncmp(menu_line(3, line, sizeof(line)), "Frame limit\x02", 12) &&
-			menu_rows() == 9, "not Dynamic: the Dynamic minimum row hidden");
+		check(!strstr(menu, "Dynamic minimum") && !strncmp(menu_line(4, line, sizeof(line)), "Frame limit\x02", 12) &&
+			menu_rows() == 11, "not Dynamic: the Dynamic minimum row hidden");
 		vita_settings_set("HALO_RENDER_SCALE", "0.3");
 		check(!strcmp(getenv("HALO_RENDER_SCALE"), "0.5"), "a scale off the list goes to the nearest number, not Dynamic");
 		vita_settings_set("HALO_RENDER_SCALE", "dynamic");
@@ -2538,7 +5453,7 @@ int main(void)
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Dynamic again (from 63%): Balanced again");
 		press(VITA_BUTTON_DOWN);
 		press(VITA_BUTTON_UP);
-		check(!strncmp(menu_line(3, line, sizeof(line)), "Dynamic minimum\x02", 16) && menu_rows() == 10 && menu_fits(),
+		check(!strncmp(menu_line(4, line, sizeof(line)), "Dynamic minimum\x02", 16) && menu_rows() == 12 && menu_fits(),
 			"Dynamic: the Dynamic minimum row shows, under it");
 		vita_settings_set("HALO_DYNAMIC_RES_MIN", "0.75");
 		check(!strcmp(getenv("HALO_DYNAMIC_RES_MIN"), "0.75") &&
@@ -2548,45 +5463,120 @@ int main(void)
 		check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "back to 63%: Balanced again");
 	}
 	{
-		/* Screen: the aspect ratio and the upscale filter, on a page of
-		their own (live, no *); the row says both. First person: the
-		first-person legs and the weapon's motion (live, no *) */
-		unsigned long generation;
-
-		check(to_line("Screen") && strstr(menu, "\n\x05" "Aspect ratio, upscale filter\n") &&
-			menu_fits(), "Screen: its help says what is there");
-		check(open_page("Screen") && strstr(menu, "\n\x03Graphics > Screen\n") &&
-			!strcmp(menu_line(2, line, sizeof(line)), "Aspect ratio\x02  16:9 >") &&
-			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02  Smooth >") && menu_rows() == 2 &&
-			menu_fits() && menu_height_fits() && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Upscale filter*"),
-			"Graphics, Screen: Aspect ratio (16:9), Upscale filter (Smooth), live");
+		/* Screen: the aspect ratio and the upscale filter, on the tab under
+		their heading (live, no *) */
+		check(to_line("Aspect ratio") && menu_selected == 8 && strstr(menu, "\n\x05" "4:3: the Xbox's framing, black bars\n") &&
+			menu_fits() && !strstr(menu, "Aspect ratio*") && !strstr(menu, "Upscale filter*"),
+			"Video, Screen: Aspect ratio (16:9) on the tab under its heading, its help; live");
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_DISPLAY_WIDTH"), "640") && strstr(file_text(SETTINGS_FILE), "HALO_DISPLAY_WIDTH=640\n") &&
+			!strcmp(menu_line(8, line, sizeof(line)), "Aspect ratio\x02< 4:3  ") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Aspect ratio 4:3: saved, the profile kept");
 		press(VITA_BUTTON_DOWN);
-		check(strstr(menu, "\n\x05Scaling to the screen: Sharp = crisp pixels\n") && menu_fits(),
+		/* (Field of view, under it: 70 (original) as shipped; live, no *,
+		the profile kept, in the environment port/linux/game/field_of_view.c
+		reads, the readers told) */
+		check(menu_selected == 9 && !strcmp(menu_line(9, line, sizeof(line)), "Field of view\x02  70 (original) >") &&
+			strstr(menu, "\n\x05Wider shows more, but more to draw can cost frame rate\n") && menu_fits() &&
+			!strstr(menu, "Field of view*") && !strcmp(getenv("HALO_FIELD_OF_VIEW"), "70"),
+			"down from Aspect ratio: Field of view (70 (original), in the environment), its help line fits; live");
+		{
+			unsigned long generation = halo_settings_generation;
+			int step;
+
+			press(VITA_BUTTON_RIGHT);
+			check(!strcmp(getenv("HALO_FIELD_OF_VIEW"), "75") && strstr(file_text(SETTINGS_FILE), "HALO_FIELD_OF_VIEW=75\n") &&
+				halo_settings_generation != generation &&
+				!strcmp(menu_line(9, line, sizeof(line)), "Field of view\x02< 75 >") &&
+				!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+				"Field of view 75: saved, the readers told (the settings generation), the profile kept");
+			for (step = 0; step < 8; step++)
+				press(VITA_BUTTON_RIGHT);
+			check(!strcmp(getenv("HALO_FIELD_OF_VIEW"), "100") && strstr(file_text(SETTINGS_FILE), "HALO_FIELD_OF_VIEW=100\n") &&
+				!strcmp(menu_line(9, line, sizeof(line)), "Field of view\x02< 100  "),
+				"Field of view up to 100, in steps of 5, the last");
+			for (step = 0; step < 8; step++)
+				press(VITA_BUTTON_LEFT);
+			check(!strcmp(getenv("HALO_FIELD_OF_VIEW"), "70") && strstr(file_text(SETTINGS_FILE), "HALO_FIELD_OF_VIEW=70\n") &&
+				!strcmp(menu_line(9, line, sizeof(line)), "Field of view\x02  70 (original) >"),
+				"Field of view back to 70 (original): saved");
+		}
+		press(VITA_BUTTON_DOWN);
+		check(menu_selected == 10 && strstr(menu, "\n\x05Scaling to the screen: Sharp = crisp pixels\n") && menu_fits(),
 			"Upscale filter: its help line fits");
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_UPSCALE_FILTER"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_UPSCALE_FILTER=1\n") &&
-			!strcmp(menu_line(3, line, sizeof(line)), "Upscale filter\x02< Sharp  ") &&
+			!strcmp(menu_line(10, line, sizeof(line)), "Upscale filter\x02< Sharp  ") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"), "Upscale filter Sharp: saved, the profile kept");
-		press(VITA_BUTTON_CIRCLE);
-		check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
-			!strcmp(menu_line(menu_selected, line, sizeof(line)), "Screen\x02  4:3, Sharp  >") && menu_fits(),
-			"circle: back to Graphics, on Screen, which says 4:3, Sharp");
+		/* (Sharp interface, under it: the interface at the display's
+		resolution, on as shipped; live, no *, the profile kept) */
+		press(VITA_BUTTON_DOWN);
+		check(menu_selected == 11 && !strcmp(menu_line(11, line, sizeof(line)), "Sharp interface\x02  On >") &&
+			strstr(menu, "\n\x05HUD, menus and text at full resolution\n") && menu_fits() &&
+			!strstr(menu, "Sharp interface*") && !strcmp(getenv("HALO_SHARP_UI"), "1"),
+			"down from Upscale filter: Sharp interface (On, in the environment), its help line fits; live");
+		{
+			unsigned long generation = halo_settings_generation;
+
+			press(VITA_BUTTON_RIGHT);
+			check(!strcmp(getenv("HALO_SHARP_UI"), "0") && strstr(file_text(SETTINGS_FILE), "HALO_SHARP_UI=0\n") &&
+				halo_settings_generation != generation &&
+				!strcmp(menu_line(11, line, sizeof(line)), "Sharp interface\x02< Off  ") &&
+				!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+				"Sharp interface Off: saved, the readers told (the settings generation), the profile kept");
+			press(VITA_BUTTON_LEFT);
+			check(!strcmp(getenv("HALO_SHARP_UI"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_SHARP_UI=1\n") &&
+				!strcmp(menu_line(11, line, sizeof(line)), "Sharp interface\x02  On >"), "Sharp interface On again: saved");
+		}
+		press(VITA_BUTTON_DOWN);
+		/* (Brightness, under Sharp interface: the 3D picture's curve in the
+		blit to the display, live; in no profile) */
+		check(menu_selected == 12 && !strcmp(menu_line(menu_selected, line, sizeof(line)), "Brightness\x02< 5 >") &&
+			!strcmp(getenv("HALO_BRIGHTNESS"), "5") && menu_fits(),
+			"down from Sharp interface: Brightness (5, in the environment), its help line fits");
+		{
+			unsigned long generation = halo_settings_generation;
+
+			press(VITA_BUTTON_RIGHT);
+			check(!strcmp(getenv("HALO_BRIGHTNESS"), "6") && strstr(file_text(SETTINGS_FILE), "HALO_BRIGHTNESS=6\n") &&
+				halo_settings_generation != generation &&
+				!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+				"Brightness 6: saved, the readers told, the profile kept");
+			vita_settings_set("HALO_BRIGHTNESS", "0");
+			check(!strcmp(getenv("HALO_BRIGHTNESS"), "0"),
+				"Brightness 0: the lowest");
+			vita_settings_set("HALO_BRIGHTNESS", "11");
+			check(!strcmp(getenv("HALO_BRIGHTNESS"), "10"),
+				"Brightness off its list: the nearest");
+		}
+		press(VITA_BUTTON_DOWN);
+		check(menu_selected == 13 && !strcmp(menu_line(menu_selected, line, sizeof(line)), "Detail\x02  >"),
+			"down from Brightness: Detail");
+		vita_settings_set("HALO_BRIGHTNESS", "5");
+		press(VITA_BUTTON_UP);
+		press(VITA_BUTTON_UP);
+		press(VITA_BUTTON_UP);
+		press(VITA_BUTTON_UP);
+		press(VITA_BUTTON_UP);
+		press(VITA_BUTTON_UP);
+		check(menu_selected == 6 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "Frame interpolation\x02", 20),
+			"up from Aspect ratio: Frame interpolation (the Screen heading stepped over)");
 		vita_settings_set("HALO_DISPLAY_WIDTH", "848");
 		vita_settings_set("HALO_UPSCALE_FILTER", "0");
+	}
+	{
+		/* Game's First person: the first-person legs and the weapon's
+		motion (live, no *); the FPS counter, under Interface (live) */
+		unsigned long generation;
 
-		check(to_line("First person") && strstr(menu, "\n\x05" "First-person legs, smooth weapon motion\n") &&
-			!strcmp(menu_line(menu_selected, line, sizeof(line)), "First person\x02  >") && menu_fits(),
-			"First person: its help says what is there");
-		check(open_page("First person") && strstr(menu, "\n\x03Graphics > First person\n") &&
-			!strcmp(menu_line(2, line, sizeof(line)), "First-person legs\x02< On  ") &&
-			!strcmp(menu_line(3, line, sizeof(line)), "Smooth weapon motion\x02  On >") && menu_rows() == 2 &&
+		check(to_tab("Game") && to_line("First-person legs") && menu_selected == 7 &&
+			!strcmp(menu_line(6, line, sizeof(line)), "\x08" "First person") &&
+			!strcmp(menu_line(7, line, sizeof(line)), "First-person legs\x02< On  ") &&
+			!strcmp(menu_line(8, line, sizeof(line)), "Smooth weapon motion\x02  On >") &&
 			menu_fits() && menu_height_fits() && !strstr(menu, "First-person legs*") &&
 			!strstr(menu, "Smooth weapon motion*") && !strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "1") &&
 			!strcmp(getenv("HALO_INTERPOLATE_FIRST_PERSON"), "1"),
-			"Graphics, First person: First-person legs (On), Smooth weapon motion (On), both in the environment, live");
+			"Game, First person: First-person legs (On), Smooth weapon motion (On), both in the environment, live");
 		/* (port/linux/game/first_person_legs.c reads it again as the
 		generation changes) */
 		check(strstr(menu, "\n\x05Your legs when you look down, as others see them\n") && menu_fits(),
@@ -2595,7 +5585,7 @@ int main(void)
 		press(VITA_BUTTON_LEFT);
 		check(!strcmp(getenv("HALO_FIRST_PERSON_LEGS"), "0") && halo_settings_generation != generation &&
 			strstr(file_text(SETTINGS_FILE), "HALO_FIRST_PERSON_LEGS=0\n") &&
-			!strcmp(menu_line(2, line, sizeof(line)), "First-person legs\x02  Off >") && !strstr(notice, "Restart") &&
+			!strcmp(menu_line(7, line, sizeof(line)), "First-person legs\x02  Off >") && !strstr(notice, "Restart") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
 			"First-person legs Off: in the environment and settings.txt at once, no restart, the profile kept");
 		press(VITA_BUTTON_RIGHT);
@@ -2608,17 +5598,30 @@ int main(void)
 		press(VITA_BUTTON_RIGHT);
 		check(!strcmp(getenv("HALO_INTERPOLATE_FIRST_PERSON"), "0") && halo_settings_generation != generation &&
 			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATE_FIRST_PERSON=0\n") &&
-			!strcmp(menu_line(3, line, sizeof(line)), "Smooth weapon motion\x02< Off  ") && !strstr(notice, "Restart") &&
+			!strcmp(menu_line(8, line, sizeof(line)), "Smooth weapon motion\x02< Off  ") && !strstr(notice, "Restart") &&
 			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
 			"Smooth weapon motion Off: in the environment and settings.txt at once, no restart, the profile kept");
 		press(VITA_BUTTON_LEFT);
 		check(!strcmp(getenv("HALO_INTERPOLATE_FIRST_PERSON"), "1") &&
 			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATE_FIRST_PERSON=1\n"), "... and On again");
-		press(VITA_BUTTON_CIRCLE);
-		check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
-			!strcmp(menu_line(menu_selected, line, sizeof(line)), "First person\x02  >"),
-			"circle: back to Graphics, on First person");
-		while (menu_selected > 2)
+		press(VITA_BUTTON_UP);
+		press(VITA_BUTTON_UP);
+		check(menu_selected == 5 && !strncmp(menu_line(menu_selected, line, sizeof(line)), "FPS counter\x02", 12),
+			"up from First-person legs: FPS counter (the First person heading stepped over)");
+		check(strstr(menu, "\n\x05The game's frame counter, bottom right\n") && menu_fits(), "FPS counter: its help line fits");
+		generation = halo_settings_generation;
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_FRAMERATE_COUNTER"), "1") && halo_settings_generation != generation &&
+			strstr(file_text(SETTINGS_FILE), "HALO_FRAMERATE_COUNTER=1\n") &&
+			!strcmp(menu_line(5, line, sizeof(line)), "FPS counter\x02< On  ") && !strstr(notice, "Restart") &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+			"FPS counter On: in the environment and settings.txt at once, no restart, the profile kept");
+		press(VITA_BUTTON_LEFT);
+		check(!strcmp(getenv("HALO_FRAMERATE_COUNTER"), "0"), "... and Off again");
+		for (index = 0; index < 20 && menu_selected > 2; index++)
+			press(VITA_BUTTON_UP);
+		check(to_tab("Video") && menu_selected == 6, "back on Video: on Frame interpolation, as left");
+		for (index = 0; index < 20 && menu_selected > 2; index++)
 			press(VITA_BUTTON_UP);
 	}
 	{
@@ -2643,11 +5646,12 @@ int main(void)
 		check(!strcmp(getenv("HALO_INTERPOLATION"), "false") &&
 			strstr(file_text(SETTINGS_FILE), "HALO_INTERPOLATION=false\n"), "... and Off again");
 	}
-	/* Graphics' Detail: the detail rows (most of them the profile's), the
+	/* Video's Detail: the detail rows (most of them the profile's), the
 	particles made and drawn */
-	check(to_line("Detail") && strstr(menu, "\n\x05" "Models, shadows, lights, effects, particles\n") && menu_fits(),
-		"Detail: its help says what is there");
-	check(open_page("Detail") && strstr(menu, "\n\x03Graphics > Detail\n") &&
+	check(to_line("Detail") && !strcmp(menu_line(menu_selected - 1, line, sizeof(line)), "Brightness\x02< 5 >") &&
+		strstr(menu, "\n\x05" "Models, shadows, lights, effects, particles\n") && menu_fits(),
+		"Detail: under Brightness, its help says what is there");
+	check(open_page("Detail") && strstr(menu, "\n\x03Video > Detail\n") && !strchr(menu, '\x08') &&
 		!strcmp(menu_line(2, line, sizeof(line)), "Model detail\x02< Medium >") &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Hide distant objects\x02< Small >") &&
 		!strcmp(menu_line(4, line, sizeof(line)), "Object shadows\x02< Off  ") &&
@@ -2657,31 +5661,53 @@ int main(void)
 		!strcmp(menu_line(8, line, sizeof(line)), "Tiny decals\x02  Shown >") &&
 		!strcmp(menu_line(9, line, sizeof(line)), "Particles\x02< Reduced >") &&
 		!strcmp(menu_line(10, line, sizeof(line)), "Particle density\x02  Full >") &&
-		!strncmp(menu_line(11, line, sizeof(line)), "\x05Level of detail", 16) && menu_rows() == 9 && menu_fits() &&
+		!strcmp(menu_line(11, line, sizeof(line)), "Ragdolls\x02< On  ") &&
+		!strncmp(menu_line(12, line, sizeof(line)), "\x05Level of detail", 16) && menu_rows() == 10 && menu_fits() &&
 		menu_height_fits() && !strstr(menu, "*\x02"),
-		"Graphics, Detail: model detail (Medium), distant objects (Small), shadows (Off), lights (4), effects (Full), "
-		"sun rays (Off), tiny decals (Shown), Particles (Reduced), particle density (Full); all live");
+		"Video, Detail: model detail (Medium), distant objects (Small), shadows (Off), lights (4), effects (Full), "
+		"sun rays (Off), tiny decals (Shown), Particles (Reduced), particle density (Full), Ragdolls (On); all live; "
+		"no headings on a page");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_MODEL_LOD_SCALE"), "1") && !strcmp(settings[0].names[settings[0].choice], "Custom"),
 		"a detail row changed on its page (Model detail High): the profile Custom");
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(settings[0].names[settings[0].choice], "Balanced"), "... and Balanced again");
 	test_particles_row();
+	/* (port/linux/game/ragdolls.c reads it again as the generation
+	changes: no restart, no profile's) */
+	{
+		unsigned long generation;
+
+		check(to_line("Ragdolls") && strstr(menu, "\n\x05" "Dead bodies fall limp where they land\n") && menu_fits() &&
+			getenv("HALO_RAGDOLLS") && !strcmp(getenv("HALO_RAGDOLLS"), "1"),
+			"Ragdolls: On by default, in the environment, its help line fits");
+		generation = halo_settings_generation;
+		press(VITA_BUTTON_LEFT);
+		check(!strcmp(getenv("HALO_RAGDOLLS"), "0") && halo_settings_generation != generation &&
+			strstr(file_text(SETTINGS_FILE), "HALO_RAGDOLLS=0\n") &&
+			!strcmp(menu_line(menu_selected, line, sizeof(line)), "Ragdolls\x02  Off >") && !restart_pending &&
+			!strcmp(settings[0].names[settings[0].choice], "Balanced"),
+			"Ragdolls Off: in the environment and settings.txt at once, no restart, the profile kept");
+		press(VITA_BUTTON_RIGHT);
+		check(!strcmp(getenv("HALO_RAGDOLLS"), "1") && strstr(file_text(SETTINGS_FILE), "HALO_RAGDOLLS=1\n"),
+			"... and On again");
+	}
 	press(VITA_BUTTON_CIRCLE);
-	check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
+	check(menu_visible && strstr(menu, "|*Video|") && !strstr(menu, "\n\x03") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Detail\x02  >"),
-		"circle: back to Graphics, on Detail");
-	/* Graphics' Performance: the update rates, the AI's, the fourth core */
+		"circle: back to Video, on Detail");
+	/* Video's Performance: the update rates, the AI's, the fourth core */
 	check(to_line("Performance") && strstr(menu, "\n\x05" "Update rates, AI think rate, fourth core helpers\n") &&
 		menu_fits(), "Performance: its help says what is there");
-	check(open_page("Performance") && strstr(menu, "\n\x03Graphics > Performance\n") &&
+	check(open_page("Performance") && strstr(menu, "\n\x03Video > Performance\n") && !strchr(menu, '\x08') &&
 		!strcmp(menu_line(2, line, sizeof(line)), "Scenery updates\x02< Quarter  ") &&
 		!strcmp(menu_line(3, line, sizeof(line)), "Object lighting\x02< Third  ") &&
 		!strcmp(menu_line(4, line, sizeof(line)), "AI think rate\x02< Adaptive >") &&
-		!strcmp(menu_line(5, line, sizeof(line)), "Fourth core helpers*\x02< All async  ") && menu_rows() == 4 &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Fourth core helpers*\x02< All async  ") &&
+		!strcmp(menu_line(6, line, sizeof(line)), "Battery saver in menus\x02  On >") && menu_rows() == 5 &&
 		menu_fits() && menu_height_fits() && !strstr(menu, "Scenery updates*") && !strstr(menu, "AI think rate*"),
-		"Graphics, Performance: scenery (Quarter), lighting (Third), AI think rate (Adaptive), fourth core helpers "
-		"(All async, after a restart)");
+		"Video, Performance: scenery (Quarter), lighting (Third), AI think rate (Adaptive), fourth core helpers "
+		"(All async, after a restart), battery saver in menus (On)");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_SCENERY_UPDATE_DIVISOR"), "2") && !strcmp(settings[0].names[settings[0].choice], "Custom") &&
 		!restart_pending, "a rate changed on its page (Scenery updates Half): the profile Custom, no restart");
@@ -2690,23 +5716,37 @@ int main(void)
 	test_bruno_rows();
 	test_fourth_core();
 	press(VITA_BUTTON_CIRCLE);
-	check(menu_visible && strstr(menu, "\t*Graphics") && !strstr(menu, "\n\x03") &&
+	check(menu_visible && strstr(menu, "|*Video|") && !strstr(menu, "\n\x03") &&
 		!strcmp(menu_line(menu_selected, line, sizeof(line)), "Performance\x02  >"),
-		"circle: back to Graphics, on Performance");
+		"circle: back to Video, on Performance");
+	/* L and R through the tabs, wrapping at either end */
 	press(VITA_BUTTON_L);
-	check(strstr(menu, "*Multiplayer") != NULL, "L from the first tab wraps to the last shown");
+	check(strstr(menu, "|*Controls|") && strstr(menu, "Look sensitivity"), "L from Video: Controls");
+	press(VITA_BUTTON_L);
+	check(strstr(menu, "\t*Game|") && strstr(menu, "Menu style"), "L: Game");
+	press(VITA_BUTTON_L);
+	check(strstr(menu, "|*Multiplayer\n") != NULL, "L from the first tab, Game, wraps to the last shown");
+	press(VITA_BUTTON_R);
+	check(strstr(menu, "\t*Game|") != NULL, "R from the last: Game again");
 	press(VITA_BUTTON_R);
 	press(VITA_BUTTON_R);
-	check(strstr(menu, "*General") && strstr(menu, "Look sensitivity"), "R: General");
 	press(VITA_BUTTON_R);
-	check(strstr(menu, "*Audio") && strstr(menu, "\nLanguage\x02  Automatic >") && strstr(menu, "\nSound voices*\x02") &&
-		strstr(menu, "\nSound occlusion\x02") && strstr(menu, "\nSound updates\x02< Every 2nd >") && menu_rows() == 4 &&
-		menu_fits(), "R: Audio: Language (Automatic), then the sound rows");
+	check(strstr(menu, "|*Sound|") && strstr(menu, "\nSound voices*\x02") && strstr(menu, "\nSound occlusion\x02") &&
+		strstr(menu, "\nSound updates\x02< Every 2nd >") && menu_rows() == 3 && !strstr(menu, "Language") &&
+		!strchr(menu, '\x08') && menu_fits() && menu_height_fits(),
+		"R, R, R: Sound: the sound rows, no heading (Language on Game)");
+	check(!strncmp(menu_line(1, line, sizeof(line)), "Sound voices*\x02", 14) && menu_selected == 1,
+		"Sound: Sound voices first, chosen");
 	press(VITA_BUTTON_R);
-	check(!strncmp(menu, "\tGraphics|General|Audio|*Multiplayer\n", sizeof("\tGraphics|General|Audio|*Multiplayer\n") - 1), "R: Multiplayer");
+	check(!strncmp(menu, "\tGame|Controls|Video|Sound|*Multiplayer\n", sizeof("\tGame|Controls|Video|Sound|*Multiplayer\n") - 1),
+		"R: Multiplayer");
 	printf("%s\n--\n", menu);
 
 	test_multiplayer_tab();
+
+	test_forge_page();
+	test_player_model_row();
+	test_appearance_page();
 
 	/* ---------- Multiplayer's Modded maps page */
 	write_map("ux0:data/haloce-vita/maps/mygulch.map", 5, 250000);
@@ -2721,17 +5761,36 @@ int main(void)
 	check(to_tab("Multiplayer") && strstr(menu, "\nModded maps\x02  4 maps  >"), "Multiplayer: Modded maps says how many");
 	check(open_page("Modded maps") && strstr(menu, "\n\x03Multiplayer > Modded maps\n"), "the Modded maps page");
 	printf("%s\n--\n", menu);
-	check(!strncmp(menu_line(2, line, sizeof(line)), "PC maps\x02", 8) &&
-		!strcmp(menu_line(3, line, sizeof(line)), "Map downloads\x02  Ask >") && !menu_line(4, line, sizeof(line))[0] &&
-		!strcmp(menu_line(5, line, sizeof(line)), "!Missing: sounds.map loc.map") &&
-		!strcmp(menu_line(6, line, sizeof(line)), "!Copy them in, or the Halo CE installer") &&
-		!strcmp(menu_line(7, line, sizeof(line)), "!(halocesetup*.exe) to ux0:data/haloce-vita"),
-		"PC maps switch, Map downloads (Ask), a gap; a CE map without sounds.map/loc.map: the warning, and that "
-		"the installer does");
-	check(!strncmp(menu_line(8, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(9, line, sizeof(line)), "cesolo\x02", 7) &&
-		!strncmp(menu_line(10, line, sizeof(line)), "inplay\x02", 7) &&
-		!strncmp(menu_line(11, line, sizeof(line)), "mygulch\x02", 8) && menu_line(12, line, sizeof(line))[0] == '\x05',
+	check(!strcmp(menu_line(2, line, sizeof(line)), "Mod manager\x02  >") &&
+		!strncmp(menu_line(3, line, sizeof(line)), "PC maps\x02", 8) &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Halo content folder\x02  Found by itself >") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Map downloads\x02  Ask >") && !menu_line(6, line, sizeof(line))[0] &&
+		!strcmp(menu_line(7, line, sizeof(line)), "!Missing: sounds.map loc.map") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "!Copy them in, or the Halo CE installer") &&
+		!strcmp(menu_line(9, line, sizeof(line)), "!(halocesetup*.exe) to ux0:data/haloce-vita") &&
+		!strcmp(menu_line(10, line, sizeof(line)), "\x04" "Content: the Xbox maps (no MCC folder)"),
+		"Mod manager, PC maps switch, Halo content folder (found by itself), Map downloads (Ask), a gap; a CE map "
+		"without sounds.map/loc.map: the warning, and that the installer does; no MCC folder: the Xbox maps");
+	check(!strncmp(menu_line(11, line, sizeof(line)), "cemap\x02", 6) && !strncmp(menu_line(12, line, sizeof(line)), "cesolo\x02", 7) &&
+		!strncmp(menu_line(13, line, sizeof(line)), "inplay\x02", 7) &&
+		!strncmp(menu_line(14, line, sizeof(line)), "mygulch\x02", 8) && menu_line(15, line, sizeof(line))[0] == '\x05',
 		"the custom maps listed in order, not the Xbox's or CE resource maps");
+	/* the Halo content folder (port/linux/game/mcc_content.c): found by
+	itself, or one of the memory cards' data/mcc; in the environment the game
+	reads, saved; no switch, the page says where the content is read from */
+	check(!getenv("HALO_CONTENT_ROOT") || !strcmp(getenv("HALO_CONTENT_ROOT"), "auto"),
+		"Halo content folder: found by itself by default");
+	to_line("Halo content folder");
+	check(strstr(menu, "\n\x05" "Your MCC folder with halo1 in it; only read. Default: haloce-vita/mcc\n") && menu_fits(),
+		"Halo content folder's help: what it is, read only, where by default");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_CONTENT_ROOT") && !strcmp(getenv("HALO_CONTENT_ROOT"), "ux0:data/mcc") &&
+		strstr(file_text(SETTINGS_FILE), "HALO_CONTENT_ROOT=ux0:data/mcc\n") &&
+		strstr(menu, "\nHalo content folder\x02< ux0:data/mcc >\n"),
+		"right: ux0:data/mcc, in the environment and settings.txt");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_CONTENT_ROOT"), "auto") && strstr(file_text(SETTINGS_FILE), "HALO_CONTENT_ROOT=auto\n"),
+		"left: found by itself again, saved");
 	/* Map downloads: Ask (the default: public games warn), Not public games,
 	Never; each with its own help, saved and in the environment the game
 	reads (map_share.c) */
@@ -2793,7 +5852,7 @@ int main(void)
 		strstr(menu, "Deleted cemap.map") && !strstr(menu, "!Missing"), "cross deletes it (and its picture); no CE map, no warning");
 	check(strstr(log_text, "settings: map cemap.map deleted") != NULL, "halo.log says what was deleted");
 	press(VITA_BUTTON_UP);
-	while (strncmp(menu_line(menu_selected, line, sizeof(line)), "PC maps", 7))
+	for (index = 0; index < 20 && strncmp(menu_line(menu_selected, line, sizeof(line)), "PC maps", 7); index++)
 		press(VITA_BUTTON_UP);
 	press(VITA_BUTTON_RIGHT);
 	check(!strcmp(getenv("HALO_CUSTOM_EDITION"), "1") && strstr(menu, "!Missing: sounds.map loc.map"),
@@ -2817,25 +5876,100 @@ int main(void)
 	installer_state = 0;
 	press(VITA_BUTTON_CIRCLE);
 
+	/* MCC mods (experimental, off by default): no row without a folder in
+	ux0:data/haloce-vita/mods; with one, the row, Off, and right turns it on
+	(HALO_MCC_MODS, live) */
+	open_page("Modded maps");
+	check(!strstr(menu, "\nMCC mods\x02"), "no mods folder: no MCC mods row");
+	press(VITA_BUTTON_CIRCLE);
+	mkdir("ux0:data/haloce-vita/mods", 0777);
+	mkdir("ux0:data/haloce-vita/mods/ruby", 0777);
+	open_page("Modded maps");
+	check(strstr(menu, "\nMCC mods\x02  Off >") != NULL && menu_fits(), "a mod's folder: the MCC mods row, Off");
+	to_line("MCC mods");
+	check(strstr(menu, "\n\x05" "Experimental: mods folder's MCC maps, solo, offline\n") != NULL, "MCC mods' help");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_MCC_MODS") && !strcmp(getenv("HALO_MCC_MODS"), "1") && strstr(menu, "\nMCC mods\x02< On  \n"),
+		"right: MCC mods On");
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_MCC_MODS") && !strcmp(getenv("HALO_MCC_MODS"), "0"), "left: Off again");
+	press(VITA_BUTTON_CIRCLE);
+	rmdir("ux0:data/haloce-vita/mods/ruby");
+	rmdir("ux0:data/haloce-vita/mods");
+
+	/* the Halo content folder found (ux0:data/haloce-vita/mcc, halo1\maps in
+	it): the page says it is read from there, and how many Halo CE maps
+	(bitmaps.map and ui.map not counted) */
+	mkdir("ux0:data/haloce-vita/mcc", 0777);
+	mkdir("ux0:data/haloce-vita/mcc/halo1", 0777);
+	mkdir("ux0:data/haloce-vita/mcc/halo1/maps", 0777);
+	write_file("ux0:data/haloce-vita/mcc/halo1/maps/a10.map", "x", 1);
+	write_file("ux0:data/haloce-vita/mcc/halo1/maps/bloodgulch.map", "x", 1);
+	write_file("ux0:data/haloce-vita/mcc/halo1/maps/bitmaps.map", "x", 1);
+	write_file("ux0:data/haloce-vita/mcc/halo1/maps/ui.map", "x", 1);
+	open_page("Modded maps");
+	check(strstr(menu, "\n\x04" "Content: ux0:data/haloce-vita/mcc\n\x04" "Halo CE: 2 MCC maps (no sound yet)\n") &&
+		!strstr(menu, "Content: the Xbox maps") && menu_fits(), "an MCC folder: where the content is read from, its maps");
+	press(VITA_BUTTON_CIRCLE);
+	remove("ux0:data/haloce-vita/mcc/halo1/maps/a10.map");
+	remove("ux0:data/haloce-vita/mcc/halo1/maps/bloodgulch.map");
+	remove("ux0:data/haloce-vita/mcc/halo1/maps/bitmaps.map");
+	remove("ux0:data/haloce-vita/mcc/halo1/maps/ui.map");
+	rmdir("ux0:data/haloce-vita/mcc/halo1/maps");
+	rmdir("ux0:data/haloce-vita/mcc/halo1");
+	rmdir("ux0:data/haloce-vita/mcc");
+
+	/* PC map vehicles: no row while PC maps is off; with it on, Xbox, and
+	right PC, then Allowed (HALO_PC_MAP_VEHICLES, live); back to Xbox, and PC
+	maps off again hides it */
+	open_page("Modded maps");
+	check(!strstr(menu, "\nPC map vehicles\x02"), "PC maps off: no PC map vehicles row");
+	to_line("PC maps");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nPC map vehicles\x02  Xbox >") != NULL && menu_fits(), "PC maps on: the PC map vehicles row, Xbox");
+	to_line("PC map vehicles");
+	check(strstr(menu, "\n\x05" "Local games: PC maps' Banshees, turrets. Allowed: all the map allows\n") != NULL,
+		"PC map vehicles' help");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_PC_MAP_VEHICLES") && !strcmp(getenv("HALO_PC_MAP_VEHICLES"), "pc"), "right: PC");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_PC_MAP_VEHICLES") && !strcmp(getenv("HALO_PC_MAP_VEHICLES"), "all") &&
+		strstr(menu, "\nPC map vehicles\x02< Allowed  \n"), "right again: Allowed");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_LEFT);
+	check(getenv("HALO_PC_MAP_VEHICLES") && !strcmp(getenv("HALO_PC_MAP_VEHICLES"), "xbox"), "left twice: Xbox again");
+	to_line("PC maps");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_CUSTOM_EDITION"), "0") && !strstr(menu, "\nPC map vehicles\x02"),
+		"PC maps off again: the row goes");
+	press(VITA_BUTTON_CIRCLE);
+
+	/* ---------- Modded maps' Mod manager page */
+	test_mod_manager_page();
+	test_friends_page();
+	test_party_page();
+	test_chat_page();
+	test_players_page();
+
 	/* ---------- Dev, behind its switch */
 	press(VITA_BUTTON_R);
-	check(strstr(menu, "*Graphics") != NULL, "R from Multiplayer: Graphics (Dev hidden)");
-	to_tab("General");
-	open_page("Advanced");
-	to_line("Show dev settings");
+	check(strstr(menu, "\t*Game|") != NULL, "R from Multiplayer: Game (Dev hidden)");
+	check(to_line("Show dev settings") && menu_selected == 14 && strstr(menu, "\n\x05The Dev tab: switches for testers, Save report\n"),
+		"Show dev settings: Game's last row, under Updates, its help");
 	press(VITA_BUTTON_RIGHT);
-	check(strstr(menu, "\t*Graphics|*General") == NULL && strstr(menu, "|Multiplayer|Dev\n") != NULL,
-		"Show dev settings (General, Advanced): the Dev tab");
+	check(strstr(menu, "\t*Game|Controls|Video|Sound|Multiplayer|Dev\n") && menu_fits() && tab_bar_fits() &&
+		strstr(menu, "\nShow dev settings\x02< On  "), "Show dev settings (Game): the Dev tab, last");
 	to_tab("Dev");
 	printf("%s\n--\n", menu);
 	check(!strncmp(menu_line(1, line, sizeof(line)), "Performance logging*\x02", 21) &&
 		!strncmp(menu_line(2, line, sizeof(line)), "Crash dump on hang\x02", 19) &&
 		!strncmp(menu_line(3, line, sizeof(line)), "FPS overlay\x02", 12) &&
 		!strncmp(menu_line(4, line, sizeof(line)), "Debug camera\x02", 13) &&
-		!strncmp(menu_line(5, line, sizeof(line)), "Ad hoc dialog\x02", 14) &&
-		!strcmp(menu_line(6, line, sizeof(line)), "Save report\x02  >") &&
-		!strcmp(menu_line(7, line, sizeof(line)), "A/B switches\x02  >") && menu_rows() == 7 && menu_fits(),
-		"Dev: the switches, Debug camera, Ad hoc dialog, Save report, then A/B switches");
+		!strcmp(menu_line(5, line, sizeof(line)), "Battery log\x02  Auto >") &&
+		!strncmp(menu_line(6, line, sizeof(line)), "Ad hoc dialog\x02", 14) &&
+		!strcmp(menu_line(7, line, sizeof(line)), "Save report\x02  >") &&
+		!strcmp(menu_line(8, line, sizeof(line)), "A/B switches\x02  >") && menu_rows() == 8 && menu_fits(),
+		"Dev: the switches, Debug camera, Battery log (Auto), Ad hoc dialog, Save report, then A/B switches");
 	check(!strstr(file_text(SETTINGS_FILE), "HALO_GXM_RTT_SYNC") && !strstr(file_text(SETTINGS_FILE), "XV_FPS"),
 		"dev switches off: not in settings.txt");
 	press(VITA_BUTTON_RIGHT);
@@ -2891,6 +6025,14 @@ int main(void)
 	test_online_rows();
 	press(VITA_BUTTON_CIRCLE);
 	check(!menu_visible, "circle closes the panel");
+	/* (Show dev settings turned off - the game's @set, a settings.txt -
+	with the panel last on Dev: it opens on the first tab, Game) */
+	vita_settings_set("HALO_DEV_SETTINGS", "0");
+	open_panel();
+	check(menu_visible && strstr(menu, "\t*Game|Controls|Video|Sound|Multiplayer\n"),
+		"Dev hidden since the panel was last on it: it opens on Game, the first tab");
+	press(VITA_BUTTON_CIRCLE);
+	vita_settings_set("HALO_DEV_SETTINGS", "1");
 
 	/* the next start: the dev switches on say test mode in halo.log */
 	log_text[0] = 0;
@@ -2904,7 +6046,7 @@ int main(void)
 
 	/* a dev switch env.txt sets and settings.txt does not: env.txt's
 	value stands */
-	unlink(SETTINGS_FILE);
+	settings_file_delete();
 	settings[0].choice = 1;
 	for (index = 0; index < SETTING_COUNT; index++)
 		if (settings[index].dev)
@@ -2943,6 +6085,73 @@ int main(void)
 			"a 1.0 settings.txt (Custom): its own rows kept, the rows it does not name at their defaults (no sun rays)");
 	}
 
+	/* the retired Crossplay switch (Oct 19 2026, docs/crossplay.md): On, a
+	player's choice to play PCs, loads as Browser shows PC games; Off (as
+	shipped) as all games; a Browser shows saved since wins; the old line is
+	gone at the next save */
+	{
+		static const char on[] = "HALO_CROSSPLAY=1\nHALO_VITA_NETWORK=online\n";
+		static const char off[] = "HALO_CROSSPLAY=0\nHALO_VITA_NETWORK=online\n";
+		static const char both[] = "HALO_CROSSPLAY=1\nHALO_NET_BROWSER_FILTER=vita\nHALO_VITA_NETWORK=online\n";
+
+		write_file(SETTINGS_FILE, on, sizeof(on) - 1);
+		unsetenv("HALO_NET_BROWSER_FILTER");
+		log_text[0] = 0;
+		vita_settings_load();
+		check(getenv("HALO_NET_BROWSER_FILTER") && !strcmp(getenv("HALO_NET_BROWSER_FILTER"), "pc") &&
+			!getenv("HALO_CROSSPLAY") && strstr(log_text, "the Crossplay switch is gone (Crossplay On): Browser shows PC games"),
+			"Crossplay On in an older settings.txt: Browser shows PC games, halo.log says so");
+		vita_settings_set("HALO_FRAME_CAP", "30");
+		check(!strstr(file_text(SETTINGS_FILE), "HALO_CROSSPLAY") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_NET_BROWSER_FILTER=pc\n"), "the next save: Browser shows, no Crossplay line");
+		write_file(SETTINGS_FILE, off, sizeof(off) - 1);
+		unsetenv("HALO_NET_BROWSER_FILTER");
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_NET_BROWSER_FILTER"), "all"), "Crossplay Off (as shipped): Browser shows all games");
+		write_file(SETTINGS_FILE, both, sizeof(both) - 1);
+		unsetenv("HALO_NET_BROWSER_FILTER");
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_NET_BROWSER_FILTER"), "vita"), "a Browser shows saved since: it holds");
+		setenv("HALO_NET_BROWSER_FILTER", "all", 1);
+	}
+	/* the retired two-way Who can join (HALO_NET_HOST_CROSSPLAY, Oct 20
+	2026): Vitas loads as Vita, Vitas and PC as Everyone (OpenCE's players,
+	as it took); a three-way choice saved since wins; env.txt's too; the old
+	line is gone at the next save */
+	{
+		static const char vitas[] = "HALO_NET_HOST_CROSSPLAY=false\nHALO_VITA_NETWORK=online\n";
+		static const char with_pc[] = "HALO_NET_HOST_CROSSPLAY=true\nHALO_VITA_NETWORK=online\n";
+		static const char both[] = "HALO_NET_HOST_CROSSPLAY=true\nHALO_NET_WHO_CAN_JOIN=vita_pc\nHALO_VITA_NETWORK=online\n";
+		static const char plain[] = "HALO_VITA_NETWORK=online\n";
+
+		write_file(SETTINGS_FILE, with_pc, sizeof(with_pc) - 1);
+		unsetenv("HALO_NET_WHO_CAN_JOIN");
+		log_text[0] = 0;
+		vita_settings_load();
+		check(getenv("HALO_NET_WHO_CAN_JOIN") && !strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "everyone") &&
+			!getenv("HALO_NET_HOST_CROSSPLAY") &&
+			strstr(log_text, "Who can join has three choices now (it was Vitas and PC): Everyone"),
+			"the old Vitas and PC in settings.txt: Everyone, halo.log says so");
+		vita_settings_set("HALO_FRAME_CAP", "30");
+		check(!strstr(file_text(SETTINGS_FILE), "HALO_NET_HOST_CROSSPLAY") &&
+			strstr(file_text(SETTINGS_FILE), "HALO_NET_WHO_CAN_JOIN=everyone\n"),
+			"the next save: the three-way line, no old one");
+		write_file(SETTINGS_FILE, vitas, sizeof(vitas) - 1);
+		unsetenv("HALO_NET_WHO_CAN_JOIN");
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "vita"), "the old Vitas: Vita");
+		write_file(SETTINGS_FILE, both, sizeof(both) - 1);
+		unsetenv("HALO_NET_WHO_CAN_JOIN");
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "vita_pc"), "a three-way choice saved since: it holds");
+		write_file(SETTINGS_FILE, plain, sizeof(plain) - 1);
+		unsetenv("HALO_NET_WHO_CAN_JOIN");
+		setenv("HALO_NET_HOST_CROSSPLAY", "true", 1);
+		vita_settings_load();
+		check(!strcmp(getenv("HALO_NET_WHO_CAN_JOIN"), "everyone") && !getenv("HALO_NET_HOST_CROSSPLAY"),
+			"env.txt's old HALO_NET_HOST_CROSSPLAY=true: Everyone");
+		setenv("HALO_NET_WHO_CAN_JOIN", "vita", 1);
+	}
 	/* 1.0.3's co-op choice (every game hosted became that level, the
 	owner's trap) loads as Off, and is gone from settings.txt at the next
 	save; its Online games row loads as Visibility */
@@ -2986,14 +6195,14 @@ int main(void)
 		vita_settings_load();
 		check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "Couch co-op!") && !strcmp(getenv("HALO_NET_LOBBY_PASSWORD"), "pw 1"),
 			"settings.txt's lobby name (printable characters only) and password at start-up");
-		unlink(SETTINGS_FILE);
+		settings_file_delete();
 		unsetenv("HALO_NET_LOBBY_NAME");
 		unsetenv("HALO_NET_LOBBY_PASSWORD");
 		vita_settings_load();
 		vita_settings_set("HALO_FRAME_CAP", "30");
-		check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "vitauser") && !getenv("HALO_NET_LOBBY_PASSWORD")[0] &&
+		check(!getenv("HALO_NET_LOBBY_NAME")[0] && !getenv("HALO_NET_LOBBY_PASSWORD")[0] &&
 			!strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_NAME") && !strstr(file_text(SETTINGS_FILE), "PASSWORD"),
-			"none saved: the lobby name is the Vita's user name (not saved), no password");
+			"none saved: no lobby name (the profile's stands), no password");
 		vita_settings_set("HALO_NET_LOBBY_NAME", "Test_Lobby_With_A_Long_Name");
 		check(!strcmp(getenv("HALO_NET_LOBBY_NAME"), "Test_Lobby_With") &&
 			strstr(file_text(SETTINGS_FILE), "HALO_NET_LOBBY_NAME=Test_Lobby_With\n"),
@@ -3199,7 +6408,7 @@ int main(void)
 			"env.txt naming the render resolution over a Balanced settings.txt: not moved by the profile (settings.txt's), Custom");
 		/* (env.txt's HALO_PROFILE: that profile's rows, under the ones it
 		names itself) */
-		unlink(SETTINGS_FILE);
+		settings_file_delete();
 		profile_rows_fresh();
 		setenv("HALO_PROFILE", "quality", 1);
 		setenv("HALO_AI_THINK_DIVISOR", "1", 1);
@@ -3256,12 +6465,12 @@ int main(void)
 				}
 			}
 			check(all && !strcmp(settings[0].names[settings[0].choice], "Custom"),
-				"a settings.txt saved with the Display and Advanced pages: every row as saved (now on Screen, First person, "
-				"Detail, Performance and the tab), Custom");
+				"a settings.txt saved with the Display and Advanced pages: every row as saved (now on Video and its Detail "
+				"and Performance, and Game), Custom");
 			/* (back to the defaults) */
 			for (index = 0; index < (int)(sizeof(defaults) / sizeof(defaults[0])); index++)
 				vita_settings_set(defaults[index][0], defaults[index][1]);
-			unlink(SETTINGS_FILE);
+			settings_file_delete();
 			profile_rows_fresh();
 			vita_settings_load();
 			restart_pending = 0;
@@ -3316,6 +6525,15 @@ int main(void)
 	update_status_value = UPDATE_STATUS_AVAILABLE;
 	snprintf(update_version_value, sizeof(update_version_value), "1.1.0-beta.4");
 	test_languages();
+	test_menu_style_row();
+	test_answer_press_held();
+	test_menu_style_original();
+	test_carnage_report_row();
+	test_scoreboard_row();
+	test_restart_offer();
+	test_save_off_thread();
+	test_save_any_thread();
+	test_settings_load_safe();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures ? 1 : 0;
 }

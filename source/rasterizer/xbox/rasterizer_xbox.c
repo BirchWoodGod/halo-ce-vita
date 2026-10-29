@@ -1057,6 +1057,61 @@ void rasterizer_set_pixel_shader(
 		pixel_shader);
 	combiner_count = (short)(pixel_shader->combiner_count &
 		PIXEL_SHADER_COMBINER_COUNT_MASK);
+#ifdef HALO_LINUX
+	/* (port, debug) HALO_PIXEL_SHADER_LOG=1: each pixel shader set whole
+	logged the first time it is ("pixel shader: <hash>: modes <texture
+	modes>, <n> combiners"), the hash of what makes the program - the
+	combiners it writes, the final combiner's inputs, the texture modes,
+	the dot mapping, the input texture - and not of its constants: a menu's
+	widgets left alpha stages in pixel_shader that the next frame's model
+	shader wrote out (rasterizer_xbox_models.c
+	set_environment_shader_pixel_shader); run_menus_test.sh h3customrows
+	reads it */
+	{
+		static int log_on = -1;
+
+		if (log_on < 0)
+		{
+			char const *setting = getenv("HALO_PIXEL_SHADER_LOG");
+
+			log_on = setting && atoi(setting) != 0;
+		}
+		if (log_on)
+		{
+			static unsigned long seen[1024];
+			static long seen_count;
+			unsigned long hash = 2166136261UL;
+			long index;
+			short stage;
+
+#define PIXEL_SHADER_LOG_MIX(value) (hash = (hash ^ (unsigned long)(value)) * 16777619UL)
+			PIXEL_SHADER_LOG_MIX(pixel_shader->texture_modes);
+			PIXEL_SHADER_LOG_MIX(pixel_shader->combiner_count);
+			PIXEL_SHADER_LOG_MIX(pixel_shader->input_texture);
+			PIXEL_SHADER_LOG_MIX(pixel_shader->dot_mapping);
+			PIXEL_SHADER_LOG_MIX(pixel_shader->final_combiner_inputs_abcd);
+			PIXEL_SHADER_LOG_MIX(pixel_shader->final_combiner_inputs_efg);
+			for (stage = 0; stage < combiner_count && stage < 8; stage++)
+			{
+				PIXEL_SHADER_LOG_MIX(pixel_shader->alpha_inputs[stage]);
+				PIXEL_SHADER_LOG_MIX(pixel_shader->alpha_outputs[stage]);
+				PIXEL_SHADER_LOG_MIX(pixel_shader->rgb_inputs[stage]);
+				PIXEL_SHADER_LOG_MIX(pixel_shader->rgb_outputs[stage]);
+			}
+#undef PIXEL_SHADER_LOG_MIX
+			for (index = 0; index < seen_count && seen[index] != hash; index++)
+				;
+			if (index == seen_count && seen_count < (long)NUMBEROF(seen))
+			{
+				void platform_log(const char *format, ...);
+
+				seen[seen_count++] = hash;
+				platform_log("pixel shader: %08lx: modes %08lx, %d combiners", hash,
+					(unsigned long)pixel_shader->texture_modes, (int)combiner_count);
+			}
+		}
+	}
+#endif
 	if (combiner_count < MAXIMUM_INLINE_PIXEL_SHADER_COMBINERS)
 	{
 		boolean unique_constant_0 = (boolean)((pixel_shader->combiner_count >>
@@ -1973,6 +2028,39 @@ void _rasterizer_window_end(
 	rasterizer_profile_window_end();
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port) The split between a frame's 3D picture and its interface. The
+Vita draws the screen-sized targets at the render scale (HALO_RENDER_SCALE,
+or the dynamic resolution's part of them) and scales the picture up to the
+display; whatever the game draws into the back buffer after this goes
+straight to the display at its own resolution instead (d3d8_gxm.c
+halo_d3d_interface_begin), so the HUD, the menus and their text stay sharp
+at any render scale. Called where the window's interface begins - after
+the HUD's screen effect, which reads the 3D picture back (the scope's
+zoom, the night vision), and before the HUD, the screen flashes and the
+menus (render.c, interface.c); a second call in the frame does nothing.
+Only in a single window drawn into the back buffer: a split screen, or a
+window into another target (a mirror), keeps everything at the render
+scale. */
+void halo_d3d_interface_begin(void);
+/* (bink_playback.h: whether a movie plays) */
+boolean bink_playback_active(void);
+
+void rasterizer_interface_begin(
+	void)
+{
+	/* (not while a movie plays: the owner's Vita showed the movies black,
+	sound only, with the movie drawn on the display; a movie fills the
+	screen, so it gains nothing from the display's resolution) */
+	if (global_window_parameters.rasterizer_target == _rasterizer_target_render_primary &&
+		main_get_window_count() <= 1 && !bink_playback_active())
+	{
+		halo_d3d_interface_begin();
+	}
+	return;
+}
+#endif
 
 boolean rasterizer_preinitialize__fill_you_up_with_the_devils_cock(
 	void)
@@ -3211,6 +3299,50 @@ void rasterizer_set_stencil_mode(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port/linux/game/field_of_view.c */
+real field_of_view_first_person_scale(short local_player_index);
+#endif
+
+#ifdef HALO_LINUX
+/* port: (field_of_view.c) the first-person weapon's x and y projection on
+the window's frustum, or the window's own again, for what is projected on
+the processor from it: the weapon's lights' lens flares
+(rasterizer_lights.c) */
+void rasterizer_first_person_projection(
+	boolean first_person)
+{
+	static real window_projection[2];
+	static boolean applied = FALSE;
+	static long applied_scene;
+
+	/* (a new window's frustum: nothing to put back) */
+	if (applied && applied_scene != render.scene_index)
+		applied = FALSE;
+	if (first_person && !applied)
+	{
+		real scale = field_of_view_first_person_scale(render.local_player_index);
+
+		if (scale != 1.0f)
+		{
+			window_projection[0] = global_window_parameters.frustum.projection_matrix[0][0];
+			window_projection[1] = global_window_parameters.frustum.projection_matrix[1][1];
+			global_window_parameters.frustum.projection_matrix[0][0] *= scale;
+			global_window_parameters.frustum.projection_matrix[1][1] *= scale;
+			applied = TRUE;
+			applied_scene = render.scene_index;
+		}
+	}
+	else if (!first_person && applied)
+	{
+		global_window_parameters.frustum.projection_matrix[0][0] = window_projection[0];
+		global_window_parameters.frustum.projection_matrix[1][1] = window_projection[1];
+		applied = FALSE;
+	}
+	return;
+}
+#endif
+
 void rasterizer_set_frustum_z(
 	real z_near,
 	real z_far)
@@ -3223,10 +3355,45 @@ void rasterizer_set_frustum_z(
 		"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox.c",
 		2967,
 		global_d3d_device);
+#ifdef HALO_LINUX
+	/* port: the player's Field of view (port/linux/game/field_of_view.c)
+	widens the world, not the first-person weapon: drawn with its own depth
+	range (the first-person clip distances), its x and y put back to the
+	stock field of view; the window's own again with the depth range's */
+	static real first_person_projection[2];
+	static boolean first_person_projection_saved = FALSE;
+
+	/* (-1, -1: a window's begin, its frustum new) */
+	if (z_near == -1.0f && z_far == -1.0f)
+		first_person_projection_saved = FALSE;
+	if (first_person_projection_saved)
+	{
+		global_window_parameters.frustum.projection_matrix[0][0] = first_person_projection[0];
+		global_window_parameters.frustum.projection_matrix[1][1] = first_person_projection[1];
+		first_person_projection_saved = FALSE;
+	}
+#endif
 	render_camera_hack_frustum_z(
 		&global_window_parameters.frustum,
 		z_near,
 		z_far);
+#ifdef HALO_LINUX
+	if (z_near == rasterizer_globals.first_person_weapon_near_clip_distance &&
+		z_far == rasterizer_globals.first_person_weapon_far_clip_distance &&
+		z_near > 0.0f)
+	{
+		real scale = field_of_view_first_person_scale(render.local_player_index);
+
+		if (scale != 1.0f)
+		{
+			first_person_projection[0] = global_window_parameters.frustum.projection_matrix[0][0];
+			first_person_projection[1] = global_window_parameters.frustum.projection_matrix[1][1];
+			first_person_projection_saved = TRUE;
+			global_window_parameters.frustum.projection_matrix[0][0] *= scale;
+			global_window_parameters.frustum.projection_matrix[1][1] *= scale;
+		}
+	}
+#endif
 	for (column = 0; column < 4; column++)
 	{
 		for (row = 0; row < 4; row++)

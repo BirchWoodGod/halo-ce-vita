@@ -397,12 +397,16 @@ symbols in this file:
 #include "tag_files/tag_files.h"
 #include "custom_edition_maps.h"
 #include "custom_edition_cache.h" /* port: custom_edition_level_name */
+#include "mcc_content.h" /* port: MCC's own maps */
 #include "network_wire.h"
 #include "crossplay_maps.h"
 #include "network_game_record.h"
 #include "network_crossplay_guard.h"
+#include "../src/crossplay_guard.h"
 #include "map_share.h"
+#include "party_net.h"
 #include "net_fuzz_twin.h"
+#include "player_cosmetics.h"
 /* (port/linux/src/lang.h, through the -iquote port/linux/game path) */
 #include "../src/lang.h"
 void platform_show_message(char const *title, char const *message);
@@ -781,6 +785,12 @@ static boolean network_game_client_process_messages(
 	boolean budgeted);
 static boolean network_game_client_process_last_messages(
 	struct network_game_client *client);
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+boolean cache_files_give_time_to_precache(char const *map_name);
+
 static void network_game_client_update_precache_status(
 	struct network_game_client *client);
 static boolean network_game_client_map_name_is_valid(
@@ -835,6 +845,66 @@ static struct
 	/* (HALO_PORT_ADVERTISED_COOP_FLAG: the co-op game's difficulty) */
 	byte difficulty;
 } network_game_client_advertised_versions[MAXIMUM_NETWORK_ADVERTISED_GAMES];
+
+#ifdef HALO_LINUX
+/* port: which wire the advertised game in that place plays (network_wire.h),
+by its version and flags: 0 the legacy Vita wire, 1 the crossplay wire, -1
+neither (a version this build joins on no wire); and in platform (if not
+NULL) what hosts it (crossplay_guard.h's tags: a legacy game's a Vita's; a
+crossplay game's a Vita's if its Vita host bit says so, ChupathingyCE's by
+its Delta bit, else OpenCE's; another version's a PC's) */
+static long network_game_client_advertised_wire(
+	long game_index,
+	int *platform)
+{
+	unsigned int version;
+	int flags;
+	long game_wire;
+
+	if (game_index < 0 || game_index >= MAXIMUM_NETWORK_ADVERTISED_GAMES)
+	{
+		if (platform)
+			*platform = CROSSPLAY_PLATFORM_PC;
+		return -1;
+	}
+	version = network_game_client_advertised_versions[game_index].version;
+	flags = network_game_client_advertised_versions[game_index].flags;
+	game_wire = network_wire_of_version(version);
+	if (platform)
+		*platform = crossplay_guard_platform_of_advertisement(game_wire == 1, game_wire < 0 &&
+			version != HALO_PORT_NETWORK_VERSION, version, flags);
+	return game_wire;
+}
+
+/* port: this project's marks of the advertised game in that place
+(crossplay_guard.h's CROSSPLAY_HOST_*): its host is the PC build, its game
+takes Vitas only (network_wire.h's flags; none from an older build) */
+static int network_game_client_advertised_marks(
+	long game_index)
+{
+	int flags, platform, marks = 0;
+	long game_wire;
+
+	if (game_index < 0 || game_index >= MAXIMUM_NETWORK_ADVERTISED_GAMES)
+		return 0;
+	flags = network_game_client_advertised_versions[game_index].flags;
+	game_wire = network_game_client_advertised_wire(game_index, &platform);
+	if (platform != CROSSPLAY_PLATFORM_VITA)
+		return 0;
+	if (game_wire == 0)
+	{
+		if (flags & NETWORK_WIRE_ADVERTISED_PC_HOST_FLAG)
+			marks |= CROSSPLAY_HOST_PC_BUILD;
+		if (flags & NETWORK_WIRE_ADVERTISED_VITAS_ONLY_FLAG)
+			marks |= CROSSPLAY_HOST_VITAS_ONLY;
+	}
+	else if (game_wire == 1 && (flags & NETWORK_WIRE_ADVERTISED_CROSSPLAY_PC_HOST_FLAG))
+	{
+		marks |= CROSSPLAY_HOST_PC_BUILD;
+	}
+	return marks;
+}
+#endif
 
 struct network_game_client network_game_client_dont_use_directly;
 boolean allow_out_of_sync = FALSE;
@@ -1408,6 +1478,12 @@ enum network_game_client_map_check
 	/* crossplay: a PC host's map this machine does not play (why: the
 	check's crossplay verdict, crossplay_maps.h) */
 	_network_game_client_map_crossplay_refused,
+	/* (port) one of MCC's own maps (mcc_content.h) that this machine does
+	not have (no Halo content folder, or no such file in it), or whose file
+	is not the host's (another MCC version), or a host that does not say
+	which it plays: never downloaded */
+	_network_game_client_map_mcc_missing,
+	_network_game_client_map_mcc_different,
 };
 
 static short network_game_client_map_check(
@@ -1444,6 +1520,19 @@ static short network_game_client_map_check(
 		if (!cache_files_map_plays_multiplayer(map->name, build))
 			return _network_game_client_map_build_unsupported;
 		return _network_game_client_map_playable;
+	}
+	/* port: one of MCC's own maps (the Halo content folder,
+	mcc_content.h): this machine's own MCC file, the same as the host's
+	(its identity, as a custom map's, and one the host must give); never
+	asked of the host, which shares none */
+	{
+		char mcc_stem[MCC_CONTENT_STEM_BYTES];
+
+		if (mcc_content_name_stem(map->name, mcc_stem) != _mcc_content_none && !global_network_game_server_get())
+		{
+			if (!map->version || !custom_edition_maps_host_copy_matches(map->name, (unsigned long)map->version, &missing))
+				return map->version && missing ? _network_game_client_map_mcc_missing : _network_game_client_map_mcc_different;
+		}
 	}
 	/* 1. the build */
 	if (!cache_files_map_plays_multiplayer(map->name, build))
@@ -1497,6 +1586,16 @@ static void network_game_client_map_refusal_show(
 	case _network_game_client_map_custom_different:
 		length = snprintf(message, sizeof(message),
 			T("The host's custom map %s isn't the same as yours. Copy the host's map to your maps folder."), name);
+		break;
+	case _network_game_client_map_mcc_missing:
+		length = snprintf(message, sizeof(message),
+			T("The host is playing %s from its MCC files. To join, set the Halo content folder (Multiplayer > Modded "
+			"maps) to your own copy of Halo: The Master Chief Collection's folder."), name);
+		break;
+	case _network_game_client_map_mcc_different:
+		length = snprintf(message, sizeof(message),
+			T("The host's %s from its MCC files isn't the same as yours (another MCC version?). MCC maps are never "
+			"downloaded."), name);
 		break;
 	case _network_game_client_map_custom_needs_pc_maps:
 		length = snprintf(message, sizeof(message),
@@ -1786,6 +1885,11 @@ boolean network_game_client_game_settings_updated(
 	return FALSE;
 }
 
+#ifdef HALO_LINUX
+#define NETWORK_LISTED_LATE_MILLISECONDS 750
+static unsigned long client_listed_forgotten_at;
+#endif
+
 void network_game_client_new_advertised_game(
 	struct network_game_client *client,
 	struct message_server_game_advertise *message_packet)
@@ -1795,10 +1899,34 @@ void network_game_client_new_advertised_game(
 		0x2FC,
 		client && message_packet);
 
+#ifdef HALO_LINUX
+	/* port: the network just switched (network_game_client_forget_listed_
+	games): an advertisement still in flight from the one before let go */
+	if (client_listed_forgotten_at &&
+		(long)(system_milliseconds() - client_listed_forgotten_at) < NETWORK_LISTED_LATE_MILLISECONDS)
+	{
+		return;
+	}
+#endif
 	add_advertised_game(client->available_games, message_packet);
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* port (the server browser's network tabs): every game listed so far let
+go - another network's - and the late ones of it after */
+void network_game_client_forget_listed_games(void)
+{
+	struct network_game_client *client = global_network_game_client_get();
+
+	client_listed_forgotten_at = system_milliseconds();
+	if (!client_listed_forgotten_at)
+		client_listed_forgotten_at = 1;
+	if (client)
+		csmemset(client->available_games, 0, sizeof(client->available_games));
+}
+#endif
 
 boolean network_game_client_request_remove_player(
 	struct network_game_client *client,
@@ -1969,6 +2097,16 @@ boolean network_game_client_add_player(
 		network_game_client_add_player_request_times[local_player_index] = now;
 	}
 
+#ifdef HALO_LINUX
+	/* port: a party's team token first (party_net.h), so that a host which
+	fills its game with bots has it as it picks the player's team: on the
+	same stream, before the request */
+	if (local_player_index == 0 &&
+		(client->state == _network_game_client_state_pregame || client->state == _network_game_client_state_ingame))
+	{
+		party_net_client_send(client);
+	}
+#endif
 	player_ui_get_active_player_profile(local_player_index, &profile);
 
 	player.controller_index = (char)local_player_index;
@@ -1977,7 +2115,34 @@ boolean network_game_client_add_player(
 	user's name (network_game_local_player_name), not the empty one */
 	network_game_local_player_name(profile.player_name, player.name, NETWORK_PLAYER_NAME_LENGTH);
 	player.primary_color_index = profile.primary_color_index;
-	player.icon_index = NONE;
+	/* port: the tester's flaming helmet claimed (its first player's alone):
+	a hint every machine checks with this machine's signed proof
+	(port/linux/game/friends_game.c, port/linux/src/p2p_flame.inc) */
+	{
+		extern boolean friends_game_flame_claim(short local_player_index);
+
+		boolean flame = friends_game_flame_claim(local_player_index);
+
+		player.icon_index = flame ? NETWORK_PLAYER_FLAME_CLAIM : NONE;
+		/* port: the platform's cosmetics (player_cosmetics.h), between this
+		project's builds alone: the record's colour the nearest of the
+		eighteen, the extended colour and the visor in icon_index; on the
+		crossplay wire nothing more (the nearest colour, the stock visor) */
+		if (!network_wire_crossplay())
+		{
+			short color = player_cosmetics_profile_color(player_ui_get_active_player_profile_index(local_player_index),
+				profile.primary_color_index);
+
+			player.icon_index = player_cosmetics_icon_encode(flame, color,
+				player_cosmetics_profile_visor(player_ui_get_active_player_profile_index(local_player_index)));
+			if (player.icon_index != NONE && player.icon_index != NETWORK_PLAYER_FLAME_CLAIM)
+			{
+				platform_log("cosmetics: player %d sent with colour %d, visor %d (0x%04X)", local_player_index,
+					player_cosmetics_icon_color(player.icon_index), player_cosmetics_icon_visor(player.icon_index),
+					(unsigned short)player.icon_index);
+			}
+		}
+	}
 	player.team_index = NONE;
 	player.player_list_index = NONE;
 
@@ -2056,6 +2221,13 @@ boolean network_game_client_add_player(
 	return success;
 }
 
+/* port: how far behind the host's time this machine's clock may stay, a
+second on, before it takes the host's (network_game_client_handle_game_update) */
+#define NETWORK_GAME_CLIENT_CLOCK_SLACK_TICKS (TICKS_PER_SECOND / 6)
+/* (the host's time at the first update that found this machine's clock past
+the slack behind, NONE while it is not) */
+static long network_game_client_clock_behind_since = NONE;
+
 boolean network_game_client_handle_game_update(
 	struct network_game_client *client,
 	struct message_server_game_update *message_packet)
@@ -2082,6 +2254,7 @@ boolean network_game_client_handle_game_update(
 	else if (network_game_client_late_join_clock_pending)
 	{
 		network_game_client_late_join_clock_pending = FALSE;
+		network_game_client_clock_behind_since = NONE;
 		if (message_packet->game_time > game_time_get())
 		{
 			game_time_set_distributed(message_packet->game_time);
@@ -2095,13 +2268,38 @@ boolean network_game_client_handle_game_update(
 	sent the update, before this machine's by the way there, so a clock in
 	step is never moved; one behind is, at the next update (once a second at
 	least) */
-	else if (message_packet->game_time > game_time_get() + TICKS_PER_SECOND)
+	/* port: and more than a few ticks ahead for a second, not a whole
+	second ahead at once: a stall a little over a second (a stock map's
+	first frame in the game, its copy to the cache drive, 1.4-1.7 s) left
+	the clock 0.4-1 s behind the host's for the whole game, under a second,
+	never moved (a PC host's joiner respawning a second "early" on the
+	host's clock, Oct 2026). A shorter stall's ticks are caught up by this
+	frame's game_time_update, after this, never skipped: the clock is only
+	moved once it is still behind a second of the host's time on (the
+	updates once a second, every tick a machine's first second), what its
+	catching up lost, once, not at every hitch. The host's time is never
+	ahead of the host, so taking it never puts this machine ahead */
+	else if (message_packet->game_time > game_time_get() + TICKS_PER_SECOND ||
+		(message_packet->game_time > game_time_get() + NETWORK_GAME_CLIENT_CLOCK_SLACK_TICKS &&
+		network_game_client_clock_behind_since != NONE &&
+		message_packet->game_time - network_game_client_clock_behind_since >= TICKS_PER_SECOND))
 	{
 		network_event(
 			"the host's clock is %ld ticks ahead of this machine's; taking its game tick #%ld",
 			message_packet->game_time - game_time_get(),
 			message_packet->game_time);
 		game_time_set_distributed(message_packet->game_time);
+		network_game_client_clock_behind_since = NONE;
+	}
+	else if (message_packet->game_time > game_time_get() + NETWORK_GAME_CLIENT_CLOCK_SLACK_TICKS)
+	{
+		if (network_game_client_clock_behind_since == NONE ||
+			message_packet->game_time < network_game_client_clock_behind_since)
+			network_game_client_clock_behind_since = message_packet->game_time;
+	}
+	else
+	{
+		network_game_client_clock_behind_since = NONE;
 	}
 
 	return TRUE;
@@ -2805,6 +3003,12 @@ void network_game_client_rejected_by_game(
 	case _rejection_code_blacklisted_machine:
 		reason = "_rejection_code_blacklisted_machine";
 		break;
+
+	case _rejection_code_vitas_only:
+		/* (port: OpenCE 39's code 7 from a PC host: network_wire.h) */
+		reason = network_wire_rejection_is_name_refused(rejection_code) ? "name refused (OpenCE 39)" :
+			"_rejection_code_vitas_only";
+		break;
 	}
 
 	network_event(
@@ -2819,6 +3023,14 @@ void network_game_client_rejected_by_game(
 		platform_show_message(T("Halo: cannot join this game"),
 			T("The game is full: it has as many players as its host allows. Try another game."));
 	}
+	/* (a host for Vitas only refused the PC build: network_wire.h) */
+	if (rejection_code == _rejection_code_vitas_only && network_wire_rejection_is_name_refused(rejection_code))
+	{
+		platform_show_message(T("Halo: cannot join this game"),
+			T("The host refused your player name. Change it in your profile and try again."));
+	}
+	else if (rejection_code == _rejection_code_vitas_only)
+		platform_show_message(T("Halo: cannot join this game"), crossplay_guard_vitas_only_text());
 #endif
 	/* port: the join went to the pregame screen at once (and a machine
 	refused a game in progress, network_game_server_refuse_late_joiner, is in
@@ -2914,12 +3126,16 @@ static boolean add_advertised_game(
 	struct network_advertised_game *advertised_game = NULL;
 	long game_index;
 
-	/* (port) Vitas play only Vitas (halo_port_limits.h): a host of the
-	other kind is never listed. On the crossplay wire (network_wire.h) the
-	bit is OpenCE's "in progress", not a Vita's: every host is listed, and
-	its version decides (network_game_client_advertised_game_compatible) */
-	if (!network_wire_crossplay())
+	/* (port) the legacy Vita wire's Vita line (halo_port_limits.h): a host
+of its version (18) but of the other kind (a PC build of this tree) is never
+listed. A host of another version is listed whatever its flags, which are
+then its wire's (OpenCE's 0x02 is "in progress", not a Vita's): the
+crossplay wire's hosts (network_wire.h), and hosts of versions neither wire
+joins, whose join is refused with the player told why
+(network_game_client_advertised_game_compatible) */
 	{
+		unsigned int advertised_version = (unsigned int)(advertisement->__unknown5A[HALO_PORT_ADVERTISED_VERSION_OFFSET] |
+			(advertisement->__unknown5A[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] << 8));
 		boolean vita_host = (advertisement->__unknown5A[HALO_PORT_ADVERTISED_FLAGS_OFFSET] &
 			HALO_PORT_ADVERTISED_VITA_FLAG) != 0;
 #ifdef HALO_PORT_VITA_NETWORK
@@ -2929,7 +3145,8 @@ static boolean add_advertised_game(
 #endif
 		static boolean told = FALSE;
 
-		if (vita_host != vita_client && !network_game_client_test_crosses_vita_line())
+		if (advertised_version == HALO_PORT_NETWORK_VERSION && vita_host != vita_client &&
+			!network_game_client_test_crosses_vita_line())
 		{
 			if (!told)
 			{
@@ -3412,6 +3629,17 @@ static boolean network_game_client_idle_joining(
 
 				csmemset(&join_game_request, 0, sizeof(join_game_request));
 				network_game_generate_local_machine_name(join_game_request.machine_name);
+#ifdef HALO_PORT_VITA_NETWORK
+				/* port: which of this project's builds joins (a Vita, the PC
+				build), in the name's last character, which older hosts clear
+				(player_name_clean): on the legacy wire, where a host for
+				Vitas only refuses the PC build (network_wire.h) */
+				if (!network_wire_crossplay())
+				{
+					join_game_request.machine_name[NUMBEROF(join_game_request.machine_name) - 1] =
+						(wchar_t)network_wire_join_platform_mark();
+				}
+#endif
 				csmemcpy(
 					join_game_request.join_token,
 					client->join_parameters.join_token,
@@ -3703,46 +3931,53 @@ boolean network_game_client_advertised_game_compatible(
 	boolean tell)
 {
 	long game_index = client ? game - client->available_games : NONE;
-	unsigned int ours = network_wire_version();
+	unsigned int ours = network_wire_version_of(1);
 	unsigned int theirs;
 	boolean distributed;
 	boolean vita_host;
 	boolean vita_client = FALSE;
 	char message[600];
+	char joined[32];
+	long game_wire;
+	int platform = CROSSPLAY_PLATFORM_VITA;
 
 	if (game_index < 0 || game_index >= MAXIMUM_NETWORK_ADVERTISED_GAMES)
 		return FALSE;
 	theirs = network_game_client_advertised_versions[game_index].version;
 	distributed = (network_game_client_advertised_versions[game_index].flags &
 		HALO_PORT_ADVERTISED_DISTRIBUTED_FLAG) != 0;
+	game_wire = network_game_client_advertised_wire(game_index, &platform);
 	/* (port) the crossplay wire (network_wire.h): a PC host (OpenCE,
-	ChupathingyCE, DamnationCE) of a version this build joins, playing the
-	distributed netcode; the Vita line and its flag are the legacy wire's */
-	if (network_wire_crossplay())
+	ChupathingyCE, DamnationCE), or a Vita's game for Vitas and PC, of a
+	version this build joins, playing the distributed netcode; the Vita line
+	and its flag are the legacy wire's. Joined on that wire: chosen now, as
+	the join token is made next (network_game_generate_join_game_token) */
+	if (game_wire == 1 || (theirs >= 20 && distributed))
 	{
-		if (distributed && network_wire_version_accepted(theirs))
+		if (game_wire == 1 && distributed)
 		{
 			/* (docs/crossplay.md 6, T11: a PC co-op or large game joined as
-			experimental, asked about in its lobby: network_crossplay_guard.c) */
+			experimental, asked about in its lobby: network_crossplay_guard.c;
+			a Vita's game is neither: its host takes the Vitas' 16) */
+			network_wire_choose_version(theirs, platform, "joining a game from the list");
 			if (!network_crossplay_guard_advertisement(game->game_name, game->map.name, (long)sizeof(game->map.name),
 				game->engine_type, (long)game->player_count, (long)game->maximum_player_count, tell))
 			{
 				return FALSE;
 			}
-			network_event("joining a host of network version %u (crossplay)", theirs);
+			network_event("joining a host of network version %u (crossplay, %s)", theirs, crossplay_guard_tag(platform));
 			return TRUE;
-		}
-		if (theirs == HALO_PORT_NETWORK_VERSION)
-		{
-			snprintf(message, sizeof(message), "%s",
-				T("This game is on the Vita-to-Vita network (Crossplay off).\n\n"
-				"Crossplay is on: turn it off (Settings, Multiplayer) and restart to join Vita games."));
 		}
 		/* (port: an older PC host, of a build before OpenCE's build-201 or
 		ChupathingyCE's 0.7.4e (26: DamnationCE's still): its game plays a
 		few things otherwise than ours with no message changed, so it is
 		refused rather than played wrong, network_wire.h) */
-		else if (distributed && theirs < ours)
+		/* (port: the crossplay wire joins 29 and 32, network_wire.h: the
+		version told is the one to look for, the nearest joined above the
+		host's, else the newest) */
+		ours = network_wire_crossplay_version_near(theirs);
+		network_wire_crossplay_versions_text(joined, (int)sizeof(joined));
+		if (distributed && theirs < ours)
 		{
 			snprintf(message, sizeof(message),
 				T("This PC game's host runs an older version of OpenCE or ChupathingyCE (network version %u). "
@@ -3767,13 +4002,14 @@ boolean network_game_client_advertised_game_compatible(
 		}
 		if (tell)
 		{
-			network_event("not joining a host of network version %u%s (crossplay: this machine joins %u)%s", theirs,
-				distributed ? "" : " with the lockstep netcode", ours,
+			network_event("not joining a host of network version %u%s (crossplay: this machine joins %s)%s", theirs,
+				distributed ? "" : " with the lockstep netcode", joined,
 				distributed && theirs < ours ? ": an older PC build" : distributed ? ": a newer PC build" : "");
 			platform_show_message(T("Halo: cannot join this game"), message);
 		}
 		return FALSE;
 	}
+	ours = network_wire_version_of(0);
 	vita_host = (network_game_client_advertised_versions[game_index].flags &
 		HALO_PORT_ADVERTISED_VITA_FLAG) != 0;
 #ifdef HALO_PORT_VITA_NETWORK
@@ -3797,6 +4033,7 @@ boolean network_game_client_advertised_game_compatible(
 	if (theirs == ours && distributed)
 	{
 		network_event("joining a host of network version %u", theirs);
+		network_wire_choose(0, CROSSPLAY_PLATFORM_VITA, "joining a game from the list");
 		return TRUE;
 	}
 	if (theirs == ours)
@@ -3938,6 +4175,250 @@ short network_game_client_listed_game_count(
 	return count;
 }
 
+#ifdef HALO_LINUX
+static void network_game_client_listed_game_id(
+	struct network_advertised_game const *game,
+	char *id)
+{
+	static char const digits[] = "0123456789abcdef";
+	long index;
+
+	for (index = 0; index < TRANSPORT_NONCE_LENGTH && index * 2 + 2 < NETWORK_LISTED_GAME_ID_SIZE; index++)
+	{
+		id[index * 2] = digits[game->nonce[index] >> 4];
+		id[index * 2 + 1] = digits[game->nonce[index] & 15];
+	}
+	id[index * 2] = 0;
+}
+
+/* the advertised game's name as the LAN browser shows it: its characters
+up to the field's end, printable ASCII and Latin-1 kept (as UTF-8), the
+rest left out, no spaces at either end; "???" when nothing is left */
+static void network_game_client_listed_game_name(
+	wchar_t const *name,
+	char *out,
+	long size)
+{
+	long length = 0;
+	long index;
+
+	for (index = 0; index < NETWORK_GAME_NAME_LENGTH && name[index]; index++)
+	{
+		unsigned long code = (unsigned short)name[index];
+
+		if (code == ' ' && !length)
+			continue;
+		if (code >= 0x20 && code < 0x7F && length + 1 < size)
+			out[length++] = (char)code;
+		else if (code >= 0xA1 && code <= 0xFF && length + 2 < size)
+		{
+			out[length++] = (char)(0xC0 | (code >> 6));
+			out[length++] = (char)(0x80 | (code & 0x3F));
+		}
+	}
+	while (length > 0 && out[length - 1] == ' ')
+		length--;
+	out[length] = 0;
+	if (!length)
+		csstrncpy(out, "???", size - 1);
+	out[size - 1] = 0;
+}
+
+/* port: the games the System Link list shows, checked for the Halo 3 LAN
+browser (network_client_manager.h) */
+short network_game_client_listed_games(
+	struct network_listed_game *games,
+	short maximum)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	short count = 0;
+	long pass, game_index;
+
+	if (!client || !games || maximum <= 0 || client->state != _network_game_client_state_searching)
+		return 0;
+	/* (the open games, then the closed ones: the System Link list's order) */
+	for (pass = 0; pass < 2; pass++)
+	{
+		for (game_index = 0; game_index < MAXIMUM_NETWORK_ADVERTISED_GAMES && count < maximum; game_index++)
+		{
+			struct network_advertised_game *game = &client->available_games[game_index];
+			struct network_listed_game *listed = &games[count];
+			char const *leaf;
+			long length;
+			short difficulty = 0;
+
+			if (!network_game_client_advertised_game_is_valid(game) ||
+				game->platform != network_game_get_local_platform() || (game->open ? pass != 0 : pass != 1))
+			{
+				continue;
+			}
+			csmemset(listed, 0, sizeof(*listed));
+			network_game_client_listed_game_id(game, listed->id);
+			network_game_client_listed_game_name(game->game_name, listed->name, (long)sizeof(listed->name));
+			/* (the map: a name the joining would take, else "?"; its path's
+			last part, printable ASCII, cut to the field) */
+			if (network_game_client_map_name_is_valid(game->map.name, (long)sizeof(game->map.name)))
+			{
+				leaf = strrchr(game->map.name, '\\');
+				leaf = leaf ? leaf + 1 : game->map.name;
+				for (length = 0; *leaf && length < NETWORK_LISTED_GAME_MAP_SIZE - 1; leaf++)
+				{
+					if ((unsigned char)*leaf >= 0x20 && (unsigned char)*leaf < 0x7F)
+						listed->map[length++] = *leaf;
+				}
+				listed->map[length] = 0;
+			}
+			if (!listed->map[0])
+				csstrncpy(listed->map, "?", sizeof(listed->map) - 1);
+			listed->engine_type = game->engine_type >= first_usable_game_engine_index &&
+				game->engine_type <= last_usable_game_engine_index ? game->engine_type : game_engine_none;
+			listed->maximum = (short)PIN(game->maximum_player_count, 1, HALO_PORT_MAXIMUM_NETWORK_PLAYERS);
+			listed->players = (short)PIN((long)game->player_count, 0, HALO_PORT_MAXIMUM_NETWORK_PLAYERS);
+			listed->open = game->open != 0;
+			listed->has_teams = game->has_teams != 0;
+			listed->cooperative = network_game_client_advertised_game_cooperative(game, &difficulty);
+			listed->difficulty = (short)PIN(difficulty, 0, 3);
+			{
+				int platform;
+
+				listed->crossplay = network_game_client_advertised_wire(game_index, &platform) == 1;
+#ifndef HALO_PORT_VITA_NETWORK
+				/* (a build that does not play as a Vita: every game a PC's, as
+				its tags say - network_game_client_advertised_game_tag) */
+				platform = CROSSPLAY_PLATFORM_PC;
+#endif
+				listed->platform = (short)platform;
+#ifdef HALO_PORT_VITA_NETWORK
+				listed->marks = (short)network_game_client_advertised_marks(game_index);
+#else
+				listed->marks = 0;
+#endif
+				/* (a PC co-op game: no game engine on a level that is not one
+				of the Xbox's multiplayer ones, as OpenCE hosts it) */
+				listed->pc_coop = platform != CROSSPLAY_PLATFORM_VITA && network_crossplay_guard_coop_game(game->map.name,
+					(long)sizeof(game->map.name), game->engine_type);
+#ifdef HALO_PORT_VITA_NETWORK
+				listed->dedicated = crossplay_guard_advertised_dedicated(listed->crossplay,
+					network_game_client_advertised_versions[game_index].version,
+					network_game_client_advertised_versions[game_index].flags) != 0;
+#endif
+			}
+			csmemcpy(listed->host, ((XNADDR const *)&game->xnaddr)->abEnet, sizeof(listed->host));
+			/* (the browsers' filter, network.browser_filter) */
+			if (!network_wire_browser_shows(crossplay_guard_vita_game(listed->platform, listed->marks)))
+				continue;
+			count++;
+		}
+	}
+	/* (the Vitas' games first, then the PCs', each in the order above: the
+	System Link list's groups, ui_widget_game_data_input_functions.c) */
+	{
+		short vita_count = 0, index, moving;
+
+		for (index = 0; index < count; index++)
+		{
+			struct network_listed_game moved;
+
+			if (!crossplay_guard_vita_game(games[index].platform, games[index].marks))
+				continue;
+			moved = games[index];
+			for (moving = index; moving > vita_count; moving--)
+				games[moving] = games[moving - 1];
+			games[vita_count++] = moved;
+		}
+	}
+	return count;
+}
+
+/* port: the advertised game's tag, as the System Link list shows it before
+its name (crossplay_guard.h: VITA, VITA+PC, or the PC build's), and whether
+the list shows it (network.browser_filter) */
+void network_game_client_advertised_game_tag(
+	struct network_advertised_game const *game,
+	char *badge,
+	long size)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	int platform = CROSSPLAY_PLATFORM_PC, marks = 0;
+	long game_wire = -1;
+
+	if (!badge || size <= 0)
+		return;
+	badge[0] = 0;
+	if (client && game >= client->available_games && game < client->available_games + MAXIMUM_NETWORK_ADVERTISED_GAMES)
+	{
+		game_wire = network_game_client_advertised_wire(game - client->available_games, &platform);
+		marks = network_game_client_advertised_marks(game - client->available_games);
+	}
+#ifndef HALO_PORT_VITA_NETWORK
+	platform = CROSSPLAY_PLATFORM_PC;
+	marks = 0;
+#endif
+	/* (the tag alone: the list's rows are 31 characters; the large or co-op
+	question says the rest when a PC game is joined) */
+	crossplay_guard_host_badge(badge, (int)size, platform, marks, game_wire == 1, 0, CROSSPLAY_GUARD_OK,
+		network_wire_this_platform() == NETWORK_PLATFORM_VITA_PC);
+}
+
+boolean network_game_client_advertised_game_shown(
+	struct network_advertised_game const *game)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	int platform = CROSSPLAY_PLATFORM_PC;
+
+	if (!client || game < client->available_games || game >= client->available_games + MAXIMUM_NETWORK_ADVERTISED_GAMES)
+		return TRUE;
+	network_game_client_advertised_wire(game - client->available_games, &platform);
+#ifndef HALO_PORT_VITA_NETWORK
+	platform = CROSSPLAY_PLATFORM_PC;
+	return network_wire_browser_shows(0) != 0;
+#else
+	return network_wire_browser_shows(crossplay_guard_vita_game(platform,
+		network_game_client_advertised_marks(game - client->available_games))) != 0;
+#endif
+}
+
+boolean network_game_client_advertised_game_vita(
+	struct network_advertised_game const *game)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	int platform = CROSSPLAY_PLATFORM_PC;
+
+	if (!client || game < client->available_games || game >= client->available_games + MAXIMUM_NETWORK_ADVERTISED_GAMES)
+		return TRUE;
+	network_game_client_advertised_wire(game - client->available_games, &platform);
+#ifndef HALO_PORT_VITA_NETWORK
+	platform = CROSSPLAY_PLATFORM_PC;
+	return FALSE;
+#else
+	return crossplay_guard_vita_game(platform, network_game_client_advertised_marks(game - client->available_games));
+#endif
+}
+
+/* port: the advertised game of a listed game's id, while it is listed */
+void const *network_game_client_listed_game_by_id(
+	char const *id)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	long game_index;
+
+	if (!client || !id || client->state != _network_game_client_state_searching || client->join_in_progress)
+		return NULL;
+	for (game_index = 0; game_index < MAXIMUM_NETWORK_ADVERTISED_GAMES; game_index++)
+	{
+		struct network_advertised_game *game = &client->available_games[game_index];
+		char game_id[NETWORK_LISTED_GAME_ID_SIZE];
+
+		if (!network_game_client_advertised_game_is_valid(game) || game->platform != network_game_get_local_platform())
+			continue;
+		network_game_client_listed_game_id(game, game_id);
+		if (!strcmp(game_id, id))
+			return game;
+	}
+	return NULL;
+}
+#endif
+
 /* port: whether the advertised game is co-op on a campaign level (its host
 says so: HALO_PORT_ADVERTISED_COOP_FLAG), and its difficulty */
 boolean network_game_client_advertised_game_cooperative(
@@ -3953,8 +4434,9 @@ boolean network_game_client_advertised_game_cooperative(
 		return FALSE;
 	}
 	game_index = game - client->available_games;
-	/* (the crossplay wire's 0x04 is not ours: ChupathingyCE's Delta) */
-	if (network_wire_crossplay() ||
+	/* (the crossplay wire's 0x04 is not ours: ChupathingyCE's Delta; a
+host's own wire, by its version) */
+	if (network_game_client_advertised_versions[game_index].version != HALO_PORT_NETWORK_VERSION ||
 		!(network_game_client_advertised_versions[game_index].flags & HALO_PORT_ADVERTISED_COOP_FLAG))
 	{
 		return FALSE;

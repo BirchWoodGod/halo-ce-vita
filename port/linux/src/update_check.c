@@ -135,6 +135,22 @@ static int compare_identifier(const char *first, size_t first_length, const char
 	}
 }
 
+/* port: the pre-release words this project ships, in their order: the
+insider builds, then the public betas, then the release candidates (the
+owner's naming, Oct 18 2026); 0 for any other word */
+static int prerelease_rank(const char *word, size_t length)
+{
+	static const char *const words[] = { "insider", "beta", "rc" };
+	int index;
+
+	for (index = 0; index < 3; index++)
+	{
+		if (strlen(words[index]) == length && !memcmp(word, words[index], length))
+			return index + 1;
+	}
+	return 0;
+}
+
 int update_version_compare(const struct update_version *first, const struct update_version *second)
 {
 	const char *a, *b;
@@ -150,6 +166,12 @@ int update_version_compare(const struct update_version *first, const struct upda
 		return (first->prerelease[0] ? -1 : 0) + (second->prerelease[0] ? 1 : 0);
 	a = first->prerelease;
 	b = second->prerelease;
+	{
+		int a_rank = prerelease_rank(a, strcspn(a, ".")), b_rank = prerelease_rank(b, strcspn(b, "."));
+
+		if (a_rank && b_rank && a_rank != b_rank)
+			return a_rank < b_rank ? -1 : 1;
+	}
 	for (;;)
 	{
 		size_t a_length = strcspn(a, "."), b_length = strcspn(b, ".");

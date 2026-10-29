@@ -127,6 +127,7 @@ and render states, the shader choice and constant arithmetic, the constant
 uploads, the state before the draw, and the draw itself (models.c reports
 it with render_model's split), in the frames fine_profile.h picks */
 #include "fine_profile.h"
+#include "player_cosmetics.h"
 void platform_log(const char *format, ...);
 static int model_part_profile_on = -1;
 static unsigned long long model_part_profile_us[5];
@@ -921,6 +922,29 @@ static void set_environment_shader_pixel_shader(
 		"c:\\halo\\SOURCE\\rasterizer\\xbox\\rasterizer_xbox_models.c",
 		107,
 		detail_mask>=0 && detail_mask<NUMBER_OF_SHADER_MODEL_DETAIL_MASKS);
+
+#ifdef HALO_LINUX
+	/* (port) the whole pixel shader set again (local_pixel_shader_dirty_flag,
+	below) starts from a cleared definition. pixel_shader is the rasterizer's
+	one shared definition (rasterizer_xbox.h): this shader sets the eight
+	combiners' colour halves and the first three alpha halves, and
+	rasterizer_set_pixel_shader writes all eight, so the alpha halves of
+	stages 3 to 7 (and the constants it leaves) were whatever the last
+	other user had left there. The menus' widget bitmaps are drawn with the
+	Xbox interface's plasma (ui_widget.c draw_bitmap_in_rect: the dynamic
+	screen geometry's min blend of two maps, rasterizer_xbox_dynavobgeom.c),
+	which fills alpha stages 3, 4 and 6; with Halo 3 CUSTOMIZATION's last
+	row, VIBRATION, focused, the frame's widgets left those there for the
+	next frame's models, whose stages 3 to 6 then ran them over the alpha
+	the colour stages read: the preview's Spartan lost its visor's
+	reflection and its shading, and a program of its own was compiled for
+	it (Ben 10 and xal, insider.17).
+	Cleared, they are the zeros every other frame drew with */
+	if (local_pixel_shader_dirty_flag)
+	{
+		memset(&pixel_shader, 0, sizeof(pixel_shader));
+	}
+#endif
 
 	{
 		unsigned long detail_mask_alpha_inputs[
@@ -2380,6 +2404,25 @@ void _rasterizer_model_draw(
 					shader_model->model.parallel_tint_color.blue*
 					local_parameters->lighting.reflection_tint_color.blue;
 
+#ifdef HALO_LINUX
+				/* port: the platform's visor colour (player_cosmetics.h): the
+				stock cyborg visor's gold is its reflection's tint, a constant
+				of the stock shader - the same program, another colour */
+				{
+					real_rgb_color visor;
+
+					if (player_cosmetics_visor_tint(shader_model, shader_model->model.reflection_cube_map.index,
+						shader_model->model.base_map.index, &visor))
+					{
+						perpendicular.red = visor.red * local_parameters->lighting.reflection_tint_color.red;
+						perpendicular.green = visor.green * local_parameters->lighting.reflection_tint_color.green;
+						perpendicular.blue = visor.blue * local_parameters->lighting.reflection_tint_color.blue;
+						parallel.red = perpendicular.red;
+						parallel.green = perpendicular.green;
+						parallel.blue = perpendicular.blue;
+					}
+				}
+#endif
 				vertex_constants[0].n[0] = shader_model->model.detail_map_scale;
 				vertex_constants[0].n[1] = shader_model->model.detail_map_scale*
 					shader_model->model.detail_map_v_scale;

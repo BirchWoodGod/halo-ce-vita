@@ -200,6 +200,21 @@ malformed:
 	return 0;
 }
 
+int update_asset_vpk_name(const char *version, char *name, size_t size)
+{
+	int length;
+
+	if (!version || !name || !size)
+		return 0;
+	length = snprintf(name, size, UPDATE_ASSET_VPK_PREFIX "%s" UPDATE_ASSET_VPK_SUFFIX, version);
+	if (length < 0 || (size_t)length >= size)
+	{
+		name[0] = 0;
+		return 0;
+	}
+	return 1;
+}
+
 static int fail(int code, struct update_manifest *manifest, char *error, int error_size, const char *why)
 {
 	memset(manifest, 0, sizeof(*manifest));
@@ -247,8 +262,17 @@ int update_manifest_check(const char *text, size_t size, const char *signature_t
 		snprintf(why, sizeof(why), "the manifest is for title %.12s, not %.12s", manifest->title, title ? title : "?");
 		return fail(UPDATE_VERIFY_WRONG_TITLE, manifest, error, error_size, why);
 	}
-	if (strcmp(manifest->file, UPDATE_ASSET_VPK))
-		return fail(UPDATE_VERIFY_WRONG_FILE, manifest, error, error_size, "the manifest names another file");
+	/* (the release's VPK: halo-ce-vita-<version>-vita.vpk, or halo.vpk, its
+	name until 1.1.1) */
+	{
+		char name[sizeof(manifest->file)];
+
+		if (strcmp(manifest->file, UPDATE_ASSET_VPK) &&
+			(!update_asset_vpk_name(manifest->version, name, sizeof(name)) || strcmp(manifest->file, name)))
+		{
+			return fail(UPDATE_VERIFY_WRONG_FILE, manifest, error, error_size, "the manifest names another file");
+		}
+	}
 	if (!manifest->size || manifest->size > UPDATE_VPK_MAXIMUM)
 	{
 		snprintf(why, sizeof(why), "the update's size (%lu bytes) is not taken", manifest->size);
@@ -363,7 +387,13 @@ int update_asset_url(char *url, int size, const char *base, const char *version,
 	if (!update_tag_valid(tag))
 		return 0;
 	if (strcmp(asset, UPDATE_ASSET_VPK) && strcmp(asset, UPDATE_ASSET_MANIFEST) && strcmp(asset, UPDATE_ASSET_SIGNATURE))
-		return 0;
+	{
+		/* (or the release's VPK by its name: this version's alone) */
+		char name[128];
+
+		if (!update_asset_vpk_name(version, name, sizeof(name)) || strcmp(asset, name))
+			return 0;
+	}
 	/* GitHub's, another repository's releases on GitHub (a hardware test's,
 	signed with a test build's key: tools/release/README.md), or the tests'
 	server on this machine */

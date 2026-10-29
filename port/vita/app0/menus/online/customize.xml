@@ -1,0 +1,714 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Online (a preview): CUSTOMIZATION's editor. It opens in place of the Halo 3 editor
+(h3/custom/screen: menu_tags.c menu_tags_online) and edits the same profile with the same rows and
+functions (menu_functions.c "port h3 custom ..."), laid out the online way: the header band with
+CUSTOMIZATION and its tabs - ARMORY, COLORS, CONTROLS, L and R change them -, the tab's rows at the
+left with the orange bar, their values beside them, the help under them, the profile's Spartan
+large at the right, the buttons at the foot. ARMORY: PLAYER NAME, MODEL (the Spartan or a Custom
+Edition player model), the tester's FLAMING HELMET, and the armor pieces Halo CE has no models
+for greyed ("not yet"); COLORS: ARMOR PRIMARY (the game's eighteen colours and the platform's own,
+in a grid with the chosen one framed and its hex), ARMOR VISOR (the visor's colours, a
+grid of their own), the other colours greyed; CONTROLS: the profile's controller
+settings. The tabs' rows: menu_functions.c online_custom_update. Circle saves, as the Halo 3
+editor's. The art is this folder's own (tools/online_menu_art.py) and the Halo 3 set's. -->
+<menus>
+	<bitmap name="online/haze_light">
+		<frame png="online/haze_light.png" width="128" height="4"/>
+	</bitmap>
+	<widget name="online/custom/haze" left="0" top="0" width="640" height="480" bitmap="online/haze_light"/>
+	<bitmap name="online/header">
+		<frame png="online/header.png" width="4" height="256"/>
+	</bitmap>
+	<bitmap name="online/tab">
+		<frame png="online/tab_off.png" width="256" height="64"/>
+		<frame png="online/tab_on.png" width="256" height="64"/>
+	</bitmap>
+	<bitmap name="online/row_dim">
+		<frame png="online/item_off.png" width="4" height="4"/>
+		<frame png="online/row_dim_on.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="online/box">
+		<frame png="online/box.png" width="256" height="32"/>
+	</bitmap>
+	<bitmap name="online/select_frame">
+		<frame png="online/select_frame.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_random">
+		<frame png="online/colour_random.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_00">
+		<frame png="online/colour_00.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_01">
+		<frame png="online/colour_01.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_02">
+		<frame png="online/colour_02.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_03">
+		<frame png="online/colour_03.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_04">
+		<frame png="online/colour_04.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_05">
+		<frame png="online/colour_05.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_06">
+		<frame png="online/colour_06.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_07">
+		<frame png="online/colour_07.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_08">
+		<frame png="online/colour_08.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_09">
+		<frame png="online/colour_09.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_10">
+		<frame png="online/colour_10.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_11">
+		<frame png="online/colour_11.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_12">
+		<frame png="online/colour_12.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_13">
+		<frame png="online/colour_13.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_14">
+		<frame png="online/colour_14.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_15">
+		<frame png="online/colour_15.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_16">
+		<frame png="online/colour_16.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_17">
+		<frame png="online/colour_17.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_18">
+		<frame png="online/colour_18.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_19">
+		<frame png="online/colour_19.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_20">
+		<frame png="online/colour_20.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_21">
+		<frame png="online/colour_21.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_22">
+		<frame png="online/colour_22.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_23">
+		<frame png="online/colour_23.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_24">
+		<frame png="online/colour_24.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_25">
+		<frame png="online/colour_25.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_26">
+		<frame png="online/colour_26.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_27">
+		<frame png="online/colour_27.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_28">
+		<frame png="online/colour_28.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_29">
+		<frame png="online/colour_29.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_30">
+		<frame png="online/colour_30.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_31">
+		<frame png="online/colour_31.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_32">
+		<frame png="online/colour_32.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_33">
+		<frame png="online/colour_33.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_34">
+		<frame png="online/colour_34.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_35">
+		<frame png="online/colour_35.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_36">
+		<frame png="online/colour_36.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_37">
+		<frame png="online/colour_37.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_38">
+		<frame png="online/colour_38.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_39">
+		<frame png="online/colour_39.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_40">
+		<frame png="online/colour_40.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/colour_41">
+		<frame png="online/colour_41.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_00">
+		<frame png="online/visor_00.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_01">
+		<frame png="online/visor_01.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_02">
+		<frame png="online/visor_02.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_03">
+		<frame png="online/visor_03.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_04">
+		<frame png="online/visor_04.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_05">
+		<frame png="online/visor_05.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_06">
+		<frame png="online/visor_06.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_07">
+		<frame png="online/visor_07.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_08">
+		<frame png="online/visor_08.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_09">
+		<frame png="online/visor_09.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_10">
+		<frame png="online/visor_10.png" width="64" height="32"/>
+	</bitmap>
+	<bitmap name="online/visor_11">
+		<frame png="online/visor_11.png" width="64" height="32"/>
+	</bitmap>
+	<strings name="online/custom_labels">
+		<string text="PLAYER NAME"/>
+		<string text="SERVICE TAG"/>
+		<string text="MODEL"/>
+		<string text="HELMET"/>
+		<string text="RIGHT SHOULDER"/>
+		<string text="LEFT SHOULDER"/>
+		<string text="CHEST"/>
+		<string text="FLAMING HELMET"/>
+		<string text="ARMOR PRIMARY"/>
+		<string text="ARMOR SECONDARY"/>
+		<string text="ARMOR VISOR"/>
+		<string text="ARMOR LIGHTS"/>
+		<string text="STICK LAYOUT"/>
+		<string text="BUTTON LAYOUT"/>
+		<string text="LOOK SENSITIVITY"/>
+		<string text="INVERT LOOK"/>
+		<string text="INVERT FLIGHT"/>
+		<string text="AUTO-CENTER"/>
+		<string text="VIBRATION"/>
+		<string text="KEYBOARD &amp; MOUSE"/>
+	</strings>
+	<strings name="online/custom_text">
+		<string text="CUSTOMIZATION"/>
+		<string text="ARMORY"/>
+		<string text="COLORS"/>
+		<string text="CONTROLS"/>
+		<string text="Close"/>
+		<string text="Change"/>
+		<string text="Tabs"/>
+		<string text="PROFILE"/>
+		<string text="Delete"/>
+		<string text="New Profile"/>
+	</strings>
+
+	<!-- the rows: a label, the value beside it (the focused row's arrows), as the Halo 3 editor's
+	children named alike (value, arrow_left, arrow_right) -->
+	<widget name="online/custom/value" type="text" left="150" top="0" width="140" height="18" align="center" font="online/font_item" color="#FFAFC4DE" text_y="2" text_flags="no_focus_test"/>
+	<widget name="online/custom/na/value" type="text" left="150" top="0" width="140" height="18" align="center" font="online/font_small" color="#FF6A7C94" text_y="3" text_flags="no_focus_test"/>
+	<widget name="online/custom/arrow_left" left="146" top="1" width="8" height="16" bitmap="h3/arrow_left"/>
+	<widget name="online/custom/arrow_right" left="286" top="1" width="8" height="16" bitmap="h3/arrow_right"/>
+	<widget name="online/custom/op_name_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="0"/>
+	<widget name="online/custom/op_name" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port h3 custom next"/>
+		<child widget="online/custom/op_name_label"/>
+		<child widget="online/custom/value"/>
+	</widget>
+	<widget name="online/custom/na_tag_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FF7E8EA4" text_x="7" text_y="2" string_list="online/custom_labels" string_index="1"/>
+	<widget name="online/custom/na_tag" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/row_dim">
+		<child widget="online/custom/na_tag_label"/>
+		<child widget="online/custom/na/value"/>
+	</widget>
+	<widget name="online/custom/op_model_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="2"/>
+	<widget name="online/custom/op_model" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_model_label"/>
+		<child widget="online/custom/value"/>
+		<child widget="online/custom/arrow_left"/>
+		<child widget="online/custom/arrow_right"/>
+	</widget>
+	<widget name="online/custom/na_helmet_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FF7E8EA4" text_x="7" text_y="2" string_list="online/custom_labels" string_index="3"/>
+	<widget name="online/custom/na_helmet" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/row_dim">
+		<child widget="online/custom/na_helmet_label"/>
+		<child widget="online/custom/na/value"/>
+	</widget>
+	<widget name="online/custom/na_rshoulder_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FF7E8EA4" text_x="7" text_y="2" string_list="online/custom_labels" string_index="4"/>
+	<widget name="online/custom/na_rshoulder" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/row_dim">
+		<child widget="online/custom/na_rshoulder_label"/>
+		<child widget="online/custom/na/value"/>
+	</widget>
+	<widget name="online/custom/na_lshoulder_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FF7E8EA4" text_x="7" text_y="2" string_list="online/custom_labels" string_index="5"/>
+	<widget name="online/custom/na_lshoulder" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/row_dim">
+		<child widget="online/custom/na_lshoulder_label"/>
+		<child widget="online/custom/na/value"/>
+	</widget>
+	<widget name="online/custom/na_chest_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FF7E8EA4" text_x="7" text_y="2" string_list="online/custom_labels" string_index="6"/>
+	<widget name="online/custom/na_chest" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/row_dim">
+		<child widget="online/custom/na_chest_label"/>
+		<child widget="online/custom/na/value"/>
+	</widget>
+	<widget name="online/custom/op_flame_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="7"/>
+	<widget name="online/custom/op_flame" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_flame_label"/>
+		<child widget="online/custom/value"/>
+		<child widget="online/custom/arrow_left"/>
+		<child widget="online/custom/arrow_right"/>
+	</widget>
+	<widget name="online/custom/op_color_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="8"/>
+	<widget name="online/custom/op_color" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<!-- (Cross: the grid picked in - up and down a row of six -, again done; picked in the grid
+		alone, as ARMOR VISOR: left and right step only in it, no arrows - the owner) -->
+		<on event="a" run="port online custom grid"/>
+		<on event="right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_color_label"/>
+		<child widget="online/custom/value"/>
+	</widget>
+	<widget name="online/custom/na_secondary_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FF7E8EA4" text_x="7" text_y="2" string_list="online/custom_labels" string_index="9"/>
+	<widget name="online/custom/na_secondary" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/row_dim">
+		<child widget="online/custom/na_secondary_label"/>
+		<child widget="online/custom/na/value"/>
+	</widget>
+	<widget name="online/custom/op_visor_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="10"/>
+	<widget name="online/custom/op_visor" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<!-- (Cross: the visors' grid picked in, again done) -->
+		<on event="a" run="port online custom grid"/>
+		<on event="right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_visor_label"/>
+		<child widget="online/custom/value"/>
+	</widget>
+	<widget name="online/custom/na_lights_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FF7E8EA4" text_x="7" text_y="2" string_list="online/custom_labels" string_index="11"/>
+	<widget name="online/custom/na_lights" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/row_dim">
+		<child widget="online/custom/na_lights_label"/>
+		<child widget="online/custom/na/value"/>
+	</widget>
+	<widget name="online/custom/op_stick_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="12"/>
+	<widget name="online/custom/op_stick" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_stick_label"/>
+		<child widget="online/custom/value"/>
+		<child widget="online/custom/arrow_left"/>
+		<child widget="online/custom/arrow_right"/>
+	</widget>
+	<widget name="online/custom/op_buttons_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="13"/>
+	<widget name="online/custom/op_buttons" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_buttons_label"/>
+		<child widget="online/custom/value"/>
+		<child widget="online/custom/arrow_left"/>
+		<child widget="online/custom/arrow_right"/>
+	</widget>
+	<widget name="online/custom/op_look_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="14"/>
+	<widget name="online/custom/op_look" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_look_label"/>
+		<child widget="online/custom/value"/>
+		<child widget="online/custom/arrow_left"/>
+		<child widget="online/custom/arrow_right"/>
+	</widget>
+	<widget name="online/custom/op_invert_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="15"/>
+	<widget name="online/custom/op_invert" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_invert_label"/>
+		<child widget="online/custom/value"/>
+		<child widget="online/custom/arrow_left"/>
+		<child widget="online/custom/arrow_right"/>
+	</widget>
+	<widget name="online/custom/op_flight_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="16"/>
+	<widget name="online/custom/op_flight" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_flight_label"/>
+		<child widget="online/custom/value"/>
+		<child widget="online/custom/arrow_left"/>
+		<child widget="online/custom/arrow_right"/>
+	</widget>
+	<widget name="online/custom/op_autocenter_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="17"/>
+	<widget name="online/custom/op_autocenter" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_autocenter_label"/>
+		<child widget="online/custom/value"/>
+		<child widget="online/custom/arrow_left"/>
+		<child widget="online/custom/arrow_right"/>
+	</widget>
+	<widget name="online/custom/op_vibration_label" type="text" left="0" top="0" width="150" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="18"/>
+	<widget name="online/custom/op_vibration" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port h3 custom next"/>
+		<on event="left stick_left" run="port h3 custom previous"/>
+		<child widget="online/custom/op_vibration_label"/>
+		<child widget="online/custom/value"/>
+		<child widget="online/custom/arrow_left"/>
+		<child widget="online/custom/arrow_right"/>
+	</widget>
+	<!-- (CONTROLS' KEYBOARD & MOUSE: the PC's keys - the page, online/keys.xml, standing for the Halo 3
+	one, h3/keys/screen -; menu_functions.c online_custom_update shows it on a PC alone) -->
+	<widget name="online/custom/op_keys_label" type="text" left="0" top="0" width="300" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/custom_labels" string_index="19"/>
+	<widget name="online/custom/op_keys" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" open="h3/keys/screen"/>
+		<child widget="online/custom/op_keys_label"/>
+	</widget>
+	<!-- PROFILE's rows (menu_functions.c online_profile_*): a profile's name (pr_label, set as it
+	shows) and CURRENT beside the one edited; CREATE NEW PROFILE last -->
+	<widget name="online/custom/pr_label" type="text" left="0" top="0" width="190" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" text_flags="no_focus_test"/>
+	<widget name="online/custom/pr_value" type="text" left="190" top="0" width="100" height="18" align="right" font="online/font_small" color="#FFAFC4DE" text_y="3" text_flags="no_focus_test"/>
+	<widget name="online/custom/pr_1" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_2" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_3" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_4" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_5" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_6" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_7" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_8" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port online profile choose"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/pr_new" width="300" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a start" run="port h3 profile create"/>
+		<child widget="online/custom/pr_label"/>
+		<child widget="online/custom/pr_value"/>
+	</widget>
+	<widget name="online/custom/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 custom"/>
+		<data input="port online custom"/>
+		<on event="left_trigger" run="port online custom tab previous"/>
+		<on event="right_trigger" run="port online custom tab next"/>
+		<on event="x" run="port online profile delete ask" open="h3/profdel/screen"/>
+		<on event="y" run="port h3 profile create"/>
+		<child widget="online/custom/pr_1" x="0" y="0"/>
+		<child widget="online/custom/pr_2" x="0" y="0"/>
+		<child widget="online/custom/pr_3" x="0" y="0"/>
+		<child widget="online/custom/pr_4" x="0" y="0"/>
+		<child widget="online/custom/pr_5" x="0" y="0"/>
+		<child widget="online/custom/pr_6" x="0" y="0"/>
+		<child widget="online/custom/pr_7" x="0" y="0"/>
+		<child widget="online/custom/pr_8" x="0" y="0"/>
+		<child widget="online/custom/pr_new" x="0" y="0"/>
+		<child widget="online/custom/op_name" x="0" y="0"/>
+		<child widget="online/custom/na_tag" x="0" y="0"/>
+		<child widget="online/custom/op_model" x="0" y="0"/>
+		<child widget="online/custom/na_helmet" x="0" y="0"/>
+		<child widget="online/custom/na_rshoulder" x="0" y="0"/>
+		<child widget="online/custom/na_lshoulder" x="0" y="0"/>
+		<child widget="online/custom/na_chest" x="0" y="0"/>
+		<child widget="online/custom/op_flame" x="0" y="0"/>
+		<child widget="online/custom/op_color" x="0" y="0"/>
+		<child widget="online/custom/na_secondary" x="0" y="0"/>
+		<child widget="online/custom/op_visor" x="0" y="0"/>
+		<child widget="online/custom/na_lights" x="0" y="0"/>
+		<child widget="online/custom/op_stick" x="0" y="0"/>
+		<child widget="online/custom/op_buttons" x="0" y="0"/>
+		<child widget="online/custom/op_look" x="0" y="0"/>
+		<child widget="online/custom/op_invert" x="0" y="0"/>
+		<child widget="online/custom/op_flight" x="0" y="0"/>
+		<child widget="online/custom/op_autocenter" x="0" y="0"/>
+		<child widget="online/custom/op_vibration" x="0" y="0"/>
+		<child widget="online/custom/op_keys" x="0" y="0"/>
+	</widget>
+
+	<!-- the header band (full width), CUSTOMIZATION and the tabs -->
+	<widget name="online/custom/header" left="0" top="0" width="640" height="80" bitmap="online/header"/>
+	<widget name="online/custom/title" type="text" left="-70" top="12" width="400" height="34" font="online/font_header" color="#FFF2F6FA" string_list="online/custom_text" string_index="0"/>
+	<widget name="online/custom/tab_0" left="-78" top="52" width="118" height="24" bitmap="online/tab"/>
+	<widget name="online/custom/tab_label_0" type="text" left="-70" top="52" width="100" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/custom_text" string_index="7"/>
+	<widget name="online/custom/tab_1" left="40" top="52" width="118" height="24" bitmap="online/tab"/>
+	<widget name="online/custom/tab_label_1" type="text" left="48" top="52" width="100" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/custom_text" string_index="1"/>
+	<widget name="online/custom/tab_2" left="158" top="52" width="118" height="24" bitmap="online/tab"/>
+	<widget name="online/custom/tab_label_2" type="text" left="166" top="52" width="100" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/custom_text" string_index="2"/>
+	<widget name="online/custom/tab_3" left="276" top="52" width="118" height="24" bitmap="online/tab"/>
+	<widget name="online/custom/tab_label_3" type="text" left="284" top="52" width="100" height="24" font="online/font_tab" color="#FFE8EEF6" text_y="4" string_list="online/custom_text" string_index="3"/>
+	<widget name="online/custom/profile_name" type="text" left="290" top="57" width="190" height="16" align="right" font="online/font_small" color="#FF9FB6CC"/>
+
+	<!-- under the rows: a rule, the colour's name, the row's help, the editor's word (a name
+	refused, a model that cannot be built) -->
+	<widget name="online/custom/rule" left="-70" top="268" width="300" height="2" bitmap="online/rule"/>
+	<widget name="online/custom/colour_name" type="text" left="-70" top="274" width="290" height="20" font="online/font_item" color="#FFF0F4F8" text_x="7"/>
+	<widget name="online/custom/custom_help" type="text" left="-70" top="296" width="300" height="60" font="online/font_small" color="#FFC4D2E2" text_x="7" string_list="h3/custom_help"/>
+	<widget name="online/custom/na_help" type="text" left="-70" top="296" width="300" height="60" font="online/font_small" color="#FFC4D2E2" text_x="7"/>
+	<widget name="online/custom/status" type="text" left="-70" top="362" width="300" height="34" font="online/font_small" color="#FFF0B070" text_x="7"/>
+	<widget name="online/custom/preview_name" type="text" left="460" top="453" width="270" height="16" align="right" font="online/font_small" color="#FF9FB6CC"/>
+
+	<!-- COLORS: the hex of the chosen colour in its box, then the grid (RANDOM, then the game's
+	eighteen in its order, then the platform's: player_cosmetics.c), the visors' under it, the chosen one framed (online_custom_update moves the frame) -->
+	<widget name="online/custom/hex_box" left="248" top="92" width="100" height="16" bitmap="online/box"/>
+	<widget name="online/custom/hex" type="text" left="248" top="92" width="100" height="16" align="center" font="online/font_small" color="#FFF0F4F8" text_y="1"/>
+	<widget name="online/custom/cell_0" left="248" top="112" width="24" height="14" bitmap="online/colour_random"/>
+	<widget name="online/custom/cell_1" left="274" top="112" width="24" height="14" bitmap="online/colour_00"/>
+	<widget name="online/custom/cell_2" left="300" top="112" width="24" height="14" bitmap="online/colour_01"/>
+	<widget name="online/custom/cell_3" left="326" top="112" width="24" height="14" bitmap="online/colour_02"/>
+	<widget name="online/custom/cell_4" left="352" top="112" width="24" height="14" bitmap="online/colour_03"/>
+	<widget name="online/custom/cell_5" left="378" top="112" width="24" height="14" bitmap="online/colour_04"/>
+	<widget name="online/custom/cell_6" left="248" top="128" width="24" height="14" bitmap="online/colour_05"/>
+	<widget name="online/custom/cell_7" left="274" top="128" width="24" height="14" bitmap="online/colour_06"/>
+	<widget name="online/custom/cell_8" left="300" top="128" width="24" height="14" bitmap="online/colour_07"/>
+	<widget name="online/custom/cell_9" left="326" top="128" width="24" height="14" bitmap="online/colour_08"/>
+	<widget name="online/custom/cell_10" left="352" top="128" width="24" height="14" bitmap="online/colour_09"/>
+	<widget name="online/custom/cell_11" left="378" top="128" width="24" height="14" bitmap="online/colour_10"/>
+	<widget name="online/custom/cell_12" left="248" top="144" width="24" height="14" bitmap="online/colour_11"/>
+	<widget name="online/custom/cell_13" left="274" top="144" width="24" height="14" bitmap="online/colour_12"/>
+	<widget name="online/custom/cell_14" left="300" top="144" width="24" height="14" bitmap="online/colour_13"/>
+	<widget name="online/custom/cell_15" left="326" top="144" width="24" height="14" bitmap="online/colour_14"/>
+	<widget name="online/custom/cell_16" left="352" top="144" width="24" height="14" bitmap="online/colour_15"/>
+	<widget name="online/custom/cell_17" left="378" top="144" width="24" height="14" bitmap="online/colour_16"/>
+	<widget name="online/custom/cell_18" left="248" top="160" width="24" height="14" bitmap="online/colour_17"/>
+	<widget name="online/custom/cell_19" left="274" top="160" width="24" height="14" bitmap="online/colour_18"/>
+	<widget name="online/custom/cell_20" left="300" top="160" width="24" height="14" bitmap="online/colour_19"/>
+	<widget name="online/custom/cell_21" left="326" top="160" width="24" height="14" bitmap="online/colour_20"/>
+	<widget name="online/custom/cell_22" left="352" top="160" width="24" height="14" bitmap="online/colour_21"/>
+	<widget name="online/custom/cell_23" left="378" top="160" width="24" height="14" bitmap="online/colour_22"/>
+	<widget name="online/custom/cell_24" left="248" top="176" width="24" height="14" bitmap="online/colour_23"/>
+	<widget name="online/custom/cell_25" left="274" top="176" width="24" height="14" bitmap="online/colour_24"/>
+	<widget name="online/custom/cell_26" left="300" top="176" width="24" height="14" bitmap="online/colour_25"/>
+	<widget name="online/custom/cell_27" left="326" top="176" width="24" height="14" bitmap="online/colour_26"/>
+	<widget name="online/custom/cell_28" left="352" top="176" width="24" height="14" bitmap="online/colour_27"/>
+	<widget name="online/custom/cell_29" left="378" top="176" width="24" height="14" bitmap="online/colour_28"/>
+	<widget name="online/custom/cell_30" left="248" top="192" width="24" height="14" bitmap="online/colour_29"/>
+	<widget name="online/custom/cell_31" left="274" top="192" width="24" height="14" bitmap="online/colour_30"/>
+	<widget name="online/custom/cell_32" left="300" top="192" width="24" height="14" bitmap="online/colour_31"/>
+	<widget name="online/custom/cell_33" left="326" top="192" width="24" height="14" bitmap="online/colour_32"/>
+	<widget name="online/custom/cell_34" left="352" top="192" width="24" height="14" bitmap="online/colour_33"/>
+	<widget name="online/custom/cell_35" left="378" top="192" width="24" height="14" bitmap="online/colour_34"/>
+	<widget name="online/custom/cell_36" left="248" top="208" width="24" height="14" bitmap="online/colour_35"/>
+	<widget name="online/custom/cell_37" left="274" top="208" width="24" height="14" bitmap="online/colour_36"/>
+	<widget name="online/custom/cell_38" left="300" top="208" width="24" height="14" bitmap="online/colour_37"/>
+	<widget name="online/custom/cell_39" left="326" top="208" width="24" height="14" bitmap="online/colour_38"/>
+	<widget name="online/custom/cell_40" left="352" top="208" width="24" height="14" bitmap="online/colour_39"/>
+	<widget name="online/custom/cell_41" left="378" top="208" width="24" height="14" bitmap="online/colour_40"/>
+	<widget name="online/custom/cell_42" left="248" top="224" width="24" height="14" bitmap="online/colour_41"/>
+	<widget name="online/custom/grid_select" left="248" top="112" width="24" height="14" bitmap="online/select_frame"/>
+	<widget name="online/custom/vcell_0" left="248" top="250" width="24" height="14" bitmap="online/visor_00"/>
+	<widget name="online/custom/vcell_1" left="274" top="250" width="24" height="14" bitmap="online/visor_01"/>
+	<widget name="online/custom/vcell_2" left="300" top="250" width="24" height="14" bitmap="online/visor_02"/>
+	<widget name="online/custom/vcell_3" left="326" top="250" width="24" height="14" bitmap="online/visor_03"/>
+	<widget name="online/custom/vcell_4" left="352" top="250" width="24" height="14" bitmap="online/visor_04"/>
+	<widget name="online/custom/vcell_5" left="378" top="250" width="24" height="14" bitmap="online/visor_05"/>
+	<widget name="online/custom/vcell_6" left="248" top="266" width="24" height="14" bitmap="online/visor_06"/>
+	<widget name="online/custom/vcell_7" left="274" top="266" width="24" height="14" bitmap="online/visor_07"/>
+	<widget name="online/custom/vcell_8" left="300" top="266" width="24" height="14" bitmap="online/visor_08"/>
+	<widget name="online/custom/vcell_9" left="326" top="266" width="24" height="14" bitmap="online/visor_09"/>
+	<widget name="online/custom/vcell_10" left="352" top="266" width="24" height="14" bitmap="online/visor_10"/>
+	<widget name="online/custom/vcell_11" left="378" top="266" width="24" height="14" bitmap="online/visor_11"/>
+	<widget name="online/custom/visor_select" left="248" top="250" width="24" height="14" bitmap="online/select_frame"/>
+	<widget name="online/custom/grid">
+		<child widget="online/custom/hex_box"/>
+		<child widget="online/custom/hex"/>
+		<child widget="online/custom/cell_0"/>
+		<child widget="online/custom/cell_1"/>
+		<child widget="online/custom/cell_2"/>
+		<child widget="online/custom/cell_3"/>
+		<child widget="online/custom/cell_4"/>
+		<child widget="online/custom/cell_5"/>
+		<child widget="online/custom/cell_6"/>
+		<child widget="online/custom/cell_7"/>
+		<child widget="online/custom/cell_8"/>
+		<child widget="online/custom/cell_9"/>
+		<child widget="online/custom/cell_10"/>
+		<child widget="online/custom/cell_11"/>
+		<child widget="online/custom/cell_12"/>
+		<child widget="online/custom/cell_13"/>
+		<child widget="online/custom/cell_14"/>
+		<child widget="online/custom/cell_15"/>
+		<child widget="online/custom/cell_16"/>
+		<child widget="online/custom/cell_17"/>
+		<child widget="online/custom/cell_18"/>
+		<child widget="online/custom/cell_19"/>
+		<child widget="online/custom/cell_20"/>
+		<child widget="online/custom/cell_21"/>
+		<child widget="online/custom/cell_22"/>
+		<child widget="online/custom/cell_23"/>
+		<child widget="online/custom/cell_24"/>
+		<child widget="online/custom/cell_25"/>
+		<child widget="online/custom/cell_26"/>
+		<child widget="online/custom/cell_27"/>
+		<child widget="online/custom/cell_28"/>
+		<child widget="online/custom/cell_29"/>
+		<child widget="online/custom/cell_30"/>
+		<child widget="online/custom/cell_31"/>
+		<child widget="online/custom/cell_32"/>
+		<child widget="online/custom/cell_33"/>
+		<child widget="online/custom/cell_34"/>
+		<child widget="online/custom/cell_35"/>
+		<child widget="online/custom/cell_36"/>
+		<child widget="online/custom/cell_37"/>
+		<child widget="online/custom/cell_38"/>
+		<child widget="online/custom/cell_39"/>
+		<child widget="online/custom/cell_40"/>
+		<child widget="online/custom/cell_41"/>
+		<child widget="online/custom/cell_42"/>
+		<child widget="online/custom/grid_select"/>
+		<child widget="online/custom/vcell_0"/>
+		<child widget="online/custom/vcell_1"/>
+		<child widget="online/custom/vcell_2"/>
+		<child widget="online/custom/vcell_3"/>
+		<child widget="online/custom/vcell_4"/>
+		<child widget="online/custom/vcell_5"/>
+		<child widget="online/custom/vcell_6"/>
+		<child widget="online/custom/vcell_7"/>
+		<child widget="online/custom/vcell_8"/>
+		<child widget="online/custom/vcell_9"/>
+		<child widget="online/custom/vcell_10"/>
+		<child widget="online/custom/vcell_11"/>
+		<child widget="online/custom/visor_select"/>
+	</widget>
+
+	<!-- the foot: Circle closes (and saves), Cross changes, L and R the tabs -->
+	<widget name="online/custom/foot" left="0" top="446" width="640" height="34" bitmap="online/footer"/>
+	<widget name="online/custom/b_butn" left="-70" top="452" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="online/custom/close" type="text" left="-50" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/custom_text" string_index="4"/>
+	<widget name="online/custom/a_butn" left="14" top="452" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="online/custom/change" type="text" left="34" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/custom_text" string_index="5"/>
+	<widget name="online/custom/l_butn" left="102" top="452" width="16" height="16" bitmap="h3/glyph_l"/>
+	<widget name="online/custom/r_butn" left="120" top="452" width="16" height="16" bitmap="h3/glyph_r"/>
+	<widget name="online/custom/tabs" type="text" left="140" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/custom_text" string_index="6"/>
+	<widget name="online/custom/x_butn" left="200" top="452" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="online/custom/delete" type="text" left="220" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/custom_text" string_index="8"/>
+	<widget name="online/custom/y_butn" left="282" top="452" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="online/custom/new" type="text" left="302" top="451" width="110" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/custom_text" string_index="9"/>
+
+	<!-- the profiles first (the Halo 3 SELECT PROFILE's widgets, profiles.xml), under the header
+	band: CUSTOMIZATION, the line saying to choose one -->
+	<widget name="online/custprof/title" type="text" left="-70" top="12" width="400" height="34" font="online/font_header" color="#FFF2F6FA" string_list="online/custom_text" string_index="0"/>
+	<widget name="online/custprof/subtitle" type="text" left="-70" top="56" width="500" height="16" font="online/font_small" color="#FFC4D2E2" string_list="h3/profile_text" string_index="3"/>
+	<widget name="online/custprof/panel" left="40" top="86" width="560" height="330" bitmap="online/panel"/>
+	<widget name="online/custprof/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 25 0" backdrop="multiplayer 29.602 -104.323 59.258 -112.75 5.92 0 70">
+		<on event="created" run="port h3 profiles customize"/>
+		<on event="created" run="port h3 scene"/>
+		<on event="deleted" run="port h3 profiles close"/>
+		<on event="b back" back="true"/>
+		<on event="x" run="port h3 profile delete ask" open="h3/profdel/screen"/>
+		<on event="y" run="port h3 profile create"/>
+		<child widget="online/main/haze"/>
+		<child widget="online/custom/header"/>
+		<child widget="online/custprof/panel"/>
+		<child widget="online/custprof/title"/>
+		<child widget="online/custprof/subtitle"/>
+		<child widget="h3/profiles/info_swatch"/>
+		<child widget="h3/profiles/info_name"/>
+		<child widget="h3/profiles/info_level_label"/>
+		<child widget="h3/profiles/info_level"/>
+		<child widget="h3/profiles/info_skill_label"/>
+		<child widget="h3/profiles/info_skill"/>
+		<child widget="h3/profiles/info_controls_label"/>
+		<child widget="h3/profiles/info_controls"/>
+		<child widget="h3/profiles/info_text"/>
+		<child widget="h3/profiles/status"/>
+		<child widget="online/custom/foot"/>
+		<child widget="h3/pick/a_butn" x="-122" y="31"/>
+		<child widget="h3/pick/select" x="-122" y="31"/>
+		<child widget="h3/pick/b_butn" x="-122" y="31"/>
+		<child widget="h3/pick/back" x="-122" y="31"/>
+		<child widget="h3/profiles/x_butn" x="-122" y="31"/>
+		<child widget="h3/profiles/delete" x="-122" y="31"/>
+		<child widget="h3/profiles/y_butn" x="-122" y="31"/>
+		<child widget="h3/profiles/new" x="-122" y="31"/>
+		<child widget="h3/profiles/list"/>
+	</widget>
+
+	<!-- (scene: the Halo 3 editor's camera; the Spartan placed large at the right,
+	menu_functions.c ONLINE_CUSTOM_SPARTAN_PLACEMENT) -->
+	<widget name="online/custom/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 25 0" backdrop="multiplayer 29.602 -104.323 59.258 -112.75 5.92 0 70">
+		<on event="created" run="port h3 scene"/>
+		<on event="b back" run="port h3 custom save" back="true"/>
+		<on event="deleted" run="port h3 custom close"/>
+		<child widget="online/custom/haze"/>
+		<child widget="online/custom/header"/>
+		<child widget="online/custom/title"/>
+		<child widget="online/custom/tab_0"/>
+		<child widget="online/custom/tab_label_0"/>
+		<child widget="online/custom/tab_1"/>
+		<child widget="online/custom/tab_label_1"/>
+		<child widget="online/custom/tab_2"/>
+		<child widget="online/custom/tab_label_2"/>
+		<child widget="online/custom/tab_3"/>
+		<child widget="online/custom/tab_label_3"/>
+		<child widget="online/custom/profile_name"/>
+		<child widget="online/custom/rule"/>
+		<child widget="online/custom/colour_name"/>
+		<child widget="online/custom/custom_help"/>
+		<child widget="online/custom/na_help"/>
+		<child widget="online/custom/status"/>
+		<child widget="online/custom/preview_name"/>
+		<child widget="online/custom/grid"/>
+		<child widget="online/custom/foot"/>
+		<child widget="online/custom/b_butn"/>
+		<child widget="online/custom/close"/>
+		<child widget="online/custom/a_butn"/>
+		<child widget="online/custom/change"/>
+		<child widget="online/custom/l_butn"/>
+		<child widget="online/custom/r_butn"/>
+		<child widget="online/custom/tabs"/>
+		<child widget="online/custom/x_butn"/>
+		<child widget="online/custom/delete"/>
+		<child widget="online/custom/y_butn"/>
+		<child widget="online/custom/new"/>
+		<child widget="online/custom/list" x="-70" y="92"/>
+	</widget>
+</menus>

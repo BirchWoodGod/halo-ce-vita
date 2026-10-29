@@ -556,8 +556,11 @@ symbols in this file:
 #include "interface/interface.h"
 #include "interface/hud.h"
 #include "interface/hud_definitions.h"
-#ifdef HALO_VITA
-#include "interface/hud_draw.h" /* (port) hud_vita_score_hint */
+#if defined(HALO_VITA) || defined(HALO_LINUX)
+#include "interface/hud_draw.h" /* (port) hud_vita_score_hint, hud_key_score_hint */
+#endif
+#ifdef HALO_LINUX
+#include "forge.h" /* port: port/linux/game/forge.c */
 #endif
 #include "interface/hud_messaging.h"
 #include "interface/player_ui.h"
@@ -597,11 +600,14 @@ real_argb_color *hud_get_text_color(real_argb_color *color);
 #include "units/units.h"
 #ifdef HALO_LINUX
 #include "latency_meter.h"
+#include "infection.h" /* port: port/linux/game/infection.c */
+#include "player_cosmetics.h" /* port: port/linux/game/player_cosmetics.c */
 #endif
 #include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
+void platform_log(char const *format, ...);
 /* port/linux/game/network_distributed.c's */
 void network_distributed_player_killed(long *killing_player_index, long *killing_object_index,
 	long dead_player_index, boolean *friendly_fire);
@@ -1288,6 +1294,9 @@ static void game_engine_generate_title_string(
 			break;
 		}
 	}
+	/* port: Infection's humans and zombies left (infection.c) */
+	else if (infection_title_string(player_index, title_string, 80))
+		;
 	else if (game_engine_has_teams())
 	{
 		/* port: room for any score a game type writes as a team's name
@@ -1962,6 +1971,16 @@ void game_engine_post_rasterize_post_game(
 
 	if (!game_engine)
 		return;
+#ifdef HALO_LINUX
+	/* port: the Halo 3 carnage report stands for it (Menu style Halo 3:
+	port/linux/game/carnage_report.c), drawn by the menus over the game */
+	{
+		boolean carnage_report_replaces_postgame(void);
+
+		if (carnage_report_replaces_postgame())
+			return;
+	}
+#endif
 
 	tab_stops[0] = 50;
 	tab_stops[1] = 125;
@@ -2027,6 +2046,16 @@ void game_engine_post_rasterize_post_game(
 			string_list_index != NONE ?
 				unicode_string_list_get_string(string_list_index, 0x42) :
 				L"";
+		/* port: Infection's teams by their sides' names (infection.c) */
+		if (infection_active())
+		{
+			static wchar_t infection_team_formats[2][48];
+
+			usnprintf(infection_team_formats[0], NUMBEROF(infection_team_formats[0]), L"\t%s\t%%s", TW(L"Zombies"));
+			usnprintf(infection_team_formats[1], NUMBEROF(infection_team_formats[1]), L"\t%s\t%%s", TW(L"Humans"));
+			team_formats[0] = infection_team_formats[0];
+			team_formats[1] = infection_team_formats[1];
+		}
 
 		if (!red_team_won)
 		{
@@ -2240,6 +2269,38 @@ void game_engine_post_rasterize_post_game(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) Whether any biped the search below can take (find_closest_player_
+callback: not invisible, not dead, not the player's own) stands within the
+20 world units of the camera that it asks of the one it chooses
+(distance_squared < 400.0f, from the same camera position to the same
+object position). With none, the search - every collideable object of
+every cluster the camera's cluster can see, then each living biped's
+autoaim test - chooses none, so it is not made; with any, it is made as
+before. In a 32-player game it cost the Pi 0.55 ms a frame, and the Vita
+some 5 ms, with no one near most of the time. */
+static boolean find_closest_player_candidate_near(
+	long unit_index,
+	long player_index)
+{
+	struct object_iterator iterator;
+	struct object_datum *object;
+	real_point3d camera_position;
+
+	unit_get_camera_position(unit_index, &camera_position);
+	object_iterator_new(&iterator, _object_mask_biped, 0);
+	while ((object = object_iterator_next(&iterator)) != NULL)
+	{
+		if (find_closest_player_callback(iterator.index, &player_index) &&
+			distance_squared3d(&camera_position, &object->object.position) < 400.0f)
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+#endif
+
 static long find_closest_player_index(
 	long player_index)
 {
@@ -2264,7 +2325,8 @@ static long find_closest_player_index(
 
 	if (best_object_index == NONE &&
 		unit_index != NONE &&
-		object_try_and_get_and_verify_type(unit_index, _object_mask_unit))
+		object_try_and_get_and_verify_type(unit_index, _object_mask_unit) &&
+		find_closest_player_candidate_near(unit_index, player_index))
 #else
 	long unit_index = player->unit_index;
 
@@ -2301,6 +2363,31 @@ static long find_closest_player_index(
 			real target_distance;
 			real target_angle;
 
+#ifdef HALO_LINUX
+			/* (port) the same tests, the cheap ones first: a candidate
+			more than 20 units away, or outside the 7.5 degrees, is passed
+			over before its line of sight is cast (autoaim_target_within_
+			angle; up to 32 rays a frame through the structure and every
+			object, for players across the map). None of them changes
+			anything, so the one chosen is the one chosen before. */
+			(void)target_position;
+			(void)target_direction;
+			(void)target_distance;
+			(void)target_angle;
+			if (distance_squared < 400.0f &&
+				distance_squared < 900.0f &&
+				(candidate->unit.active_camouflage < 1.0f ||
+					player->player_display_index == player_index_from_unit_index(candidate_object_index)) &&
+				autoaim_target_within_angle(
+					object_indices[object_index],
+					&camera_position,
+					&facing_direction,
+					unit_index,
+					0.13083334267139435))
+			{
+				best_object_index = object_indices[object_index];
+			}
+#else
 			if ((candidate->unit.active_camouflage < 1.0f ||
 				player->player_display_index == player_index_from_unit_index(candidate_object_index)) &&
 				autoaim_compute_target(
@@ -2318,6 +2405,7 @@ static long find_closest_player_index(
 			{
 				best_object_index = object_indices[object_index];
 			}
+#endif
 		}
 	}
 
@@ -3279,6 +3367,21 @@ static void game_engine_post_rasterize_in_game(
 	}
 
 	fade = PIN(fade, 0.0f, 1.0f);
+#ifdef HALO_LINUX
+	/* port: the Halo 3 scoreboard stands for it while Back is held (Menu
+	style Halo 3, menus.scoreboard: port/linux/game/menu_functions.c "port
+	h3 scoreboard", drawn with the menus over this player's view) */
+	{
+		boolean menu_functions_scoreboard_replaces(short local_player_index);
+
+		if (menu_functions_scoreboard_replaces((short)local_player_index))
+		{
+			fade = 0.0f;
+			/* (drawn, as far as the automated tests count) */
+			game_engine_in_game_score_draws++;
+		}
+	}
+#endif
 	if (fade > 0.0f)
 	{
 		real alpha = linear_to_non_linear_alpha(fade);
@@ -4248,6 +4351,18 @@ void game_engine_update_non_deterministic(
 			if (game_engine_globals.postgame_progress > 1.0f)
 				game_engine_globals.postgame_progress = 1.0f;
 
+#ifdef HALO_LINUX
+			/* port: not while a screen is up over the scores (the Halo 3
+			carnage report, whose own buttons go on or leave; the PLAYERS
+			screen, whose Circle goes back), nor for the press that closed
+			one: carnage_report.c */
+			{
+				boolean carnage_report_holds_buttons(void);
+
+				if (carnage_report_holds_buttons())
+					break;
+			}
+#endif
 			if (test_any_gamepad_button(0) || test_any_gamepad_button(12))
 			{
 				if (global_network_game_server_get())
@@ -4305,6 +4420,9 @@ boolean game_engine_has_shield(
 
 	if (game_engine && player_index!=NONE)
 		has_shield = !TEST_FLAG(global_variant.universal_variant.flags, _game_variant_no_shields_bit);
+	/* port: Infection's zombies without shields, if so set (infection.c) */
+	if (has_shield && infection_player_is_zombie(player_index) && !infection_zombie_shields())
+		has_shield = FALSE;
 
 	return has_shield;
 }
@@ -4595,6 +4713,9 @@ boolean game_engine_should_end_game(
 {
 	boolean should_end_game = FALSE;
 
+	/* port: Infection's round (port/linux/game/infection.c): its own end */
+	if (infection_active())
+		return infection_should_end_game();
 	if (game_engine && !multiple_teams_alive())
 		should_end_game = TRUE;
 	/* port: the gametype's time limit (game_variant_options; OpenCE's) */
@@ -4810,6 +4931,12 @@ short game_engine_player_get_custom_motion_sensor_positions(
 
 	return count;
 }
+
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+short hud_get_nav_point_render_type(short local_player_index, real_point3d const *head, real_point3d const *position, long reference_object_index);
 
 void game_engine_render_nav_points(
 	short local_player_index)
@@ -6111,6 +6238,9 @@ struct game_variant *game_engine_get_variant_by_name(
 		result = *build_game_variant_slayer(&temporary);
 	else if (csstrcmp(name, "team_slayer") == 0)
 		result = *build_game_variant_team_slayer(&temporary);
+	/* port: Infection (port/linux/game/infection.c) */
+	else if (csstrcmp(name, "infection") == 0)
+		result = *build_game_variant_infection(&temporary);
 	else if (csstrcmp(name, "elimination") == 0)
 		result = *build_game_variant_elimination(&temporary);
 	else if (csstrcmp(name, "stalker") == 0)
@@ -6154,6 +6284,12 @@ real_point3d *game_engine_get_goal_position(
 	return position;
 }
 
+/* port: declared, not left implicit: an undeclared call reads its result as a whole
+int, where these narrower results fill only part of the register (an x86 build with
+link-time optimisation read the rest as garbage: every init.txt command was refused as
+"playing in another's game"; the Vita's ARM ABI widens them, but see tools/vita_build.py) */
+short find_nav_point(char const *name);
+
 void game_engine_set_goal_position(
 	short goal_index,
 	real_point3d const *position,
@@ -6195,7 +6331,10 @@ real_rgb_color *game_engine_player_get_change_color(
 	struct player_datum *player = player_get(player_index);
 	real_rgb_color result;
 
-	if (global_variant.universal_variant.teams)
+	/* port: an Infection zombie's green (port/linux/game/infection.c) */
+	if (infection_change_color(player_index, &result))
+		;
+	else if (global_variant.universal_variant.teams)
 	{
 		if (player->team_index == 0)
 			result = *global_real_rgb_red;
@@ -6206,6 +6345,16 @@ real_rgb_color *game_engine_player_get_change_color(
 	{
 		long color_index = player->network_player_data.primary_color_index;
 
+#ifdef HALO_LINUX
+		/* port: the platform's colours (player_cosmetics.h): this machine's
+		players their profiles', the others' what their machines sent */
+		{
+			short extended = player_cosmetics_player_color(player_index);
+
+			if (extended != NONE)
+				color_index = extended;
+		}
+#endif
 		if (debug_player_color != NONE)
 			color_index = debug_player_color;
 
@@ -6291,6 +6440,12 @@ void game_engine_variant_cleanup(
 		variant->game_engine_variant.slayer.no_death_bonus = !!variant->game_engine_variant.slayer.no_death_bonus;
 		variant->game_engine_variant.slayer.no_kill_penalty = !!variant->game_engine_variant.slayer.no_kill_penalty;
 		variant->game_engine_variant.slayer.kill_in_order = !!variant->game_engine_variant.slayer.kill_in_order;
+		/* port: Infection's settings in their ranges (a host's, a file's) */
+		if (infection_variant(variant))
+		{
+			variant->game_engine_variant.slayer.infection_version = INFECTION_VARIANT_VERSION;
+			infection_settings_clamp(&variant->game_engine_variant.slayer.infection);
+		}
 		break;
 
 	case game_engine_oddball:
@@ -6414,6 +6569,10 @@ void game_engine_initialize(
 		game_engine_variant_cleanup(&global_variant);
 		/* port: the cleaned variant's (the one given may be any number) */
 		game_engine = game_engines[global_variant.game_engine_index];
+		/* port: an Infection game type plays Slayer with Infection's rules
+		on top (port/linux/game/infection.c) */
+		if (infection_variant(&global_variant))
+			game_engine = infection_engine_get();
 	}
 
 	return;
@@ -6696,6 +6855,15 @@ boolean game_engine_vehicle_placement_allowed(
 	out of range is refused by object_new_from_scenario, and not read here */
 	if (!game_engine || !VALID_INDEX(placement->palette_entry_index, palette->count))
 		return TRUE;
+#ifdef HALO_LINUX
+	/* port: a Custom Edition map's local game with Halo PC's vehicles
+	(PC map vehicles, port/linux/game/custom_edition_objects.c): every type
+	its placements choose, as the PC vehicle set's, in place of the Xbox
+	variant's set (Slayer's own is Warthogs alone); one with no vehicles
+	never gets here (custom_edition_vehicles_by_placement) */
+	if (custom_edition_vehicles_every_type())
+		return TRUE;
+#endif
 	side = global_variant.universal_variant.teams ? game_engine_nearest_team(&placement->position) : 0;
 	set = options->vehicle_set[side];
 	if (set == VARIANT_VEHICLE_SET_PC)
@@ -6904,6 +7072,32 @@ void game_engine_variant_set_generic_starting_equipment(
 }
 #endif
 
+/* port: Infection's shotgun (shotgun TRUE) or pistol, the map's own tags
+from the game's weapon list; if the map has no shotgun the pistol, if no
+pistol the weapon asked about (logged once) */
+long game_engine_infection_weapon(
+	boolean shotgun,
+	long fallback_definition_index)
+{
+	static boolean reported[2];
+	long result = list_index_to_weapon_definition_index(shotgun ? _weapon_list_shotgun : _weapon_list_pistol);
+
+	if (result == NONE)
+	{
+		if (!reported[shotgun ? 1 : 0])
+		{
+			reported[shotgun ? 1 : 0] = TRUE;
+			platform_log("infection: this map's weapon list has no %s: %s instead",
+				shotgun ? "shotgun" : "pistol", shotgun ? "the pistol" : "the weapon as it is");
+		}
+		if (shotgun)
+			result = list_index_to_weapon_definition_index(_weapon_list_pistol);
+		if (result == NONE)
+			result = fallback_definition_index;
+	}
+	return result;
+}
+
 long game_engine_remap_weapon(
 	long weapon_definition_index)
 {
@@ -6911,11 +7105,22 @@ long game_engine_remap_weapon(
 		weapon_definition_index_to_list_index(weapon_definition_index);
 
 	if (weapon_list_index == _weapon_list_ball ||
-		weapon_list_index == _weapon_list_flag ||
-		weapon_list_index == NONE)
+		weapon_list_index == _weapon_list_flag)
 	{
 		return weapon_definition_index;
 	}
+
+	/* port: Infection's humans have shotguns and pistols alone, every
+	weapon the game makes (the map's, a starting one) one of them */
+	if (infection_active() && !network_game_distributed_client() &&
+		weapon_definition_index != get_ball_definition_index())
+	{
+		return game_engine_infection_weapon(weapon_list_index == _weapon_list_pistol ||
+			weapon_list_index == _weapon_list_plasma_pistol ? FALSE : TRUE, weapon_definition_index);
+	}
+
+	if (weapon_list_index == NONE)
+		return weapon_definition_index;
 
 	/* port: the dedicated server's SWAT and Snipers: every weapon the one */
 	if (game_engine_sole_weapon_list_index() != NONE)
@@ -7404,16 +7609,13 @@ static void internal_rasterize_target_name(
 
 	player = player_get(player_index);
 	target_player_index = NONE;
-	if (player->local_player_index != NONE && player->unit_index != NONE)
-	{
-		target_player_index = find_closest_player_index(player_index);
-		if (target_player_index == player_index)
-			target_player_index = NONE;
-	}
 
 	/* This is drawn once a frame, several frames per tick
 	(render_interpolation.c): the hold time counts ticks, as it did on the
-	Xbox. */
+	Xbox. (port) The player aimed at is looked for only on the frame that
+	counts the tick, the one frame that reads it: a frame between ticks
+	threw the search away (in a 32-player game a quarter of the Pi's
+	render, triage/perf-111-crossplay.md). */
 	{
 		static long last_game_times[MAXIMUM_LOCAL_PLAYERS];
 		long *last_game_time = NULL;
@@ -7425,6 +7627,12 @@ static void internal_rasterize_target_name(
 		}
 		if (!last_game_time || *last_game_time != game_time_get())
 		{
+			if (player->local_player_index != NONE && player->unit_index != NONE)
+			{
+				target_player_index = find_closest_player_index(player_index);
+				if (target_player_index == player_index)
+					target_player_index = NONE;
+			}
 			if (last_game_time)
 				*last_game_time = game_time_get();
 	if (player->player_display_index != target_player_index)
@@ -7860,6 +8068,10 @@ static boolean internal_rasterize_score(
 		/* (port) the Vita button the scoreboard is on, not the Xbox's BACK */
 		buffer[buffer_size - 1] = 0;
 		hud_vita_score_hint(buffer, buffer_size);
+#elif defined(HALO_KEY_GLYPHS)
+		/* (port) the key the scoreboard is on, with the keyboard's icons */
+		buffer[buffer_size - 1] = 0;
+		hud_key_score_hint(buffer, buffer_size);
 #endif
 		break;
 	default:
@@ -8228,6 +8440,9 @@ void game_engine_postspawn_player_update(
 		}
 	}
 
+	/* port: an Infection zombie's skull alone (port/linux/game/infection.c) */
+	infection_postspawn_player_update(player_index);
+
 	return;
 }
 
@@ -8285,7 +8500,12 @@ boolean game_engine_get_state_message(
 				message,
 				message_character_count);
 		}
-		else if (game_time_get() < 15 * TICKS_PER_SECOND)
+		else if (game_time_get() < 15 * TICKS_PER_SECOND
+#ifdef HALO_LINUX
+			/* port: not in Forge (forge.c): a game of no score */
+			&& !forge_game_active()
+#endif
+			)
 		{
 			result = multiplayer_message_internal(
 				player_index,
@@ -8611,6 +8831,68 @@ long game_engine_network_player_score(
 	return game_engine->get_player_score(player_index, TRUE);
 }
 
+#ifdef HALO_LINUX
+/* port: the Halo 3 carnage report (port/linux/game/carnage_report.c): every
+player, those who quit too, ranked and placed as the game's own post-game
+report ranks them (populate_statistic_buffer's ranking: the score, then
+kills, deaths, assists), each its player's index, place (0 first) and
+whether it is shared; the count */
+long game_engine_postgame_ranking(
+	long *player_indices,
+	long *places,
+	boolean *tied,
+	long maximum)
+{
+	struct statistic_buffer entries[MULTIPLAYER_MAXIMUM_PLAYERS];
+	long count;
+	long index;
+
+	if (!game_engine || !player_data)
+		return 0;
+	count = populate_statistic_buffer_of(entries, _postgame_statistic_ranking, FALSE, FALSE);
+	for (index = 0; index < count && index < maximum; index++)
+	{
+		player_indices[index] = entries[index].player_index;
+		places[index] = place_get_position(&entries[index]);
+		tied[index] = is_place_tied(&entries[index]);
+	}
+	return index;
+}
+
+/* (port: the Halo 3 scoreboard, carnage_report_read_in_game) the same for
+the game being played: its players still in it (not those who quit), ranked
+and placed among themselves as the in-game score ranks them */
+long game_engine_in_game_ranking(
+	long *player_indices,
+	long *places,
+	boolean *tied,
+	long maximum)
+{
+	struct statistic_buffer entries[MULTIPLAYER_MAXIMUM_PLAYERS];
+	long count;
+	long index;
+
+	if (!game_engine || !player_data)
+		return 0;
+	count = populate_statistic_buffer_of(entries, _postgame_statistic_ranking, FALSE, TRUE);
+	for (index = 0; index < count && index < maximum; index++)
+	{
+		player_indices[index] = entries[index].player_index;
+		places[index] = place_get_position(&entries[index]);
+		tied[index] = is_place_tied(&entries[index]);
+	}
+	return index;
+}
+
+/* ... and whether a team won the game (the game type's say, as the post-game
+report's order of the teams) */
+boolean game_engine_postgame_team_won(
+	long team_index)
+{
+	return game_engine && player_data && game_engine_did_team_win(team_index) == TRUE;
+}
+#endif
+
 /* the distributed netcode (port/linux/game/network_distributed.c): the
 current game type's state (scores, and what else every machine must agree
 on), which the host sends its clients; the size written, 0 for none */
@@ -8631,7 +8913,16 @@ long game_engine_write_network_state(
 	switch (game_engine_get_type())
 	{
 	case game_engine_ctf: written = game_engine_ctf_write_network_state(buffer, size); break;
-	case game_engine_slayer: written = game_engine_slayer_write_network_state(buffer, size); break;
+	case game_engine_slayer:
+		written = game_engine_slayer_write_network_state(buffer, size);
+		/* port: Infection's part after Slayer's (infection.c) */
+		if (written > 0 && infection_active())
+		{
+			long infection_written = infection_write_network_state(buffer + written, size - written);
+
+			written = infection_written > 0 ? written + infection_written : 0;
+		}
+		break;
 	case game_engine_oddball: written = game_engine_oddball_write_network_state(buffer, size); break;
 	case game_engine_king: written = game_engine_king_write_network_state(buffer, size); break;
 	case game_engine_race: written = game_engine_race_write_network_state(buffer, size); break;
@@ -8658,7 +8949,18 @@ void game_engine_read_network_state(
 	switch (game_engine_get_type())
 	{
 	case game_engine_ctf: read = game_engine_ctf_read_network_state(buffer, size, first); break;
-	case game_engine_slayer: read = game_engine_slayer_read_network_state(buffer, size, first); break;
+	case game_engine_slayer:
+		/* port: Infection's part after Slayer's (infection.c), each read whole */
+		if (infection_active())
+		{
+			long tail = infection_network_state_size();
+
+			read = size >= tail && game_engine_slayer_read_network_state(buffer, size - tail, first) &&
+				infection_read_network_state(buffer + size - tail, tail, first);
+		}
+		else
+			read = game_engine_slayer_read_network_state(buffer, size, first);
+		break;
 	case game_engine_oddball: read = game_engine_oddball_read_network_state(buffer, size, first); break;
 	case game_engine_king: read = game_engine_king_read_network_state(buffer, size, first); break;
 	case game_engine_race: read = game_engine_race_read_network_state(buffer, size, first); break;

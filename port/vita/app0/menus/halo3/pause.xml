@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style pause screen (Menu style Halo 3), built into each level's
+map (ingame.txt): it stands for the Xbox's pause screen
+(ui\shell\solo_game\pause_game\pause_game) and does what that one does - its
+handlers copied from the level's (HALO_MENUS_DUMP) - laid out as Halo 3's
+Start menu: the mission and difficulty in the title strip, the column of
+choices at the left, the objectives at the right, the buttons in a strip at
+the bottom, over the game, paused. The art is this folder's own
+(tools/halo3_menu_art.py). -->
+<menus root="h3/pause/screen" replaces="ui\shell\solo_game\pause_game\pause_game">
+	<font name="h3/font_title" file="halo3/font_title.bin"/>
+	<font name="h3/font_item" file="halo3/font_item.bin"/>
+	<font name="h3/font_small" file="halo3/font_small.bin"/>
+	<bitmap name="h3/haze">
+		<frame png="halo3/haze.png" width="64" height="64"/>
+	</bitmap>
+	<bitmap name="h3/column">
+		<frame png="halo3/column.png" width="64" height="64"/>
+	</bitmap>
+	<bitmap name="h3/panel">
+		<frame png="halo3/panel.png" width="64" height="64"/>
+	</bitmap>
+	<bitmap name="h3/strip">
+		<frame png="halo3/strip.png" width="64" height="16"/>
+	</bitmap>
+	<bitmap name="h3/item">
+		<frame png="halo3/item_off.png" width="128" height="16"/>
+		<frame png="halo3/item_on.png" width="128" height="16"/>
+	</bitmap>
+	<bitmap name="h3/rule">
+		<frame png="halo3/rule.png" width="128" height="2"/>
+	</bitmap>
+	<!-- (the nameplate in the profile's primary colour: frame 0 none - Halo 3's green -, then the
+	game's eighteen colours in its order, as the swatches, then the platform's 24 (player_cosmetics.h):
+	menu_functions.c h3_nameplate_update) -->
+	<bitmap name="h3/nameplate">
+		<frame png="halo3/nameplate.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_00.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_01.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_02.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_03.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_04.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_05.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_06.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_07.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_08.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_09.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_10.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_11.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_12.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_13.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_14.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_15.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_16.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_17.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_18.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_19.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_20.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_21.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_22.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_23.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_24.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_25.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_26.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_27.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_28.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_29.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_30.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_31.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_32.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_33.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_34.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_35.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_36.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_37.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_38.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_39.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_40.png" width="256" height="16"/>
+		<frame png="halo3/nameplate_41.png" width="256" height="16"/>
+	</bitmap>
+	<bitmap name="h3/glyph_cross">
+		<frame png="halo3/glyph_cross.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="h3/glyph_circle">
+		<frame png="halo3/glyph_circle.png" width="16" height="16"/>
+	</bitmap>
+	<strings name="h3/pause_items">
+		<string text="RESUME GAME"/>
+		<string text="REVERT TO CHECKPOINT"/>
+		<string text="RESTART MISSION"/>
+		<string text="SAVE AND QUIT"/>
+		<string text="OBJECTIVES"/>
+		<string text="Select"/>
+		<string text="Back"/>
+		<string text="1 Player"/>
+	</strings>
+
+	<!-- the choices: as the Xbox's - resume, the last checkpoint and the
+	mission's start each asked first, quit saving the game -->
+	<widget name="h3/pause/resume" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/pause_items" string_index="0">
+		<on event="a" close="all"/>
+	</widget>
+	<widget name="h3/pause/revert" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/pause_items" string_index="1">
+		<on event="a" open="ui\shell\error\confirm_restartatsave_modal_fullscreen"/>
+	</widget>
+	<widget name="h3/pause/restart" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/pause_items" string_index="2">
+		<on event="a" open="ui\shell\error\confirm_restartlevel_modal_fullscreen"/>
+	</widget>
+	<widget name="h3/pause/quit" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/pause_items" string_index="3">
+		<on event="a start" open="ui\shell\error\warning_saving_file_screen_ingame"/>
+	</widget>
+	<widget name="h3/pause/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/pause/resume" x="0" y="0"/>
+		<child widget="h3/pause/revert" x="0" y="24"/>
+		<child widget="h3/pause/restart" x="0" y="48"/>
+		<child widget="h3/pause/quit" x="0" y="72"/>
+	</widget>
+
+	<widget name="h3/pause/haze" left="0" top="0" width="640" height="480" bitmap="h3/haze"/>
+	<widget name="h3/pause/strip" left="0" top="40" width="640" height="40" bitmap="h3/strip"/>
+	<widget name="h3/pause/rule" left="0" top="80" width="640" height="2" bitmap="h3/rule"/>
+	<widget name="h3/pause/title" type="text" left="56" top="49" width="540" height="26" font="h3/font_title" color="#FFF4F4F4">
+		<data input="port h3 mission title"/>
+	</widget>
+	<widget name="h3/pause/column" left="48" top="112" width="236" height="112" bitmap="h3/column"/>
+	<widget name="h3/pause/players" type="text" left="380" top="92" width="200" height="16" font="h3/font_small" color="#FFEEF2F6" string_list="h3/pause_items" string_index="7"/>
+	<widget name="h3/pause/nameplate" type="text" left="380" top="110" width="256" height="16" bitmap="h3/nameplate" font="h3/font_small" color="#FF10220A" text_x="22">
+		<data input="port h3 nameplate"/>
+	</widget>
+	<widget name="h3/pause/objectives_panel" left="300" top="150" width="300" height="130" bitmap="h3/panel"/>
+	<widget name="h3/pause/objectives_caption" type="text" left="312" top="156" width="280" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/pause_items" string_index="4"/>
+	<widget name="h3/pause/objectives_rule" left="312" top="174" width="276" height="2" bitmap="h3/rule"/>
+	<widget name="h3/pause/objective" type="text" left="312" top="180" width="276" height="94" font="h3/font_small" color="#FFD3CBC3">
+		<data input="solo game objective text"/>
+	</widget>
+	<widget name="h3/pause/buttons" left="0" top="440" width="640" height="24" bitmap="h3/strip"/>
+	<widget name="h3/pause/a_butn" left="56" top="444" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/pause/select" type="text" left="76" top="443" width="100" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/pause_items" string_index="5"/>
+	<widget name="h3/pause/b_butn" left="172" top="444" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/pause/back" type="text" left="192" top="443" width="100" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/pause_items" string_index="6"/>
+
+	<widget name="h3/pause/screen" flags="pass_unhandled_to_focused_child pause_game">
+		<on event="b back" close="all"/>
+		<child widget="h3/pause/haze"/>
+		<child widget="h3/pause/strip"/>
+		<child widget="h3/pause/rule"/>
+		<child widget="h3/pause/title"/>
+		<child widget="h3/pause/players"/>
+		<child widget="h3/pause/nameplate"/>
+		<child widget="h3/pause/column"/>
+		<child widget="h3/pause/objectives_panel"/>
+		<child widget="h3/pause/objectives_caption"/>
+		<child widget="h3/pause/objectives_rule"/>
+		<child widget="h3/pause/objective"/>
+		<child widget="h3/pause/buttons"/>
+		<child widget="h3/pause/a_butn"/>
+		<child widget="h3/pause/select"/>
+		<child widget="h3/pause/b_butn"/>
+		<child widget="h3/pause/back"/>
+		<child widget="h3/pause/list" x="56" y="120"/>
+	</widget>
+</menus>

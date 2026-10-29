@@ -687,17 +687,23 @@ int p2p_ed25519_to_x25519(const unsigned char *public_key, unsigned char *x25519
 /* ---------- passwords (a password-protected public game's listing holds
 its invite's token sealed with the password's key: p2p_lobby.c) */
 
-/* Argon2id of 4 MiB (OpenCE's) and four passes (OpenCE's three, and one
-more: the Vita's key is worked out on a thread of its own, so it may take
-longer): about 58 ms on a Raspberry Pi 4 in 32-bit ARM at 1.8 GHz, built as
-the Vita builds it, so about half a second on a Vita's Cortex-A9 at 444 MHz
-(eight times slower); once for the host and once a guess for a joiner */
+/* Argon2id of 4 MiB (OpenCE's) and four passes on the legacy Vita wire
+(OpenCE's three, and one more: the Vita's key is worked out on a thread of
+its own, so it may take longer): about 58 ms on a Raspberry Pi 4 in 32-bit
+ARM at 1.8 GHz, built as the Vita builds it, so about half a second on a
+Vita's Cortex-A9 at 444 MHz (eight times slower); once for the host and
+once a guess for a joiner. On the crossplay wire OpenCE's own three passes
+(its 6112dcfc, p2p_crypto.c of 8102e711 and 6ec42856), so that a PC player
+opens a Vita's game with its password, and a Vita a PC's: with four, the
+same password made another key on each side (docs/crossplay.md 7.4) */
 #define PASSWORD_KEY_BLOCKS 4096
 #define PASSWORD_KEY_PASSES 4
+#define CROSSPLAY_PASSWORD_KEY_PASSES 3
 
-int p2p_password_key(const char *password, const unsigned char *salt, unsigned char *key)
+int p2p_password_key(const char *password, const unsigned char *salt, unsigned char *key, int crossplay)
 {
-	crypto_argon2_config config = { CRYPTO_ARGON2_ID, PASSWORD_KEY_BLOCKS, PASSWORD_KEY_PASSES, 1 };
+	crypto_argon2_config config = { CRYPTO_ARGON2_ID, PASSWORD_KEY_BLOCKS,
+		crossplay ? CROSSPLAY_PASSWORD_KEY_PASSES : PASSWORD_KEY_PASSES, 1 };
 	crypto_argon2_inputs inputs;
 	void *work_area = malloc((size_t)PASSWORD_KEY_BLOCKS * 1024);
 
@@ -741,4 +747,54 @@ int p2p_ed25519_verify(const unsigned char *public_key, const void *message, int
 	signature a message) */
 	return p2p_ed25519_to_x25519(public_key, x25519_public) &&
 		crypto_ed25519_check(signature, public_key, message, (size_t)size) == 0;
+}
+
+/* ---------- a friend identity's backup (p2p_friends_backup.inc): the key
+of its password, Argon2id with the file's own memory (KiB blocks) and passes
+and its random salt; its contents sealed with XChaCha20-Poly1305 (a random
+24-byte nonce of its own), its header the additional data */
+
+int p2p_backup_key(const char *password, int password_size, const unsigned char *salt, int salt_size,
+	unsigned long blocks, unsigned long passes, unsigned char *key)
+{
+	crypto_argon2_config config;
+	crypto_argon2_inputs inputs;
+	void *work_area;
+
+	if (password_size < 0 || salt_size < 8 || blocks < 8 || passes < 1)
+		return 0;
+	work_area = malloc((size_t)blocks * 1024);
+	if (!work_area)
+		return 0;
+	config.algorithm = CRYPTO_ARGON2_ID;
+	config.nb_blocks = (uint32_t)blocks;
+	config.nb_passes = (uint32_t)passes;
+	config.nb_lanes = 1;
+	inputs.pass = (const unsigned char *)password;
+	inputs.pass_size = (uint32_t)password_size;
+	inputs.salt = salt;
+	inputs.salt_size = (uint32_t)salt_size;
+	crypto_argon2(key, P2P_PASSWORD_KEY_SIZE, work_area, config, inputs, crypto_argon2_no_extras);
+	crypto_wipe(work_area, (size_t)blocks * 1024);
+	free(work_area);
+	return 1;
+}
+
+void p2p_backup_seal(const unsigned char *key, const unsigned char *nonce, const void *additional,
+	int additional_size, const void *plaintext, int size, unsigned char *sealed)
+{
+	crypto_aead_lock(sealed, sealed + size, key, nonce, additional, (size_t)additional_size, plaintext, (size_t)size);
+}
+
+int p2p_backup_open(const unsigned char *key, const unsigned char *nonce, const void *additional,
+	int additional_size, const unsigned char *sealed, int size, unsigned char *plaintext)
+{
+	return crypto_aead_unlock(plaintext, sealed + size, key, nonce, additional, (size_t)additional_size, sealed,
+		(size_t)size) == 0;
+}
+
+void p2p_wipe(void *secret, int size)
+{
+	if (secret && size > 0)
+		crypto_wipe(secret, (size_t)size);
 }

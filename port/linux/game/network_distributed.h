@@ -62,6 +62,17 @@ enum
 	/* a client's Discord user, as its Discord told it (reliable, with its
 	ready: distributed_client_send_identity) */
 	_distributed_message_client_identity,
+	/* network Forge (port/linux/game/forge_net.inc, forge_net_protocol.h),
+	between games' kinds: numbers of their own, clear of upstream's (its
+	pings at 19, its votes, voice and map sharing at 78-86) and of ours; a
+	build without them drops them as kinds it does not know, and only a
+	machine that answered the host's Forge hello is sent any. A client's
+	requests (reliable, over its stream only), the host's updates, palette
+	and layout (reliable) */
+	_distributed_message_forge_requests = 40,
+	_distributed_message_forge_updates,
+	_distributed_message_forge_palette,
+	_distributed_message_forge_layout,
 	/* the host's actors' units: their control and state (network_actors.c).
 	A number of its own, clear of the kinds upstream adds: a build without
 	it drops the message as a kind it does not know, so the network version
@@ -107,6 +118,22 @@ enum
 	NUMBER_OF_DISTRIBUTED_MESSAGES
 };
 
+/* OpenCE's network version 32 (docs/opence-net32-spec.md 7): the host's
+mouse aim assist policy, sent reliably to each client as it is ready, as a
+game starts and when it changes. Numbered by OpenCE, past this build's own
+kinds (NUMBER_OF_DISTRIBUTED_MESSAGES: it has no slot in the tables indexed
+by kind), and handled before every other check (network_distributed.c) */
+#define DISTRIBUTED_MESSAGE_AIM_ASSIST_POLICY 90
+#define DISTRIBUTED_AIM_ASSIST_POLICY_SIZE 12
+/* OpenCE's network version 36 (38's seventh value): the host's shield
+effects (glow, light show, overshield; 6 each machine's own look), sent
+reliably to a client: the header, the effects as a 16-bit value and 16 bits
+of 0. As ChupathingyCE reads it (2d2ad1d8, 251bba5c, GPL: network_rules.h's
+NETWORK_RULES_SHIELD_EFFECTS_*, network_rules_shield_effects_read): checked
+and drawn as stock, this build having no other look */
+#define DISTRIBUTED_MESSAGE_SHIELD_EFFECTS 91
+#define DISTRIBUTED_SHIELD_EFFECTS_SIZE 12
+
 /* where a message goes */
 enum
 {
@@ -125,9 +152,11 @@ tick, drawn as it goes; further, it is put there, drawn gliding
 #define HOST_VEHICLE_BLEND_DISTANCE 0.5f
 #define REMOTE_BLEND_DISTANCE 1.0f
 /* world units: how far a remote unit may be from where the host says
-before it is put there, and how far from the origin a unit can be */
+before it is put there, and how far from the origin a unit can be (the
+world's, as the camera that follows it has it: observer.c's
+valid_world_real) */
 #define REMOTE_CORRECTION_TOLERANCE 0.05f
-#define UNIT_WORLD_BOUND 32768.0f
+#define UNIT_WORLD_BOUND 5000.0f
 #define REMOTE_VEHICLE_BLEND_DISTANCE 2.0f
 
 enum
@@ -207,6 +236,13 @@ void distributed_trace_correction(char const *source, long object_index, real_po
 void network_distributed_byte_statistics(long *sent_bytes, long *received_bytes);
 /* (the host) the client machines in the game, but for its own; their count */
 short distributed_client_machines(long *machine_indices, short maximum);
+/* whether mouse aim assist is blocked in this machine's game (OpenCE 32's
+kind 90): the host's own setting (network.block_mouse_aim_assist) on the
+host; the host's word on a client, blocked until it comes; FALSE with no
+network game. This build aims with no mouse that has aim assist (a desktop
+mouse never has it, the Vita's gyro is no mouse): kept for the log, tests
+and a mouse that may have it one day */
+boolean network_distributed_mouse_aim_assist_blocked(void);
 /* (main.c) the host has no machine in its game but its own */
 boolean network_distributed_host_alone(void);
 /* (the host) how long a message takes that client and its answer back, in
@@ -246,6 +282,9 @@ void distributed_note_own_round_trip(long time);
 /* (the host, in its tick) the client machine a player is on, NONE for none
 (the host's own players') */
 long distributed_player_machine(short player_index);
+/* (the host) a client's player's move taken or refused (kind: network_anticheat.h's
+_anticheat_move or _anticheat_vehicle_move): refused for seconds on end, counted against its machine */
+void distributed_note_move(short player_index, short kind, boolean taken);
 /* (the host, in its tick) whether the client's players can see the player
 (or the player is its own, or it has none alive to see with) */
 boolean distributed_machine_sees_player(long machine_index, short player_index);

@@ -56,6 +56,11 @@ FILE *halo_linux_freopen(const char *path, const char *mode, FILE *stream);
 int halo_linux_remove(const char *path);
 int halo_linux_rename(const char *old_path, const char *new_path);
 #define fopen halo_linux_fopen
+/* (HALO_TRACE_FILES=2: every write and close said, msvc_crt.c) */
+size_t halo_linux_fwrite(const void *buffer, size_t size, size_t count, FILE *stream);
+int halo_linux_fclose(FILE *stream);
+#define fwrite halo_linux_fwrite
+#define fclose halo_linux_fclose
 #define freopen halo_linux_freopen
 #define remove halo_linux_remove
 #define rename halo_linux_rename

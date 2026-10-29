@@ -349,6 +349,15 @@ long player_ui_get_active_player_profile_index(
 	return result;
 }
 
+/* port: the saved game file index of the profile being edited (NONE: none;
+Menu style Halo CE's MORE OPTIONS, menu_functions.c, edits the same one) */
+long player_ui_get_edit_profile_index(
+	void)
+{
+	return saved_game_file_get_type(player_ui_globals.edit_profile_index) == _saved_game_file_type_player_profile ?
+		player_ui_globals.edit_profile_index : NONE;
+}
+
 struct player_profile *player_ui_get_edit_player_profile(
 	void)
 {
@@ -600,11 +609,6 @@ long player_ui_get_player1_last_used_profile_index(
 void player_ui_fast_setup_network_server(
 	void)
 {
-#ifdef HALO_LINUX
-	/* port: never on the crossplay wire (the player told why) */
-	if (network_game_wire_refuses_hosting(NONE))
-		return;
-#endif
 	ui_widgets_close_all();
 	dispose_global_network_game_server();
 	dispose_global_network_game_client();

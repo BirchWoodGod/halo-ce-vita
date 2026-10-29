@@ -10,7 +10,12 @@ name, as the level levels\test\<name>\<name> as the Xbox levels are named:
 the cache file loader finds a map by the last part of its level name. The
 game engine keeps a level name in 64 characters, so a map whose name is
 longer than 25 characters is left out, and so is a map named as one of the
-Xbox levels, which that level already offers.
+Xbox levels, which that level already offers. A copy a player renamed
+(cursed-bloodgulch.map, named bloodgulch inside) is offered under its
+file's name as well: a Custom Edition one as any other, an Xbox one known
+by that name in the cache partition too (cache_files_windows.c,
+cache_file_read_header_from_dvd), and never shared
+(custom_edition_maps_shareable).
 
 The Custom Edition caches of solo scenarios, the campaign maps
 (custom_edition_cache_campaign), are the campaign's level list's, after its
@@ -21,6 +26,22 @@ network co-op (Y on the difficulty). Their level name is
 custom_maps\<name> (custom_edition_cache.h), which no campaign level has.
 They come after the multiplayer maps in the maps array, with display
 indices of their own.
+
+(port) The maps of the mods folder's mods, Halo: CE Anniversary campaign
+maps (custom_edition_mods.c), come after the Custom Edition campaign maps
+in the campaign's level list, in their mods' order, with the titles and
+descriptions their campaign files give; their level name is mods\<name>,
+and they are played alone, never hosted (custom_edition_maps_campaign_level
+does not take them) nor shared.
+
+(port) With the Halo content folder (mcc_content.h), the multiplayer maps
+of the Halo content folder come first among the multiplayer maps, named
+mcc_<map> (levels\test\mcc_bloodgulch\mcc_bloodgulch) and shown as
+"Blood Gulch (MCC)" with the Xbox level's picture, and MCC's campaign maps
+first among the mods' (custom_edition_mods.c). Neither is ever shared
+(custom_edition_maps_shareable); a network game on one needs every machine's
+own MCC file, the same as the host's (custom_edition_maps_host_copy_matches,
+network_client_manager.c).
 
 A map's picture is the Windows bitmap <name>.bmp beside it, when there is one
 (bmp_files.c): the middle of it with the shape of the menus' level pictures,
@@ -36,6 +57,7 @@ in lines of about 20 characters.
 
 #include "cseries.h"
 #include "errors.h"
+#include "cseries_windows.h"
 #include "tag_files/files.h"
 #include "tag_files/tag_files.h"
 #include "bitmaps/bitmaps.h"
@@ -43,11 +65,15 @@ in lines of about 20 characters.
 #include "bitmaps/bitmap_group.h"
 #include "cache/cache_files.h"
 #include "bmp_files.h"
+#include "png_files.h"
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
+#include "map_checks.h"
 #include "crossplay_maps.h"
 #include "network_game_record.h"
 #include "cache_file_formats.h"
+#include "custom_edition_mods.h"
+#include "mcc_content.h"
 #include "text/unicode.h"
 #include "../src/lang.h"
 
@@ -90,11 +116,22 @@ level not reached yet (ui_widget_game_data_input_functions.c) */
 #define PICTURE_EXTENSION ".bmp"
 /* a 4K screenshot is 25 MB as a bmp file */
 #define MAXIMUM_PICTURE_FILE_BYTES 0x04000000L
+/* (port) a mod map's picture, a stranger's file read whole into the C heap
+(the Vita's is 48 MB): its PNG is at most 1024 a side (png_files.c), 4 MB
+of pixels however it is compressed, and a bmp of that size is as large */
+#define MAXIMUM_MOD_PICTURE_FILE_BYTES 0x00800000L
 /* the width and height of a picture's texture: about twice the menus'
 level pictures */
 #define PICTURE_TEXTURE_SIZE 256
 
 #define DESCRIPTION_EXTENSION ".txt"
+/* (port) the characters of a map's name in the menus kept: a mod map's
+title ("The Truth and Reconciliation") is longer than a file's name */
+#define MAXIMUM_DISPLAY_NAME_LENGTH 47
+/* (port) a mod map's description's lines, as the Xbox levels' are, and
+their number */
+#define MOD_DESCRIPTION_LINE_LENGTH 22
+#define MOD_DESCRIPTION_LINES 8
 /* the bytes of a description file read, and the characters of it kept: the
 menus' descriptions are a few short lines */
 #define MAXIMUM_DESCRIPTION_FILE_BYTES 1024
@@ -115,20 +152,37 @@ struct custom_edition_map
 	/* saved_game_file_remember_last_used_multiplayer_map writes
 	MAXIMUM_FILENAME_LENGTH+1 characters of a level name */
 	char level_name[MAXIMUM_FILENAME_LENGTH + 1];
-	wchar_t display_name[MAXIMUM_MAP_NAME_LENGTH + 1];
+	wchar_t display_name[MAXIMUM_DISPLAY_NAME_LENGTH + 1];
 	wchar_t description[MAXIMUM_DESCRIPTION_LENGTH + 1];
 	boolean picture_read;
 	struct bitmap_data *picture;
 	/* an Xbox cache (a modded or newly built Xbox map), not a Custom Edition
 	one */
 	boolean xbox_cache;
+	/* (port) an Xbox cache a player renamed, named inside as another map
+	(custom_edition_cache_xbox_renamed): listed and played by its file's
+	name, never shared */
+	boolean xbox_renamed;
 	/* a Custom Edition campaign map (a solo scenario) */
 	boolean campaign;
+	/* (port) a mod's map (custom_edition_mods.c), at `mod_order` in the
+	mods' maps, with its picture's file (none: empty) */
+	boolean mod;
+	short mod_order;
+	char picture_path[MAXIMUM_FILENAME_LENGTH + 1];
+	/* (port) one of MCC's own maps (mcc_content.h): its stock map's picture
+	frame, -1 for none */
+	boolean mcc;
+	short mcc_frame;
 };
 
 struct custom_edition_maps_globals
 {
 	boolean looked_for;
+	/* (port) the PC maps setting when they were looked for, and Halo CE
+	content's */
+	boolean looked_for_custom_edition;
+	boolean looked_for_mcc_content;
 	/* the maps: the multiplayer ones, then the campaign ones */
 	short map_count;
 	short multiplayer_count;
@@ -160,6 +214,7 @@ struct remembered_map_file
 	struct file_last_modification_date date;
 	boolean custom_edition_enabled;
 	boolean xbox_cache;
+	boolean xbox_renamed;
 	boolean multiplayer;
 	boolean campaign;
 	/* its description file's text, as read when it was last written */
@@ -299,6 +354,14 @@ static boolean custom_edition_map_disabled(
 	}
 
 	return FALSE;
+}
+
+/* (the scene packs, scene_packs.c) whether the map `name` is turned off
+(custom_edition_map_disabled): a pack built from it is not offered */
+boolean custom_edition_maps_turned_off(
+	char const *name)
+{
+	return name && custom_edition_map_disabled(name);
 }
 
 /* the file name as the menus show it: "beavercreek_halo3" as
@@ -494,6 +557,7 @@ static void custom_edition_map_add(
 	boolean custom_edition_enabled = halo_custom_edition_enabled();
 	short map_index;
 	boolean xbox_cache;
+	boolean xbox_renamed = FALSE;
 	boolean multiplayer;
 	boolean campaign = FALSE;
 
@@ -511,6 +575,17 @@ static void custom_edition_map_add(
 	if (xbox_level_named(name))
 	{
 		return;
+	}
+	/* (port: a name of MCC's own maps, mcc_content.h, is only ever MCC's
+	folder's: a file of the maps folder of that name is never played) */
+	{
+		char mcc_stem[MCC_CONTENT_STEM_BYTES];
+
+		if (mcc_content_name_stem(name, mcc_stem) != _mcc_content_none)
+		{
+			error(_error_silent, "custom edition: the maps folder's '%s' is not listed: that name is MCC's own map's", name);
+			return;
+		}
 	}
 	if (custom_edition_map_disabled(name))
 	{
@@ -532,6 +607,7 @@ static void custom_edition_map_add(
 	if (remembered)
 	{
 		xbox_cache = remembered->xbox_cache;
+		xbox_renamed = remembered->xbox_renamed;
 		multiplayer = remembered->multiplayer;
 		campaign = remembered->campaign;
 	}
@@ -540,6 +616,8 @@ static void custom_edition_map_add(
 		/* a modded or newly built Xbox map plays as the Xbox levels do; a
 		Custom Edition one only with the setting on */
 		xbox_cache = !csstrcasecmp(extension, "map") && custom_edition_cache_xbox_multiplayer(name);
+		/* (a renamed copy: by its file's name) */
+		xbox_renamed = xbox_cache && custom_edition_cache_xbox_renamed(name);
 		multiplayer = !xbox_cache && custom_edition_enabled && custom_edition_cache_multiplayer(name);
 		/* (a campaign map: the campaign's level list's) */
 		campaign = !xbox_cache && !multiplayer && custom_edition_enabled && custom_edition_cache_campaign(name);
@@ -552,6 +630,7 @@ static void custom_edition_map_add(
 			remembered->date = *date;
 			remembered->custom_edition_enabled = custom_edition_enabled;
 			remembered->xbox_cache = xbox_cache;
+			remembered->xbox_renamed = xbox_renamed;
 			remembered->multiplayer = multiplayer;
 			remembered->campaign = campaign;
 		}
@@ -582,6 +661,7 @@ static void custom_edition_map_add(
 	map = &globals->maps[globals->map_count++];
 	csmemset(map, 0, sizeof(*map));
 	map->xbox_cache = xbox_cache;
+	map->xbox_renamed = xbox_renamed;
 	map->campaign = campaign;
 	csstrcpy(map->name, name);
 	if (campaign)
@@ -611,8 +691,259 @@ static int custom_edition_map_compare(
 	{
 		return first_map->campaign ? 1 : -1;
 	}
+	/* (port: MCC's own multiplayer maps first, in their order) */
+	if (!first_map->campaign && first_map->mcc != second_map->mcc)
+	{
+		return first_map->mcc ? -1 : 1;
+	}
+	if (!first_map->campaign && first_map->mcc)
+	{
+		return first_map->mod_order - second_map->mod_order;
+	}
+	/* (the mods' maps last, in their order) */
+	if (first_map->mod != second_map->mod)
+	{
+		return first_map->mod ? 1 : -1;
+	}
+	if (first_map->mod)
+	{
+		return first_map->mod_order - second_map->mod_order;
+	}
 
 	return (int)csstrcasecmp(first_map->name, second_map->name);
+}
+
+/* (port) Appends the words of `text` to `description` (`*length`
+characters of it so far) in lines of MOD_DESCRIPTION_LINE_LENGTH, while
+there are fewer than MOD_DESCRIPTION_LINES of them (`*lines`). */
+static void mod_description_append(
+	wchar_t *description,
+	short *length,
+	short *lines,
+	char const *text)
+{
+	short line_length = 0;
+
+	while (*text && *lines < MOD_DESCRIPTION_LINES)
+	{
+		short word_length = 0;
+		short index;
+
+		while (*text == ' ')
+		{
+			text++;
+		}
+		while (text[word_length] && text[word_length] != ' ')
+		{
+			word_length++;
+		}
+		if (!word_length)
+		{
+			break;
+		}
+		if (line_length && line_length + 1 + word_length > MOD_DESCRIPTION_LINE_LENGTH)
+		{
+			if (*lines + 1 >= MOD_DESCRIPTION_LINES || *length + 2 > MAXIMUM_DESCRIPTION_LENGTH)
+			{
+				break;
+			}
+			description[(*length)++] = '\r';
+			description[(*length)++] = '\n';
+			(*lines)++;
+			line_length = 0;
+		}
+		else if (line_length && *length < MAXIMUM_DESCRIPTION_LENGTH)
+		{
+			description[(*length)++] = ' ';
+			line_length++;
+		}
+		for (index = 0; index < word_length && *length < MAXIMUM_DESCRIPTION_LENGTH; index++)
+		{
+			description[(*length)++] = (wchar_t)(unsigned char)text[index];
+		}
+		line_length += word_length;
+		text += word_length;
+	}
+	description[*length] = 0;
+
+	return;
+}
+
+/* (port) Adds the mods' maps (custom_edition_mods.c), looked for anew, as
+campaign maps: each mod map not turned off (HALO_MAPS_DISABLED), named by
+its title, described by its mod's title and its own description. */
+static void custom_edition_mods_maps_add(
+	void)
+{
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+	short count = custom_edition_mods_look_for();
+	short index;
+
+	for (index = 0; index < count; index++)
+	{
+		char const *name = custom_edition_mods_map_name(index);
+		char const *title = custom_edition_mods_map_title(index);
+		char const *mod_title = custom_edition_mods_map_mod_title(index);
+		char const *picture_path = custom_edition_mods_map_picture_path(index);
+		struct custom_edition_map *map;
+		short length = 0;
+		short lines = 0;
+		short character;
+
+		if (custom_edition_map_disabled(name))
+		{
+			error(_error_silent, "custom edition: the map '%s' is turned off (HALO_MAPS_DISABLED)", name);
+			continue;
+		}
+		if (globals->map_count == MAXIMUM_CUSTOM_EDITION_MAPS)
+		{
+			error(_error_silent, "custom edition: the map '%s' is not in a level list, which hold %d of them", name,
+				MAXIMUM_CUSTOM_EDITION_MAPS);
+			break;
+		}
+		map = &globals->maps[globals->map_count++];
+		csmemset(map, 0, sizeof(*map));
+		map->campaign = TRUE;
+		map->mod = TRUE;
+		map->mod_order = index;
+		csstrcpy(map->name, name);
+		/* (port: MCC's own campaign map, mcc_content.h: the stock level's
+		picture) */
+		{
+			char mcc_stem[MCC_CONTENT_STEM_BYTES];
+
+			map->mcc = mcc_content_name_stem(name, mcc_stem) == _mcc_content_campaign;
+			map->mcc_frame = (short)(map->mcc ? mcc_content_picture_frame(mcc_stem) : -1);
+		}
+		csprintf(map->level_name, "%s%s", CUSTOM_EDITION_MODS_LEVEL_NAME_PREFIX, name);
+		if (picture_path && csstrlen(picture_path) < (long)sizeof(map->picture_path))
+		{
+			csstrcpy(map->picture_path, picture_path);
+		}
+		if (title && title[0])
+		{
+			for (character = 0; title[character] && character < MAXIMUM_DISPLAY_NAME_LENGTH; character++)
+			{
+				map->display_name[character] = (wchar_t)(unsigned char)title[character];
+			}
+			map->display_name[character] = 0;
+		}
+		else
+		{
+			display_name_make(name, map->display_name);
+		}
+		mod_description_append(map->description, &length, &lines, mod_title && mod_title[0] ? mod_title : name);
+		if (lines + 2 < MOD_DESCRIPTION_LINES && length + 4 <= MAXIMUM_DESCRIPTION_LENGTH)
+		{
+			map->description[length++] = '\r';
+			map->description[length++] = '\n';
+			map->description[length++] = '\r';
+			map->description[length++] = '\n';
+			map->description[length] = 0;
+			lines += 2;
+			mod_description_append(map->description, &length, &lines, custom_edition_mods_map_description(index));
+		}
+	}
+
+	return;
+}
+
+/* (port) Adds the multiplayer maps of the Halo content folder (Halo CE
+content MCC files, mcc_content.h): each stock multiplayer map whose file
+there is a Halo: CE Anniversary cache of a multiplayer scenario, not turned
+off (HALO_MAPS_DISABLED), as mcc_<map>, "Blood Gulch (MCC)". */
+static void mcc_multiplayer_maps_add(
+	void)
+{
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+	short added = 0;
+	int index;
+	char const *stem;
+
+	for (index = 0; (stem = mcc_content_multiplayer_stem(index)) != NULL; index++)
+	{
+		struct custom_edition_map *map;
+		char name[MCC_CONTENT_NAME_BYTES];
+		char title[MAXIMUM_DISPLAY_NAME_LENGTH + 1];
+		short character;
+
+		csprintf(name, "%s%s", MCC_CONTENT_NAME_PREFIX, stem);
+		if (custom_edition_map_disabled(name))
+		{
+			error(_error_silent, "custom edition: the map '%s' is turned off (HALO_MAPS_DISABLED)", name);
+			continue;
+		}
+		if (globals->map_count == MAXIMUM_CUSTOM_EDITION_MAPS)
+		{
+			break;
+		}
+		/* (its file there: the loader its header asks for Halo CE's, and read
+		as that loader reads it: custom_edition_cache.c) */
+		{
+			char path[MAXIMUM_FILENAME_LENGTH + 1];
+
+			if (!mcc_content_map_path(stem, path, sizeof(path)) ||
+				custom_edition_cache_content_loader(path, NULL) != _content_library_loader_halo1 ||
+				!custom_edition_cache_multiplayer(name))
+			{
+				continue;
+			}
+		}
+		map = &globals->maps[globals->map_count++];
+		csmemset(map, 0, sizeof(*map));
+		map->mcc = TRUE;
+		map->mod_order = (short)index;
+		map->mcc_frame = (short)mcc_content_picture_frame(stem);
+		csstrcpy(map->name, name);
+		csprintf(map->level_name, LEVEL_NAME_FORMAT, name, name);
+		snprintf(title, sizeof(title), "%s (MCC)", mcc_content_title(stem));
+		for (character = 0; title[character]; character++)
+		{
+			map->display_name[character] = (wchar_t)(unsigned char)title[character];
+		}
+		map->display_name[character] = 0;
+		ustrncpy(map->description, TW(L"Your MCC files'\r\nown map. No sound\r\nyet in this version."),
+			MAXIMUM_DESCRIPTION_LENGTH);
+		map->description[MAXIMUM_DESCRIPTION_LENGTH] = 0;
+		added++;
+	}
+	error(_error_silent, "mcc: %d multiplayer maps of the Halo content folder's halo1", added);
+
+	return;
+}
+
+/* (port) Says what the Halo content folder holds, game by game (mcc_content.h's
+table): each game folder with maps, how many map files, and whether this
+build has their loader (those without one are not listed). */
+static void content_library_games_say(
+	void)
+{
+	int index;
+	struct content_library_game const *game;
+
+	for (index = 0; (game = content_library_game_get(index)) != NULL; index++)
+	{
+		char pattern[MAXIMUM_FILENAME_LENGTH + 1];
+		WIN32_FIND_DATAA data;
+		HANDLE find;
+		short files = 0;
+
+		csprintf(pattern, "%s%s\\maps\\*.map", MCC_CONTENT_ROOT, game->folder);
+		find = FindFirstFileA(pattern, &data);
+		if (find == INVALID_HANDLE_VALUE)
+		{
+			continue;
+		}
+		do
+		{
+			files++;
+		} while (FindNextFileA(find, &data));
+		CloseHandle(find);
+		error(_error_silent, "content: %s (%s): %d map files, %s", game->title, game->folder, files,
+			game->loader != _content_library_loader_none ? "played by this build" : "no loader in this build yet: not listed");
+	}
+
+	return;
 }
 
 static void custom_edition_maps_look_for(
@@ -629,6 +960,8 @@ static void custom_edition_maps_look_for(
 
 	custom_edition_maps_forget();
 	globals->looked_for = TRUE;
+	globals->looked_for_custom_edition = halo_custom_edition_enabled();
+	globals->looked_for_mcc_content = halo_content_library_found();
 
 	file_reference_create_from_path(&directory, cache_files_map_directory(), TRUE);
 	find_files_start(0, &directory);
@@ -689,6 +1022,19 @@ static void custom_edition_maps_look_for(
 			description_listed,
 			description_listed ? description_date : NULL);
 	}
+	/* (port: the mods' maps, Halo: CE Anniversary campaign maps, which PC
+	maps turns on too; and MCC's own, which the Halo content folder does,
+	mcc_content.h) */
+	platform_mcc_root_forget();
+	if (halo_content_library_found())
+	{
+		content_library_games_say();
+		mcc_multiplayer_maps_add();
+	}
+	if (halo_custom_edition_enabled() || halo_content_library_found())
+	{
+		custom_edition_mods_maps_add();
+	}
 	qsort(globals->maps, globals->map_count, sizeof(globals->maps[0]), custom_edition_map_compare);
 	for (globals->multiplayer_count = 0;
 		globals->multiplayer_count < globals->map_count && !globals->maps[globals->multiplayer_count].campaign;
@@ -715,10 +1061,24 @@ static struct bitmap_data *custom_edition_map_picture_read(
 	enum bmp_file_status status;
 	struct bitmap_data *bitmap = NULL;
 	uint8_t *file = NULL;
+	/* (port: a PNG's bitmap, png_files.c's memory) */
+	uint8_t *converted = NULL;
 	FILE *stream;
 	long size = 0;
 
-	csprintf(path, "%s%s%s", cache_files_map_directory(), map->name, PICTURE_EXTENSION);
+	if (map->mod)
+	{
+		/* (port: a mod map's, beside it in the mods folder, or none) */
+		if (!map->picture_path[0])
+		{
+			return NULL;
+		}
+		csstrcpy(path, map->picture_path);
+	}
+	else
+	{
+		csprintf(path, "%s%s%s", cache_files_map_directory(), map->name, PICTURE_EXTENSION);
+	}
 	stream = fopen(path, "rb");
 	if (!stream)
 	{
@@ -726,7 +1086,7 @@ static struct bitmap_data *custom_edition_map_picture_read(
 	}
 	if (fseek(stream, 0, SEEK_END) == 0 &&
 		(size = ftell(stream)) >= 0 &&
-		size <= MAXIMUM_PICTURE_FILE_BYTES &&
+		size <= (map->mod ? MAXIMUM_MOD_PICTURE_FILE_BYTES : MAXIMUM_PICTURE_FILE_BYTES) &&
 		fseek(stream, 0, SEEK_SET) == 0)
 	{
 		/* one more byte, so that an empty file is not a failed allocation */
@@ -743,15 +1103,30 @@ static struct bitmap_data *custom_edition_map_picture_read(
 		error(_error_silent, "custom edition: the picture '%s' could not be read", path);
 		return NULL;
 	}
+	/* (port: a mod map's PNG, made a bitmap first, png_files.c) */
+	if (map->mod && csstrlen(path) > 4 && !csstrcasecmp(path + csstrlen(path) - 4, ".png"))
+	{
+		uint32_t converted_size;
+		enum png_file_status png_status = png_file_to_bitmap(file, (uint32_t)size, &converted, &converted_size);
 
-	status = bmp_file_open(file, (uint32_t)size, &picture);
+		free(file);
+		file = NULL;
+		if (png_status != _png_file_status_ok)
+		{
+			error(_error_silent, "custom edition: the picture '%s' cannot be shown: %s", path, png_file_status_describe(png_status));
+			return NULL;
+		}
+		size = (long)converted_size;
+	}
+
+	status = bmp_file_open(converted ? converted : file, (uint32_t)size, &picture);
 	if (status == _bmp_file_status_ok)
 	{
 		bitmap = bitmap_2d_new(PICTURE_TEXTURE_SIZE, PICTURE_TEXTURE_SIZE, 0, _bitmap_format_a8r8g8b8);
 		if (bitmap && bitmap->base_address)
 		{
 			bmp_file_fit(
-				file,
+				converted ? converted : file,
 				&picture,
 				LEVEL_PICTURE_SHAPE_WIDTH,
 				LEVEL_PICTURE_SHAPE_HEIGHT,
@@ -770,7 +1145,11 @@ static struct bitmap_data *custom_edition_map_picture_read(
 	{
 		error(_error_silent, "custom edition: the picture '%s' cannot be shown: %s", path, bmp_file_status_describe(status));
 	}
-	free(file);
+	if (file)
+	{
+		free(file);
+	}
+	png_file_bitmap_free(converted);
 
 	return bitmap;
 }
@@ -818,12 +1197,38 @@ char **custom_edition_maps_level_list(
 	{
 		globals->levels[level_index] = xbox_levels[level_index];
 	}
-	custom_edition_maps_look_for();
+	/* (looked for again each time the list opens, but not while a map copy
+	is under way, when every file call of the look waits on the Vita for
+	the memory card behind the copy: a host's lobby precaches the map it
+	chose, and its map picker opened again then. The maps found last stand,
+	unless the setting has changed or the maps were said to have: a map share
+	download, the mod manager, custom_edition_maps_look_again) */
+	if (!globals->looked_for || !cache_files_precache_in_progress() ||
+		globals->looked_for_custom_edition != halo_custom_edition_enabled() ||
+		globals->looked_for_mcc_content != halo_content_library_found())
+	{
+		custom_edition_maps_look_for();
+	}
 	for (map_index = 0; map_index < globals->multiplayer_count; map_index++)
 	{
 		globals->levels[globals->xbox_level_count + map_index] = globals->maps[map_index].level_name;
 	}
 	*level_count = globals->xbox_level_count + globals->multiplayer_count;
+	{
+		/* (port: the custom maps it offers, said - those turned off in the
+		mod manager are not among them) */
+		char names[256];
+		long length = 0;
+
+		names[0] = 0;
+		for (map_index = 0; map_index < globals->multiplayer_count && length < (long)sizeof(names) - 1; map_index++)
+		{
+			length += snprintf(names + length, sizeof(names) - (size_t)length, "%s%s", map_index ? ", " : "",
+				globals->maps[map_index].name);
+		}
+		error(_error_silent, "custom edition: the multiplayer level list: %d Xbox levels, then %s", globals->xbox_level_count,
+			globals->multiplayer_count ? names : "no custom map");
+	}
 
 	return globals->levels;
 }
@@ -844,6 +1249,15 @@ short custom_edition_maps_display_index(
 	char const *name = tag_name_strip_path(level_name);
 	short map_index;
 
+	/* (an Xbox level's name is never a custom map's, custom_edition_map_add:
+	answered without looking at the maps folder. A join's check asks of the
+	host's map (cache_files_map_plays_multiplayer), and the first ask looked
+	at every file of the folder on the game thread, an insider.10 tester's
+	126 file calls and 0.4 s as it joined a Damnation game) */
+	if (!name[0] || xbox_level_named(name))
+	{
+		return NONE;
+	}
 	if (!globals->looked_for)
 	{
 		custom_edition_maps_look_for();
@@ -865,7 +1279,7 @@ boolean custom_edition_maps_multiplayer_listed(
 	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
 	short map_index;
 
-	if (!name || !name[0] || custom_edition_map_disabled(name))
+	if (!name || !name[0] || custom_edition_map_disabled(name) || xbox_level_named(name))
 	{
 		return FALSE;
 	}
@@ -923,6 +1337,16 @@ struct bitmap_data *custom_edition_maps_picture(
 	*frame_index = campaign_pictures ? UNKNOWN_CAMPAIGN_LEVEL_FRAME : UNKNOWN_LEVEL_FRAME;
 	if (!map)
 	{
+		return NULL;
+	}
+	/* (port: MCC's own map: its stock level's frame of the pictures of its
+	own kind, when it has one) */
+	if (map->mcc)
+	{
+		if (map->mcc_frame >= 0 && map->campaign == campaign_pictures)
+		{
+			*frame_index = map->mcc_frame;
+		}
 		return NULL;
 	}
 	if (!map->picture_read)
@@ -1035,6 +1459,22 @@ short custom_edition_maps_loadable(
 	if (missing_size > 0)
 	{
 		missing[0] = 0;
+	}
+	/* (port: one of MCC's own maps, mcc_content.h: with the Halo content
+	folder, its file there, read as the loader reads it) */
+	{
+		char mcc_stem[MCC_CONTENT_STEM_BYTES];
+
+		if (mcc_content_name_stem(name, mcc_stem) != _mcc_content_none)
+		{
+			if (!custom_edition_cache_multiplayer(name))
+			{
+				error(_error_silent, "custom maps: '%s' is MCC's own map, which this machine cannot load (no Halo content "
+					"folder, or not in it)", name);
+				return _custom_edition_maps_not_loadable;
+			}
+			return _custom_edition_maps_loadable;
+		}
 	}
 	/* (an Xbox level's file: the Xbox map's, checked as it is precached,
 	custom_edition_maps_stock_problem; or a Halo PC map of that name, which
@@ -1165,10 +1605,20 @@ char const *custom_edition_maps_level_title(
 	return name;
 }
 
+boolean custom_edition_maps_is_xbox_level(
+	char const *name)
+{
+	return name && xbox_level_stock(name);
+}
+
 void custom_edition_maps_look_again(
 	void)
 {
 	custom_edition_maps_globals.looked_for = FALSE;
+	/* (and the Xbox levels' files looked at again: map_checks.c; port: and
+	MCC's folder looked for again, when none was found) */
+	map_checks_forget();
+	platform_mcc_root_forget();
 
 	return;
 }
@@ -1220,10 +1670,64 @@ boolean custom_edition_maps_campaign_level(
 	return level_name && (main_get_solo_level_from_name(level_name) != NONE || custom_edition_level_name(level_name));
 }
 
+char const *custom_edition_maps_campaign_next_level(
+	char const *level_name)
+{
+	enum { FIRST_CAMPAIGN_LEVEL = 13, CAMPAIGN_LEVEL_NAME_LENGTH = 3 };
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+	char next_name[MAXIMUM_MAP_NAME_LENGTH + 1];
+	char const *name;
+	long length;
+	short level_index;
+	short map_index;
+
+	/* (port: a mod map's goes on as its campaign lists, custom_edition_mods.c) */
+	if (custom_edition_mods_level_name(level_name))
+	{
+		return custom_edition_mods_next_level(level_name);
+	}
+	if (!level_name || !custom_edition_level_name(level_name))
+	{
+		return NULL;
+	}
+	name = level_name + csstrlen(CUSTOM_EDITION_LEVEL_NAME_PREFIX);
+	length = (long)csstrlen(name);
+	/* (a prefix, then a campaign level's name, not the last's) */
+	if (length <= CAMPAIGN_LEVEL_NAME_LENGTH || length > MAXIMUM_MAP_NAME_LENGTH)
+	{
+		return NULL;
+	}
+	for (level_index = FIRST_CAMPAIGN_LEVEL; level_index < NUMBEROF(xbox_level_names) - 1; level_index++)
+	{
+		if (!csstrcasecmp(name + length - CAMPAIGN_LEVEL_NAME_LENGTH, xbox_level_names[level_index]))
+		{
+			break;
+		}
+	}
+	if (level_index >= NUMBEROF(xbox_level_names) - 1)
+	{
+		return NULL;
+	}
+	csmemcpy(next_name, name, length - CAMPAIGN_LEVEL_NAME_LENGTH);
+	csstrcpy(next_name + length - CAMPAIGN_LEVEL_NAME_LENGTH, xbox_level_names[level_index + 1]);
+	custom_edition_maps_look_for();
+	for (map_index = 0; map_index < globals->map_count; map_index++)
+	{
+		if (globals->maps[map_index].campaign && !globals->maps[map_index].mod &&
+			!csstrcasecmp(globals->maps[map_index].name, next_name))
+		{
+			return globals->maps[map_index].level_name;
+		}
+	}
+
+	return NULL;
+}
+
 boolean custom_edition_maps_shareable(
 	char const *level_name)
 {
 	char const *name;
+	char mcc_stem[MCC_CONTENT_STEM_BYTES];
 
 	if (!level_name || !level_name[0])
 	{
@@ -1232,8 +1736,16 @@ boolean custom_edition_maps_shareable(
 	name = tag_name_strip_path(level_name);
 
 	/* (turned off since the list was made: HALO_MAPS_DISABLED is the panel's
-	switch, read anew) */
+	switch, read anew; port: a mod's map never, nor a renamed Xbox map's
+	copy, which map sharing would know by the name inside it,
+	map_share_protocol.c) */
 	return !xbox_level_stock(name) &&
+		!custom_edition_mods_level_name(level_name) &&
+		/* (port: MCC's own maps never, mcc_content.h: the player's own files) */
+		mcc_content_name_stem(name, mcc_stem) == _mcc_content_none &&
+		(custom_edition_maps_display_index(level_name) == NONE ||
+			(!custom_edition_map_get(custom_edition_maps_display_index(level_name))->mod &&
+				!custom_edition_map_get(custom_edition_maps_display_index(level_name))->xbox_renamed)) &&
 		!custom_edition_map_disabled(name) &&
 		custom_edition_maps_display_index(level_name) != NONE;
 }

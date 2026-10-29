@@ -197,6 +197,12 @@ void game_statistics_record_kill(
 				}
 				else
 				{
+#ifdef HALO_LINUX
+					/* port: a teammate's death only (a betrayal, as the
+					Halo 3 carnage report counts them: carnage_report.c); a
+					player's own death is a suicide, counted above */
+					if (credited_player_index != dead_player_index)
+#endif
 					credited_player->statistics.friendly_fire_kills++;
 					credited_friendly_fire = TRUE;
 				}

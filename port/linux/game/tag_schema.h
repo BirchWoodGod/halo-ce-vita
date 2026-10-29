@@ -319,6 +319,43 @@ boolean tag_validate_custom_edition_tags(
 	short file_range_count,
 	char const *map_name);
 
+/* (port) the same, on the scene packs' builder's thread
+(port/linux/game/scene_pack_ce.c: a pack's Custom Edition source), the
+map's own check kept as it was; corrections (if not NULL) says how many were
+made */
+boolean tag_validate_custom_edition_tags_isolated(
+	void *tag_header,
+	long loaded_size,
+	unsigned long tag_cache_size,
+	struct tag_validate_file_range const *file_ranges,
+	short file_range_count,
+	char const *map_name,
+	long *corrections);
+
+/* (port) the next packs checked may hold a structure bsp and a scenario
+(the menus' backdrop's: menu_backdrop.c) */
+void tag_validate_pack_allow_structure(
+	boolean allowed);
+
+/* (port) a scene pack's tags (port/linux/game/scene_pack.c): size bytes at
+tag_header laid out as a map's tag data, moved to where they are, their
+pixels and samples at file_offset..file_offset + file_size of the pack's
+file range: FALSE if they cannot be used (a pack has no scenario, structure
+bsp or globals, and every tag's group has a schema). The map's own check is
+kept as it was; corrections (if not NULL) says how many were made */
+boolean tag_validate_pack_tags(
+	void *tag_header,
+	long size,
+	unsigned long file_offset,
+	unsigned long file_size,
+	char const *name,
+	long *corrections);
+
+/* (port) the tag cache's bytes after the map's tags held by the scene packs
+(scene_packs.c), not taken for a structure bsp's check's scratch */
+void tag_validate_reserve_after_tags(
+	unsigned long bytes);
+
 /* a structure bsp just read (size bytes at base, its header there) as tag
 tag_index: FALSE if it cannot be used */
 boolean tag_validate_structure_bsp(
@@ -392,6 +429,15 @@ void *tag_validate_root(
 	struct tag_validation *validation);
 /* whether the tags being checked are a Custom Edition map's */
 boolean tag_validate_custom_edition(
+	struct tag_validation *validation);
+/* (port) whether the Custom Edition map's structure bsps keep their
+vertices in its file rather than in each bsp, as a Halo: CE Anniversary
+map's do (custom_edition_geometry.c reads them as the bsp loads): its
+materials' vertex counts are then checked there, not against their
+uncompressed vertex data, which they have none of */
+void tag_validate_structure_vertices_in_file(
+	boolean in_file);
+boolean tag_validate_structure_vertices_are_in_file(
 	struct tag_validation *validation);
 /* whether size bytes at address are in the tags (or the bsp) being checked */
 boolean tag_validate_contains(

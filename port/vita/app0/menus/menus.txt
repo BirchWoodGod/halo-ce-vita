@@ -3,3 +3,44 @@ art.xml
 multiplayer.xml
 browser.xml
 setup.xml
+halo3/main.xml
+classic/main.xml
+classic/pregame.xml
+classic/profile.xml
+classic/keys.xml
+classic/fileshare.xml
+classic/mods.xml
+classic/friends.xml
+halo3/campaign.xml
+halo3/profiles.xml
+halo3/profiles_coop.xml
+halo3/customize.xml
+halo3/keys.xml
+halo3/forge_lobby.xml
+halo3/fileshare.xml
+halo3/multiplayer.xml
+halo3/gametypes.xml
+halo3/network.xml
+halo3/password.xml
+halo3/mods.xml
+halo3/friends.xml
+halo3/party.xml
+halo3/players.xml
+halo3/join.xml
+halo3/join_split.xml
+halo3/pregame.xml
+halo3/dialog.xml
+halo3/dialog_ui.xml
+# Menu style Classic+: the port's screens in the original menus' look (a cp/<name> widget stands
+# for h3/<name>: menu_tags.c menu_tags_online)
+classic/forge.xml
+classic/customize.xml
+# Menu style Online (a preview: menus/online, menu_tags.c menu_tags_online)
+online/main.xml
+online/customize.xml
+online/keys.xml
+online/title.xml
+online/multiplayer.xml
+online/campaign.xml
+online/browser.xml
+online/host.xml

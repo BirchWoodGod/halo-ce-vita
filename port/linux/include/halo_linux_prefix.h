@@ -77,6 +77,21 @@ always runs and the handler is compiled out. */
 #define __finally
 #define __leave
 
+/* ---------- the port's log
+
+declared for every unit, game and platform alike: game code is C89 with
+warnings off, so a unit that calls platform_log without a prototype in scope
+gets an implicit `int platform_log()`, not a variadic call. On the Vita's
+hard-float ABI that passes the doubles in VFP registers while vsnprintf reads
+its arguments from the core registers and the stack, so a %s after a %f takes
+a stray word as its string (the 1.1.1 RC's crash in strlen from the
+tick-join-hitch line) */
+
+#ifdef __cplusplus
+extern "C"
+#endif
+void platform_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
+
 /* ---------- multiplayer session limits of the native builds */
 
 #include "halo_port_limits.h"

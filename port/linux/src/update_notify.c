@@ -140,8 +140,15 @@ static void status_set(int status, int channel, const char *version)
 static void log_answer(int status, int channel, const char *version, const char *how)
 {
 	if (status == UPDATE_STATUS_AVAILABLE)
+#ifdef HALO_VITA
 		platform_log("update: %s is available (this is %s; Update channel %s%s): " UPDATE_RELEASES_PAGE, version,
 			HALO_VITA_VERSION, update_channel_name(channel), how);
+#else
+		/* (the PC build's file of that release, for the player to get) */
+		platform_log("update: %s is available (this is %s; Update channel %s%s): halo-ce-vita-%s"
+			UPDATE_ASSET_PC_SUFFIX " from " UPDATE_RELEASES_PAGE, version, HALO_VITA_VERSION_SHOWN,
+			update_channel_name(channel), how, version);
+#endif
 	else if (status == UPDATE_STATUS_UP_TO_DATE)
 		platform_log("update: up to date (%s; Update channel %s%s)", HALO_VITA_VERSION, update_channel_name(channel), how);
 }

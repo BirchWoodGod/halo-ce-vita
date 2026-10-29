@@ -61,6 +61,9 @@ void hud_draw_set_scope_centered(
 	boolean centered);
 boolean hud_static_element_shown_by_zoom(
 	struct static_hud_element_definition const *element);
+real hud_mcc_bitmap_scale(
+	long bitmap_group_index,
+	boolean on_canvas);
 #endif
 
 long get_return_eip(
@@ -144,7 +147,19 @@ void hud_draw_numbers(
 	long flash_reference_time,
 	real override_scale);
 
-#ifdef HALO_VITA
+/* (port) the PlayStation button icons (the settings panel's Button icons):
+the Vita's, and the PC builds' (Linux and Windows: HALO_BUTTON_ICONS) */
+#if defined(HALO_VITA) || (defined(HALO_LINUX) && (defined(__linux__) || defined(_WIN32)) && !defined(HALO_ANDROID))
+#define HALO_BUTTON_GLYPHS 1
+#endif
+/* (port) and the desktop build's keyboard and mouse icons, and the Xbox's
+in the Halo 3 menus (display.button_icons: port/linux/include/
+halo_button_icons.h); never the Vita's */
+#if defined(HALO_BUTTON_GLYPHS) && !defined(HALO_VITA)
+#define HALO_KEY_GLYPHS 1
+#endif
+
+#ifdef HALO_BUTTON_GLYPHS
 /* (port) the Vita's button icons, PlayStation's (hud_draw.c): a glyph is
 a VITA_GLYPH_* (port/vita/include/vita_controls.h), 0 for the Xbox's icon */
 short hud_vita_button_glyph(
@@ -153,11 +168,17 @@ short hud_vita_menu_button_glyph(
 	long bitmap_group_index);
 short hud_vita_glyph_face_icon(
 	short glyph);
+boolean hud_vita_glyph_drawn(
+	short glyph);
+wchar_t const *hud_vita_glyph_word(
+	short glyph);
 wchar_t const *hud_vita_glyph_text(
 	short glyph);
+#ifdef HALO_VITA
 void hud_vita_score_hint(
 	wchar_t *buffer,
 	long buffer_size);
+#endif
 boolean hud_vita_glyph_draw(
 	short glyph,
 	struct bitmap_data const *bitmap,
@@ -170,6 +191,22 @@ boolean hud_vita_glyph_draw_in_rect(
 	short glyph,
 	real_rectangle2d const *rectangle,
 	pixel32 color);
+#ifdef HALO_KEY_GLYPHS
+/* the multiplayer score hint ("Hold BACK for score") naming the key Back is
+on, with the keyboard's icons (game_engine.c) */
+void hud_key_score_hint(
+	wchar_t *buffer,
+	long buffer_size);
+/* how much wider than the Xbox icon's sprite a glyph that hud_vita_glyph_draw
+draws there is (a wider keycap: SPACE, ENTER ...), in pixels: what a line of
+text moves on by past the sprite's width; 0 for the others */
+real hud_vita_glyph_flow_extra(
+	short glyph,
+	struct bitmap_data const *bitmap,
+	short placement,
+	real_rectangle2d const *clip,
+	real scale);
+#endif
 #endif
 
 /* ---------- public code */

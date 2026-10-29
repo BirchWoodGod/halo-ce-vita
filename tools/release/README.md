@@ -10,16 +10,42 @@ public half of the key (`port/vita/include/vita_update_key.h`). The private
 key never goes into git, GitHub, CI or anyone else's hands: whoever holds it
 can make every updating Vita offer their file as the next Halo.
 
-A release the game can download carries three assets:
+## Release files
 
-| asset | what |
-| --- | --- |
-| `halo.vpk` | the game, as before |
-| `halo-update.txt` | the manifest: version, title ID, file, size, SHA-512 of `halo.vpk` |
-| `halo-update.txt.sig` | the manifest's Ed25519 signature (128 hex digits) |
+From 1.1.1 a release's files are named for the project, the version and
+the platform:
 
-A release without the two extra files still installs with VitaShell as
-before; the in-game download refuses it ("the server answered 404").
+| asset | what | made by |
+| --- | --- | --- |
+| `halo-ce-vita-<version>-vita.vpk` | the Vita's game | `ninja vita`, then `sign_update.py` copies it under this name |
+| `halo-ce-vita-<version>-pc-windows.zip` | the PC build, Windows | `tools/package_pc.py windows` (CI's Windows job, artifact `halo-ce-vita-pc-windows`) |
+| `halo-ce-vita-<version>-pc-linux.tar.gz` | the PC build, Linux | `tools/package_pc.py linux` (CI's Linux job, artifact `halo-ce-vita-pc-linux`) |
+| `halo-update.txt` | the Vita updater's manifest: version, title ID, file, size, SHA-512 of the VPK | `sign_update.py` |
+| `halo-update.txt.sig` | the manifest's Ed25519 signature (128 hex digits) | `sign_update.py` |
+| `halo.vpk` | the same VPK under its old name, **1.1.1 releases only** | `sign_update.py --legacy-name` |
+
+The Vita's updater (from 1.1.1) downloads the file the signed manifest
+names, `halo-ce-vita-<version>-vita.vpk` or `halo.vpk`, and no other. The
+builds before 1.1.1 ask for `halo.vpk` alone and refuse a manifest naming
+anything else, so the 1.1.1 releases (betas included) are signed with
+`--legacy-name`: the manifest names `halo.vpk`, uploaded beside the new
+name. From 1.1.2 on, sign without it (a 1.1.0 Vita then gets "the manifest
+names another file" and installs by hand, as before the updater).
+
+The PC build is packed from a build configured with `--linux-net-vita` (it
+plays with the Vitas; `package_pc.py` refuses one without it):
+
+```
+python3 configure.py --lto off --pgo off --portable --release --linux-net-vita
+ninja linux
+python3 tools/package_pc.py linux       # dist/halo-ce-vita-<version>-pc-linux.tar.gz
+```
+
+The PC files are not signed for an updater: the PC build never downloads
+itself (port/linux/README.md, "Updates").
+
+A release without the manifest and signature still installs with VitaShell
+as before; the in-game download refuses it ("the server answered 404").
 
 ## Once: make the key
 
@@ -64,13 +90,17 @@ against the game's Monocypher by `port/vita/tests/run_update_download_test.sh`).
    --portable --release`, `ninja vita`) with the version in
    `port/vita/include/vita_version.h` and the real public key in
    `vita_update_key.h` - **without** any of the test options below.
-2. Sign the exact `halo.vpk` you will upload, on your machine, with the key
-   plugged in:
+2. Sign the exact VPK you will upload, on your machine, with the key
+   plugged in (`--legacy-name` for the 1.1.1 releases: "Release files"):
 
    ```
    python3 tools/release/sign_update.py --key ~/halo-update-key/halo-update.key \
-       --vpk build/vita/halo.vpk --version 1.1.0-beta.4 --out release-files/
+       --vpk build/vita/halo.vpk --version 1.1.1-beta.1 --out release-files/ --legacy-name
    ```
+
+   `release-files/` then holds `halo-ce-vita-1.1.1-beta.1-vita.vpk`
+   (and `halo.vpk`, with `--legacy-name`), `halo-update.txt` and
+   `halo-update.txt.sig`.
 
    It refuses a version that is not a tag's (`x.y.z`, `x.y.z-beta.n` or
    `x.y.z-rc.n`), a file that is not a VPK or is over 64 MB, and a test
@@ -79,17 +109,16 @@ against the game's Monocypher by `port/vita/tests/run_update_download_test.sh`).
 3. Check what you will upload (optional, the same checks the Vita makes):
 
    ```
-   cp build/vita/halo.vpk release-files/
-   python3 tools/release/verify_update.py --dir release-files/ --version 1.1.0-beta.4
+   python3 tools/release/verify_update.py --dir release-files/ --version 1.1.1-beta.1
    ```
 
-4. Unplug the key. Upload `halo.vpk`, `halo-update.txt` and
-   `halo-update.txt.sig` to the release tagged `v1.1.0-beta.4` (the tag must
+4. Unplug the key. Upload everything in `release-files/`, and the PC
+   files, to the release tagged `v1.1.1-beta.1` (the tag must
    be the version with a `v`: the game asks for exactly that tag's files and
    refuses a manifest naming another version, or one not newer than the
    running build).
 
-Do not re-upload a different `halo.vpk` without signing again: the Vita
+Do not re-upload a different VPK without signing again: the Vita
 refuses a file whose SHA-512 is not the manifest's.
 
 ## CI
@@ -110,7 +139,8 @@ two signature files the owner made locally, never a key.
   (`port/linux/src/update_roots.h`).
 - The manifest's signature first, with the built-in key; then its form, that
   its version is the tag's and newer than the running build, the title
-  (`HCEV00001`), the file (`halo.vpk`) and a size of at most 64 MB.
+  (`HCEV00001`), the file (`halo-ce-vita-<version>-vita.vpk`, or `halo.vpk`;
+  before 1.1.1 `halo.vpk` alone) and a size of at most 64 MB.
 - The card's free space; `halo.vpk` downloaded to that size at most (resumed
   if cut), its size and SHA-512 the manifest's. Only then is it kept, as
   `update/halo-<version>.vpk` beside its signed manifest, older kept ones
@@ -128,7 +158,7 @@ the build is a release build:
 | --- | --- |
 | `--vita-update-test-sources` | defines `HALO_UPDATE_TEST_SOURCES`: the build takes `HALO_UPDATE_URL` (the releases list: `https://api.github.com/...` or a loopback `http://127.x`) and `HALO_UPDATE_DOWNLOAD_BASE` (`https://github.com/<owner>/<repo>/releases/download` or a loopback `http://127.x`) from `env.txt`; a release build ignores both and logs it |
 | `--vita-update-key HEX` | the build's public key, in place of `vita_update_key.h`'s |
-| `--vita-version VERSION` | the version the build says it is, in place of `vita_version.h`'s |
+| `--vita-version VERSION` | the version the build says it is, in place of `vita_version.h`'s: the Vita's and the PC builds' (Linux, Windows) alike; `tools/package_pc.py` names its files for it |
 
 `build.ninja` then says "TEST BUILD of the updater", and `sign_update.py`
 refuses that tree's `build/vita/halo.vpk` without `--test-build`. Files a
@@ -192,3 +222,86 @@ What these settle, which the Linux tests cannot: the Vita's TLS to
 to `update_roots.h`), that a safe homebrew writes `ux0:data/haloce-vita/update`
 and VitaShell installs the file from there, that the download costs the game
 no frames, and how long each stage takes on the Vita.
+
+## Tester list (the flaming helmet)
+
+Testers wear a blue flaming helmet that every other player's game shows,
+and that nobody can fake for anyone else's screen: the list of testers is
+signed with the release key above (the same private key file, the same
+`HALO_RELEASE_PUBLIC_KEY` in `port/vita/include/vita_update_key.h`), and in
+each game every machine asks a claiming player's machine to prove, with its
+own friend identity (the per-machine key behind the friend code), that it is
+the listed one (`port/linux/src/p2p_flame.inc`; the file's form:
+`port/linux/src/tester_list.h`). Each machine checks the list's signature
+and the proof itself; the host's word counts for nothing.
+
+### Adding a tester
+
+1. Get the tester's friend identity. Their game writes it, nothing secret in
+   it, to `friends/tester-id.txt` in its save folder:
+   `ux0:data/haloce-vita/friends/tester-id.txt` on the Vita (VitaShell's FTP
+   or USB), the save folder's `friends/tester-id.txt` on a PC. They send you
+   that file. Or, if you are friends with them in the game, your own
+   `friends/friends.dat` holds their key: use `--friends-dat` with their
+   name or friend code.
+2. Sign a new list version (from the repository, with the release key):
+
+   ```
+   python3 tools/release/sign_testers.py --key ~/halo-update-key/halo-update.key \
+       --list port/vita/app0/testers.txt --add-id tester-id.txt [--expires 2027-01-31]
+   python3 tools/release/sign_testers.py --key ~/halo-update-key/halo-update.key \
+       --list port/vita/app0/testers.txt --friends-dat /path/to/your/friends.dat --add-friend ABCD-EFGH-JKLM
+   python3 tools/release/sign_testers.py --list port/vita/app0/testers.txt --show
+   ```
+
+   Each change bumps the list's version by one (or `--version N`, higher);
+   `--expires` (YYYY-MM-DD, the end of that day UTC, or a Unix second) ends
+   an entry by itself; `--remove NAME|CODE|KEY` takes a tester off.
+3. Ship it: commit `port/vita/app0/testers.txt` (it is only public keys and
+   a signature). `ninja vita` puts it in the VPK (`app0:testers.txt`) and
+   `tools/package_pc.py` beside the PC executable; the dedicated servers read
+   it beside theirs (copy it next to `halo-server`), so they check what they
+   relay.
+4. Before a release carries it, a newer list can be handed out: dropped in
+   `ux0:data/haloce-vita/testers.txt` (a PC's save folder's `testers.txt`)
+   it wins over the packaged one when its version is higher and its
+   signature good; it is read as the game starts.
+
+The tester turns it on or off with Flaming helmet in CUSTOMIZATION or the
+settings panel (Game), shown only once their identity is on a valid list
+(on by default); it takes effect in the next game they join.
+
+### Revoking
+
+Sign a new version without them (`--remove`) and ship it (or hand it out as
+above). The newest valid list a machine has wins, so a machine still on an
+older list keeps showing the old testers until it gets the new one: for an
+urgent revocation hand the new list out to the testers and the servers.
+
+### What it does not stop
+
+- Anyone can draw a flame on their own screen with a modified build: no one
+  else's game shows it.
+- A tester can give their flame away (as by giving away their
+  `friends/identity.dat`): only a new list version takes it back. One key
+  lights one player a game.
+- The proofs travel in the game's own messages, so every network game has
+  them: online, System Link, ad hoc, co-op, a dedicated server's. Not the
+  crossplay wire (OpenCE PC hosts), nor a game whose host is an older build
+  (it drops them: only its joiners' own flames, on their own screens).
+- Offline (split screen, bots, Forge, the campaign) a listed tester's own
+  flame shows with nothing to prove: it is their own screen. In split screen
+  it is player 1's alone (the identity is the machine's, not a profile's).
+- Cutscenes show it on the Master Chief when the cutscene shows the player's
+  own biped; one a script hides or takes off the map (a stand-in in its
+  place) carries none.
+
+### Tests
+
+`port/vita/tests/run_tester_list_test.sh` (the list and the tool, ASan),
+`run_p2p_friends_test.sh` (the proofs, ASan) and
+`run_netns_flame_test.sh all` (offline multiplayer and campaign; online,
+a modified host, System Link, ad hoc and online co-op in namespaces; a
+throwaway key: configure with `--testers-test-key <its public key>`, test
+builds only, refused with `--release`; `HALO_TEST_TESTERS_KEY=<its private
+key file>`).

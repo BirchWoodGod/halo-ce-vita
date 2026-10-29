@@ -8,11 +8,20 @@ and its rows, which scroll: steps down and up through more games than the
 twelve rows (the menus wrapping their focus at the ends, as
 widget_event_function_list_widget_goto_next_item does), past the list's
 ends, a page at a time, the game chosen followed as it moves, the list
-growing and shrinking under the rows, two games and none. Built by
+growing and shrinking under the rows, two games and none; and the groups
+(the Vitas' games first, then the PCs', a header row before each, never
+chosen: stepped and paged over, shown above the group's first game).
+Built by
 run_browser_list_test.sh (with ASan and UBSan there).
 */
 
 #include "../../linux/game/browser_list.c"
+
+/* (crossplay_guard.c's: a Vita's game, not the port's PC build's) */
+int crossplay_guard_vita_game(int platform, int marks)
+{
+	return platform == CROSSPLAY_PLATFORM_VITA && !(marks & CROSSPLAY_HOST_PC_BUILD);
+}
 
 #include <stdio.h>
 #include <string.h>
@@ -195,10 +204,178 @@ static void scrolling(void)
 	check(target == 0 && view.row == 0, "a row focused past the games shown: no step taken");
 }
 
+/* a step over a grouped list, as browser_update makes it */
+static int group_step(struct browser_view *view, struct p2p_lobby_entry const *entries, int count, int direction,
+	int chosen)
+{
+	return browser_view_follow_groups(view, entries, ROWS, count, menu_step(view, direction), chosen, 0);
+}
+
+static void platform_entry(struct p2p_lobby_entry *e, char const *id, int platform, int players)
+{
+	entry(e, id, id, "Blood Gulch", "Slayer", players, 0, 1);
+	e->platform = platform;
+}
+
+static void groups(void)
+{
+	struct p2p_lobby_entry entries[44];
+	struct browser_view view;
+	char id[16];
+	int count, target, index;
+
+	/* the Vitas' games first, each group by players; a header before each */
+	platform_entry(&entries[0], "p1", CROSSPLAY_PLATFORM_OPENCE, 15);
+	platform_entry(&entries[1], "v1", CROSSPLAY_PLATFORM_VITA, 3);
+	platform_entry(&entries[2], "p2", CROSSPLAY_PLATFORM_CHUPA, 9);
+	platform_entry(&entries[3], "v2", CROSSPLAY_PLATFORM_VITA, 7);
+	platform_entry(&entries[4], "p3", CROSSPLAY_PLATFORM_PC, 1);
+	platform_entry(&entries[5], "v3", CROSSPLAY_PLATFORM_VITA, 0);
+	platform_entry(&entries[6], "p4", CROSSPLAY_PLATFORM_DAMNATION, 4);
+	browser_list_sort(entries, 7, _browser_sort_players);
+	check(order_is(entries, 7, "v2 v1 v3 p1 p2 p4 p3"), "the Vitas' games first, then the PCs', each by players");
+	browser_list_sort(entries, 7, _browser_sort_name);
+	check(order_is(entries, 7, "v1 v2 v3 p1 p2 p3 p4"), "by name: still the Vitas' first");
+	browser_list_sort(entries, 7, _browser_sort_players);
+	count = browser_list_group(entries, 7, 9, "VITA GAMES (%d)", "PC GAMES (%d)");
+	check(count == 9 && order_is(entries, 9, "#vita v2 v1 v3 #pc p1 p2 p4 p3"), "a header before each group");
+	check(entries[0].header && !strcmp(entries[0].name, "VITA GAMES (3)") && entries[4].header &&
+		!strcmp(entries[4].name, "PC GAMES (4)") && !entries[1].header, "the headers' names and counts");
+	check(browser_list_group(entries, count, 9, "VITA GAMES (%d)", "PC GAMES (%d)") == 9 &&
+		order_is(entries, 9, "#vita v2 v1 v3 #pc p1 p2 p4 p3"), "grouped again: the same, no header twice");
+	check(browser_list_header_count(entries, 9) == 2 && browser_list_game_number(entries, 9, 5) == 4 &&
+		browser_list_game_number(entries, 9, 1) == 1 && browser_list_game_number(entries, 9, 4) == 0,
+		"the game numbers: the headers not counted");
+	/* the rows: the headers never chosen */
+	browser_view_reset(&view);
+	target = browser_view_follow_groups(&view, entries, ROWS, 9, -1, -1, 0);
+	check(target == 1 && view.row == 1 && view.offset == 0, "opened: the first game, under its header");
+	target = group_step(&view, entries, 9, 1, 1);
+	target = group_step(&view, entries, 9, 1, target);
+	check(target == 3, "down: the Vitas' games");
+	target = group_step(&view, entries, 9, 1, target);
+	check(target == 5 && view.row == 5, "down from the last Vita game: over PC GAMES, the first PC game");
+	target = group_step(&view, entries, 9, -1, target);
+	check(target == 3, "up from the first PC game: over the header, the last Vita game");
+	browser_view_follow_groups(&view, entries, ROWS, 9, -1, 8, 0);
+	target = group_step(&view, entries, 9, 1, 8);
+	check(target == 1, "down on the last game: over VITA GAMES, the first game");
+	target = group_step(&view, entries, 9, -1, 1);
+	check(target == 8, "up on the first game: the last");
+	/* one group alone (a filter): its header alone */
+	for (index = 0; index < 4; index++)
+		platform_entry(&entries[index], index ? "p" : "q", CROSSPLAY_PLATFORM_OPENCE, index);
+	count = browser_list_group(entries, 4, 6, "VITA GAMES (%d)", "PC GAMES (%d)");
+	check(count == 5 && entries[0].header && !strcmp(entries[0].name, "PC GAMES (4)") && !entries[1].header,
+		"PC games alone: PC GAMES over them, no VITA GAMES");
+	check(browser_list_group(entries, 0, 2, "V %d", "P %d") == 0, "no games: no header");
+	/* no room for a header: the games kept */
+	for (index = 0; index < 4; index++)
+		platform_entry(&entries[index], index ? "p" : "q", CROSSPLAY_PLATFORM_OPENCE, index);
+	check(browser_list_group(entries, 4, 4, "V %d", "P %d") == 4 && !entries[0].header,
+		"no room: no header, every game kept");
+	/* more than the rows: scrolled back up, the header shows again */
+	for (index = 0; index < 40; index++)
+	{
+		snprintf(id, sizeof(id), "%c%02d", index < 20 ? 'v' : 'p', index);
+		platform_entry(&entries[index], id, index < 20 ? CROSSPLAY_PLATFORM_VITA : CROSSPLAY_PLATFORM_OPENCE, 40 - index);
+	}
+	count = browser_list_group(entries, 40, 44, "VITA GAMES (%d)", "PC GAMES (%d)");
+	check(count == 42 && entries[21].header, "40 games: 42 rows with the headers");
+	browser_view_reset(&view);
+	target = browser_view_follow_groups(&view, entries, ROWS, count, -1, -1, 0);
+	for (index = 0; index < 14; index++)
+		target = group_step(&view, entries, count, 1, target);
+	check(target == 15 && view.offset == 4, "down fourteen: the rows scrolled");
+	while (target > 1)
+		target = group_step(&view, entries, count, -1, target);
+	check(target == 1 && view.offset == 0 && view.row == 1, "back up to the first game: VITA GAMES shown above it");
+	target = browser_view_follow_groups(&view, entries, ROWS, count, -1, 9, 1);
+	check(target == 22 && !entries[target].header, "a page down onto PC GAMES: the first PC game");
+	target = browser_view_follow_groups(&view, entries, ROWS, count, -1, 22, -1);
+	check(target == 10, "a page up");
+	target = browser_view_follow_groups(&view, entries, ROWS, count, -1, 10, -1);
+	check(target == 1 && view.offset == 0, "a page up to the top: the first game, not the header nor the last");
+	target = browser_view_follow_groups(&view, entries, ROWS, count, -1, 30, 0);
+	check(target == 30 && view.offset == 19 && entries[view.offset].header == 0, "a PC game chosen: followed");
+	for (index = 0; index < 8; index++)
+		target = group_step(&view, entries, count, -1, target);
+	check(target == 22 && view.offset <= 21 && view.offset + view.row == 22, "up to the first PC game: PC GAMES shown above it");
+	browser_view_follow_groups(&view, entries, ROWS, count, -1, 35, 0);
+	target = browser_view_follow_groups(&view, entries, ROWS, count, 0, 35, 0);
+	while (target > 22)
+		target = group_step(&view, entries, count, -1, target);
+	check(target == 22 && view.offset == 21 && view.row == 1, "from further down, up to it: PC GAMES brought into the rows");
+}
+
+static void hosted(struct p2p_lobby_entry *e, char const *id, char const *name, unsigned char host)
+{
+	entry(e, id, name, "Wizard", "SWAT", 28, 0, 1);
+	if (host)
+	{
+		e->host[0] = 0x02;
+		e->host[5] = host;
+	}
+}
+
+/* the games browser's System Link rows and the online ones after them: a
+host in both (an internet play peer's game, which its broadcasts bring to
+the System Link search; a LAN host that lists online) is one row, its
+online one; different hosts, the same name or none known, all kept */
+static void merge_lan(void)
+{
+	struct p2p_lobby_entry entries[8];
+	int count, lan;
+
+	/* (LadyCassie, insider.18: ". SWAT pistols" twice, the server joined
+	before still a peer) */
+	hosted(&entries[0], "lan:swat", ". SWAT pistols", 7);
+	hosted(&entries[1], "lan:home", "Halo", 9);
+	hosted(&entries[2], "online:swat", ". SWAT pistols", 7);
+	hosted(&entries[3], "online:other", "Halo", 3);
+	lan = 2;
+	count = browser_list_merge_lan(entries, 4, &lan);
+	check(count == 3 && lan == 1, "a peer's game in both lists: one row");
+	check(order_is(entries, count, "lan:home online:swat online:other"), "its online row kept, the rest in order");
+
+	/* two games of the same name, different hosts: both */
+	hosted(&entries[0], "lan:a", "Halo", 1);
+	hosted(&entries[1], "online:b", "Halo", 2);
+	lan = 1;
+	count = browser_list_merge_lan(entries, 2, &lan);
+	check(count == 2 && lan == 1, "the same name, different hosts: both kept");
+
+	/* a System Link row whose host is not known (all zero) is never taken
+	for an online game's, nor an online row with none */
+	hosted(&entries[0], "lan:a", "Halo", 0);
+	hosted(&entries[1], "online:b", "Halo", 0);
+	lan = 1;
+	count = browser_list_merge_lan(entries, 2, &lan);
+	check(count == 2 && lan == 1, "no host known: kept");
+
+	/* every System Link row online too; no online games; none at all */
+	hosted(&entries[0], "lan:a", "A", 1);
+	hosted(&entries[1], "lan:b", "B", 2);
+	hosted(&entries[2], "online:b", "B", 2);
+	hosted(&entries[3], "online:a", "A", 1);
+	lan = 2;
+	count = browser_list_merge_lan(entries, 4, &lan);
+	check(count == 2 && lan == 0 && order_is(entries, count, "online:b online:a"), "every LAN row online too: the online rows");
+	hosted(&entries[0], "lan:a", "A", 1);
+	hosted(&entries[1], "lan:b", "B", 1);
+	lan = 2;
+	count = browser_list_merge_lan(entries, 2, &lan);
+	check(count == 2 && lan == 2, "no online games: the System Link rows as they are (two of one host kept)");
+	lan = 0;
+	check(browser_list_merge_lan(entries, 0, &lan) == 0 && lan == 0, "no games");
+}
+
 int main(void)
 {
 	sorts();
 	scrolling();
+	groups();
+	merge_lan();
 	printf("-- %d of %d checks failed\n", failures, checks);
 	return failures != 0;
 }

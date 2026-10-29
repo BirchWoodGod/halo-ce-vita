@@ -5,6 +5,8 @@ Win32/XAPI kernel services for the Linux build: handles, events, mutexes,
 threads, asynchronous procedure calls, time, memory and debug output.
 */
 
+/* (halo_cond_timedwait: WaitForSingleObjectEx) */
+#define HALO_COND_TIMED
 #include "platform.h"
 
 #include <errno.h>
@@ -38,7 +40,23 @@ void platform_log(const char *format, ...)
 	va_end(arguments);
 	vita_host_log(line);
 #else
+	/* (test builds: HALO_LOG_TIMES, each line's time - the system's
+	monotonic clock, the same for every copy of a run - after the prefix:
+	run_netns_online_test.sh partyfollow times the party's follows) */
+#ifndef HALO_RELEASE
+	static int log_times = -1;
 
+	if (log_times < 0)
+		log_times = getenv("HALO_LOG_TIMES") != NULL;
+	if (log_times)
+	{
+		struct timespec now;
+
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		fprintf(stderr, "halo-linux: %ld.%03ld ", (long)now.tv_sec, now.tv_nsec / 1000000L);
+	}
+	else
+#endif
 	fputs("halo-linux: ", stderr);
 	va_start(arguments, format);
 	vfprintf(stderr, format, arguments);
@@ -123,7 +141,7 @@ struct platform_handle *platform_handle_new(long type, void *data,
 	pthread_mutexattr_init(&attributes);
 	pthread_mutex_init(&handle->lock, &attributes);
 	pthread_mutexattr_destroy(&attributes);
-	pthread_cond_init(&handle->condition, NULL);
+	halo_cond_init(&handle->condition);
 	return handle;
 }
 
@@ -147,7 +165,7 @@ void platform_handle_signal(struct platform_handle *handle)
 {
 	pthread_mutex_lock(&handle->lock);
 	handle->signaled = TRUE;
-	pthread_cond_broadcast(&handle->condition);
+	halo_cond_broadcast(&handle->condition);
 	pthread_mutex_unlock(&handle->lock);
 }
 
@@ -167,7 +185,7 @@ BOOL WINAPI CloseHandle(HANDLE object)
 	if (handle->destroy)
 		handle->destroy(handle);
 	handle->signature = 0;
-	pthread_cond_destroy(&handle->condition);
+	halo_cond_destroy(&handle->condition);
 	pthread_mutex_destroy(&handle->lock);
 	free(handle);
 	return TRUE;
@@ -286,9 +304,9 @@ DWORD WINAPI WaitForSingleObjectEx(HANDLE object, DWORD milliseconds, BOOL alert
 		}
 		if (milliseconds == INFINITE)
 		{
-			pthread_cond_wait(&handle->condition, &handle->lock);
+			halo_cond_wait(&handle->condition, &handle->lock);
 		}
-		else if (pthread_cond_timedwait(&handle->condition, &handle->lock, &deadline) == ETIMEDOUT)
+		else if (halo_cond_timedwait(&handle->condition, &handle->lock, &deadline) == ETIMEDOUT)
 		{
 			if (!handle_try_acquire(handle))
 				result = WAIT_TIMEOUT;
@@ -378,7 +396,7 @@ BOOL WINAPI ReleaseMutex(HANDLE mutex)
 	if (handle->recursion > 0 && pthread_equal(handle->owner, pthread_self()))
 	{
 		if (--handle->recursion == 0)
-			pthread_cond_broadcast(&handle->condition);
+			halo_cond_broadcast(&handle->condition);
 		result = TRUE;
 	}
 	else
@@ -495,7 +513,7 @@ static void thread_release(struct platform_handle *handle)
 	{
 		handle->signature = 0;
 		free(thread);
-		pthread_cond_destroy(&handle->condition);
+		halo_cond_destroy(&handle->condition);
 		pthread_mutex_destroy(&handle->lock);
 		free(handle);
 	}
@@ -510,7 +528,7 @@ static void *thread_main(void *context)
 
 	pthread_mutex_lock(&handle->lock);
 	while (thread->suspended)
-		pthread_cond_wait(&handle->condition, &handle->lock);
+		halo_cond_wait(&handle->condition, &handle->lock);
 	pthread_mutex_unlock(&handle->lock);
 
 	exit_code = thread->start(thread->parameter);
@@ -519,14 +537,14 @@ static void *thread_main(void *context)
 	thread->exit_code = exit_code;
 	thread->finished = TRUE;
 	handle->signaled = TRUE;
-	pthread_cond_broadcast(&handle->condition);
+	halo_cond_broadcast(&handle->condition);
 	free_now = thread->closed;
 	pthread_mutex_unlock(&handle->lock);
 	if (free_now)
 	{
 		handle->signature = 0;
 		free(thread);
-		pthread_cond_destroy(&handle->condition);
+		halo_cond_destroy(&handle->condition);
 		pthread_mutex_destroy(&handle->lock);
 		free(handle);
 	}
@@ -590,7 +608,7 @@ DWORD WINAPI ResumeThread(HANDLE object)
 	pthread_mutex_lock(&handle->lock);
 	previous = thread->suspended ? 1 : 0;
 	thread->suspended = FALSE;
-	pthread_cond_broadcast(&handle->condition);
+	halo_cond_broadcast(&handle->condition);
 	pthread_mutex_unlock(&handle->lock);
 	return previous;
 }
@@ -974,10 +992,11 @@ static struct
 static __thread int heap_census_busy;
 
 /* (HALO_HEAP_CENSUS_FILE=path) every site's bytes, count and callers at
-the exit, one line each, for comparing two builds */
-static void heap_census_write(void)
+the exit, one line each, for comparing two builds (and, with
+HALO_HEAP_CENSUS_EACH=1, at every census too, as path.<n>.<when>: what a
+map change leaves, site by site, for triage/heap-creep's census_series.py) */
+static void heap_census_write_to(const char *path)
 {
-	const char *path = getenv("HALO_HEAP_CENSUS_FILE");
 	FILE *file;
 	unsigned long index;
 
@@ -1000,6 +1019,11 @@ static void heap_census_write(void)
 		fclose(file);
 	}
 	heap_census_busy = 0;
+}
+
+static void heap_census_write(void)
+{
+	heap_census_write_to(getenv("HALO_HEAP_CENSUS_FILE"));
 }
 
 static int heap_census_on(void)
@@ -1172,6 +1196,18 @@ void platform_heap_census_log(const char *when)
 	for (index = 0; index < HEAP_CENSUS_SITES; index++)
 		heap_census.sites[index].reported_bytes = heap_census.sites[index].bytes;
 	pthread_mutex_unlock(&heap_census.lock);
+	{
+		static unsigned long census_number;
+		const char *path = getenv("HALO_HEAP_CENSUS_FILE");
+		const char *each = getenv("HALO_HEAP_CENSUS_EACH");
+		char numbered[512];
+
+		if (path && *path && each && atoi(each))
+		{
+			snprintf(numbered, sizeof(numbered), "%s.%03lu.%s", path, census_number++, when);
+			heap_census_write_to(numbered);
+		}
+	}
 }
 
 void *malloc(size_t size)

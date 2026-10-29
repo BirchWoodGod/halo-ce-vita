@@ -25,6 +25,7 @@ also declares.
 #define DeleteFileA halo_xbox_DeleteFileA
 #define FindFirstFileA halo_xbox_FindFirstFileA
 #define FindNextFileA halo_xbox_FindNextFileA
+#define FlushFileBuffers halo_xbox_FlushFileBuffers
 #define GetDiskFreeSpaceExA halo_xbox_GetDiskFreeSpaceExA
 #define GetExitCodeThread halo_xbox_GetExitCodeThread
 #define GetFileAttributesA halo_xbox_GetFileAttributesA

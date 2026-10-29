@@ -32,6 +32,10 @@ panel changes them at any time, so they are read each time) */
 long bots_wanted_count(void);
 short bots_skill(void);
 short bots_teams(void);
+/* (bots.online, HALO_BOTS_ONLINE: "full", the default, "off" or a count)
+the most bots a game this machine hosts online fills its lobby with
+(network_server_manager.c): 0 unless the connection is Online */
+long bots_online_fill(void);
 
 /* a machine (or a player of one) is a bot */
 int bots_machine_is_bot(long machine_index);

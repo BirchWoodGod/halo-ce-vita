@@ -712,6 +712,21 @@ void *debug_realloc(
 				size - old_size);
 		}
 	}
+#ifdef HALO_LINUX
+	else if (pointer != NULL && size != 0)
+	{
+		/* (port) the larger block refused: the old one is still the
+		caller's, as realloc leaves it, so back on the list as it was. It
+		had been taken off and marked disposed above, and its free later
+		unlinked it again through links gone stale - the list rewritten
+		through freed blocks, then a write through NULL (debug_memory.c
+		#446): 1.1.1 RC2's crash switching player models, a model pack's
+		build whose blob could not grow (scene_pack.c blob_alloc) */
+		header = (struct debug_memory_header *)pointer - 1;
+		header->signature = debug_memory_allocated_signature;
+		debug_memory_add_pointer(header);
+	}
+#endif
 
 	if (result != NULL || size == 0)
 	{

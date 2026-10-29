@@ -24,6 +24,17 @@ cores' load since the last line) */
 void vita_host_thread_times_report(unsigned long frames);
 #endif
 
+/* (the Vita's watchdog, vita_main.c) work the game thread waits on that is
+making progress - a scene pack read at a map's load, a map's copy into the
+cache partition - counted here: a stretch with no present but this moving
+is a long load, not a hang */
+volatile unsigned long halo_progress_counter;
+
+void halo_progress_heartbeat(void)
+{
+	__atomic_add_fetch(&halo_progress_counter, 1, __ATOMIC_RELAXED);
+}
+
 static int frame_timing_every = -1;
 static unsigned long long frame_timing_mark[_frame_timing_event_count];
 static unsigned long long frame_timing_sum[4], frame_timing_max_frame;

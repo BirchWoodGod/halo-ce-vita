@@ -418,6 +418,37 @@ boolean autoaim_compute_target(
 	return result;
 }
 
+#ifdef HALO_LINUX
+/* (port) autoaim_compute_target's answer and its angle under maximum_angle,
+as autoaim_compute_target(...) && fabs(target_angle) < maximum_angle reads
+them, the angle tested first: the line of sight, a ray through the
+structure and the objects, is cast only for a target in that cone. The
+same values (the target point, the direction and the angle are worked out
+as there, from the same inputs), the same answer. */
+boolean autoaim_target_within_angle(
+	long object_index,
+	real_point3d const *position,
+	real_vector3d const *direction,
+	long unit_index,
+	double maximum_angle)
+{
+	real_point3d target_position;
+	real_vector3d target_direction;
+	real target_distance;
+	real target_angle;
+
+	object_compute_autoaim_target(object_index, position, direction, &target_position);
+	vector_from_points3d(position, &target_position, &target_direction);
+	target_distance= normalize3d(&target_direction);
+	if (target_distance==0.f)
+		return FALSE;
+	target_angle= arccosine(PIN(dot_product3d(direction, &target_direction), -1.f, 1.f));
+	if (!(fabs(target_angle) < maximum_angle))
+		return FALSE;
+	return aim_assist_clear_line_of_sight(position, &target_position, unit_index, object_index);
+}
+#endif
+
 static short find_aim_assist_targets_recursive(
 	struct aim_assist_parameters const *parameters,
 	long object_index,
@@ -604,6 +635,28 @@ long player_aim_projectile(
 
 				autoaim_level= target.autoaim_level;
 				target_object_index= target.object_index;
+#ifdef HALO_LINUX
+				/* port: no autoaim for this machine's local player who asked
+				for no aim assist at all (the Vita's gyro on, its Gyro aim
+				assist off: player_control_aim_assist_off): the shot goes
+				where the reticle is, not bent towards the target. The
+				target is kept for what is not the player's aim: a homing
+				projectile's (the Needler's, an overcharged plasma bolt's)
+				and the AI's noticing it is aimed at. A client's player
+				on its host has no local index: in a network game a
+				client aims its own players' shots itself and reports the
+				hits (port/linux/game/network_damage.c), the host's copies
+				dealing nothing, so this is the one place it is decided */
+				if (player_control_aim_assist_off(player->local_player_index))
+				{
+					player_control_aim_assist_note_shot(player->local_player_index, FALSE, autoaim_level>0.f);
+					autoaim_level= 0.f;
+				}
+				else
+				{
+					player_control_aim_assist_note_shot(player->local_player_index, autoaim_level>0.f, FALSE);
+				}
+#endif
 			}
 		}
 

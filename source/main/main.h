@@ -102,6 +102,11 @@ void main_menu_unload(
 void main_menu_ensure_player_queues_exist(
 	void);
 
+#ifdef HALO_LINUX
+void main_menu_player_queues_from_clock(
+	void);
+#endif
+
 boolean main_menu_fade_active(
 	void);
 
@@ -113,6 +118,10 @@ void main_set_game_connection_to_film_playback(
 
 short main_get_current_solo_level(
 	void);
+#ifdef HALO_LINUX
+boolean main_current_level_is_custom_campaign(
+	void);
+#endif
 
 char const *main_get_solo_level_name(
 	short level);
@@ -193,7 +202,11 @@ panel's Play page. "kick <player name>" (dropped, may join again), "ban
 <player name>" (dropped, kept out: bans.txt) or "bringto" (co-op: every
 player comes to the host), run as the console runs it
 (hs_compile_and_evaluate) at the top of the next frame, while no tick runs.
-FALSE if the command is too long or too many wait already. Thread-safe. */
+FALSE if the command is too long or too many wait already. Thread-safe.
+_from names who asked, for the log (the Halo 3 menus' scenes ask too). */
+boolean main_request_host_command_from(
+	char const *command,
+	char const *source);
 boolean main_request_host_command(
 	char const *command);
 #endif

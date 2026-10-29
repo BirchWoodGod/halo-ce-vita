@@ -182,6 +182,10 @@ symbols in this file:
 #include "memory/data_packet_groups.h"
 #include "networking/network_messages.h"
 #include "map_share_protocol.h"
+#include "forge_net_protocol.h"
+#include "infection_net.h"
+#include "flame_net.h"
+#include "party_net.h"
 
 /* cseries_windows.c's */
 unsigned long system_milliseconds(void);
@@ -275,7 +279,21 @@ struct network_game_message_packet_definitions
 	struct data_packet_definition server_map_download_answer;
 	struct data_packet_field server_map_download_data_fields[4];
 	struct data_packet_definition server_map_download_data;
-	struct data_packet_entry packets[38];
+	struct data_packet_field client_forge_fields[4];
+	struct data_packet_definition client_forge;
+	struct data_packet_field server_forge_fields[4];
+	struct data_packet_definition server_forge;
+	struct data_packet_field client_game_rules_fields[3];
+	struct data_packet_definition client_game_rules;
+	struct data_packet_field server_game_rules_fields[3];
+	struct data_packet_definition server_game_rules;
+	struct data_packet_field client_flame_fields[3];
+	struct data_packet_definition client_flame;
+	struct data_packet_field server_flame_fields[3];
+	struct data_packet_definition server_flame;
+	struct data_packet_field client_party_fields[3];
+	struct data_packet_definition client_party;
+	struct data_packet_entry packets[NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES];
 	struct data_packet_group_definition group;
 };
 
@@ -332,6 +350,21 @@ map_share_request, map_share_answer_message, map_share_data_message) */
 DEFINE_NETWORK_GAME_MESSAGE(message_client_map_download, 2 * 2 + 2 * 4 + MAP_SHARE_NAME_BYTES);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_map_download_answer, 2 * 2 + 3 * 4 + MAP_SHARE_NAME_BYTES + MAP_SHARE_DIGEST_BYTES);
 DEFINE_NETWORK_GAME_MESSAGE(message_server_map_download_data, 2 * 2 + 4 + MAP_SHARE_CHUNK_BYTES);
+/* (port) network Forge's (port/linux/game/forge_net_protocol.h: struct
+forge_net_lobby_message, both ways) */
+DEFINE_NETWORK_GAME_MESSAGE(message_client_forge, sizeof(struct forge_net_lobby_message));
+DEFINE_NETWORK_GAME_MESSAGE(message_server_forge, sizeof(struct forge_net_lobby_message));
+/* (port) the game's rules (port/linux/game/infection_net.h: struct
+game_rules_net_message, both ways) */
+DEFINE_NETWORK_GAME_MESSAGE(message_client_game_rules, sizeof(struct game_rules_net_message));
+DEFINE_NETWORK_GAME_MESSAGE(message_server_game_rules, sizeof(struct game_rules_net_message));
+/* (port) the flaming helmet's proofs (port/linux/game/flame_net.h: struct
+flame_net_message, both ways) */
+DEFINE_NETWORK_GAME_MESSAGE(message_client_flame, sizeof(struct flame_net_message));
+DEFINE_NETWORK_GAME_MESSAGE(message_server_flame, sizeof(struct flame_net_message));
+/* (port) a joiner's party's team token (port/linux/game/party_net.h:
+struct party_net_message) */
+DEFINE_NETWORK_GAME_MESSAGE(message_client_party, sizeof(struct party_net_message));
 
 #undef DEFINE_NETWORK_GAME_MESSAGE
 
@@ -582,6 +615,50 @@ static struct network_game_message_packet_definitions data_0030aa68 =
 	},
 	NETWORK_GAME_MESSAGE_DEFINITION(server_map_download_data, "message_server_map_download_data_packet", message_server_map_download_data),
 	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 4),
+		DATA_PACKET_FIELD(_data_packet_field_longs, 4),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, FORGE_NET_MAXIMUM_PACKS * FORGE_NET_PACK_BYTES + FORGE_NET_TITLE_SIZE),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(client_forge, "message_client_forge_packet", message_client_forge),
+	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 4),
+		DATA_PACKET_FIELD(_data_packet_field_longs, 4),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, FORGE_NET_MAXIMUM_PACKS * FORGE_NET_PACK_BYTES + FORGE_NET_TITLE_SIZE),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(server_forge, "message_server_forge_packet", message_server_forge),
+	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_longs, 3),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(client_game_rules, "message_client_game_rules_packet", message_client_game_rules),
+	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_longs, 3),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(server_game_rules, "message_server_game_rules_packet", message_server_game_rules),
+	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, FLAME_NET_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(client_flame, "message_client_flame_packet", message_client_flame),
+	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, FLAME_NET_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(server_flame, "message_server_flame_packet", message_server_flame),
+	{
+		DATA_PACKET_FIELD(_data_packet_field_shorts, 2),
+		DATA_PACKET_FIELD(_data_packet_field_bytes, PARTY_NET_TOKEN_BYTES),
+		DATA_PACKET_FIELD_END,
+	},
+	NETWORK_GAME_MESSAGE_DEFINITION(client_party, "message_client_party_packet", message_client_party),
+	{
 		{ 0, 0, &data_0030aa68.client_broadcast_game_search },
 		{ 0, 0, &data_0030aa68.client_ping },
 		{ 1, 0, &data_0030aa68.server_game_advertise },
@@ -620,10 +697,17 @@ static struct network_game_message_packet_definitions data_0030aa68 =
 		{ 3, 0, &data_0030aa68.client_map_download },
 		{ 2, 0, &data_0030aa68.server_map_download_answer },
 		{ 2, 0, &data_0030aa68.server_map_download_data },
+		{ 3, 0, &data_0030aa68.client_forge },
+		{ 2, 0, &data_0030aa68.server_forge },
+		{ 3, 0, &data_0030aa68.client_game_rules },
+		{ 2, 0, &data_0030aa68.server_game_rules },
+		{ 3, 0, &data_0030aa68.client_flame },
+		{ 2, 0, &data_0030aa68.server_flame },
+		{ 3, 0, &data_0030aa68.client_party },
 	},
 	{
 		"network_game_messages_group",
-		38,
+		NUMBER_OF_NETWORK_GAME_MESSAGE_TYPES,
 		8,
 		/* the per-tick update of 128 players decodes to 0x1010 bytes */
 		HALO_PORT_NETWORK_PACKET_SIZE,
@@ -659,7 +743,9 @@ static short const network_game_message_structure_sizes[NUMBER_OF_NETWORK_GAME_M
 	sizeof(message_server_graceful_game_exit_postgame), sizeof(message_client_remove_player_request_postgame),
 	sizeof(message_client_switch_to_pregame), sizeof(message_client_graceful_game_exit_postgame),
 	sizeof(message_client_map_download), sizeof(message_server_map_download_answer),
-	sizeof(message_server_map_download_data),
+	sizeof(message_server_map_download_data), sizeof(message_client_forge), sizeof(message_server_forge),
+	sizeof(message_client_game_rules), sizeof(message_server_game_rules),
+	sizeof(message_client_flame), sizeof(message_server_flame), sizeof(message_client_party),
 };
 
 /* port: whether a type's packet definition holds more than its structure
@@ -915,6 +1001,33 @@ void *create_network_game_message(
 		break;
 	case _message_server_map_download_data:
 		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_map_download_data));
+		break;
+
+	case _message_client_forge:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_client_forge));
+		break;
+
+	case _message_server_forge:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_forge));
+		break;
+
+	case _message_client_game_rules:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_client_game_rules));
+		break;
+
+	case _message_server_game_rules:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_game_rules));
+		break;
+
+	case _message_client_flame:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_client_flame));
+		break;
+
+	case _message_server_flame:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_server_flame));
+		break;
+	case _message_client_party:
+		match_assert(__FILE__, __LINE__, message_struct_size==sizeof(message_client_party));
 		break;
 	default:
 #line 213 "c:\\halo\\SOURCE\\networking\\network_messages.c"

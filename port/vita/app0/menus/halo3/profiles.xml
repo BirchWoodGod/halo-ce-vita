@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style SELECT PROFILE (Menu style Halo 3): it stands for the Xbox's campaign profile
+screen (ui\shell\main_menu\load_campaign_player_profile, which CAMPAIGN opens; profiles_coop.xml
+for the screen inside it, which the settings panel's Host co-op campaign opens) and, with
+customize.xml, for the settings' (player_profile_select_screen, CUSTOMIZATION). It does what they
+do with the game's own functions (menu_functions.c "port h3 profile ...": the Xbox's 3-wide list,
+its "3wide plyr prof set for game", "create&edit player profile" and "final del player profile"),
+laid out as Halo 3's panels: the profiles at the left, each with its colour, then CREATE NEW
+PROFILE; the chosen one's card at the right (its colour, name, current level, difficulty and
+controls, as the Xbox's card); Cross plays it (the campaign lobby: halo3/campaign.xml), Square
+deletes it after a question, Triangle makes a new one. A profile whose file is damaged is said
+to be so, and is not played. The art is this folder's own (tools/halo3_menu_art.py: the colour
+swatches are the game's colours). -->
+<menus root="h3/profiles/screen" replaces="ui\shell\main_menu\load_campaign_player_profile">
+	<!-- (a profile's colour: frame 0 none - the host picks one -, then the game's eighteen in its
+	order: menu_functions.c h3_swatch_frame) -->
+	<bitmap name="h3/swatch">
+		<frame png="halo3/swatch_random.png" width="16" height="16"/>
+		<frame png="halo3/swatch_00.png" width="16" height="16"/>
+		<frame png="halo3/swatch_01.png" width="16" height="16"/>
+		<frame png="halo3/swatch_02.png" width="16" height="16"/>
+		<frame png="halo3/swatch_03.png" width="16" height="16"/>
+		<frame png="halo3/swatch_04.png" width="16" height="16"/>
+		<frame png="halo3/swatch_05.png" width="16" height="16"/>
+		<frame png="halo3/swatch_06.png" width="16" height="16"/>
+		<frame png="halo3/swatch_07.png" width="16" height="16"/>
+		<frame png="halo3/swatch_08.png" width="16" height="16"/>
+		<frame png="halo3/swatch_09.png" width="16" height="16"/>
+		<frame png="halo3/swatch_10.png" width="16" height="16"/>
+		<frame png="halo3/swatch_11.png" width="16" height="16"/>
+		<frame png="halo3/swatch_12.png" width="16" height="16"/>
+		<frame png="halo3/swatch_13.png" width="16" height="16"/>
+		<frame png="halo3/swatch_14.png" width="16" height="16"/>
+		<frame png="halo3/swatch_15.png" width="16" height="16"/>
+		<frame png="halo3/swatch_16.png" width="16" height="16"/>
+		<frame png="halo3/swatch_17.png" width="16" height="16"/>
+		<frame png="halo3/swatch_18.png" width="16" height="16"/>
+		<frame png="halo3/swatch_19.png" width="16" height="16"/>
+		<frame png="halo3/swatch_20.png" width="16" height="16"/>
+		<frame png="halo3/swatch_21.png" width="16" height="16"/>
+		<frame png="halo3/swatch_22.png" width="16" height="16"/>
+		<frame png="halo3/swatch_23.png" width="16" height="16"/>
+		<frame png="halo3/swatch_24.png" width="16" height="16"/>
+		<frame png="halo3/swatch_25.png" width="16" height="16"/>
+		<frame png="halo3/swatch_26.png" width="16" height="16"/>
+		<frame png="halo3/swatch_27.png" width="16" height="16"/>
+		<frame png="halo3/swatch_28.png" width="16" height="16"/>
+		<frame png="halo3/swatch_29.png" width="16" height="16"/>
+		<frame png="halo3/swatch_30.png" width="16" height="16"/>
+		<frame png="halo3/swatch_31.png" width="16" height="16"/>
+		<frame png="halo3/swatch_32.png" width="16" height="16"/>
+		<frame png="halo3/swatch_33.png" width="16" height="16"/>
+		<frame png="halo3/swatch_34.png" width="16" height="16"/>
+		<frame png="halo3/swatch_35.png" width="16" height="16"/>
+		<frame png="halo3/swatch_36.png" width="16" height="16"/>
+		<frame png="halo3/swatch_37.png" width="16" height="16"/>
+		<frame png="halo3/swatch_38.png" width="16" height="16"/>
+		<frame png="halo3/swatch_39.png" width="16" height="16"/>
+		<frame png="halo3/swatch_40.png" width="16" height="16"/>
+		<frame png="halo3/swatch_41.png" width="16" height="16"/>
+	</bitmap>
+	<!-- the panel, with a window at the card's lower right where the focused profile's Spartan
+	stands (tools/halo3_menu_art.py) -->
+	<bitmap name="h3/profiles_panel">
+		<frame png="halo3/profiles_panel.png" width="256" height="256"/>
+	</bitmap>
+	<strings name="h3/profile_text">
+		<string text="SELECT PROFILE"/>
+		<string text="Choose the profile to play the campaign with."/>
+		<string text="CUSTOMIZATION"/>
+		<string text="Choose the profile to customize."/>
+		<string text="Delete"/>
+		<string text="New Profile"/>
+		<string text="CURRENT LEVEL"/>
+		<string text="DIFFICULTY"/>
+		<string text="CONTROLS"/>
+		<string text="DELETE PROFILE"/>
+		<string text="CANCEL"/>
+		<string text="Changes are saved to the profile when you go back."/>
+		<string text="Change"/>
+	</strings>
+
+	<!-- the list: ten rows (they scroll past ten: menu_functions.c h3_profiles_update), each the
+	profile's colour, its name and DAMAGED for a file that cannot be read; the last item CREATE NEW
+	PROFILE. A row's Cross plays the profile (the campaign) or edits it (CUSTOMIZATION): the
+	screen's mode picks, the other's handler fails -->
+	<widget name="h3/profiles/row_swatch" left="6" top="2" width="16" height="16" bitmap="h3/swatch"/>
+	<widget name="h3/profiles/row_name" type="text" left="30" top="0" width="190" height="20" font="h3/font_item" color="#FFE6ECF2" text_y="2"/>
+	<widget name="h3/profiles/row_note" type="text" left="200" top="0" width="84" height="20" align="right" font="h3/font_small" color="#FFF0B070" text_y="3"/>
+	<widget name="h3/profiles/row_1" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 profile play" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen"/>
+		<on event="a start" run="port h3 profile edit" open="h3/custom/screen"/>
+		<child widget="h3/profiles/row_swatch"/>
+		<child widget="h3/profiles/row_name"/>
+		<child widget="h3/profiles/row_note"/>
+	</widget>
+	<widget name="h3/profiles/row_2" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 profile play" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen"/>
+		<on event="a start" run="port h3 profile edit" open="h3/custom/screen"/>
+		<child widget="h3/profiles/row_swatch"/>
+		<child widget="h3/profiles/row_name"/>
+		<child widget="h3/profiles/row_note"/>
+	</widget>
+	<widget name="h3/profiles/row_3" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 profile play" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen"/>
+		<on event="a start" run="port h3 profile edit" open="h3/custom/screen"/>
+		<child widget="h3/profiles/row_swatch"/>
+		<child widget="h3/profiles/row_name"/>
+		<child widget="h3/profiles/row_note"/>
+	</widget>
+	<widget name="h3/profiles/row_4" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 profile play" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen"/>
+		<on event="a start" run="port h3 profile edit" open="h3/custom/screen"/>
+		<child widget="h3/profiles/row_swatch"/>
+		<child widget="h3/profiles/row_name"/>
+		<child widget="h3/profiles/row_note"/>
+	</widget>
+	<widget name="h3/profiles/row_5" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 profile play" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen"/>
+		<on event="a start" run="port h3 profile edit" open="h3/custom/screen"/>
+		<child widget="h3/profiles/row_swatch"/>
+		<child widget="h3/profiles/row_name"/>
+		<child widget="h3/profiles/row_note"/>
+	</widget>
+	<widget name="h3/profiles/row_6" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 profile play" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen"/>
+		<on event="a start" run="port h3 profile edit" open="h3/custom/screen"/>
+		<child widget="h3/profiles/row_swatch"/>
+		<child widget="h3/profiles/row_name"/>
+		<child widget="h3/profiles/row_note"/>
+	</widget>
+	<widget name="h3/profiles/row_7" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 profile play" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen"/>
+		<on event="a start" run="port h3 profile edit" open="h3/custom/screen"/>
+		<child widget="h3/profiles/row_swatch"/>
+		<child widget="h3/profiles/row_name"/>
+		<child widget="h3/profiles/row_note"/>
+	</widget>
+	<widget name="h3/profiles/row_8" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 profile play" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen"/>
+		<on event="a start" run="port h3 profile edit" open="h3/custom/screen"/>
+		<child widget="h3/profiles/row_swatch"/>
+		<child widget="h3/profiles/row_name"/>
+		<child widget="h3/profiles/row_note"/>
+	</widget>
+	<widget name="h3/profiles/row_9" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 profile play" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen"/>
+		<on event="a start" run="port h3 profile edit" open="h3/custom/screen"/>
+		<child widget="h3/profiles/row_swatch"/>
+		<child widget="h3/profiles/row_name"/>
+		<child widget="h3/profiles/row_note"/>
+	</widget>
+	<widget name="h3/profiles/row_10" width="290" height="20" bitmap="h3/row">
+		<on event="a start" run="port h3 profile play" open="ui\shell\main_menu\solo_level_select\solo_level_select_screen"/>
+		<on event="a start" run="port h3 profile edit" open="h3/custom/screen"/>
+		<child widget="h3/profiles/row_swatch"/>
+		<child widget="h3/profiles/row_name"/>
+		<child widget="h3/profiles/row_note"/>
+	</widget>
+	<widget name="h3/profiles/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 profiles"/>
+		<on event="left_trigger" run="port h3 profile page up"/>
+		<on event="right_trigger" run="port h3 profile page down"/>
+		<child widget="h3/profiles/row_1" x="52" y="102"/>
+		<child widget="h3/profiles/row_2" x="52" y="124"/>
+		<child widget="h3/profiles/row_3" x="52" y="146"/>
+		<child widget="h3/profiles/row_4" x="52" y="168"/>
+		<child widget="h3/profiles/row_5" x="52" y="190"/>
+		<child widget="h3/profiles/row_6" x="52" y="212"/>
+		<child widget="h3/profiles/row_7" x="52" y="234"/>
+		<child widget="h3/profiles/row_8" x="52" y="256"/>
+		<child widget="h3/profiles/row_9" x="52" y="278"/>
+		<child widget="h3/profiles/row_10" x="52" y="300"/>
+	</widget>
+
+	<!-- the chosen profile's card (the Xbox's: its colour, name, the level after the highest it
+	finished, that one's difficulty, its controls), or what CREATE NEW PROFILE and a damaged file
+	mean (info_text); at its right, in the panel's window (h3/profiles/panel), the profile's Spartan
+	in its colour and player model (menu_functions.c h3_profiles_spartan: the scene packs' Spartan,
+	as CUSTOMIZATION's preview, in front of the screen's camera, the editor's), following the focus;
+	none for CREATE NEW PROFILE, a damaged file, the scenes off or no pack (the swatch stays) -->
+	<widget name="h3/profiles/panel" left="40" top="40" width="560" height="400" bitmap="h3/profiles_panel"/>
+	<widget name="h3/profiles/info_swatch" left="368" top="104" width="40" height="40" bitmap="h3/swatch"/>
+	<widget name="h3/profiles/info_name" type="text" left="418" top="110" width="172" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/profiles/info_level_label" type="text" left="368" top="156" width="116" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/profile_text" string_index="6"/>
+	<widget name="h3/profiles/info_level" type="text" left="368" top="172" width="116" height="38" font="h3/font_item" color="#FFAABED6" text_y="2"/>
+	<widget name="h3/profiles/info_skill_label" type="text" left="368" top="214" width="116" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/profile_text" string_index="7"/>
+	<widget name="h3/profiles/info_skill" type="text" left="368" top="230" width="116" height="20" font="h3/font_item" color="#FFAABED6" text_y="2"/>
+	<widget name="h3/profiles/info_controls_label" type="text" left="368" top="256" width="116" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/profile_text" string_index="8"/>
+	<widget name="h3/profiles/info_controls" type="text" left="368" top="272" width="116" height="38" font="h3/font_item" color="#FFAABED6" text_y="2"/>
+	<widget name="h3/profiles/info_text" type="text" left="368" top="156" width="220" height="140" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/profiles/status" type="text" left="52" top="340" width="536" height="34" font="h3/font_small" color="#FFF0B070" text_y="1"/>
+
+	<!-- the buttons: Cross Select, Circle Back, Square Delete, Triangle New Profile (the icons are
+	named as the game's keys, a tap presses them: x_butn is the Xbox's X, the Vita's Square) -->
+	<widget name="h3/profiles/x_butn" left="240" top="422" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="h3/profiles/delete" type="text" left="260" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/profile_text" string_index="4"/>
+	<widget name="h3/profiles/y_butn" left="334" top="422" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="h3/profiles/new" type="text" left="354" top="421" width="120" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/profile_text" string_index="5"/>
+
+	<widget name="h3/profiles/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/profile_text" string_index="0"/>
+	<widget name="h3/profiles/subtitle" type="text" left="52" top="72" width="536" height="16" font="h3/font_small" color="#FFCFD9E3" string_list="h3/profile_text" string_index="1"/>
+	<!-- (the campaign's: CAMPAIGN, the Xbox's load_campaign_player_profile; behind it the
+	editor's camera, customize.xml's h3/custom/screen, in ui.map's multiplayer point, for the card's
+	Spartan; gone, the Spartan goes with it) -->
+	<widget name="h3/profiles/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 25 0">
+		<on event="created" run="port h3 profiles campaign"/>
+		<on event="created" run="port h3 scene"/>
+		<on event="deleted" run="port h3 profiles close"/>
+		<on event="b back" back="true"/>
+		<on event="x" run="port h3 profile delete ask" open="h3/profdel/screen"/>
+		<on event="y" run="port h3 profile create"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/profiles/panel"/>
+		<child widget="h3/profiles/title"/>
+		<child widget="h3/profiles/subtitle"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/profiles/info_swatch"/>
+		<child widget="h3/profiles/info_name"/>
+		<child widget="h3/profiles/info_level_label"/>
+		<child widget="h3/profiles/info_level"/>
+		<child widget="h3/profiles/info_skill_label"/>
+		<child widget="h3/profiles/info_skill"/>
+		<child widget="h3/profiles/info_controls_label"/>
+		<child widget="h3/profiles/info_controls"/>
+		<child widget="h3/profiles/info_text"/>
+		<child widget="h3/profiles/status"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/profiles/x_butn"/>
+		<child widget="h3/profiles/delete"/>
+		<child widget="h3/profiles/y_butn"/>
+		<child widget="h3/profiles/new"/>
+		<child widget="h3/profiles/list"/>
+	</widget>
+
+	<!-- Square's question, a Halo 3 dialog: CANCEL first (focused), then DELETE PROFILE, which
+	deletes it as the Xbox's "final del player profile" does; both go back to the list -->
+	<widget name="h3/profdel/panel" left="120" top="150" width="400" height="180" bitmap="h3/panel"/>
+	<widget name="h3/profdel/title" type="text" left="132" top="156" width="376" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/profile_text" string_index="9"/>
+	<widget name="h3/profdel/rule" left="120" top="184" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/profdel/question" type="text" left="132" top="194" width="376" height="40" font="h3/font_small" color="#FFCFD9E3">
+		<data input="port h3 profile delete text"/>
+	</widget>
+	<widget name="h3/profdel/op_cancel" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/profile_text" string_index="10">
+		<on event="a start" back="true"/>
+	</widget>
+	<widget name="h3/profdel/op_delete" type="text" width="376" height="20" bitmap="h3/item" font="h3/font_item" color="#FFF2F6FA" text_x="10" text_y="3" string_list="h3/profile_text" string_index="9">
+		<on event="a start" run="port h3 profile delete" back="true"/>
+	</widget>
+	<widget name="h3/profdel/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/profdel/op_cancel" x="132" y="250"/>
+		<child widget="h3/profdel/op_delete" x="132" y="274"/>
+	</widget>
+	<widget name="h3/profdel/strip" left="120" top="310" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/profdel/a_butn" left="132" top="312" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/profdel/select" type="text" left="152" top="311" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
+	<widget name="h3/profdel/b_butn" left="226" top="312" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/profdel/back" type="text" left="246" top="311" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<widget name="h3/profdel/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/profdel/panel"/>
+		<child widget="h3/profdel/title"/>
+		<child widget="h3/profdel/rule"/>
+		<child widget="h3/profdel/question"/>
+		<child widget="h3/profdel/strip"/>
+		<child widget="h3/profdel/a_butn"/>
+		<child widget="h3/profdel/select"/>
+		<child widget="h3/profdel/b_butn"/>
+		<child widget="h3/profdel/back"/>
+		<child widget="h3/profdel/list"/>
+	</widget>
+</menus>

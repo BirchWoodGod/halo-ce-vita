@@ -48,6 +48,10 @@ struct posix_file_information
 /* stat()/fstat(); return 0 on success or -1 with errno set */
 int posix_stat(const char *path, struct posix_file_information *information);
 int posix_fstat(int descriptor, struct posix_file_information *information);
+/* 1 when `path` is a symbolic link (or a Windows reparse point) itself, not
+followed: the mod manager deletes the link, never what it points at
+(port/linux/game/mod_manager.c); 0 otherwise (the Vita has none) */
+int posix_is_link(const char *path);
 
 /* set access and modification times; a zero seconds value leaves it alone */
 int posix_set_file_times(const char *path,

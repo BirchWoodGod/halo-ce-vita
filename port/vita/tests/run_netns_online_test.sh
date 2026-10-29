@@ -96,6 +96,14 @@
 #            again, drop the joiner's link, take its listing off the
 #            broker's slot and publish none after; the bots must play; none
 #            of the three may list, reach or join the Split Screen game
+#   vitapc     the port's PC build tags itself (Oct 20 2026): its public game
+#            (HALO_TEST_PLATFORM=pc) and a Vita's, a Vita's browser lists
+#            them VITA (PC) and VITA and joins the PC build's; with
+#            HALO_TEST_VITA_OLD (a build of before the tags) an older
+#            browser lists both (as VITA) and joins the PC build's too
+#   vitaonly   Who can join: a Vita's game for Vita refuses the PC build
+#            ("This game is for PS Vitas only"), marked VITAS ONLY in its
+#            browser, and takes a Vita; one for Vita PC takes both
 #   unjoinable a game listed that cannot be joined (Oct 8 2026: beta.1 and
 #            beta.2 hosts list their Split Screen and bots games; joining one
 #            bounced from the System Link search to the menus, 8 times): the
@@ -119,16 +127,85 @@
 #            chosen); the joiner finds it in the server browser
 #   menus    lobby, joined from OpenCE's multiplayer screens (menu_tags.c):
 #            the joiner (its maps folder HALO_TEST_DATA_MENUS, with the Halo
-#            PC bitmaps.map and loc.map) presses Multiplayer, INTERNET (the
-#            server browser), A on the host's row, then on the System Link
-#            screen the profile and the game (HALO_TEST_PAD)
+#            PC bitmaps.map and loc.map) presses Multiplayer, INTERNET: the
+#            profile first (as SYSTEM LINK and CREATE GAME), then the server
+#            browser, A on the host's row; then the System Link list at once,
+#            the host's game joined by itself (HALO_TEST_PAD)
 #   menuspw  the same with a password (HALO_TEST_LOBBY_PASSWORD), typed on
 #            the password screen (HALO_TEST_TEXT_INPUT)
+#   menusjoinpress  menus, Cross pressed again at once and a second on (as the
+#            Vita's large PC game question's answer reached the game, Neff,
+#            1.1.1 RC6): the System Link list the join opens, empty until the
+#            host is reached, must host nothing (it hosted and published a
+#            game of the joiner's own, and the join was lost); run it with a
+#            slow host link (HALO_TEST_NETEM="delay 400ms 50ms") to have the
+#            presses land before the host's game is listed
+#   onlinebrowser  the Menu style ElDewrito (online) SERVER BROWSER: the
+#            joiner's main menu SERVER BROWSER, A on the host's row (a
+#            Vita's public game) and Cross again twice; joined from the games
+#            browser once its host is reached, nothing hosted or published
+#   onlinebrowserded  the same with a dedicated server's game, a player in it
+#            first (HALO_TEST_OB_PLAYER=0: none)
+#   onlinebrowsertab  onlinebrowser, the browser's network switched first (R:
+#            SYSTEM LINK, AD HOC, ONLINE again) and A pressed once: joined
+#            at once (1.1.1 RC8: the main menu ticked under the new search
+#            client, whose connection a client tick's message to no host
+#            closed, so the first join's request was never sent: CONNECTION
+#            LOST; picked again, it joined)
 #   browserscroll  the server browser's scrolling and sorts, its game joined by itself
 #            (browser_list.h): 20 made-up games beside the host's
 #            (HALO_TEST_BROWSER_GAMES, test builds only); down past the twelve
 #            rows, a page down (rt), Y sorts by name (the host's VitaHost
 #            last), up on the first game wraps to it, A joins it and plays
+#   pickjoin menushost, the host staying on the map list a minute
+#            (HALO_TEST_PICK_WAIT, ms): its game open from its server's start,
+#            the joiner's join (the server browser) held meanwhile - nothing of
+#            the game sent, no map copied - and answered once the host chooses
+#            the map (network_game_server_port_map_pending); then played
+#   infection  code, the host's game Infection (port/linux/game/infection.c) on
+#            Prisoner (HALO_TEST_HOST_GAME), two joiners behind NATs of their
+#            own (three players: one first zombie), a round of two minutes; the
+#            host's scripted kills (one every 20 s) turn a human now and then.
+#            The host must ask each joiner whether it plays Infection
+#            (infection_net.c) and have both answer; every machine must log the
+#            game's end with the same winner (the humans left on time, or the
+#            zombies), each joiner hear of every player the host turned ("the
+#            host says NAME is a zombie"), and its players'
+#            teams each second (t0 zombies, t1 humans) agree with the host's at
+#            the same tick, 90% of the samples at least (a side changes at a
+#            death, a client hears of it a moment later)
+#   infectionold  the same with one joiner of an older build: HALO_TEST_VITA_JOINER
+#            (one before Infection: refused), else this build with
+#            HALO_GAME_RULES_NET=0 (it does not answer, as an older build): the
+#            host must refuse it from the Infection game within seconds, and it
+#            must never play it
+#   h3live  the Halo 3 live lobby (HALO_TEST_PROFILE): the host opens MULTIPLAYER on SYSTEM
+#            LINK, its lobby's game open at once; a joiner on its LAN joins it from BROWSE GAMES
+#            before START GAME; the host changes MAP (Blood Gulch) and GAME (the next game type),
+#            the joiner's lobby following each; START GAME takes both into the game (the joiner
+#            copies Blood Gulch, the countdown at once). HALO_TEST_VITA_JOINER=an older build
+#            (v1.1.0's): it joins by the network test's System Link join in its own menus and must
+#            follow and play the same
+#   h3liveleave  the same, the host leaving its lobby (B) once the joiner is in: the joiner told
+#            the host left, back at the menus
+#   h3liveagain  h3live's game short (5 kills): the host back in its live lobby after it, not the
+#            Xbox's map choice, the joiner still in its game; START GAME again: a second game
+#   h3liveinvite  the host's live lobby on ONLINE, private: L (INVITE FRIENDS) invites its friend
+#            (the codes through files), who accepts at the menus and lands in the lobby; START
+#            GAME: the two play; the lobby and its game never listed; END GAME: the joiner told
+#            "The online game has closed down."
+#   h3livebots  (RC6, Cass) the host alone with its Bots online (full): its live lobby on
+#            ONLINE, GAME Infection (HALO_TEST_LIVEBOTS_GAME=infection, the picker's last; slayer:
+#            the lobby's own); START GAME, the bots in, Cross: the countdown and the game started,
+#            the bots its only company (Infection's lobby has everyone on the humans' team)
+#   h3liveprivate  the live lobby private by default: the host's lobby on ONLINE with the
+#            settings panel's Visibility Public (the shipped default) is not listed; its
+#            friend joins it from presence in one press, no code; GAME OPTIONS (Square) and its
+#            START GAME with VISIBILITY PUBLIC lists it, and the two play
+#   h3pickjoin the same from the Halo 3 menus (h3online's copies), where there
+#            is no map list after the server starts: its map is the lobby's,
+#            set as it starts, so no join is ever held (0 held) and the joiner
+#            joins the host's lobby during its minute there
 #   menushost the host creates its game from the menus: Multiplayer, CREATE
 #            GAME INTERNET, Server Setup (its name typed, Max players,
 #            public), START GAME, the profile, the map and the gametype; the
@@ -141,6 +218,62 @@
 #            round trip on both sides before (the joiner its own, the host
 #            the joiner's), both must say "connection problem" in the
 #            blackout and recover after it, and the game play on
+#   anticheatlag  code, honest players on a poor link (HALO_TEST_NETEM, "delay
+#            150ms 50ms loss 2%" on both sides by default: a 300 ms round trip,
+#            100 ms of jitter each way, one datagram in 50 lost) in one long
+#            game: both aim at each other and fire (HALO_NETWORK_TEST_AIM,
+#            real shots, reloads, empty weapons, corners) and land a shot every
+#            HALO_TEST_SHOOT seconds (3, debug.network_test_shoot) after the
+#            host brings them together. The host's anti-cheat
+#            (network_anticheat.c) must drop no one and count nothing that only
+#            a modified client sends (forged hits, hits of a weapon not held);
+#            what it counted is shown, and the host's net-tick timing
+#            (HALO_TICK_PROFILE=1: the hit checks and the moves' wall test)
+#   anticheat  code, the joiner a modified client (HALO_NETWORK_TEST_CHEAT:
+#            HALO_TEST_CHEAT, "damage,fly" by default: hits ten times as hard
+#            as its weapon deals, its player held in the air; "wall", "ammo"
+#            too; "ammo": its weapon never empties, its trigger pressed at
+#            the weapon's rate and its hits landed when it sees the other
+#            player, the host keeping its copies of the clients' weapons dry,
+#            HALO_NETWORK_TEST_DRAIN, as a client's that fired them all are:
+#            alone, its drop must be for an empty weapon's hits): the host
+#            must drop it (every machine told, a line in
+#            cheaters.txt) within HALO_TEST_KICK_WITHIN seconds of the game's
+#            start (60; 90 with "ammo"), and refuse it when it joins again
+#            by the code (HALO_NETWORK_TEST_RETRY; it plays
+#            HALO_TEST_CHEAT_SECONDS, 30 more than that);
+#            then, the modified client gone, a new
+#            run of the game on its machine (a new internet play identity: a
+#            new stand-in address) joins by the code and must be refused too,
+#            kept out by its real address and hardware id for
+#            network.anticheat_ban_minutes
+#   hostfuzzmap  hostfuzz on a Custom Edition map (HALO_TEST_CE_MAP, the
+#            Halo PC resource maps of HALO_TEST_DATA_MENUS) the joiner lacks:
+#            it downloads it (map sharing's messages, 35, twinned; not in all)
+#   hostfuzzforge  hostfuzz on a network Forge game: the joiner places,
+#            moves, deletes and undoes objects, and sends volleys of malformed,
+#            replayed and too many requests; its Forge answer (38) and requests
+#            twinned too (not in all)
+#   hostfuzzjoin  hostfuzz, and the joiner a fuzz build too
+#            (HALO_TEST_FUZZ_JOINER, the host's by default; build/linux/
+#            halo-fuzz-ub, UBSan alone, loads quicker) twinning one in
+#            HALO_TEST_FUZZ_JOIN_RATE (4) of what its host sends it
+#            (HALO_TEST_FUZZ_JOIN_KINDS, 0-255: the game's messages, the
+#            distributed netcode's objects, units, seats and weapons), on
+#            HALO_TEST_FUZZ_GAME (host:bloodgulch:slayer;
+#            host:sidewinder:team_slayer+vehicles for vehicles): neither may
+#            have a sanitizer memory error, crash or assertion, and the joiner
+#            must play on (not in all)
+#   hostfuzz the host's side fuzzed on the Vitas' own wire (not in all): the
+#            host HALO_TEST_FUZZ_HOST, an AddressSanitizer + UBSan
+#            HALO_NET_FUZZ_TWIN build, twins one in HALO_TEST_FUZZ_RATE (2) of
+#            what a Vita client sends it (its join and lobby packets, inputs,
+#            predictions, vehicle moves, hit reports - the joiner aims, fires
+#            and lands shots -, readiness, identity, the datagram batches),
+#            over internet play; its anti-cheat counts what the twins break
+#            and drops no one (HALO_NET_ANTICHEAT=false: the fuzz goes on).
+#            Passes with no sanitizer memory error, no crash and the host
+#            playing to its end
 #   lan      online off, both copies on one LAN (system link over Wi-Fi)
 #   uptime   lan, both machines up for 25 days (HALO_TEST_UPTIME_SECONDS,
 #            test builds only: 2^31 ms of a machine's uptime overflowed the
@@ -155,6 +288,92 @@
 #            readiness, hits and Discord user (which the host takes only
 #            over its connection). Both must drop them (logged), and the
 #            joiner's player go on moving on the host
+#   friends  friends (port/linux/src/p2p_friends.c): each copy writes its friend
+#            code to a file (HALO_TEST_FRIENDS code-file=), the host types the
+#            joiner's (add-file=), the joiner accepts; both must be friends,
+#            see each other online with what they do (the host's "Slayer on
+#            Blood Gulch", joinable: its game public), and the joiner join the
+#            host's game in one press from its presence (network test
+#            join-friend) and play; the broker must carry only the friends'
+#            hashed topics (hcev/f1/i/, hcev/f1/m/), nothing retained
+#   friendsdecline  the joiner declines: no friendship on either side,
+#            nothing sent back, the host's re-sent requests muted (asked once)
+#   friendsblock  the joiner blocks the host's request: the host's re-sent
+#            requests dropped as a blocked player's
+#   friendsprivate  friends, the host's game private (Oct 19 2026: "when I have
+#            a private lobby my friend should be able to join without a join
+#            code"): the joiner sees it joinable and joins it from presence
+#   friendsprivatepw  the same with a password: the joiner is asked for it
+#            (join-friend:<password> types it) and joins by the presence's
+#            sealed token, opened with it
+#   friendsinvite  the host's game is private (joinable from presence too);
+#            the host invites the joiner (invite-after=), whose invite
+#            pop-up is answered Accept (HALO_TEST_FRIENDS_ANSWER: friends_game.c)
+#            at the menus; the joiner joins the private game by it and plays
+#   friendsoffline  friends; the joiner appears offline at
+#            HALO_TEST_OFFLINE_AT seconds (70): the host must see it go offline
+#            at once and never online again, the joiner still see the host
+#   friendsforged  friends; the host sends its last message again as it was
+#            (replay-at=), then three forgeries (forge-at=: a flipped byte,
+#            another key's signature, another sender): the joiner must drop
+#            each, and nothing of them show
+#   friendsbackup  the friend code backup (p2p_friends_backup.inc): the host (Alpha) and
+#            the joiner (Bravo) become friends (codes through files); HALO_TEST_BACKUP_AT
+#            seconds in (45) Bravo backs up its code and friends list (backup=) with a
+#            password and quits at HALO_TEST_BACKUP_QUIT (70); a new machine, Charlie
+#            (behind a third NAT, a save of its own: its own code), is given the file and
+#            restores it 5 s in (restore=, confirmed): it must have Bravo's code and Alpha
+#            for a friend, and see Alpha online; Alpha, which saw Bravo go offline, must
+#            see that same friend online again (from Charlie), with no friend request
+#            from anyone new; no log, the broker's included, may hold the password
+#   friendsplayers  no codes typed (the owner: "Can I move the cursor over the player
+#            like on Halo 3 and add friend?"): the joiner joins the host's public game,
+#            and HALO_TEST_ADD_AT seconds in (25) its PLAYERS screen opens and adds the
+#            host's player (HALO_TEST_FRIENDS_PLAYERS: friends_game.c), as ADD FRIEND
+#            does: the joiner asks for the host's friend card over internet play (a
+#            nonce alone), the host answers with it signed, the joiner sends a friend
+#            request to it, the host accepts (HALO_TEST_FRIENDS accept): both friends
+#   friendsplayersoff  as friendsplayers, the host appearing offline: no card, no
+#            request, the joiner told none came
+#   friendsplayersnone  as friendsplayers, the host's friends off: the same
+#   party    the party (p2p_party.h): the host (Alpha, its game private) is friends
+#            with the joiner (Bravo) and a second joiner (Charlie, behind a third
+#            NAT); it invites both to a party (HALO_TEST_PARTY), each accepts at
+#            the invite's question (HALO_TEST_PARTY_ANSWER), and the leader's
+#            FOLLOW takes both into its game through its invite's own join: both
+#            must play it. Alpha's chat (cleaned of its markup) and Charlie's
+#            quick chat reach the others, Charlie shown to Bravo with his code
+#            (not Bravo's friend); the broker sees no name or chat; then Alpha
+#            leaves the party and the longest-standing member (the first to
+#            join) leads on both
+#   chat     the in-game chat (port/linux/game/game_chat.c) among three machines, each
+#            behind a NAT of its own: party's three (Alpha hosting Team Slayer
+#            on Blood Gulch, Bravo, Charlie, the party's FOLLOW taking them into
+#            it), each machine's scripted lines (HALO_TEST_CHAT) to ALL, TEAM
+#            (heard by the sender's team alone, as each machine logs the teams)
+#            and PARTY (the friends channel, shown over the game), a quick chat
+#            phrase from the wheel's presses and one by number (shown in each
+#            reader's language), a typed line (the keyboard answered by the
+#            test); Bravo mutes Charlie (hidden on Bravo alone); Bravo's chat
+#            filter off, Charlie's on: Alpha's lines with a slur of the list
+#            (made from port/vita/app0/chat/filter.txt at run time, in leet)
+#            shown as sent on Bravo, masked on Charlie, who mutes Alpha after
+#            the third; Bravo's flood (12 at once: the host takes 5 and tells
+#            it), malformed lines (the host drops each and shows none) and a
+#            link (refused before it is sent); the broker sees no line
+#   partyfollow  the party follows its leader through the Halo 3 lobby (insider.21's
+#            4-Vita session, Oct 21 2026): the leader (Alpha, Menu style Halo 3, its
+#            profile) and two members (Bravo, Charlie, at their main menus, their
+#            profile chosen once) friends; Alpha's lobby on ONLINE, then OFFLINE; its
+#            party made (HALO_TEST_PARTY): the lobby back on ONLINE by itself (a party
+#            plays online), live, and both members in it within PARTY_FOLLOW_BOUND
+#            seconds (8) of its follow; Alpha leaves the lobby (B): both told Alpha
+#            is back in the menus, never "can't be reached online", no error for the
+#            game closed; MULTIPLAYER again: the lobby hosted again (the same
+#            invite) and both members in the new game within the bound; then
+#            Alpha's BROWSE GAMES joins a dedicated server's public game (a
+#            fourth NAT, its port forwarded): both members follow it there
+#            within PARTY_FOLLOW_JOIN_BOUND seconds (15; a new peer reached)
 #   adhoc    online off, ad hoc on: the two machines' only link to each other
 #            is an emulated ad hoc group (HALO_NET_ADHOC_EMULATE)
 #   many     online off, the host and HALO_TEST_JOINERS joiners (3) on one
@@ -209,6 +428,120 @@
 #            and no copy may log an assertion of the camera's observer
 #            (soft or fatal) or crash; a build with assertions compiled out
 #            proves nothing here
+#   h3coopmenu co-op from the Halo 3 menus (Menu style Halo 3, both copies
+#            with the Halo PC files, HALO_TEST_DATA_MENUS, the host with
+#            HALO_TEST_PROFILE's profile; skipped without), over system link
+#            on one LAN (online off): the host's campaign lobby, NETWORK:
+#            SYSTEM LINK CO-OP, START GAME; the joiner's MULTIPLAYER, the Halo
+#            3 lobby (SYSTEM LINK), BROWSE GAMES, the System Link list, the
+#            game joined. Both must play the level together
+#   h3lan    system link from the Halo 3 menus (Menu style Halo 3, both copies
+#            with the Halo PC files, HALO_TEST_DATA_MENUS; skipped without), on
+#            one LAN (online off): the host's MULTIPLAYER, the Halo 3 lobby on
+#            SYSTEM LINK, START GAME (the profile, then the game's lobby: the
+#            lobby's GAME and MAP, no map or game type list); the joiner's MULTIPLAYER, BROWSE GAMES, the
+#            profile, the Halo 3 LAN browser (no System Link list), the host's
+#            game listed (its name, map, game type and players) and joined with
+#            A; the host starts it, and both must play it
+#   h3mppause the Halo 3 multiplayer pause (halo3/mppause.xml, standing for the
+#            Xbox's 1p_pause_game) in a system link Slayer game on one LAN
+#            (both copies Menu style Halo 3 with the Halo PC files,
+#            HALO_TEST_DATA_MENUS, and HALO_TEST_PROFILE's profile played:
+#            HALO_NETWORK_TEST_PROFILE; skipped without): the joiner's Start
+#            opens it - its rows RESUME, PLAYERS, SETTINGS, LEAVE GAME -,
+#            PLAYERS opens the roster and Circle comes back, SETTINGS its
+#            profile's controls, LEAVE GAME its question (Circle back, then
+#            Cross: the Xbox's quit, the joiner at the menus); the host's has
+#            END GAME, its question, and ends the game for a second joiner
+#            too (there to keep the game going once the first has left: a
+#            game left with one player, or one team, ends). Neither
+#            pauses the game (its ticks go on); a team game's pause (no CHANGE
+#            TEAMS) is run_menus_test.sh h3mppause's. HALO_TEST_SHOTS: the copies' screenshots
+#            at the Vita's 960x544 kept there
+#   h3scoreboard the Halo 3 SCOREBOARD (halo3/scoreboard.xml) in an online game: a Vita host
+#            (Team Slayer on Blood Gulch, Bots online 2: two bots on the teams) and two
+#            joiners by its code, every copy Menu style Halo 3 with the Halo PC files
+#            (HALO_TEST_DATA_MENUS; the host with HALO_TEST_PROFILE's profile, skipped
+#            without), each holding Back half of every 4 s (debug.network_test_scores): each
+#            holds the scoreboard up, and the three see the same players - names, teams,
+#            BOT - in their last rows, the three and a bot or two (a joiner takes a bot's
+#            place); the host's own row has the host's crown
+#            on the host. A joiner opens it (Triangle with Back held), the cursor on another
+#            machine's player (HALO_TEST_SCOREBOARD_CHOOSE), Cross: their options are BACK,
+#            MUTE CHAT and ADD FRIEND, no KICK; the host's, the same with KICK (left
+#            unpressed: Circle). The first joiner's KICK, pressed as the options' does
+#            (HALO_TEST_SCOREBOARD_KICK), is refused (only the host kicks) and the host
+#            drops no one
+#   carnage  the Halo 3 CARNAGE REPORT (halo3/carnage.xml) at the end of an online game:
+#            both copies Menu style Halo 3 with the Halo PC files (HALO_TEST_DATA_MENUS)
+#            and HALO_TEST_PROFILE's profile played by the host (skipped without), the
+#            joiner joining the host's code; Team Slayer on Blood Gulch to 3, the
+#            host's player killing the joiner's every 20 s (debug.network_test_kill).
+#            At the game's end each shows the report in the game's own one's place,
+#            the host's numbers on both: their last report's rows (place, team,
+#            score, kills, deaths, assists, suicides, betrayals, the game type's own)
+#            must be the same, the winner too. The joiner's pad: DETAILS (R),
+#            Cross (it waits for the host), Triangle PLAYERS, Circle back to the
+#            report; the host goes on by itself (HALO_TEST_CARNAGE_SECONDS, 25) and
+#            both are back in the game's lobby. HALO_TEST_SHOTS: the copies'
+#            screenshots at the Vita's 960x544, one of the report each
+#   carnageold a joiner of this build, Menu style ElDewrito with ElDewrito's carnage
+#            report, joins an older build's game by its code (HALO_TEST_VITA_OLD, default
+#            ../wt-v110client's build/linux/halo: public v1.1.0, which has no Halo 3 report
+#            of its own); Team Slayer on HALO_TEST_CARNAGE_MAP (bloodgulch; a Custom
+#            Edition one, z_sanctuary_h2_pb2 from HALO_TEST_DATA_MENUS, with both copies'
+#            PC maps on), the host's player killing the joiner's every 20 s, the old host
+#            pressing A at its own scores to go on. At the end the joiner must show
+#            ElDewrito's report, never the game's own (the RC2 report, Oct 25 2026: a
+#            joiner of a 1.1.0 host's game got the game's own), its rows the host's
+#            numbers (its own three deaths), R its DETAILS, and be back in its lobby when
+#            the old host goes on. A Custom Edition map needs --release builds of both
+#            (HALO_TEST_VITA, HALO_TEST_VITA_OLD): a non-release one halts on such a map's
+#            unit HUD reference (hud_play_unit_sounds' verify_tag_reference, 1.1.0 too);
+#            a release one has no test pad, so only the report's opening is checked then
+#   h3adhoc  the same over an emulated ad hoc group (adhoc's link, HALO_NET_ADHOC,
+#            HALO_NET_ADHOC_EMULATE): both lobbies open on AD HOC, in the group
+#            from the start (no system's dialog to join it), the LAN browser's
+#            title AD HOC GAMES; nothing may reach the broker
+#   h3liveonline the Halo 3 multiplayer lobby, live on SYSTEM LINK with the
+#            profile (HALO_TEST_PROFILE, the Halo PC files; skipped without),
+#            switched to ONLINE (its System Link game closed). ONLINE hosts on
+#            demand (LadyCassie, insider.20: the lobby went live by itself a
+#            moment after MULTIPLAYER, its scene and nameplate changing): no
+#            friend online, no party, the broker reached, the lobby stays
+#            Ready, nothing hosted, until L (INVITE FRIENDS) hosts it and
+#            opens the friends to invite; B back to the live lobby, B left;
+#            MULTIPLAYER again from the main menu, ONLINE kept: not hosted
+#            again by itself; START GAME hosts it and opens its game's lobby
+#            (no SELECT PROFILE, no other server), B back to it. No frame of
+#            the host's over 500 ms on the way (the Xbox's second of sleep as
+#            the hosted game closed, network_server_manager.c, held one 1000
+#            ms each time: time+ui 1000.4 ms, LadyCassie's audio stutter on
+#            opening MULTIPLAYER); no copy of the playlist's first map begun
+#            as a lobby went live, and the nameplate kept with no other
+#            machine in its game
+#   h3onlinelan h3online with the joiner on the host's LAN (h3lan's): the
+#            host's game reaches its System Link search and is listed online,
+#            and the games browser shows it once, its online row (it showed
+#            twice: LadyCassie, insider.18, a server joined before still a
+#            peer, whose broadcasts reach the System Link search too)
+#   h3online the connection switched live from the Halo 3 lobby (both copies
+#            start with online off and the Halo PC files, HALO_TEST_DATA_MENUS;
+#            skipped without): each lobby's NETWORK: ONLINE starts internet
+#            play there (Connecting..., then Online: the broker reached); the
+#            host's START GAME, Create Game (its name typed, public), the
+#            profile, the map and the game type; the joiner's BROWSE GAMES,
+#            the profile, the Halo 3 games browser (the online games with the
+#            System Link ones), A on the host's game: joined from that list
+#            once the host is reached, no System Link screen. The host starts
+#            it, and both must play it
+#   netswitch one copy switches its connection over and over at the main
+#            menu (HALO_NETWORK_TEST_SWITCH: Online, Same Wi-Fi, Ad hoc on an
+#            emulated group, HALO_NETWORK_TEST_SWITCH_ROUNDS times, 5 by
+#            default): every Online must reach the broker, every Same Wi-Fi
+#            must have as many threads and open files as the first (nothing of
+#            internet play's left behind), and the copy must run on and exit
+#            by itself
 #   coopmenu co-op from the campaign's menus, over system link on one LAN
 #            (online off), every press scripted (HALO_TEST_PAD): the host
 #            goes Campaign, a new profile, The Pillar of Autumn, Heroic and Y
@@ -387,10 +720,68 @@
 #            views the same: their census (network test's, every 10 s) and
 #            their players' lines (shields, grenades, the kinds of weapons
 #            carried), some player hurt with no shield in SWAT
+#   dedicatedfill  five machines behind one NAT (one home: one real address,
+#            a stand-in each) join the dedicated server's 8-player game: four
+#            play, the fifth is refused (security review F-11: one person's
+#            machines no more than half a game's players)
 #   swatmixed the same with HALO_TEST_VITA_OLD (a v1.1.0-beta.3 build, or
 #            beta.2/beta.1: no change on their side) as the first and third
 #            joiners: they must play every game with the others and see in
 #            their players' lines what the new ones see (they have no census)
+#   dedicatedbots the dedicated server's bots (sv_bots_fill 1, DEDICATED_SERVER.md)
+#            in its Infection (HALO_TEST_BOTS_GAME, prisoner infection;
+#            sv_maxplayers HALO_TEST_BOTS_MAX, 16): bots fill the game to its
+#            most players less one while anyone is in. A Vita joins by the
+#            code (the lobby), a second - HALO_TEST_VITA_OLD when given (the
+#            public 1.1.0's build: it plays the server's Infection as Team
+#            Slayer, never refused) - joins the game in progress 25 s later,
+#            and a third from the server browser 25 s after, which must list
+#            the bots apart ("N of M: P players, B bots"), and leaves early.
+#            The server's sv_status every 5 s: once settled, the game always
+#            one slot short of full (people + bots = most - 1), never a
+#            person refused, the bots back as the third leaves; each joiner
+#            plays with the others; the round begins and ends (infection:),
+#            every joiner logs the game's end; an old joiner is taken as
+#            Team Slayer, sent Slayer's state (its scores, the end), and
+#            plays on as a zombie once infected (the skull in its hands)
+#   dedicatedcompat (also dedicated_compat) the s8 question: can the public
+#            1.1.0 build play the dedicated server's Infection the bots fill?
+#            The server (sv_bots_fill 1, sv_maxplayers HALO_TEST_BOTS_MAX, 16,
+#            HALO_TEST_COMPAT_CYCLE, "prisoner infection"; games split by ';')
+#            takes one 1.1.0 client (HALO_TEST_COMPAT_V110, default
+#            ../wt-v110client's build) and one insider.21 client
+#            (HALO_TEST_COMPAT_NEW, ../wt-i21client's) by its code; both play
+#            a round. netns_compat_check.py then checks, one line each: both
+#            joined, no one refused, the bots keep the game at most-1 with a
+#            slot free, the round ends with a winner (each client its end, the
+#            insider's winner the server's), no crash, assertion, dashboard or
+#            lost connection anywhere, the 1.1.0 client sees the players and
+#            bots, its own player killed by a zombie moves to the zombies'
+#            team on its side and holds the skull alone, every player the
+#            server turned is a zombie on each client, and the two clients
+#            agree on every team second by second. A run where the 1.1.0
+#            player is never infected says NOT RUN and fails (run again;
+#            HALO_TEST_COMPAT_LENIENT=1 warns instead). README_dedicated_compat.md
+#   hostbots a 1.1.1 host online fills its lobby with bots (bots.online, Bots
+#            online: full by default, which every other mode here turns off):
+#            Alpha hosts Team Slayer on Prisoner (HALO_TEST_HOST_GAME) for
+#            HALO_TEST_HOSTBOTS_MAX (16), public; a browsing copy must list it
+#            one short of full with bots ("15 of 16: 1 players, 14 bots");
+#            the public 1.1.0 build (HALO_TEST_VITA_OLD, ../wt-v110client's)
+#            joins by the code, then Bravo, who invites Charlie to a party and
+#            Charlie follows: each takes a bot's slot (a bot of the team they
+#            join), Bravo and Charlie on one team, the teams within one, the
+#            game one short of full; the 1.1.0 player plays with the others
+#            and sees every team as the host has it
+#   (lan, adhoc, h3lan, h3adhoc: the host has Bots online on and must fill
+#            nothing: no bot off the Online connection)
+#   partyserver a party joins a server the bots fill: the dedicated server
+#            (sv_bots_fill 1, sv_maxplayers HALO_TEST_PARTY_MAX, 4: Slayer on
+#            Chill Out) and Alpha, who joins it by its code and is friends with
+#            Bravo and Charlie; Alpha invites both to a party, and its FOLLOW
+#            takes them into the server's game through its invite: the game
+#            has one free slot and two bots, and both members must get in at
+#            once (bots leaving for them, nobody refused as full) and play
 #
 #   HALO_TEST_SERVER the dedicated server (build/linux/halo-server of this tree)
 #   HALO_TEST_SYMMETRIC_NAT=all|joiners  every router's NAT a symmetric one
@@ -413,6 +804,13 @@
 #                    (host:<map>[:<variant>]; code/lobby/adhoc: no map change
 #                    is then looked for)
 #   HALO_TEST_JOIN_ENV   more VAR=value settings for the joiner
+#   HALO_TEST_JOIN2_ENV  more VAR=value settings for the second joiner alone
+#   HALO_TEST_ENV_<copy>  more VAR=value settings for that copy alone (its
+#                    name: host, joiner, joiner2, joiner1 ...)
+#   HALO_TEST_HOST_SAVE  a save folder (u/UDATA/...) copied into the host's: its
+#                    game types (code: HALO_TEST_HOST_GAME=host:bloodgulch:saved=Vita_Slayer,
+#                    '_' for a space, hosts the saved game type online; the joiner must
+#                    play by the same rules: the network test's "the game plays by")
 #   HALO_TEST_SECONDS  how long the copies run (default 180)
 #   HALO_TEST_REJOIN   seconds into its game the joiner leaves (code; 0 never)
 #   HALO_TEST_OUT    where the logs go (deleted after a pass when the test made it; HALO_TEST_KEEP=1 keeps them)
@@ -451,9 +849,13 @@ if [ "${HALO_NETNS_INSIDE:-}" != 1 ]; then
 fi
 
 mode=${1:-code}
+[ "$mode" = dedicated_compat ] && mode=dedicatedcompat
 # (latency: a home connection's delay unless one is given)
 [ "$mode" = latency ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
 	export HALO_TEST_NETEM="delay 40ms"
+# (anticheatlag: a poor link's: 150 ms each way, 50 ms of jitter, 2% lost)
+[ "$mode" = anticheatlag ] && [ -z "${HALO_TEST_NETEM:-}${HALO_TEST_NETEM_HOST:-}${HALO_TEST_NETEM_JOIN:-}" ] &&
+	export HALO_TEST_NETEM="delay 150ms 50ms loss 2%"
 # (dedicatedfullcache: a jittery link unless one is given)
 # (coopstarts: the joiners' links a home connection's, and the Vita's
 # Performance rows, the start's fault's conditions: with neither, one start
@@ -478,6 +880,14 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = dedicated ] && seconds=${HALO_TEST_SECONDS:-260}
 [ "$mode" = dedicatedpc ] && seconds=${HALO_TEST_SECONDS:-120}
 [ "$mode" = dedicatedban ] && seconds=${HALO_TEST_SECONDS:-150}
+[ "$mode" = dedicatedfill ] && seconds=${HALO_TEST_SECONDS:-150}
+[ "$mode" = dedicatedbots ] && seconds=${HALO_TEST_SECONDS:-330}
+[ "$mode" = partyserver ] && seconds=${HALO_TEST_SECONDS:-200}
+[ "$mode" = hostbots ] && seconds=${HALO_TEST_SECONDS:-240}
+# (lan, adhoc, h3lan, h3adhoc: the host's Bots online on, as the default is,
+# which must fill nothing off the Online connection: checked at the end)
+case $mode in lan|adhoc|h3lan|h3adhoc) export HALO_TEST_ENV_host="HALO_BOTS_ONLINE=full ${HALO_TEST_ENV_host:-}" ;; esac
+[ "$mode" = dedicatedcompat ] && seconds=${HALO_TEST_SECONDS:-300}
 [ "$mode" = dedicatedcoop ] && seconds=${HALO_TEST_SECONDS:-200}
 [ "$mode" = dedicatedmulti ] && seconds=${HALO_TEST_SECONDS:-220}
 [ "$mode" = dedicatedfullcache ] && seconds=${HALO_TEST_SECONDS:-200}
@@ -485,6 +895,8 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = scoreboard ] && seconds=${HALO_TEST_SECONDS:-240}
 [ "$mode" = splitscreen ] && seconds=${HALO_TEST_SECONDS:-170}
 [ "$mode" = unjoinable ] && seconds=${HALO_TEST_SECONDS:-110}
+[ "$mode" = vitapc ] && seconds=${HALO_TEST_SECONDS:-120}
+[ "$mode" = vitaonly ] && seconds=${HALO_TEST_SECONDS:-200}
 [ "$mode" = pings ] && seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = pingsmixed ] && seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = mapmid ] && seconds=${HALO_TEST_SECONDS:-300}
@@ -492,6 +904,31 @@ seconds=${HALO_TEST_SECONDS:-180}
 [ "$mode" = swat ] && seconds=${HALO_TEST_SECONDS:-500}
 [ "$mode" = swatmixed ] && seconds=${HALO_TEST_SECONDS:-500}
 [ "$mode" = coopstarts ] && seconds=${HALO_TEST_SECONDS:-75}
+[ "$mode" = party ] && seconds=${HALO_TEST_SECONDS:-210}
+[ "$mode" = partyfollow ] && seconds=${HALO_TEST_SECONDS:-210}
+[ "$mode" = friendsbackup ] && seconds=${HALO_TEST_SECONDS:-200}
+[ "$mode" = chat ] && seconds=${HALO_TEST_SECONDS:-250}
+# (chat: a team game, long enough for every line)
+if [ "$mode" = chat ]; then
+	HALO_TEST_HOST_GAME=${HALO_TEST_HOST_GAME:-host:bloodgulch:team_slayer}
+	HALO_TEST_SCORE=${HALO_TEST_SCORE:-200}
+fi
+# (pickjoin, h3pickjoin: a minute more on the map list than their modes' own)
+[ "$mode" = pickjoin ] && seconds=${HALO_TEST_SECONDS:-230}
+[ "$mode" = h3pickjoin ] && seconds=${HALO_TEST_SECONDS:-240}
+[ "$mode" = h3mppause ] && seconds=${HALO_TEST_SECONDS:-150}
+[ "$mode" = carnage ] && seconds=${HALO_TEST_SECONDS:-200}
+[ "$mode" = carnageold ] && seconds=${HALO_TEST_SECONDS:-300}
+[ "$mode" = h3scoreboard ] && seconds=${HALO_TEST_SECONDS:-180}
+[ "$mode" = h3live ] && seconds=${HALO_TEST_SECONDS:-150}
+[ "$mode" = h3liveleave ] && seconds=${HALO_TEST_SECONDS:-100}
+[ "$mode" = h3liveonline ] && seconds=${HALO_TEST_SECONDS:-110}
+# (h3liveinvite: a game and its END GAME after the invite; h3liveagain: two games)
+[ "$mode" = h3liveinvite ] && seconds=${HALO_TEST_SECONDS:-240}
+[ "$mode" = h3livebots ] && seconds=${HALO_TEST_SECONDS:-110}
+[ "$mode" = h3liveagain ] && seconds=${HALO_TEST_SECONDS:-280}
+# (network Forge: netns_forge_cases.sh)
+case $mode in forge) seconds=${HALO_TEST_SECONDS:-110} ;; forge3) seconds=${HALO_TEST_SECONDS:-125} ;; forgeold|forgeleave) seconds=${HALO_TEST_SECONDS:-80} ;; forgemp) seconds=${HALO_TEST_SECONDS:-150} ;; h3forge|h3forgeadhoc|forgepanel) seconds=${HALO_TEST_SECONDS:-130} ;; h3forgeonline) seconds=${HALO_TEST_SECONDS:-230} ;; h3variant) seconds=${HALO_TEST_SECONDS:-150} ;; h3forgeslow|h3forgeskip) seconds=${HALO_TEST_SECONDS:-330} ;; esac
 rejoin=${HALO_TEST_REJOIN:-0}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netns_test.$$}
 . "$here/test_out.sh"
@@ -579,8 +1016,17 @@ side() { # side NAME WAN_SUBNET LAN_SUBNET -> sets ${NAME}_router ${NAME}_machin
 }
 side host 10.10.1 192.168.1
 side join 10.10.2 192.168.2
-{ [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ]; } && side join2 10.10.3 192.168.3
-[ "$mode" = splitscreen ] && side join3 10.10.4 192.168.4
+# (infection: three players, a second joiner unless told otherwise)
+[ "$mode" = infection ] && export HALO_TEST_SECOND_JOINER=${HALO_TEST_SECOND_JOINER:-1}
+{ [ "${HALO_TEST_SECOND_JOINER:-0}" = 1 ] || [ "$mode" = badmap ] || [ "$mode" = splitscreen ] || [ "$mode" = party ] || [ "$mode" = chat ] ||
+	[ "$mode" = partyfollow ] ||
+	[ "$mode" = partyserver ] ||
+	[ "$mode" = hostbots ] || [ "$mode" = h3scoreboard ] ||
+	[ "$mode" = friendsbackup ] ||
+	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ] ||
+	[ "$mode" = onlinebrowser ] || [ "$mode" = onlinebrowserded ] || [ "$mode" = onlinebrowsertab ]; } &&
+	side join2 10.10.3 192.168.3
+{ [ "$mode" = splitscreen ] || [ "$mode" = vitapc ] || [ "$mode" = partyfollow ]; } && side join3 10.10.4 192.168.4
 # (lobbytls: the broker's TLS port too, with a certificate from an
 # authority made here, in the test's folder; its plain port misbehaving)
 broker_tls=
@@ -620,6 +1066,7 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 	local name=$1 ns=$2 binary=$3 cores=$4
 	shift 4
 	mkdir -p "$out/$name/data" "$out/$name/save"
+	[ "$name" = host ] && [ -n "${HALO_TEST_HOST_SAVE:-}" ] && cp -r "$HALO_TEST_HOST_SAVE"/. "$out/$name/save/"
 	local folder=$data
 	case $name in
 	host) folder=${HALO_TEST_DATA_HOST:-$data} ;;
@@ -627,6 +1074,8 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 	joiner2) folder=${HALO_TEST_DATA_JOINER2:-$data} ;;
 	esac
 	# (a copy's own data folder, copy_data_NAME: mapmid's maps folders)
+	# (Menu style Halo CE, the pads' menus, unless the mode says HALO_MENU_STYLE=halo3: Halo 3
+	# has been the default since 1.1.1)
 	local override
 	eval "override=\${copy_data_$name:-}"
 	[ -n "$override" ] && folder=$override
@@ -635,10 +1084,13 @@ run_copy() { # run_copy NAME NETNS_PID BINARY CPUS [ENV...]
 	(cd "$out/$name" && exec nsenter -t "$ns" -n env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen \
 		HALO_DATA_ROOT="$out/$name/data" HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 \
 		HALO_EXIT_AFTER="$seconds" HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 HALO_TICK_THREAD=1 \
-		HALO_UPDATE_AUTO=false HALO_DISCORD_APPLICATION= HALO_NET_ALLOW_UPNP=false \
+		HALO_UPDATE_AUTO=false HALO_DISCORD_APPLICATION= HALO_NET_ALLOW_UPNP=false HALO_MENU_STYLE=classic \
 		HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 HALO_NET_RELAYS=198.51.100.1:47320 \
+		HALO_BOTS_ONLINE=off \
 		"$@" ${HALO_TEST_ENV:-} \
 		$([ "$name" = joiner ] || [ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN_ENV:-}") \
+		$([ "$name" = joiner2 ] && echo "${HALO_TEST_JOIN2_ENV:-}") \
+		$(eval "echo \"\${HALO_TEST_ENV_$name:-}\"") \
 		taskset -c "$cores" timeout -k 5 $((seconds + 60)) "$binary" $copy_args > "$out/$name/run.log" 2>&1) &
 	pids="$pids $!"
 	last_pid=$!
@@ -674,6 +1126,22 @@ wait_code() { # the host's code, once it hosts
 }
 status=0
 fail() { echo "FAIL ($mode): $*"; status=1; }
+# (pickjoin, h3pickjoin: the host's game open from its server's start, the
+# joiner's join held while the host was on the map list - nothing of the game
+# sent, so no map copied before the host's choice - then answered with the
+# map chosen, and the game played)
+check_pick_join() {
+	grep -aE "network: (holding|the host chose)|join: the host's map is" "$hl" "$jl" | head -6
+	grep -aq "network: holding machine #[1-9][0-9]*'s join until the host chooses the map" "$hl" ||
+		fail "the host did not hold the joiner's join while it chose its map"
+	grep -aqE "network: the host chose the map .* \(([1-9][0-9]*) joins held meanwhile\)" "$hl" ||
+		fail "no join was held when the host chose its map"
+	grep -aq "answering machine #[1-9][0-9]*'s join held [0-9]* ms: the lobby is up" "$out/host/data/debug.txt" ||
+		fail "the held join was not answered once the map was chosen"
+	grep -aq "starting precaching of map 'carousel'" "$out/joiner/data/debug.txt" &&
+		fail "the joiner copied a map before the host chose one"
+	grep -aq "join: the host's map is levels" "$jl" || fail "the joiner was not told the host's map once chosen"
+}
 # (the latency meter) the delay a netem setting adds, in milliseconds
 netem_delay() { local d; d=$(sed -n 's/.*delay \([0-9]*\)ms.*/\1/p' <<< "${1:-}"); echo "${d:-0}"; }
 # the round trip the routers' netem delays make (both uploads)
@@ -704,8 +1172,100 @@ check_latency() { # check_latency LOW HIGH
 	done
 }
 
+# infection, infectionold: what the host and its joiners logged of the
+# Infection game (infection.c, infection_net.c), checked
+check_infection() {
+	local side over winners name joiners=joiner
+	[ -s "$out/joiner2/run.log" ] && joiners="joiner joiner2"
+	echo "--- infection"
+	for side in host $joiners; do
+		grep -a "infection:\|game rules net:" "$out/$side/run.log" | grep -v trace | sed "s/^halo-linux: /$side: /" | head -24
+	done
+	if [ "$mode" = infectionold ]; then
+		grep -aq "game rules net: machine [0-9]* did not answer in [0-9]* ms (a build without Infection): refused from the Infection game\|game rules net: machine [0-9]* plays rules [0-9a-f]*, not the game's" "$out/host/run.log" ||
+			fail "the host did not refuse the older build from its Infection game"
+		[ "$two" -le 5 ] || fail "the older build played the Infection game ($two s with two players)"
+		grep -aq "game rules net: machine [0-9]* plays Infection" "$out/host/run.log" &&
+			fail "the older build was taken as one that plays Infection"
+		return 0
+	fi
+	for side in $joiners; do
+		grep -aq "game rules net: the host's game needs rules 1: this build plays 1" "$out/$side/run.log" ||
+			fail "the $side was not asked whether it plays Infection, or did not answer"
+	done
+	[ "$(grep -ac "game rules net: machine [0-9]* plays Infection" "$out/host/run.log")" -ge "$(echo $joiners | wc -w)" ] ||
+		fail "the host did not take every joiner's answer"
+	grep -aq "game rules net: .*refused" "$out/host/run.log" && fail "the host refused a joiner of this build"
+	grep -aq "infection: the round begins" "$out/host/run.log" || fail "the host's round never began"
+	[ "$(grep -ac "is a zombie (a first zombie, at random)" "$out/host/run.log")" = 1 ] ||
+		fail "the host did not choose one first zombie"
+	over=$(grep -a "infection: the round is over" "$out/host/run.log" | head -1)
+	[ -n "$over" ] || fail "the host's round never ended"
+	winners=
+	for side in host $joiners; do
+		w=$(sed -n 's/.*infection: game over here: the \([a-z]*\) win.*/\1/p' "$out/$side/run.log" | head -1)
+		echo "$side: the game's end, the ${w:-(none)} win"
+		[ -n "$w" ] || fail "the $side never logged the game's end"
+		winners="$winners $w"
+	done
+	[ "$(echo $winners | tr ' ' '\n' | sort -u | wc -l)" = 1 ] || fail "the machines disagree on the winner:$winners"
+	# (every player the host turned, each joiner heard of)
+	grep -a "infection: .* is a zombie (" "$out/host/run.log" | sed 's/.*infection: \(.*\) is a zombie (.*/\1/' |
+		sort -u > "$out/infection.turned"
+	echo "the host turned: $(tr '\n' ',' < "$out/infection.turned")"
+	[ "$(wc -l < "$out/infection.turned")" -ge 1 ] || fail "the host turned no one"
+	for side in $joiners; do
+		while read -r name; do
+			grep -aqF "infection: the host says $name is a zombie" "$out/$side/run.log" ||
+				fail "the $side never heard the host turn $name"
+		done < "$out/infection.turned"
+	done
+	# (the teams each second, the host's and each joiner's at the same tick)
+	for side in $joiners; do
+		python3 - "$out/host/run.log" "$out/$side/run.log" "$side" <<'PY' || fail "the $side's teams did not agree with the host's"
+import re, sys
+def seconds(path):
+	found, playing = {}, False
+	tail = re.compile(r' s-?\d+ k\d+ d\d+ f\d+ t(\d+) m\d+\s*$')
+	for line in open(path, errors='replace'):
+		if 'infection: the round begins' in line or 'infection: the host says' in line:
+			playing = True
+		if 'infection: game over here' in line:
+			break
+		if not playing or 'network test: tick' not in line or '| playing' not in line:
+			continue
+		tick = int(line.split('network test: tick ')[1].split()[0])
+		teams = {}
+		for segment in re.split(r'(?=player \d+: )', line.split('|')[0])[1:]:
+			number = segment.split(':', 1)[0].split()[1]
+			team = tail.search(segment)
+			if team:
+				teams[number] = team.group(1)
+		found[tick] = teams
+	return found
+host, joiner = seconds(sys.argv[1]), seconds(sys.argv[2])
+host_ticks = sorted(host)
+samples = agree = 0
+for tick, teams in joiner.items():
+	if not host_ticks:
+		break
+	nearest = min(host_ticks, key=lambda t: abs(t - tick))
+	if abs(nearest - tick) > 45:
+		continue
+	for number, team in teams.items():
+		if number in host[nearest] and team in '01':
+			samples += 1
+			agree += host[nearest][number] == team
+share = agree / samples if samples else 0
+print('%s: %d of %d samples of the players\' teams agree with the host\'s (%.0f%%)' % (sys.argv[3], agree, samples,
+	share * 100))
+sys.exit(0 if samples >= 20 and share >= 0.9 else 1)
+PY
+	done
+}
+
 case $mode in
-code|lobby|lobbytls|lobbypw|relay|latency)
+code|lobby|lobbytls|lobbypw|relay|latency|infection|infectionold)
 	extra=
 	password=${HALO_TEST_LOBBY_PASSWORD:-hunter2}
 	[ "$mode" = lobby ] && extra="HALO_NET_HOST_PUBLIC=true"
@@ -713,12 +1273,20 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 	[ "$mode" = lobbypw ] && extra="HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_PASSWORD=$password"
 	# (latency: one game the whole run, no game over in the blackout)
 	[ "$mode" = latency ] && extra="HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer} HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-50}"
+	# (infection: one Infection game, the host's scripted kills turning the
+	# humans; infectionold: a joiner that does not answer the host's ask)
+	case $mode in infection|infectionold)
+		extra="HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:prisoner:infection} HALO_INFECTION_ZOMBIES=8 HALO_INFECTION_TIME=2"
+		[ "$mode" = infectionold ] && [ -z "${HALO_TEST_VITA_JOINER:-}" ] &&
+			export HALO_TEST_JOIN_ENV="HALO_GAME_RULES_NET=0 ${HALO_TEST_JOIN_ENV:-}"
+		;;
+	esac
 	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $extra ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
 	code=$(wait_code)
 	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
 	echo "host's code: $code"
 	case $mode in
-	code|relay|latency) join_mode="join-code:$code" ;;
+	code|relay|latency|infection|infectionold) join_mode="join-code:$code" ;;
 	lobby|lobbytls) join_mode=join-public ;;
 	lobbypw) join_mode="join-public:$password" ;;
 	esac
@@ -762,11 +1330,14 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 	two_players() { grep -a "network test: tick" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:"; }
 	two=$(two_players < "$out/joiner/run.log")
 	echo "joiner's seconds with two players playing: $two"
-	[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
+	case $mode in
+	infection|infectionold) check_infection ;;
+	*) [ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)" ;;
+	esac
 	# (the latency meter: about the routers' round trip)
 	rtt=$(netem_round_trip)
 	echo "the routers' round trip: $rtt ms"
-	check_latency "$rtt" $((rtt + 90))
+	[ "$mode" = infectionold ] || check_latency "$rtt" $((rtt + 90))
 	if [ "$mode" = latency ]; then
 		echo "--- latency"; grep -ah "latency: .*\(connection problem\|heard again\)" "$out"/joiner/run.log "$out"/host/run.log
 		grep -aq "latency: the host silent for [0-9]* ms: connection problem" "$out/joiner/run.log" ||
@@ -794,6 +1365,18 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 		echo "host's first game (s score, k kills, d deaths, f own-side kills: suicides): $first_game"
 		grep -aq "network test: map chillout" "$out/host/run.log" || fail "the host never changed map"
 	fi
+	# (a saved game type hosted online, HALO_TEST_HOST_GAME's saved=: the host plays it, and the
+	# joiner - HALO_NETWORK_TEST_RULES=1 in HALO_TEST_JOIN_ENV - by the same rules, as they came)
+	case ${HALO_TEST_HOST_GAME:-} in
+	*saved=*)
+		grep -aq "network test: the saved game type " "$out/host/run.log" || fail "the host did not find its saved game type"
+		host_rules=$(sed -n 's/.*network test: the game plays by: //p' "$out/host/run.log" | head -1)
+		join_rules=$(sed -n 's/.*network test: the game plays by: //p' "$out/joiner/run.log" | head -1)
+		echo "the host's game type: $host_rules"
+		echo "the joiner's:         $join_rules"
+		[ -n "$host_rules" ] && [ "$host_rules" = "$join_rules" ] ||
+			fail "the joiner did not play by the host's saved game type's rules" ;;
+	esac
 	if [ "$rejoin" != 0 ]; then
 		grep -aq "network test: joining again" "$out/joiner/run.log" || fail "the joiner never left and joined again"
 		again=$(sed -n '/network test: joining again/,$p' "$out/joiner/run.log" | two_players)
@@ -817,7 +1400,7 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 		bytes=$(sed -n 's/^summary: .* packets (\([0-9]*\) B) relayed.*/\1/p' "$out/relay.log" | tail -1)
 		echo "relayed ${bytes:-0} B in ${seconds} s: $(( ${bytes:-0} * 8 / seconds / 1000 )) kbit/s both ways together"
 		[ "${bytes:-0}" -gt 0 ] || fail "the relay carried nothing"
-	elif [ "$mode" != code ] && [ "$mode" != latency ]; then
+	elif [ "$mode" != code ] && [ "$mode" != latency ] && [ "$mode" != infection ] && [ "$mode" != infectionold ]; then
 		# (the listing on the host's slot, at least once; republished every 30 s
 		# and when the game changes, at most every 5 s)
 		sends=$(grep -c 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} [1-9][0-9]* B retained qos1' "$out/broker.log")
@@ -827,7 +1410,11 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 		grep -aq 'network test: the public games list "' "$out/joiner/run.log" || fail "the joiner never listed the host's game"
 		grep -q 'publish .* hcev/3/lobby/s/[0-9a-f]\{32\} 0 B retained' "$out/broker.log" ||
 			fail "the host's slot was never cleared (its tombstone and clearing when it quit, or its will)"
-		grep -q 'publish .* hceu/' "$out/broker.log" && fail "a Vita build published on the PCs' topics"
+		# (a host for Vitas publishes nothing on the PCs' topics; the browser,
+		# which lists PC games too since Oct 19 2026, asks their hosts to
+		# republish - hceu/3/lobby/q, as OpenCE's browser does - and that alone)
+		grep 'publish .* hceu/' "$out/broker.log" | grep -vq 'publish .* hceu/3/lobby/q [0-9]* B' &&
+			fail "a Vita build published on the PCs' topics (more than the browser's query)"
 		if [ "$mode" = lobbypw ]; then
 			grep -aq 'network test: the public games list ".*\[pw\]' "$out/joiner/run.log" ||
 				fail "the game with a password was not listed locked"
@@ -860,7 +1447,7 @@ code|lobby|lobbytls|lobbypw|relay|latency)
 		fi
 	fi
 	;;
-menus|menuspw)
+menus|menuspw|menusjoinpress)
 	password=${HALO_TEST_LOBBY_PASSWORD:-hunter2}
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 	extra="HALO_NET_HOST_PUBLIC=true"
@@ -870,13 +1457,19 @@ menus|menuspw)
 	code=$(wait_code)
 	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
 	echo "host's code: $code"
-	# (Multiplayer, INTERNET: the server browser; a while for the listing, A on
-	# its row; menuspw: the password screen, A types it, down, JOIN GAME; then
-	# the System Link screen: A joins, A picks the profile, A, a while for the
-	# host's game to be reached, A joins it)
-	pad="wait:150:3000 down a wait:150:2000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000} a"
+	# (Multiplayer, INTERNET: the profile first (A joins, A picks the profile,
+	# A), then the server browser; a while for the listing, A on its row;
+	# menuspw: the password screen, A types it, down, JOIN GAME; then the
+	# System Link list at once, the profile chosen, where the host's game is
+	# joined by itself once reached)
+	pad="wait:150:3000 down a wait:150:2000 a wait:150:2000 a wait:150:2000 a wait:150:2000 a"
+	pad="$pad wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000} a"
 	[ "$mode" = menuspw ] && pad="$pad wait:150:3000 a wait:150:1500 down a"
-	pad="$pad wait:150:6000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a"
+	# (menusjoinpress: Cross again at once, and again a second on - the press that answered the
+	# Vita's large PC game question reached the game after its box closed (Neff, RC6): the
+	# System Link list opened for the join, still empty, took it as its own A, hosted this
+	# machine's game and published it; nothing may be hosted while the join goes on)
+	[ "$mode" = menusjoinpress ] && pad="$pad wait:150:250 a wait:150:1000 a wait:150:1000 a"
 	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
 		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 "HALO_TEST_PAD=$pad" \
 		"HALO_TEST_TEXT_INPUT=$password"; join_pid=$last_pid
@@ -885,7 +1478,19 @@ menus|menuspw)
 	echo "--- joiner"; grep -aE "menus:|ui: screen|system link: (joining|in another)" "$jl" | head -20
 	grep -aq "menus: OpenCE's multiplayer screens: .* added" "$jl" || fail "the joiner did not add OpenCE's screens"
 	grep -aq "ui: screen pc.browser.screen" "$jl" || fail "the server browser did not open"
+	grep -aq "menus: Server Browser: the profile, then the server browser" "$jl" &&
+		grep -aq "menus: Server Browser: the profile chosen; the server browser" "$jl" ||
+		fail "INTERNET did not choose the profile before the server browser"
 	grep -aq "menus: joining the public game VitaHost" "$jl" || fail "the joiner did not join the host's game from the browser"
+	grep -aq "menus: the public game's invite handed on; the System Link list next (the profile chosen)" "$jl" ||
+		fail "the profile was asked again after the browser"
+	if [ "$mode" = menusjoinpress ]; then
+		grep -aE "system link: (hosting|looking)|Internet play: (hosting|the game is public)|menus: not hosting" "$jl" | head -8
+		grep -aqE "system link: hosting|Internet play: hosting" "$jl" &&
+			fail "a press on the System Link list during the browser's join hosted the joiner's own game"
+		grep -aq "Internet play: the game is public" "$jl" &&
+			fail "the joiner published a listing of a game of its own while joining"
+	fi
 	if [ "$mode" = menuspw ]; then
 		grep -aq "ui: screen pc.join.password.screen" "$jl" || fail "the password screen did not open"
 		grep -aq "menus: joining the public game VitaHost with its password" "$jl" || fail "the password was not given"
@@ -906,13 +1511,13 @@ browserscroll)
 	# down 14 times (the 15th game, the rows from the 4th), a page down (the
 	# last), Y (by name: Test game 00 first), up (wrapped: VitaHost, the last),
 	# A joins it; then the System Link screen as in menus)
-	pad="wait:150:3000 down a wait:150:2000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000}"
+	pad="wait:150:3000 down a wait:150:2000 a wait:150:2000 a wait:150:2000 a wait:150:2000 a"
+	pad="$pad wait:150:${HALO_TEST_MENUS_LIST_WAIT:-12000}"
 	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do pad="$pad down:150:400"; done
-	pad="$pad rt:150:800 y:150:800 up:150:800 a"
-	# (then the System Link screen's start and profile (A A A), and no pick
-	# in its list: the browser's game is joined by itself once the host is
+	# (the profile chosen before the browser: then the System Link list, and no
+	# pick in it: the browser's game is joined by itself once the host is
 	# reached, network_game_client_listed_game_of / ui_widget_port_join_listed_game)
-	pad="$pad wait:150:6000 a a a"
+	pad="$pad rt:150:800 y:150:800 up:150:800 a"
 	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
 		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 "HALO_TEST_PAD=$pad" \
 		HALO_TEST_BROWSER_GAMES=20; join_pid=$last_pid
@@ -937,13 +1542,82 @@ browserscroll)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
 	;;
-menushost)
+onlinebrowser|onlinebrowserded|onlinebrowsertab)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ $mode = onlinebrowserded ]; then
+		server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
+		[ -x "$server" ] || { echo "$mode needs the dedicated server (ninja linux-server, HALO_TEST_SERVER)"; exit 2; }
+		in_ns "$host_router" iptables -t nat -A PREROUTING -i w_host -p udp --dport 2302 -j DNAT --to-destination 192.168.1.2:2302
+		mkdir -p "$out/server/data"
+		printf '%s\n' 'sv_name "Netns Browser"' 'sv_maxplayers 8' 'sv_public 1' 'sv_mapcycle_add bloodgulch slayer' \
+			'sv_timelimit 5' 'sv_start_delay 5' 'sv_postgame 5' 'sv_port 2302' > "$out/server/data/init.txt"
+		ln -sfn "$(cd "$data" && pwd)/maps" "$out/server/data/maps"
+		(cd "$out/server" && exec nsenter -t "$host_machine" -n env HALO_EXIT_AFTER="$seconds" HALO_UPDATE_AUTO=false \
+			HALO_NET_ALLOW_UPNP=false HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 \
+			HALO_NET_RELAYS=198.51.100.1:47320 ${HALO_TEST_SERVER_ENV:-} \
+			taskset -c "$cpu_a" timeout -k 5 $((seconds + 60)) "$server" -path "$out/server/data" \
+			< /dev/null > "$out/server/run.log" 2>&1) &
+		pids="$pids $!"; host_pid=$!
+		for i in $(seq 1 90); do
+			code=$(sed -n 's/.*Vitas join with the code \([A-Z0-9]\{4\}-[A-Z0-9]\{4\}\).*/\1/p' "$out/server/run.log" 2>/dev/null | tail -1)
+			[ -n "$code" ] && break
+			sleep 1
+		done
+	else
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NETWORK_TEST_START=${HALO_TEST_MENUS_START:-90} \
+		HALO_NET_LOBBY_NAME=VitaHost HALO_NET_HOST_PUBLIC=true; host_pid=$last_pid
+	code=$(wait_code)
+	fi
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log" "$out/server/run.log" 2>/dev/null; exit 1; }
+	echo "host's code: $code"
+	# (a player in the game before the browser's joiner: HALO_TEST_OB_PLAYER=1, onlinebrowserded's
+	# default - Neff's join failed only on a game with players in it)
+	ob_player=${HALO_TEST_OB_PLAYER:-0}
+	[ $mode = onlinebrowserded ] && ob_player=${HALO_TEST_OB_PLAYER:-1}
+	if [ "$ob_player" = 1 ]; then
+		run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Second
+		sleep ${HALO_TEST_OB_PLAYER_WAIT:-30}
+	fi
+	# (the title screen: A; the main menu's SERVER BROWSER: A - the profile chosen before, the
+	# games browser at once -; a while for the listing, A on the game's row, then Cross again
+	# at once and a second on, as a player pressing on while the host is reached: nothing hosted)
+	pad=${HALO_TEST_OB_PAD:-"wait:150:3000 a wait:150:4000 a wait:150:${HALO_TEST_MENUS_LIST_WAIT:-10000} a wait:150:250 a wait:150:1000 a"}
+	# (onlinebrowsertab: R three times - SYSTEM LINK, AD HOC, ONLINE again -, a while for the
+	# listing, and A once: the first press must join; as the Vita runs it,
+	# the Vita's picture, the menus' live backdrop with it - its objects in the ticks)
+	ob_env=
+	[ $mode = onlinebrowsertab ] && pad=${HALO_TEST_OB_PAD:-"wait:150:3000 a wait:150:4000 a wait:150:6000 rt wait:150:3000 rt wait:150:3000 rt wait:150:12000 a"} &&
+		ob_env="HALO_GL_VITA_DISPLAY=1 HALO_TEST_PLATFORM=vita HALO_RENDER_SCALE=1"
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" \
+		HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=online HALO_TEST_INPUT=bot:2 \
+		"HALO_TEST_PAD=$pad" $ob_env; join_pid=$last_pid
+	wait $join_pid 2>/dev/null
+	jl=$out/joiner/run.log
+	echo "--- joiner"; grep -aE "ui: screen|menus: (joining|the public|the games browser|not hosting)|system link: (hosting|joining|in |the joined)|Internet play: (joining|connected to host|hosting|the game is public)" "$jl" | head -30
+	grep -aq "ui: screen pc.online.lan.screen" "$jl" || fail "the ElDewrito menus' server browser did not open"
+	name=VitaHost
+	[ $mode = onlinebrowserded ] && name="Netns Browser"
+	grep -aq "menus: joining the public game $name" "$jl" || fail "A on the game's row did not join it"
+	grep -aq "menus: the games browser joins the joined host's game" "$jl" ||
+		fail "the game was not joined from the games browser once its host was reached"
+	grep -aqE "system link: hosting|Internet play: hosting" "$jl" && fail "the joiner hosted a game of its own while joining"
+	grep -aq "Internet play: the game is public" "$jl" && fail "the joiner published a listing of a game of its own"
+	grep -aq "system link: in a network game" "$jl" || fail "the joiner did not get into the game"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players or more playing: $two"
+	[ "$two" -ge 20 ] || fail "the joiner played the game for $two s with others (20 wanted)"
+	;;
+menushost|pickjoin)
 	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 	# (Multiplayer, CREATE GAME INTERNET: Server Setup; A on SERVER NAME types
-	# it; down to START GAME; the System Link screen's profile (A A A), the map
-	# list (A), the gametype (A): the lobby; START starts the game)
-	pad="wait:150:3000 down a wait:150:2000 down down down a wait:150:2000 a wait:150:1500 down down left down down a"
-	pad="$pad wait:150:5000 a a a wait:150:5000 a wait:150:4000 a"
+	# it; down to START GAME (past WHO CAN JOIN); the System Link screen's profile (A A A), the map
+	# list (A), the gametype (A): the lobby; START starts the game. pickjoin:
+	# the host stays on the map list a minute, the joiner joining meanwhile)
+	pick=5000
+	[ $mode = pickjoin ] && pick=${HALO_TEST_PICK_WAIT:-60000}
+	pad="wait:150:3000 down a wait:150:2000 down down down a wait:150:2000 a wait:150:1500 down down left down down down a"
+	pad="$pad wait:150:5000 a a a wait:150:$pick a wait:150:4000 a"
 	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true \
 		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false "HALO_TEST_PAD=$pad" \
 		HALO_TEST_TEXT_INPUT=MenuHost; host_pid=$last_pid
@@ -961,6 +1635,9 @@ menushost)
 	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
+	grep -aq "network: the game is open while its host chooses the map (joins held until then)" "$hl" ||
+		fail "the host's game was not opened as its server started"
+	[ $mode = pickjoin ] && check_pick_join
 	;;
 lobbyflap)
 	# (a second broker, 198.51.100.2, which the host's router blackholes: its
@@ -1171,6 +1848,99 @@ fullcache)
 	echo "joiner's seconds with two players playing: $two"
 	[ "$two" -ge 30 ] || fail "the joiner played the host's game for $two s with two players (30 wanted)"
 	;;
+vitapc)
+	# the port's PC build tags itself (network_wire.h, Oct 20 2026): a PC
+	# build's public game (HALO_TEST_PLATFORM=pc: the Linux build as the
+	# released PC build) and a Vita's side by side; a Vita's browser lists
+	# them as VITA (PC) and VITA, and joins the PC build's (Vita PC, its
+	# default: it takes Vitas); an older build's browser
+	# (HALO_TEST_VITA_OLD, a build of before the tags) reads both listings
+	# (the marks are in the stamp it skips) and joins the PC build's too
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_TEST_PLATFORM=pc HALO_NET_ONLINE=true HALO_NET_HOST_PUBLIC=true \
+		HALO_NETWORK_TEST_PUBLIC=true HALO_NET_LOBBY_NAME=PcBuildHost HALO_NETWORK_TEST=host:bloodgulch:slayer \
+		HALO_NETWORK_TEST_START=40 HALO_NETWORK_TEST_SCORE=500 HALO_TEST_INPUT=bot:1; host_pid=$last_pid
+	run_copy vitahost "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true HALO_NET_HOST_PUBLIC=true \
+		HALO_NETWORK_TEST_PUBLIC=true HALO_NET_LOBBY_NAME=VitaHost HALO_NETWORK_TEST=host:bloodgulch:slayer \
+		HALO_NETWORK_TEST_START=200 HALO_NETWORK_TEST_SCORE=500 HALO_TEST_INPUT=bot:2; vitahost_pid=$last_pid
+	sleep 12
+	run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		HALO_NETWORK_TEST_PUBLIC_NAME=PcBuildHost HALO_TEST_INPUT=bot:3; join_pid=$last_pid
+	old=${HALO_TEST_VITA_OLD:-}
+	old_pid=
+	if [ -n "$old" ] && [ -x "$old" ]; then
+		run_copy joiner2 "$join3_machine" "$old" "$cpu_c" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+			HALO_NETWORK_TEST_PUBLIC_NAME=PcBuildHost HALO_TEST_INPUT=bot:4; old_pid=$last_pid
+	fi
+	wait $join_pid $old_pid $host_pid $vitahost_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- the PC build's host"; grep -aE "Halo CE Vita .* starting|network: the|Internet play: (hosting|the game is)" "$hl" | head -6
+	rows=$(grep -ah "network test: browser row" "$jl" | sed 's/^.*browser row //' | sort -u)
+	echo "--- the Vita's browser rows"; echo "$rows" | sed 's/^/  /'
+	echo "$rows" | grep -q '^\[VITA (PC)\] "PcBuildHost"' || fail "the PC build's game is not tagged VITA (PC)"
+	echo "$rows" | grep -q '^\[VITA\] "VitaHost"' || fail "the Vita's game is not tagged VITA"
+	grep -aq "Halo CE Vita .* (PC) starting" "$hl" || fail "the PC build's log does not say it is the PC build"
+	grep -aq "Internet play: connected to host" "$jl" || fail "the Vita did not reach the PC build's game"
+	grep -aqE "system link: (in another's lobby|in a network game)" "$jl" || fail "the Vita did not get into the PC build's game"
+	grep -aq "refusing the PC build" "$out/host/data/debug.txt" "$out/vitahost/data/debug.txt" 2>/dev/null &&
+		fail "a host refused someone"
+	if [ -n "$old_pid" ]; then
+		ol=$out/joiner2/run.log
+		orows=$(grep -ah "network test: browser row" "$ol" | sed 's/^.*browser row //' | sort -u)
+		echo "--- the older build's browser rows"; echo "$orows" | sed 's/^/  /'
+		echo "$orows" | grep -q '^\[VITA\] "PcBuildHost"' && echo "$orows" | grep -q '^\[VITA\] "VitaHost"' ||
+			fail "the older build did not list both games (as VITA)"
+		grep -aq "Internet play: connected to host" "$ol" && grep -aqE "system link: (in another's lobby|in a network game)" "$ol" ||
+			fail "the older build did not get into the PC build's game"
+	else
+		echo "(no HALO_TEST_VITA_OLD: the older build's browser left out)"
+	fi
+	;;
+vitaonly)
+	# Who can join (network_wire.h, Oct 20 2026): a Vita's game for Vita
+	# (Vitas only) refuses the PC build at the join, which is told "This
+	# game is for PS Vitas only", and takes a Vita; then a Vita's game for
+	# Vita PC takes both. What a joiner says: best effort
+	half=$((seconds / 2))
+	seconds=$half run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true HALO_NET_HOST_PUBLIC=true \
+		HALO_NETWORK_TEST_PUBLIC=true HALO_NET_LOBBY_NAME=VitaOnly HALO_NET_WHO_CAN_JOIN=vita \
+		HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_START=200 HALO_TEST_INPUT=bot:1; host_pid=$last_pid
+	sleep 12
+	seconds=$((half - 12)) run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_TEST_PLATFORM=pc HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_NETWORK_TEST_PUBLIC_NAME=VitaOnly HALO_TEST_INPUT=bot:2; join_pid=$last_pid
+	seconds=$((half - 12)) run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_NETWORK_TEST_PUBLIC_NAME=VitaOnly HALO_TEST_INPUT=bot:3; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	mkdir -p "$out/vitaonly"
+	for c in host joiner joiner2; do mv "$out/$c" "$out/vitaonly/$c"; done
+	v=$out/vitaonly
+	rows=$(grep -ah "network test: browser row" "$v/joiner/run.log" | sed 's/^.*browser row //' | sort -u)
+	echo "--- Vita only: the PC build's browser rows"; echo "$rows" | sed 's/^/  /'
+	echo "$rows" | grep -q '^\[VITA VITAS ONLY\] "VitaOnly"' || fail "the PC build's browser does not mark the game VITAS ONLY"
+	grep -a "refusing the PC build\|unable to join game" "$v"/*/data/debug.txt | cut -c1-160 | head -4
+	grep -aq "refusing the PC build's machine" "$v/host/data/debug.txt" || fail "the host did not refuse the PC build"
+	grep -aq "unable to join game: reason= #7/_rejection_code_vitas_only" "$v/joiner/data/debug.txt" ||
+		fail "the PC build was not told why (the rejection code)"
+	grep -aq "Halo: cannot join this game: This game is for PS Vitas only" "$v/joiner/run.log" ||
+		fail "the PC build's player was not told \"This game is for PS Vitas only\""
+	grep -aqE "system link: in a network game" "$v/joiner/run.log" && fail "the PC build got into the game for Vitas only"
+	grep -aqE "system link: (in another's lobby|in a network game)" "$v/joiner2/run.log" || fail "the Vita did not get in"
+	# the same for Vita PC: both get in
+	seconds=$half run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true HALO_NET_HOST_PUBLIC=true \
+		HALO_NETWORK_TEST_PUBLIC=true HALO_NET_LOBBY_NAME=VitaPc HALO_NET_WHO_CAN_JOIN=vita_pc \
+		HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_START=200 HALO_TEST_INPUT=bot:1; host_pid=$last_pid
+	sleep 12
+	seconds=$((half - 12)) run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_TEST_PLATFORM=pc HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_NETWORK_TEST_PUBLIC_NAME=VitaPc HALO_TEST_INPUT=bot:2; join_pid=$last_pid
+	seconds=$((half - 12)) run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_NETWORK_TEST_PUBLIC_NAME=VitaPc HALO_TEST_INPUT=bot:3; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	rows=$(grep -ah "network test: browser row" "$out/joiner/run.log" | sed 's/^.*browser row //' | sort -u)
+	echo "--- Vita PC: the PC build's browser rows"; echo "$rows" | sed 's/^/  /'
+	echo "$rows" | grep -q '^\[VITA\] "VitaPc"' || fail "the game for Vita PC is not plain VITA to the PC build"
+	grep -aq "refusing the PC build" "$out/host/data/debug.txt" && fail "the host for Vita PC refused the PC build"
+	grep -aqE "system link: (in another's lobby|in a network game)" "$out/joiner/run.log" || fail "the PC build did not get in"
+	grep -aqE "system link: (in another's lobby|in a network game)" "$out/joiner2/run.log" || fail "the Vita did not get in"
+	;;
 unjoinable)
 	after=${HALO_TEST_LOCAL_AFTER:-20}
 	bots=${HALO_TEST_BOTS:-7}
@@ -1301,6 +2071,222 @@ PY
 	case $verdict in listed*) ;; *) fail "the hosted game was never listed (before the switch)" ;; esac
 	case $verdict in *removed=None*) fail "the host's slot was not emptied at the switch" ;; esac
 	case $verdict in *late=0) ;; *) fail "the host listed something after its slot was emptied" ;; esac
+	;;
+hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin)
+	fuzz_host=${HALO_TEST_FUZZ_HOST:-}
+	[ -x "$fuzz_host" ] || { echo "SKIP ($mode): HALO_TEST_FUZZ_HOST is not an ASan HALO_NET_FUZZ_TWIN build"; exit 0; }
+	# (hostfuzzforge: a network Forge game, the joiner editing - every edit a
+	# request the host checks, then a volley of malformed, replayed and too
+	# many requests - so that the Forge messages, 38 and the requests' kinds,
+	# are twinned too)
+	fuzz_game=host:bloodgulch:slayer fuzz_join= fuzz_host_env= fuzz_join_env=
+	# (hostfuzzmap: the host's game on a Custom Edition map the joiner has
+	# not, HALO_TEST_CE_MAP, with the Halo PC resource maps of
+	# HALO_TEST_DATA_MENUS on both: the joiner downloads it, map sharing's
+	# messages, 35, twinned)
+	if [ "$mode" = hostfuzzmap ]; then
+		ce_map=${HALO_TEST_CE_MAP:-$root/../custom-maps-dl/extinction.map}
+		menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+		if [ ! -f "$ce_map" ] || [ ! -r "$menus_data/maps/bitmaps.map" ]; then
+			echo "SKIP (hostfuzzmap): no Custom Edition map (HALO_TEST_CE_MAP) or Halo PC files (HALO_TEST_DATA_MENUS)"
+			exit 0
+		fi
+		ce_name=$(basename "$ce_map" .map)
+		mkdir -p "$out/maps-host/maps" "$out/maps-joiner/maps"
+		for f in "$menus_data"/maps/*.map; do
+			ln -sfn "$(readlink -f "$f")" "$out/maps-host/maps/$(basename "$f")"
+			ln -sfn "$(readlink -f "$f")" "$out/maps-joiner/maps/$(basename "$f")"
+		done
+		ln -sfn "$(readlink -f "$ce_map")" "$out/maps-host/maps/$ce_name.map"
+		copy_data_host=$out/maps-host copy_data_joiner=$out/maps-joiner
+		fuzz_game=host:$ce_name:slayer
+		fuzz_host_env=HALO_CUSTOM_EDITION=1
+		fuzz_join_env="HALO_CUSTOM_EDITION=1 HALO_MAP_SHARE_ANSWER=yes"
+	fi
+	# (hostfuzzjoin: the joiner the fuzz build too, twinning its host's
+	# messages)
+	if [ "$mode" = hostfuzzjoin ]; then
+		fuzz_game=${HALO_TEST_FUZZ_GAME:-host:bloodgulch:slayer}
+		fuzz_joiner=${HALO_TEST_FUZZ_JOINER:-$fuzz_host}
+	fi
+	if [ "$mode" = hostfuzzforge ]; then
+		fuzz_game=host:bloodgulch:forge
+		fuzz_join="HALO_TEST_COMMANDS=L900:forge net;L910:forge camera 60 -100 1.6 150 0;L920:forge spawn teleporter base"
+		fuzz_join="$fuzz_join;L930:forge distance 6;L940:forge drop;L1000:forge spawn boulder;L1010:forge distance 7"
+		fuzz_join="$fuzz_join;L1020:forge drop;L1100:forge grab #1;L1110:forge distance 9;L1120:forge drop"
+		fuzz_join="$fuzz_join;L1200:forge delete #2;L1210:forge undo;L1300:forge net junk 60;L1500:forge net junk 60"
+		fuzz_join="$fuzz_join;L1700:forge spawn boulder;L1710:forge drop;L1800:forge net junk 60;L2100:forge net"
+	fi
+	run_copy host "$host_machine" "$fuzz_host" "$cpu_a" $host_env \
+		"HALO_NETWORK_TEST=$fuzz_game" HALO_NETWORK_TEST_SCORE=200 HALO_NETWORK_TEST_SHOOT=3 \
+		HALO_NET_ANTICHEAT=false HALO_NET_FUZZ_RATE=${HALO_TEST_FUZZ_RATE:-2} HALO_NET_FUZZ_HOST_ONLY=1 \
+		HALO_NET_FUZZ_DUMP=fuzz-dump.bin \
+		ASAN_OPTIONS=detect_leaks=0:halt_on_error=0:log_path=asan UBSAN_OPTIONS=print_stacktrace=1:log_path=ubsan \
+		$fuzz_host_env
+	host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	if [ "$mode" = hostfuzzmap ]; then
+		run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_RETRY=5 $fuzz_join_env
+	elif [ "$mode" = hostfuzzjoin ]; then
+		run_copy joiner "$join_machine" "$fuzz_joiner" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_AIM=1 HALO_NETWORK_TEST_SHOOT=3 \
+			HALO_NETWORK_TEST_RETRY=5 HALO_NET_ANTICHEAT=false \
+			HALO_NET_FUZZ_RATE=${HALO_TEST_FUZZ_JOIN_RATE:-4} HALO_NET_FUZZ_KINDS=${HALO_TEST_FUZZ_JOIN_KINDS:-0-255} \
+			HALO_NET_FUZZ_DUMP=fuzz-dump.bin \
+			ASAN_OPTIONS=detect_leaks=0:halt_on_error=0:log_path=asan UBSAN_OPTIONS=print_stacktrace=1:log_path=ubsan
+	elif [ -n "$fuzz_join" ]; then
+		run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_RETRY=5 "$fuzz_join"
+	else
+		run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_AIM=1 HALO_NETWORK_TEST_SHOOT=3 \
+			HALO_NETWORK_TEST_RETRY=5
+	fi
+	join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	twins=$(grep -ahoE "net fuzz twin: [0-9]+ twins" "$out/host/run.log" "$out/host/data/debug.txt" 2>/dev/null | tail -1)
+	# (what the twins reached: the joiner's messages over its stream, its
+	# datagrams, and the messages' types - d<kind> a distributed one's)
+	reached=$(grep -ahoE "net fuzz twin: client messages .*" "$out/host/run.log" 2>/dev/null | tail -1)
+	echo "--- $mode reached: ${reached:-nothing logged}"
+	played=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "the joiner's seconds in the host's game: $played"
+	cm=$(echo "$reached" | sed -n 's/.*client messages \([0-9]*\),.*/\1/p')
+	dg=$(echo "$reached" | sed -n 's/.*datagrams \([0-9]*\),.*/\1/p')
+	[ "${cm:-0}" -ge 10 ] || fail "few of the joiner's stream messages twinned (${cm:-0})"
+	if [ "$mode" = hostfuzzmap ]; then
+		echo "--- map sharing"; grep -aE "map share" "$out/joiner/run.log" | head -6
+		echo "$reached" | grep -qE " 35:[0-9]+" || fail "no map sharing message (35) of the joiner's twinned"
+	else
+		[ "${played:-0}" -ge 30 ] || fail "the joiner played $played s in the fuzzed host's game (30 wanted)"
+		[ "${dg:-0}" -ge 50 ] || fail "few of the joiner's datagrams twinned (${dg:-0})"
+	fi
+	if [ "$mode" = hostfuzz ]; then
+		echo "$reached" | grep -qE " d11:[0-9]+" || fail "no hit report of the joiner's twinned"
+	fi
+	if [ "$mode" = hostfuzzforge ]; then
+		grep -aq "forge net: machine 1 plays the Forge game" "$out/host/run.log" ||
+			fail "the joiner never played the fuzzed host's Forge game"
+		echo "$reached" | grep -qE " 38:[0-9]+" || fail "no Forge answer (38) of the joiner's twinned"
+		echo "$reached" | grep -qE " d4[0-3]:[0-9]+" || fail "no Forge request of the joiner's twinned"
+	fi
+	asan=$(cat "$out/host"/asan* "$out/host/data"/asan* 2>/dev/null | grep -ac "ERROR: AddressSanitizer")
+	crash=$(grep -aEc "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt|stack trace" "$out/host/run.log" 2>/dev/null)
+	ticks=$(grep -ac "network test: tick" "$out/host/run.log" 2>/dev/null)
+	ub=$(cat "$out/host"/ubsan* "$out/host/data"/ubsan* 2>/dev/null | grep -a "runtime error" | sed 's/:[0-9]*:[0-9]*:/:/' |
+		sort | uniq -c | sort -rn | head -8)
+	echo "--- hostfuzz: ${twins:-no twin count}; AddressSanitizer errors ${asan:-0}; crashes ${crash:-0}; host ticks ${ticks:-0}"
+	[ -n "$ub" ] && echo "$ub" | sed 's/^/  UBSan: /'
+	grep -ah "anticheat: the last game" "$out/host/data/debug.txt" | tail -2
+	[ "${asan:-0}" = 0 ] || fail "AddressSanitizer: $asan errors"
+	[ "${crash:-0}" = 0 ] || fail "the host crashed"
+	[ "${ticks:-0}" -ge 60 ] || fail "the host played ${ticks:-0} s (60 wanted)"
+	[ -n "$twins" ] || fail "no twins made (not a HALO_NET_FUZZ_TWIN build?)"
+	if [ "$mode" = hostfuzzjoin ]; then
+		jtwins=$(grep -ahoE "net fuzz twin: [0-9]+ twins" "$out/joiner/run.log" "$out/joiner/data/debug.txt" 2>/dev/null | tail -1)
+		jreached=$(grep -ahoE "net fuzz twin: .*messages .*" "$out/joiner/run.log" 2>/dev/null | tail -1)
+		jasan=$(cat "$out/joiner"/asan* "$out/joiner/data"/asan* 2>/dev/null | grep -ac "ERROR: AddressSanitizer")
+		jcrash=$(grep -aEc "egmentation fault|SIGSEGV|SIGABRT|EXCEPTION halt|stack trace" "$out/joiner/run.log" 2>/dev/null)
+		# (an assertion the render thread skips is one the tick's would
+		# halt on, and a read past its block on a build without them)
+		jskip=$(grep -a "render assertion skipped" "$out/joiner/run.log" "$out/joiner/data/debug.txt" 2>/dev/null |
+			sed 's/^[^:]*://' | sort -u)
+		jub=$(cat "$out/joiner"/ubsan* "$out/joiner/data"/ubsan* 2>/dev/null | grep -a "runtime error" | sed 's/:[0-9]*:[0-9]*:/:/' |
+			sort | uniq -c | sort -rn | head -8)
+		echo "--- the joiner: ${jtwins:-no twin count}; reached: ${jreached:-nothing logged}; AddressSanitizer errors ${jasan:-0}; crashes ${jcrash:-0}"
+		[ -n "$jub" ] && echo "$jub" | sed 's/^/  UBSan (joiner): /'
+		[ -n "$jskip" ] && echo "$jskip" | sed 's/^/  (joiner) /'
+		[ "${jasan:-0}" = 0 ] || fail "the joiner: AddressSanitizer: $jasan errors"
+		[ "${jcrash:-0}" = 0 ] || fail "the joiner crashed"
+		[ -z "$jskip" ] || fail "the joiner's render thread skipped assertions"
+		[ -n "$jtwins" ] || fail "the joiner made no twins"
+	fi
+	;;
+anticheat|anticheatlag)
+	# (one long game; the host lands its shots too, and brings the players
+	# together before each)
+	game="HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:bloodgulch:slayer} HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-200}
+		HALO_NETWORK_TEST_SHOOT=${HALO_TEST_SHOOT:-3} HALO_TICK_PROFILE=1"
+	# (the ammo cheat: the host's copies of its clients' weapons dry, as a
+	# client's that fired them all are; the cheater's weapon never is)
+	cheat=${HALO_TEST_CHEAT:-damage,fly}
+	kick_within=${HALO_TEST_KICK_WITHIN:-60}
+	if [ "$mode" = anticheat ]; then
+		case $cheat in *ammo*)
+			game="$game HALO_NETWORK_TEST_DRAIN=1"
+			kick_within=${HALO_TEST_KICK_WITHIN:-90} ;;
+		esac
+	fi
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $game HALO_NETWORK_TEST_AIM=1 ${HALO_TEST_HOST_ENV:-}
+	host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	if [ "$mode" = anticheat ]; then
+		join_extra="HALO_NETWORK_TEST_CHEAT=$cheat HALO_NETWORK_TEST_RETRY=3 HALO_EXIT_AFTER=${HALO_TEST_CHEAT_SECONDS:-$((kick_within + 30))}"
+	else
+		join_extra="HALO_NETWORK_TEST_AIM=1 HALO_NETWORK_TEST_SHOOT=${HALO_TEST_SHOOT:-3}"
+	fi
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 $join_extra; join_pid=$last_pid
+	if [ "$mode" = anticheat ]; then
+		# (the modified client's machine again, a new run: a new identity)
+		wait $join_pid 2>/dev/null
+		run_copy rejoiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-code:$code HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_RETRY=2 HALO_EXIT_AFTER=50
+		join_pid=$last_pid
+	fi
+	wait $join_pid $host_pid 2>/dev/null
+	hostlog="$out/host/run.log" hostdebug="$out/host/data/debug.txt"
+	echo "--- the host's anti-cheat"
+	grep -ah "anticheat:\|dropped by the host\|kept out by the host" "$hostdebug" "$hostlog" | sort -u | head -30
+	hits=$(grep -a "network test: tick" "$hostlog" | grep -ao "hits [0-9]* dealt [0-9]* rejected [0-9]*" | tail -1)
+	echo "the host's hit reports (the last count): ${hits:-none}"
+	echo "--- the host's net-tick timing (ms a tick, calls a tick)"
+	grep -a "net-tick" "$hostlog" | tail -3
+	dropped=$(cat "$hostdebug" "$hostlog" 2>/dev/null | grep -ac "dropped by the host")
+	if [ "$mode" = anticheatlag ]; then
+		two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "joiner's seconds with two players playing: $two"
+		[ "$two" -ge 60 ] || fail "the joiner played the host's game for $two s with two players (60 wanted)"
+		[ "$dropped" = 0 ] || fail "the host dropped an honest player on a poor link ($dropped)"
+		grep -aq "anticheat: .*\(forged hit\|hit of a weapon not held\)" "$hostdebug" &&
+			fail "the host counted what only a modified client sends of an honest one"
+		dealt=$(echo "$hits" | sed -n 's/.*dealt \([0-9]*\).*/\1/p')
+		[ "${dealt:-0}" -ge 5 ] || fail "the host dealt ${dealt:-0} of the joiner's hits (5 wanted)"
+	else
+		[ "$dropped" -ge 1 ] || fail "the host never dropped the modified client"
+		when=$(grep -ah "dropped by the host" "$hostdebug" "$hostlog" | head -1)
+		echo "the drop: ${when:-none}"
+		grep -aq "reason=dropped: " "$out/host/data/cheaters.txt" 2>/dev/null ||
+			fail "no line in the host's cheaters.txt for the drop"
+		# (the ammo cheat alone: dropped for its empty weapon's hits, the
+		# host's empty weapon check, and nothing else)
+		if [ "$cheat" = ammo ]; then
+			grep -aq "refused as of an empty weapon" "$hostdebug" ||
+				fail "the host refused none of the modified client's hits as of an empty weapon"
+			grep -aq "reason=dropped: hit of an empty weapon" "$out/host/data/cheaters.txt" 2>/dev/null ||
+				fail "the modified client was not dropped for its empty weapon's hits"
+		fi
+		echo "--- cheaters.txt"; cat "$out/host/data/cheaters.txt" 2>/dev/null | head -5
+		grep -aq "network test: joining again" "$out/joiner/run.log" || fail "the modified client never tried to join again"
+		grep -aqE "refusing a machine @ .*: (dropped from this game for cheating|kept out by the host)" "$hostdebug" ||
+			fail "the host did not refuse the dropped machine joining again"
+		echo "--- the host's refusals"; grep -a "refusing a machine" "$hostdebug" | head -8
+		grep -aq "network test: joining" "$out/rejoiner/run.log" || fail "the new run on the modified client's machine never tried to join"
+		grep -aq "refusing a machine @ .*: kept out by the host" "$hostdebug" ||
+			fail "the host let the dropped machine's new run in (its real address and hardware id kept out)"
+		two=$(grep -a "network test: tick" "$out/rejoiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		[ "${two:-0}" = 0 ] || fail "the dropped machine's new run played $two s in the host's game"
+		# (no more than HALO_TEST_KICK_WITHIN seconds of the game's play: the
+		# joiner's last tick before it was dropped)
+		last=$(grep -a "network test: tick" "$out/joiner/run.log" | head -400 | sed -n 's/.*network test: tick \([0-9]*\) .*/\1/p' | sort -n | tail -1)
+		echo "the modified client played to tick ${last:-none} of its game"
+		[ -n "$last" ] && [ "$last" -le $(( kick_within * 30 )) ] ||
+			fail "the modified client played past $kick_within s"
+	fi
 	;;
 pc)
 	[ -n "$pc" ] || { echo "pc mode needs HALO_TEST_PC (a build without --linux-net-vita)"; exit 2; }
@@ -1636,6 +2622,12 @@ coop)
 	grep -a "co-op" "$out/joiner/data/debug.txt" | head -40 > "$out/joiner.summary"
 	echo "--- host"; cat "$out/host.summary"
 	echo "--- joiner"; cat "$out/joiner.summary"
+	# (the host's start: its level's copy, stopped by another map's ask
+	# while it ran, was taken for the level's and waited for forever, and
+	# the host never sent the start; feat/party, Oct 2026:
+	# cache_files_precache_is_copying_map)
+	grep -aq "signalling client machines to begin loading" "$out/host/data/debug.txt" ||
+		fail "the host never started the co-op game (its level never precached: $(grep -ac "starting precaching of map" "$out/host/data/debug.txt") copies begun)"
 	two=$(grep -a "network test: tick" "$out/joiner/run.log" | grep -aEc "player [0-9]+: \(.* player [0-9]+: \(")
 	echo "joiner's seconds with both players alive: $two"
 	# (every joiner played, one alone too: the seconds all of them were alive
@@ -1753,6 +2745,889 @@ coopmenuonline)
 	echo "joiner's seconds with both players alive: $both"
 	[ "$both" -ge 15 ] || fail "both players were alive for $both s (15 wanted)"
 	;;
+h3coopmenu)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (the host's profile, as the Vita keeps it: run_menus_test.sh's)
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	# (CAMPAIGN, the profile: the lobby on The Pillar of Autumn, MISSION focused; up to
+	# NETWORK, A, down two: SYSTEM LINK CO-OP, A; down two to DIFFICULTY, A, down: Heroic
+	# - on Easy and Normal a10's cryo bay waits for the host's look test -, A; down to START
+	# GAME, A)
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 \
+		"HALO_TEST_PAD=wait:150:3000 a wait:150:3000 a wait:150:3000 up:150:600 a wait:150:2500 down:150:600 down:150:600 a wait:150:2500 down:150:600 down:150:600 a wait:150:2500 down:150:600 a wait:150:2500 down:150:600 a" \
+		"HALO_TEST_COMMANDS=L60:@vote"; host_pid=$last_pid
+	sleep 5
+	holder; lan=$held
+	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+	in_ns "$host_router" ip link set m2_host netns "$lan"
+	in_ns "$host_router" ip link set l2_host master b_host
+	in_ns "$host_router" ip link set l2_host up
+	in_ns "$lan" ip link set lo up
+	in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+	in_ns "$lan" ip link set m2_host up
+	in_ns "$lan" ip route add default via 192.168.1.1
+	# (MULTIPLAYER: the Halo 3 lobby on SYSTEM LINK; down five to BROWSE GAMES, A: the System
+	# Link screen; A joins, A the profile, A; the Halo 3 LAN browser, a while for the host's
+	# game, A on its row)
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a" \
+		"HALO_TEST_COMMANDS=L60:@vote"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log hd=$out/host/data/debug.txt
+	echo "--- host"; grep -aE "ui: screen|co-op:|menus: h3 campaign" "$hl" | head -24
+	echo "--- joiner"; grep -aE "ui: screen|menus: h3 mp|system link: (joining|in another)" "$jl" | head -16
+	grep -aq "menus: h3 campaign: network SYSTEM LINK CO-OP" "$hl" || fail "the host's lobby was not set to SYSTEM LINK CO-OP"
+	grep -aq "co-op: hosting levels.a10.a10 on difficulty 2 from the campaign's menus" "$hl" ||
+		fail "the host did not host The Pillar of Autumn on Heroic as co-op from the Halo 3 lobby"
+	grep -aqE "ui: screen .*(connected_pregame_screen|pc.h3.pregame.screen)" "$hl" || fail "the host's lobby (the waiting screen) did not open"
+	grep -aq "menus: Halo 3 screen h3/mp/screen for" "$jl" || fail "the joiner's MULTIPLAYER did not open the Halo 3 lobby"
+	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not join the host's game"
+	grep -aq "co-op: the partner is in: the countdown starts" "$hd" || fail "the partner's joining did not start the countdown"
+	both=$(grep -a "network test: tick" "$jl" | grep -aEc "player [0-9]+: \(.*player [0-9]+: \(")
+	echo "joiner's seconds with both players alive: $both"
+	[ "$both" -ge 15 ] || fail "both players were alive for $both s (15 wanted)"
+	;;
+h3lan|h3adhoc)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS)"; exit 0
+	fi
+	# (h3lan: the joiner on the host's LAN; h3adhoc: a link between the two machines alone,
+	# the emulated ad hoc group, as adhoc's)
+	if [ "$mode" = h3lan ]; then
+		holder; lan=$held
+		in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+		in_ns "$host_router" ip link set m2_host netns "$lan"
+		in_ns "$host_router" ip link set l2_host master b_host
+		in_ns "$host_router" ip link set l2_host up
+		in_ns "$lan" ip link set lo up
+		in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+		in_ns "$lan" ip link set m2_host up
+		in_ns "$lan" ip route add default via 192.168.1.1
+		join_ns=$lan host_net= join_net=
+	else
+		ip link add a_host type veth peer name a_join
+		ip link set a_host netns "$host_machine"
+		ip link set a_join netns "$join_machine"
+		in_ns "$host_machine" ip addr add 10.99.0.1/30 dev a_host
+		in_ns "$host_machine" ip link set a_host up
+		in_ns "$join_machine" ip addr add 10.99.0.2/30 dev a_join
+		in_ns "$join_machine" ip link set a_join up
+		join_ns=$join_machine
+		host_net="HALO_NET_ADHOC=true HALO_NET_ADHOC_EMULATE=10.99.0.1,10.99.0.2"
+		join_net="HALO_NET_ADHOC=true HALO_NET_ADHOC_EMULATE=10.99.0.2,10.99.0.1"
+	fi
+	# (MULTIPLAYER: the Halo 3 lobby; down three to START GAME, A: the profile (A joins, A
+	# the profile, A): the game hosted with the lobby's GAME and MAP (Slayer, Battle Creek),
+	# its lobby; a while for the joiner, then A starts the game, a few times)
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 $host_net \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:3000 a wait:150:3000 a wait:150:9000 wait:150:${HALO_TEST_H3LAN_WAIT:-40000} a wait:150:5000 a wait:150:5000 a" \
+		; host_pid=$last_pid
+	sleep 5
+	# (MULTIPLAYER: the Halo 3 lobby; down five to BROWSE GAMES, A: the profile (A joins, A
+	# the profile, A); the LAN browser, a while for the host's game, A on its row)
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_ns" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:2 $join_net \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a a a wait:150:${HALO_TEST_COOP_LIST_WAIT:-15000} a" \
+		; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	network=SYSTEM\ LINK title=system\ link
+	[ "$mode" = h3adhoc ] && network=AD\ HOC title=ad\ hoc
+	echo "--- host"; grep -aE "ui: screen|menus: (h3 mp|Multiplayer)|system link: (hosting|in a)" "$hl" | head -16
+	echo "--- joiner"; grep -aE "ui: screen|menus: (h3 mp|the LAN|the Halo 3 LAN)|system link: (joining|in a)" "$jl" | head -20
+	grep -aq "menus: h3 mp lobby: NETWORK: $network" "$hl" || fail "the host's lobby was not on $network"
+	grep -aq "menus: Multiplayer > System Link: the game's server started; the game's lobby" "$hl" ||
+		fail "the host's START GAME did not host a game (straight to its lobby)"
+	grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected" "$hl" &&
+		fail "an Xbox screen (the map or game type list) opened on the host's way"
+	grep -aq "system link: hosting" "$hl" || fail "the host did not host"
+	grep -aq "menus: h3 mp lobby: NETWORK: $network" "$jl" || fail "the joiner's lobby was not on $network"
+	grep -aq "menus: the Halo 3 LAN browser for the System Link list" "$jl" ||
+		fail "the joiner's BROWSE GAMES did not open the Halo 3 LAN browser"
+	grep -aq "menus: the LAN browser ($title)" "$jl" || fail "the LAN browser was not the $title one"
+	grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.server_list" "$jl" &&
+		fail "the Xbox's System Link list opened with Menu style Halo 3"
+	grep -aqE "menus: the LAN browser lists 1: .* \(Battle Creek, Slayer, 1/[0-9]+" "$jl" ||
+		fail "the LAN browser did not list the host's game (Battle Creek, Slayer, its one player)"
+	grep -aq "menus: the LAN browser joins " "$jl" || fail "A on the host's row did not join it"
+	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not reach the host's lobby"
+	grep -aq "menus: the LAN browser's game .* was not joined" "$jl" && fail "the join was refused"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
+	[ "$mode" = h3adhoc ] && grep -q CONNECT "$out/broker.log" && fail "ad hoc play reached the signalling broker"
+	;;
+h3liveinvite)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (INVITE FRIENDS from the live lobby: the host - its profile, Menu style Halo 3 - and the
+	# joiner become friends (codes through files, as friends'), the host's lobby on ONLINE, private
+	# (no listing, not joinable from presence): live once the broker is reached; L: INVITE FRIENDS,
+	# the friend online, Cross invites them; the joiner's invite question answered Accept at the
+	# menus (friends_game.c), its join by the invite: it must land in the host's live lobby)
+	hc=$out/host.code jc=$out/joiner.code
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	shot_env=
+	[ -n "${HALO_TEST_SHOTS:-}" ] && mkdir -p "$HALO_TEST_SHOTS/netns-h3liveinvite-host" &&
+		shot_env="HALO_SCREENSHOT_DIR=$HALO_TEST_SHOTS/netns-h3liveinvite-host HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1"
+	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A: online; a while for the
+	# broker, the lobby live and the friendship made; L: INVITE FRIENDS; Cross on the friend; Circle
+	# back to the lobby, a while for the joiner)
+	invite_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:${HALO_TEST_INVITE_WAIT:-35000}"
+	invite_pad="$invite_pad @invite-01-lobby:0:300 lt wait:150:4000 @invite-02-picker:0:300 a wait:150:3000"
+	invite_pad="$invite_pad @invite-03-invited:0:300 b wait:150:30000 @invite-04-lobby-joined:0:300"
+	# (then START GAME (down three, A): the private lobby's game played, never listed meanwhile;
+	# a while in it, Start, down three to END GAME, Cross, Cross: the game over for everyone, the
+	# joiner told the online game closed)
+	invite_pad="$invite_pad down:150:500 down:150:500 down:150:500 a wait:150:5000 @invite-05-countdown:0:300"
+	invite_pad="$invite_pad wait:150:45000 start:150:4000 wait:150:4000 down:150:800 down:150:800 down:150:800 a:150:3000"
+	invite_pad="$invite_pad wait:150:3000 a:150:3000 wait:150:20000 @invite-06-menus:0:300"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false \
+		HALO_NET_LOBBY_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$hc,add-file=$jc" $shot_env \
+		"HALO_TEST_PAD=$invite_pad" ; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" \
+		HALO_TEST_FRIENDS_ANSWER=accept "HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "ui: screen|menus: h3 (live lobby|invite)|friends: (invited|.* accepted)|system link: (hosting|in a)" "$hl" | head -30
+	echo "--- joiner"; grep -aE "friends: .*(invite|invited)|network test: (the friend|join)|system link: (joining|in a)" "$jl" | head -16
+	for side in host joiner; do
+		grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" "$out/$side/run.log" && fail "the $side: an assertion, exception or crash"
+	done
+	grep -aq "friends: .* accepted the friend request; now friends" "$hl" || fail "the host did not become the joiner's friend"
+	grep -aq "menus: h3 live lobby: open on ONLINE (Slayer on Battle Creek): others join it now" "$hl" ||
+		fail "the host's lobby did not open live on ONLINE"
+	grep -aq "menus: h3 invite: INVITE FRIENDS opens" "$hl" || fail "L did not open INVITE FRIENDS"
+	grep -aq "ui: screen pc.h3.invite.screen" "$hl" || fail "INVITE FRIENDS did not open"
+	grep -aqE "menus: h3 invite: 1 online: [^ ]+$" "$hl" || fail "INVITE FRIENDS did not list the friend online, invitable"
+	grep -aqE "menus: h3 invite: [^:]+: Invited " "$hl" || fail "Cross did not invite the friend (the outcome said)"
+	grep -aq "friends: invited .* into this machine's game" "$hl" || fail "the host's invite was not sent"
+	grep -aq "friends: .* invited this machine: " "$jl" || fail "the joiner did not hear the invite"
+	grep -aq "friends: .*'s invite accepted: Done" "$jl" || fail "the joiner did not accept the invite"
+	grep -aq "network test: the friend's invite accepted and its host reached" "$jl" || fail "the invite's host was not reached"
+	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not land in the host's lobby"
+	grep -aqE "menus: h3 live lobby: Slayer on Battle Creek; players: [^;]+, [^;]+; 2/" "$hl" ||
+		fail "the joiner was not in the host's live lobby"
+	grep -aqE "publish .* hcev/3/lobby/s/[0-9a-f]{32} [1-9][0-9]* B retained" "$out/broker.log" &&
+		fail "the private live lobby was listed"
+	grep -aq "menus: h3 live lobby: private until the host chooses Public" "$hl" || fail "the lobby was not private by default"
+	grep -aq "menus: h3 live lobby: the game's lobby: the countdown begun" "$hl" || fail "START GAME did not begin the countdown"
+	grep -aqE "Internet play: the game is (public|listed in everyone)" "$hl" && fail "the private lobby's game was listed"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 15 ] || fail "the friend played the private lobby's game for $two s with two players (15 wanted)"
+	grep -aq "ui: screen pc.h3.mppause.end_screen" "$hl" || fail "the host's END GAME did not ask"
+	grep -aq "menus: the host's game closed: said for online play" "$jl" ||
+		fail "the joiner was not told the online game closed (its network named)"
+	;;
+h3livebots)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (RC6, Cass: a host alone with its Bots online, Infection: "Ready: Cross starts the game" and
+	# nothing - the game's lobby waited for players before the countdown. The host - its profile,
+	# Menu style Halo 3 - opens MULTIPLAYER, NETWORK up to ONLINE: live once the broker is reached,
+	# the bots in; infection: GAME (down, A), the right trigger three times (the picker's last,
+	# Infection), A; START GAME (down two, A); slayer: START GAME (down three, A): the game's lobby;
+	# Cross: the countdown, the game started)
+	livebots_game=${HALO_TEST_LIVEBOTS_GAME:-infection}
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	d="down:150:500"
+	livebots_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:20000"
+	if [ "$livebots_game" = infection ]; then
+		livebots_pad="$livebots_pad $d a wait:150:2500 rt:150:500 rt:150:500 rt:150:500 a wait:150:4000 $d $d a"
+	else
+		livebots_pad="$livebots_pad $d $d $d a"
+	fi
+	# (the game's lobby: a while for the bots - START GAME on a lobby not hosted yet hosts it now,
+	# its bots coming in after -, then Cross, "Ready: Cross starts the game")
+	livebots_pad="$livebots_pad wait:150:12000 a wait:150:$((seconds * 1000))"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false \
+		HALO_NET_LOBBY_NAME=Alpha HALO_BOTS_ONLINE=full "HALO_TEST_PAD=$livebots_pad"; host_pid=$last_pid
+	wait $host_pid 2>/dev/null
+	hl=$out/host/run.log
+	echo "--- host ($livebots_game)"
+	grep -aE "menus: h3 (live lobby|mp: game type)|server: bots: a bot joined|menus: h3 pregame: " "$hl" | tail -10 | cut -c1-220
+	# (a render's "assertion skipped (torn read?)" is the threaded render's, as the other tests take it)
+	grep -av "render assertion skipped" "$hl" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+		fail "the host: an assertion, exception or crash"
+	grep -aq "menus: h3 live lobby: open on ONLINE" "$hl" || fail "the host's lobby did not open live on ONLINE"
+	grep -aq "server: bots: a bot joined" "$hl" || fail "no bot joined the host's lobby"
+	[ "$livebots_game" = infection ] && { grep -aq "menus: h3 mp: game type Infection" "$hl" || fail "GAME was not set to Infection"; }
+	grep -aq "menus: h3 live lobby: START GAME: the game's lobby" "$hl" || fail "START GAME did not open the game's lobby"
+	grep -aq "menus: h3 pregame: Ready: " "$hl" || fail "the game's lobby was never ready for the host to start"
+	grep -aq "menus: h3 pregame: Starting (the countdown)" "$hl" || fail "neither START GAME nor Cross began the countdown"
+	grep -aq "all machines have successfully loaded" "$out/host/data/debug.txt" ||
+		fail "the host alone with its bots did not start the game"
+	;;
+h3liveprivate)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (the live lobby private by default, insider.15: the host - its profile, Menu style Halo 3,
+	# Visibility Public as shipped - and the joiner friends (codes through files); the host's
+	# lobby on ONLINE: live, not listed; the friend joins it from presence (no code); Square: GAME
+	# OPTIONS, down eight to START GAME (past WHO CAN JOIN and BOTS; VISIBILITY PUBLIC, the
+	# setting's), A: the lobby listed, the game's lobby and its countdown, the game)
+	hc=$out/host.code jc=$out/joiner.code
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	private_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:${HALO_TEST_PRIVATE_WAIT:-60000}"
+	private_pad="$private_pad x wait:150:4000"
+	for row in $(seq 1 8); do private_pad="$private_pad down:150:400"; done
+	private_pad="$private_pad a wait:150:5000"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true \
+		HALO_NET_LOBBY_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$hc,add-file=$jc" \
+		"HALO_TEST_PAD=$private_pad" ; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-friend HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" \
+		HALO_TEST_FRIENDS_ANSWER=accept "HALO_TEST_PAD=wait:150:1000"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "menus: (h3 live lobby|Server Setup)|Internet play: the game (is|is listed|is no longer)" "$hl" | head -20
+	echo "--- joiner"; grep -aE "friends: .* is online: |network test: (joining friend|the friend)|system link: in a" "$jl" | head -8
+	for side in host joiner; do
+		grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" "$out/$side/run.log" && fail "the $side: an assertion, exception or crash"
+	done
+	grep -aq "menus: h3 live lobby: open on ONLINE (Slayer on Battle Creek): others join it now" "$hl" ||
+		fail "the host's lobby did not open live on ONLINE"
+	grep -aq "menus: h3 live lobby: private until the host chooses Public" "$hl" || fail "the lobby was not private by default"
+	sed -n '1,/menus: Server Setup: /p' "$hl" | grep -aqE "Internet play: the game is (public|listed in everyone)" &&
+		fail "the lobby was listed before the host chose Public"
+	grep -aq "friends: .* is online: .*(joinable)" "$jl" || fail "the friend did not see the private lobby joinable"
+	grep -aq "network test: joining friend .*: Done" "$jl" || fail "the friend did not join the private lobby in one press"
+	grep -aqE "menus: h3 live lobby: Slayer on Battle Creek; players: [^;]+, [^;]+; 2/" "$hl" ||
+		fail "the friend was not in the host's live lobby before START GAME"
+	grep -aq "menus: Server Setup: Alpha, 16 players, public, Vitas; the live lobby's game takes them, its lobby next" "$hl" ||
+		fail "GAME OPTIONS' START GAME did not take VISIBILITY PUBLIC for the live game"
+	sed -n '/menus: Server Setup: /,$p' "$hl" | grep -aq "Internet play: the game is listed in everyone's public games" ||
+		fail "the lobby was not listed once the host chose Public"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 15 ] || fail "the friend played the host's game for $two s with two players (15 wanted)"
+	;;
+h3live|h3liveleave|h3liveagain)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	# (h3liveagain: a short game - 5 kills, the host's kills every 2 s -, then the lobby again and
+	# a second game: a longer run)
+	again_env=
+	[ $mode = h3liveagain ] && again_env="HALO_NETWORK_TEST_SCORE=5 HALO_NETWORK_TEST_KILL=2"
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (the joiner on the host's LAN, as h3lan's; each copy with the profile, its nameplate's)
+	holder; lan=$held
+	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+	in_ns "$host_router" ip link set m2_host netns "$lan"
+	in_ns "$host_router" ip link set l2_host master b_host
+	in_ns "$host_router" ip link set l2_host up
+	in_ns "$lan" ip link set lo up
+	in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+	in_ns "$lan" ip link set m2_host up
+	in_ns "$lan" ip route add default via 192.168.1.1
+	for name in host joiner; do
+		mkdir -p "$out/$name/save/u/UDATA/869079979327"
+		cp "$HALO_TEST_PROFILE" "$out/$name/save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/$name/save/u/UDATA/869079979327/"
+	done
+	shots() { # NAME: the copy's screenshots at the Vita's picture, kept in HALO_TEST_SHOTS
+		[ -n "${HALO_TEST_SHOTS:-}" ] || return 0
+		mkdir -p "$HALO_TEST_SHOTS/netns-$mode-$1"
+		echo "HALO_SCREENSHOT_DIR=$HALO_TEST_SHOTS/netns-$mode-$1 HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1"
+	}
+	old_joiner=${HALO_TEST_VITA_JOINER:-}
+	# (the host: MULTIPLAYER, the lobby on SYSTEM LINK, live once up (its game open, Slayer on
+	# Battle Creek); a while for the joiner; then h3live: MAP (down two, A), BLOOD GULCH (down
+	# nine, A); GAME (up, A), the next game type (down, A); START GAME (down two, A): the game's
+	# lobby, its countdown at once; h3liveleave: B, the lobby left)
+	live_pad="wait:150:3000 down:150:700 a wait:150:${HALO_TEST_LIVE_WAIT:-45000} @live-01-lobby-joined:0:300"
+	if [ $mode = h3live ] || [ $mode = h3liveagain ]; then
+		live_pad="$live_pad down:150:500 down:150:500 a wait:150:2500"
+		for row in $(seq 1 9); do live_pad="$live_pad down:150:300"; done
+		live_pad="$live_pad a wait:150:8000 @live-02-map-changed:0:300 up:150:500 a wait:150:2500 down:150:500 a wait:150:8000"
+		live_pad="$live_pad @live-03-game-changed:0:300 down:150:500 down:150:500 a wait:150:3000 @live-04-countdown:0:300"
+		# (h3liveagain: the game over, the host back in the lobby, START GAME focused: A again)
+		[ $mode = h3liveagain ] && live_pad="$live_pad wait:150:${HALO_TEST_AGAIN_WAIT:-110000} @live-05-lobby-again:0:300 ${HALO_TEST_AGAIN_PAD:-a wait:150:4000 @live-06-second-countdown:0:300}"
+	else
+		live_pad="$live_pad b wait:150:15000 @live-02-host-left:0:300"
+	fi
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 $(shots host) $again_env \
+		"HALO_TEST_PAD=$live_pad" ; host_pid=$last_pid
+	sleep 5
+	if [ -n "$old_joiner" ]; then
+		# (an older build, its own menus - Menu style Halo CE: the Xbox's - joining the first game
+		# its System Link search finds: the network test's join)
+		HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$old_joiner" "$cpu_b" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=join HALO_UI_LOG=1 HALO_TEST_INPUT=bot:2 ; join_pid=$last_pid
+	else
+		# (MULTIPLAYER: the joiner's own lobby, live a moment; down five to BROWSE GAMES, A: its
+		# lobby closed, SELECT PROFILE (A joins, A the profile, A); the LAN browser, a while for
+		# the host's game, A on its row: the host's live lobby)
+		HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
+			HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:2 $(shots joiner) \
+			"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a a a wait:150:15000 a wait:150:10000 @live-joiner-01-lobby:0:300 wait:150:18000 @live-joiner-02-map:0:300 wait:150:10000 @live-joiner-03-game:0:300" \
+			; join_pid=$last_pid
+	fi
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "ui: screen|menus: h3 (live lobby|mp:|pregame:)|system link: (hosting|in a)" "$hl" | head -30
+	echo "--- joiner"; grep -aE "ui: screen|menus: (h3 pregame:|h3 live|the LAN browser joins)|system link: (joining|in a)|network test: (join|search)|host is shutting|error" "$jl" | head -30
+	# (the threaded render's "assertion skipped (torn read?)", logged and passed over, as the
+	# other tests take it: v1.1.0's says it now and then)
+	for side in host joiner; do
+		grep -av "assertion skipped (torn read?)" "$out/$side/run.log" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+			fail "the $side: an assertion, exception or crash"
+	done
+	grep -aq "menus: h3 live lobby: open on SYSTEM LINK (Slayer on Battle Creek): others join it now" "$hl" ||
+		fail "the host's lobby did not open live on SYSTEM LINK, Slayer on Battle Creek"
+	grep -aq "system link: hosting" "$hl" || fail "the host's lobby game was not hosted"
+	grep -aqE "menus: h3 live lobby: Slayer on Battle Creek; players: [^;]+, [^;]+; 2/" "$hl" ||
+		fail "the host's lobby did not show the joiner among its players before START GAME"
+	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not reach the host's lobby"
+	if [ -z "$old_joiner" ]; then
+		grep -aq "menus: h3 live lobby: closed (the host browses the games)" "$jl" ||
+			fail "the joiner's own live lobby was not closed by BROWSE GAMES"
+		grep -aqE "menus: h3 pregame: Waiting for the host to start; Slayer on Battle Creek" "$jl" ||
+			fail "the joiner's lobby did not show the host's Slayer on Battle Creek, waiting for the host"
+	fi
+	if [ $mode = h3live ] || [ $mode = h3liveagain ]; then
+		gametype=$(sed -n 's/.*menus: h3 mp: game type \(.*\)$/\1/p' "$hl" | tail -1)
+		echo "the host's lobby: Blood Gulch, then the game type ${gametype:-none}"
+		grep -aq "menus: h3 live lobby: now Slayer on Blood Gulch, sent to its joiners" "$hl" ||
+			fail "the host's MAP change did not go to its game"
+		[ -n "$gametype" ] && grep -aq "menus: h3 live lobby: now $gametype on Blood Gulch, sent to its joiners" "$hl" ||
+			fail "the host's GAME change did not go to its game"
+		grep -aq "menus: h3 live lobby: START GAME: the game's lobby, its countdown begun" "$hl" ||
+			fail "START GAME did not go to the live game's lobby"
+		grep -aq "menus: h3 live lobby: the game's lobby: the countdown begun" "$hl" ||
+			fail "START GAME did not begin the countdown with the joiner in"
+		grep -aq "the game's server started" "$hl" && fail "START GAME started another server"
+		grep -aq "ui: screen pc.h3.join.screen" "$hl" && fail "the host was asked for a profile (the live lobby has its player)"
+		if [ -z "$old_joiner" ]; then
+			grep -aq "menus: h3 pregame: .*; Slayer on Blood Gulch" "$jl" || fail "the joiner's lobby did not follow the MAP change"
+			[ -n "$gametype" ] && grep -aqF "; $gametype on Blood Gulch" "$jl" ||
+				fail "the joiner's lobby did not follow the GAME change"
+		fi
+		grep -aq "starting precaching of map 'bloodgulch'" "$out/joiner/data/debug.txt" ||
+			fail "the joiner did not take Blood Gulch, the host's new map"
+		two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "joiner's seconds with two players playing: $two"
+		[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
+		grep -aq "the game host is shutting down" "$out/joiner/data/debug.txt" && fail "the joiner was told the host left"
+		if [ $mode = h3liveagain ]; then
+			echo "--- after the game"; sed -n '/the game over, back to the lobby/,$p' "$hl" | grep -aE "ui: screen|menus: h3 (live lobby|mp:)" | head -12
+			grep -aq "network test: the menus' game played to 5" "$hl" || fail "the game was not made short"
+			grep -aq "menus: h3 live lobby: the game over, back to the lobby with its game and players" "$hl" ||
+				fail "the host did not come back to the live lobby after the game"
+			sed -n '/the game over, back to the lobby/,$p' "$hl" | grep -aq "menus: h3 live lobby: its game kept, live on SYSTEM LINK" ||
+				fail "the lobby did not take its game back, live"
+			# (the lobby's scene again after the game: its three Spartans made on the new load of ui.map,
+			# posed without the main menu's ticks - insider.21: gone after the carnage report)
+			after=$(awk 'f && /START GAME: the game.s lobby/ { exit } /the game over, back to the lobby/ { f = 1 } f' "$hl")
+			echo "$after" | grep -aE "h3 scene objects?|animation " | head -8
+			echo "$after" | grep -aq "menus: h3 scene objects: h3/mp/screen: made in" ||
+				fail "the lobby's Spartans were not made again after the game"
+			[ "$(echo "$after" | grep -ac "menus: h3 scene object [0-2]: characters.cyborg_mp.cyborg_mp (menu_multiplayer) at")" = 3 ] ||
+				fail "the lobby did not have its three Spartans after the game"
+			[ "$(echo "$after" | grep -acE "menus: h3 scene object [0-2]: animation (stand missile airborne|crouch rifle idle)")" = 2 ] ||
+				fail "the lobby's Spartans were not posed after the game (rocket jump, crouching sniper)"
+			grep -aq "ui: screen .*connected_map_select" "$hl" && fail "the host was shown the Xbox's map choice"
+			sed -n '/the game over, back to the lobby/,$p' "$hl" | grep -aqE "menus: h3 live lobby: [^;]+; players: [^;]+, [^;]+; 2/" ||
+				fail "the joiner was not in the lobby after the game"
+			[ "$(grep -ac "menus: h3 live lobby: the game's lobby: the countdown begun" "$hl")" -ge 2 ] ||
+				fail "the second START GAME did not begin a countdown with the joiner"
+			games=$(awk '/network test: tick / { split($0, a, "network test: tick "); split(a[2], b, " "); t = b[1] + 0;
+				if (last == "" || t < last) g++; last = t } END { print g + 0 }' "$jl")
+			echo "the joiner's games: $games"
+			[ "$games" -ge 2 ] || fail "the joiner did not play a second game with the host ($games)"
+		fi
+	else
+		grep -aq "menus: h3 live lobby: closed (the host left the lobby): its joiners are told the host left" "$hl" ||
+			fail "B did not close the host's live lobby"
+		grep -aq "the game host is shutting down" "$out/joiner/data/debug.txt" ||
+			fail "the joiner was not told the host left"
+		grep -aq "menus: the host's game closed: said for System Link" "$jl" ||
+			fail "the joiner was not told the System Link game closed"
+		grep -a "ui: screen\|error" "$jl" | sed -n '/the game host/,$p' | head -5
+		sed -n '/system link: in another.s lobby/,$p' "$jl" | grep -aqE "ui: screen (pc.h3.(main|mp).screen|ui.shell.main_menu)" ||
+			fail "the joiner was not back at the menus"
+		grep -a "network test: tick" "$jl" | grep -aq "| playing" && fail "the joiner played a game"
+	fi
+	;;
+h3mppause)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (the joiner on the host's LAN, as h3lan's; each copy with the profile)
+	holder; lan=$held
+	in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+	in_ns "$host_router" ip link set m2_host netns "$lan"
+	in_ns "$host_router" ip link set l2_host master b_host
+	in_ns "$host_router" ip link set l2_host up
+	in_ns "$lan" ip link set lo up
+	in_ns "$lan" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+	in_ns "$lan" ip link set m2_host up
+	in_ns "$lan" ip route add default via 192.168.1.1
+	# (a second joiner on the LAN, its own machine)
+	holder; lan2=$held
+	in_ns "$host_router" ip link add l3_host type veth peer name m3_host
+	in_ns "$host_router" ip link set m3_host netns "$lan2"
+	in_ns "$host_router" ip link set l3_host master b_host
+	in_ns "$host_router" ip link set l3_host up
+	in_ns "$lan2" ip link set lo up
+	in_ns "$lan2" ip addr add 192.168.1.4/24 broadcast 192.168.1.255 dev m3_host
+	in_ns "$lan2" ip link set m3_host up
+	in_ns "$lan2" ip route add default via 192.168.1.1
+	for name in host joiner; do
+		mkdir -p "$out/$name/save/u/UDATA/869079979327"
+		cp "$HALO_TEST_PROFILE" "$out/$name/save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/$name/save/u/UDATA/869079979327/"
+	done
+	shots() { # NAME: the copy's screenshots at the Vita's picture, kept in HALO_TEST_SHOTS
+		[ -n "${HALO_TEST_SHOTS:-}" ] || return 0
+		rm -rf "$HALO_TEST_SHOTS/netns-$1"; mkdir -p "$HALO_TEST_SHOTS/netns-$1"
+		echo "HALO_SCREENSHOT_DIR=$HALO_TEST_SHOTS/netns-$1 HALO_SCREENSHOT_EVERY=45 HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1"
+	}
+	pause_env="HALO_NET_ONLINE=false HALO_NETWORK_TEST_PROFILE=1 HALO_UI_LOG=1 HALO_MENU_STYLE=halo3"
+	# (the host: Slayer on Blood Gulch, started at 30 s; a while in the game, then Start,
+	# down three to END GAME, Cross: the question; Cross ends the game)
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" $pause_env \
+		HALO_NETWORK_TEST=host:bloodgulch:slayer HALO_NETWORK_TEST_START=30 $(shots host) \
+		"HALO_TEST_PAD=wait:150:${HALO_TEST_PAUSE_HOST_WAIT:-115000} start:150:4000 wait:150:4000 down:150:800 down:150:800 down:150:800 a:150:3000 wait:150:3000 a:150:3000 wait:150:15000" \
+		; host_pid=$last_pid
+	sleep 5
+	# (the joiner: in the game, Start: the pause; down, PLAYERS, Cross, Circle back; down,
+	# SETTINGS, Cross, right (the stick layout), Circle saves; down, LEAVE GAME, Cross: the
+	# question, Circle back, Cross again, Cross: left)
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$lan" "$vita" "$cpu_b" $pause_env HALO_NETWORK_TEST=join $(shots joiner) \
+		"HALO_TEST_PAD=wait:150:${HALO_TEST_PAUSE_JOIN_WAIT:-60000} start:150:4000 wait:150:3000 down:150:800 a:150:3000 wait:150:3000 b:150:2500 down:150:800 a:150:3000 right:150:2000 b:150:2500 down:150:800 a:150:2500 b:150:2000 a:150:2500 wait:150:2000 a:150:3000 wait:150:15000" \
+		; join_pid=$last_pid
+	HALO_TEST_DATA_JOINER2=$menus_data run_copy joiner2 "$lan2" "$vita" "$cpu_b" $pause_env HALO_NETWORK_TEST=join \
+		; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "ui: screen|menus: (Halo 3 screen h3/mppause|h3 mp)|network test: (the first|no profile|starting)" "$hl" | head -16
+	echo "--- joiner"; grep -aE "ui: screen|menus: (Halo 3 screen h3/mppause|h3 mp|h3 players:)|network test: (the first|no profile|join)" "$jl" | head -30
+	for side in host joiner; do
+		log=$out/$side/run.log
+		grep -aq "menus: Halo 3 screen h3/mppause/screen for ui.shell.multiplayer_game.pause_game.1p_pause_game" "$log" ||
+			fail "the $side's Start did not open the Halo 3 multiplayer pause"
+		grep -aq "ui: screen ui.shell.multiplayer_game.pause_game" "$log" && fail "the $side opened the Xbox's multiplayer pause"
+		grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" "$log" && fail "the $side: an assertion, exception or crash"
+		# (never paused: the game's ticks go on while it is open)
+		ticks=$(sed -n '/ui: screen pc.h3.mppause.screen/,$p' "$log" | grep -ac "network test: tick")
+		[ "$ticks" -ge 3 ] || fail "the $side's game did not go on under the pause ($ticks ticks said)"
+	done
+	grep -aqE "menus: h3 mp pause: Slayer on Blood Gulch, free for all, joined, 3 players; rows: resume, players, settings, leave game" "$jl" ||
+		fail "the joiner's pause did not show RESUME, PLAYERS, SETTINGS, LEAVE GAME (joined)"
+	grep -aqE "menus: h3 mp pause: Slayer on Blood Gulch, free for all, the host, [0-9]+ players; rows: resume, players, settings, end game" "$hl" ||
+		fail "the host's pause did not show RESUME, PLAYERS, SETTINGS, END GAME"
+	grep -aqi "change teams" "$jl" "$hl" && fail "CHANGE TEAMS was offered in the game"
+	grep -aq "ui: screen pc.h3.players.screen" "$jl" || fail "the joiner's PLAYERS did not open the roster"
+	grep -aq "menus: h3 players: " "$jl" || fail "the roster listed no players"
+	grep -aq "ui: screen pc.h3.mpset.screen" "$jl" || fail "the joiner's SETTINGS did not open"
+	grep -aq "menus: h3 mp settings: local player 0, profile edited" "$jl" || fail "SETTINGS did not edit the joiner's profile"
+	grep -aq "menus: h3 mp settings: saved and played: stick 1" "$jl" || fail "the stick layout changed was not saved and played"
+	[ "$(grep -ac "ui: screen pc.h3.mppause.leave_screen" "$jl")" -ge 2 ] || fail "LEAVE GAME did not ask (twice)"
+	sed -n '/ui: screen pc.h3.mppause.leave_screen/,$p' "$jl" | grep -aq "ui: screen pc.h3.mppause.screen" ||
+		fail "Circle on LEAVE GAME's question did not go back to the pause"
+	sed -n '/ui: screen pc.h3.mppause.leave_screen/,$p' "$jl" | grep -aqE "ui: screen pc.h3.(main|mp).screen" ||
+		fail "the joiner's LEAVE GAME did not take it back to the menus"
+	grep -aq "ui: screen pc.h3.mppause.end_screen" "$hl" || fail "the host's END GAME did not ask"
+	sed -n '/ui: screen pc.h3.mppause.end_screen/,$p' "$hl" | grep -aqE "ui: screen pc.h3.(main|mp).screen" ||
+		fail "the host's END GAME did not end the game (the host back at the menus)"
+	grep -aq "network test: joining" "$out/joiner2/run.log" || fail "the second joiner did not join"
+	;;
+h3scoreboard)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	sb_env="HALO_NET_ONLINE=true HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_NETWORK_TEST_SCORES=4 HALO_TEST_SCOREBOARD_CHOOSE=other"
+	# (each copy, its game well under way: Back held and Triangle, the scoreboard open on
+	# another machine's player; Cross, the options; Circle, Circle; then it plays on, holding
+	# Back every 4 s; a pad's Back is the tests' too: the open screen waits for it let go)
+	sb_pad() { echo "HALO_TEST_PAD=wait:150:$1 back:600:0 back+y:150:0 back:300:2000 a:150:2500 b:150:1500 b:150:1500"; }
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" $sb_env HALO_NETWORK_TEST_PROFILE=1 \
+		HALO_NETWORK_TEST=host:bloodgulch:team_slayer HALO_NETWORK_TEST_START=30 HALO_NETWORK_TEST_SCORE=200 \
+		HALO_NET_MAX_PLAYERS=5 HALO_BOTS_ONLINE=2 HALO_BOT_SKILL=easy HALO_TEST_INPUT=bot:1 \
+		"$(sb_pad 95000)"; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "$vita" "$cpu_b" $sb_env HALO_NETWORK_TEST=join-code:$code \
+		HALO_NET_PLAYER_NAME=Joiner1 HALO_TEST_INPUT=bot:2 HALO_TEST_SCOREBOARD_KICK=1 HALO_EXIT_AFTER=$((seconds - 10)) \
+		"$(sb_pad 75000)"; join_pid=$last_pid
+	HALO_TEST_DATA_JOINER2=$menus_data run_copy joiner2 "$join2_machine" "$vita" "$cpu_b" $sb_env HALO_NETWORK_TEST=join-code:$code \
+		HALO_NET_PLAYER_NAME=Joiner2 HALO_TEST_INPUT=bot:3 HALO_EXIT_AFTER=$((seconds - 10)) \
+		"$(sb_pad 80000)"; join2_pid=$last_pid
+	wait $join_pid $join2_pid 2>/dev/null
+	kill -TERM "$host_pid" 2>/dev/null; wait "$host_pid" 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log j2l=$out/joiner2/run.log
+	# (each copy's last rows, as names, teams and BOT: who is in the game, as each sees it)
+	sb_people() { # LOG
+		python3 - "$1" <<'PY'
+import sys
+line = ''
+for text in open(sys.argv[1], encoding='utf-8', errors='replace'):
+    if 'menus: h3 scoreboard: ' in text and ' rows, ' in text:
+        line = text.split('menus: h3 scoreboard: ', 1)[1].strip()
+people, team = [], None
+for row in [r.strip() for r in line.partition(':')[2].split('|') if r.strip()]:
+    if row.startswith('team '):
+        team = ' '.join(row.split()[1:-1])
+        continue
+    fields = row.split()
+    people.append('%s/%s%s' % (fields[0], (team or '-').replace(' ', '_'), '/bot' if 'bot' in fields[3:] else ''))
+print(' '.join(sorted(people)))
+PY
+	}
+	for side in host joiner joiner2; do
+		log=$out/$side/run.log
+		echo "--- $side"
+		grep -aE "menus: h3 scoreboard: (held|opened|options|test|Only|Kicked|That player)|network test: scoreboard held" "$log" | head -12
+		grep -av "render assertion skipped" "$log" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+			fail "the $side: an assertion, exception or crash"
+		grep -aq "menus: h3 scoreboard: held up (local player 0, full screen)" "$log" ||
+			fail "the $side never held the Halo 3 scoreboard up"
+		grep -aq "XLaunchNewImage" "$log" && fail "the $side went to the dashboard"
+		sb_people "$log" > "$out/$side.people"; echo "people: $(cat "$out/$side.people")"
+	done
+	# (three people and a bot at least: a joiner takes a bot's place)
+	people=$(wc -w < "$out/host.people")
+	bots=$(grep -o '/bot' "$out/host.people" | wc -l)
+	[ "$((people - bots))" = 3 ] && [ "$bots" -ge 1 ] ||
+		fail "the host's scoreboard did not list the three players and a bot ($(cat "$out/host.people"))"
+	for side in joiner joiner2; do
+		cmp -s "$out/host.people" "$out/$side.people" ||
+			{ fail "the $side's scoreboard does not list the host's players"; diff "$out/host.people" "$out/$side.people"; }
+	done
+	grep -a "menus: h3 scoreboard: [0-9]* rows, " "$hl" | tail -1 | grep -aqE "\| [^|]* own[^|]* host" ||
+		fail "the host's own row had no host's crown on the host"
+	for side in joiner joiner2; do
+		grep -aqE "menus: h3 scoreboard: options [A-Za-z0-9]+: back, mute, (add|view) friend$" "$out/$side/run.log" ||
+			fail "the $side's options for another player were not BACK, MUTE CHAT, ADD FRIEND (and no KICK)"
+	done
+	grep -aqE "menus: h3 scoreboard: options [A-Za-z0-9]+: back, mute, (add|view) friend, kick$" "$hl" ||
+		fail "the host's options for a joined player had no KICK"
+	grep -aq "menus: h3 scoreboard: test: KICK .* (joined)" "$jl" || fail "the joiner's KICK was not tried"
+	grep -aq "menus: h3 scoreboard: Only the game's host can kick a player" "$jl" || fail "the joiner's KICK was not refused"
+	grep -aqiE "kicked by the host|Kicked " "$hl" "$jl" "$j2l" && fail "a player was kicked"
+	for side in joiner joiner2; do
+		n=$(grep -a "network test: tick" "$out/$side/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "$side: $n s playing with another player"
+		[ "$n" -ge 40 ] || fail "the $side played with another player for $n s (40 wanted)"
+	done
+	;;
+carnage)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	# (the host plays the profile; the joiner its own default player, another name)
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	carnage_shots() { # NAME: the copy's report at the Vita's picture, kept in HALO_TEST_SHOTS
+		[ -n "${HALO_TEST_SHOTS:-}" ] || return 0
+		rm -rf "$HALO_TEST_SHOTS/netns-carnage-$1"; mkdir -p "$HALO_TEST_SHOTS/netns-carnage-$1"
+		echo "HALO_SCREENSHOT_DIR=$HALO_TEST_SHOTS/netns-carnage-$1 HALO_SCREENSHOT_EVERY=100000 HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1"
+	}
+	carnage_env="HALO_NET_ONLINE=true HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_CARNAGE_SECONDS=${HALO_TEST_CARNAGE_SECONDS:-25}"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" $carnage_env HALO_NETWORK_TEST_PROFILE=1 \
+		HALO_NETWORK_TEST=host:bloodgulch:team_slayer HALO_NETWORK_TEST_START=20 HALO_NETWORK_TEST_SCORE=3 \
+		HALO_NETWORK_TEST_KILL=20 $(carnage_shots host) "HALO_TEST_PAD=wait:150:1000 carnage:150:4000 @carnage_host" \
+		; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "host's code: $code"
+	# (the joiner, once the report is up: R, DETAILS; Cross, which waits for the host;
+	# Triangle, PLAYERS; Circle, the report again)
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "$vita" "$cpu_b" $carnage_env \
+		HALO_NETWORK_TEST=join-code:$code $(carnage_shots joiner) \
+		"HALO_TEST_PAD=wait:150:1000 carnage:150:3000 @carnage_joiner rt:150:2000 @carnage_joiner_details a:150:2000 y:150:2500 b:150:2500" \
+		; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	# (each copy's last report, its rows as this machine's marks aside)
+	last_report() { awk '/carnage: .*report.*: type/ { n = 0; delete rows; head = $0; sub(/.*carnage: [^:]*: /, "", head) }
+		/carnage: row / { line = $0; sub(/.*carnage: /, "", line); sub(/ \[this machine\]/, "", line); rows[++n] = line }
+		END { print head; for (i = 1; i <= n; i++) print rows[i] }' "$1"; }
+	for side in host joiner; do
+		log=$out/$side/run.log
+		echo "--- $side"; grep -aE "menus: (h3 carnage|the PLAYERS)|ui: screen pc.h3.(carnage|players|pregame)" "$log" | head -14
+		last_report "$log" > "$out/$side.report"; cat "$out/$side.report"
+		grep -aq "ui: screen pc.h3.carnage.screen" "$log" || fail "the $side's carnage report did not open"
+		# (a threaded render's "assertion skipped (torn read?)" is logged and passed over, as the other tests take it)
+		grep -av "render assertion skipped" "$log" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+			fail "the $side: an assertion, exception or crash"
+		[ "$(grep -ac "carnage: row " "$log")" -ge 4 ] || fail "the $side's report had fewer than four rows"
+	done
+	grep -aq "^type 2, teams, 2 players, 4 rows, winner " "$out/host.report" ||
+		fail "the host's report was not a team game's of two players"
+	cmp -s "$out/host.report" "$out/joiner.report" || { fail "the joiner's report is not the host's"; diff "$out/host.report" "$out/joiner.report"; }
+	grep -aq "kills 3 deaths 0" "$out/joiner.report" || fail "the joiner's report did not show the host's three kills"
+	grep -aq "carnage: row .* score 0 kills 0 deaths 3" "$jl" || fail "the joiner's report did not show its own three deaths"
+	grep -aq "menus: h3 carnage: page 1, .*joined" "$jl" || fail "R did not show the joiner DETAILS"
+	grep -aq "menus: h3 carnage: Waiting for the host to go on" "$jl" || fail "the joiner's Cross did not wait for the host"
+	grep -aq "ui: screen pc.h3.players.screen" "$jl" || fail "the joiner's Triangle did not open PLAYERS"
+	sed -n '/ui: screen pc.h3.players.screen/,$p' "$jl" | grep -aq "ui: screen pc.h3.carnage.screen" ||
+		fail "Circle on PLAYERS did not go back to the report"
+	grep -aq "LEAVE GAME: the game left" "$jl" && fail "the joiner left the game (Circle went back only)"
+	grep -aq "menus: h3 carnage: [0-9]* s on the report: the lobby by itself" "$hl" || fail "the host did not go on by itself"
+	for side in host joiner; do
+		grep -aq "menus: h3 carnage: closed with the game" "$out/$side/run.log" ||
+			fail "the $side did not leave the report for the lobby"
+	done
+	;;
+carnageold)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	old=${HALO_TEST_VITA_OLD:-$root/../wt-v110client/build/linux/halo}
+	map=${HALO_TEST_CARNAGE_MAP:-bloodgulch}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "$menus_data/maps/$map.map" ] || [ ! -x "$old" ]; then
+		echo "SKIP: no Halo PC files or $map.map in $menus_data/maps (HALO_TEST_DATA_MENUS), or no older build ($old: HALO_TEST_VITA_OLD)"; exit 0
+	fi
+	# (a Custom Edition map: both copies with PC maps on)
+	ce_env=
+	[ "$map" = bloodgulch ] || ce_env=HALO_CUSTOM_EDITION=1
+	# (the old host: Menu style ElDewrito too; past the game's end, A at its own scores
+	# goes on - its pad has no "carnage" step - every 4 s from 80 s on, a jump meanwhile)
+	old_pad="wait:150:80000$(for i in $(seq 40); do printf ' a:150:4000'; done)"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$old" "$cpu_a" HALO_NET_ONLINE=true HALO_UI_LOG=1 \
+		HALO_MENU_STYLE=online $ce_env HALO_NETWORK_TEST=host:$map:team_slayer HALO_NETWORK_TEST_START=20 \
+		HALO_NETWORK_TEST_SCORE=3 HALO_NETWORK_TEST_KILL=20 "HALO_TEST_PAD=$old_pad" \
+		; host_pid=$last_pid
+	code=$(wait_code)
+	[ -n "$code" ] || { fail "the old host never showed a code"; tail -20 "$out/host/run.log"; exit 1; }
+	echo "old host's code: $code ($old)"
+	# (the joiner: ElDewrito's menus and report, chosen as the settings panel saves them;
+	# once the report is up, R: DETAILS)
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_UI_LOG=1 \
+		HALO_MENU_STYLE=online HALO_CARNAGE_REPORT=halo3 $ce_env HALO_NETWORK_TEST=join-code:$code \
+		"HALO_TEST_PAD=wait:150:1000 carnage:150:3000 rt:150:2000 lt:150:2000" \
+		; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	jl=$out/joiner/run.log
+	echo "--- joiner"; grep -aE "menus: (h3 carnage|the in-game screens)|carnage: |ui: screen pc.h3.(carnage|pregame)" "$jl" | head -20
+	grep -aq "menus: the in-game screens: .* added to $map.map" "$jl" || fail "the joiner's $map.map had no in-game screens"
+	grep -aq "menus: h3 carnage: the game is over: the Halo 3 carnage report" "$jl" ||
+		fail "the joiner did not want ElDewrito's report at the game's end"
+	grep -aqE "menus: h3 carnage: (not in this map's menus|the screen did not open)" "$jl" &&
+		fail "the joiner fell back to the game's own report"
+	grep -aq "menus: h3 carnage: the carnage report opened (joined)" "$jl" || fail "the joiner's ElDewrito report did not open"
+	[ "$(grep -ac "carnage: row " "$jl")" -ge 4 ] || fail "the joiner's report had fewer than four rows"
+	grep -aq "carnage: the report (the host's numbers): type 2, teams, 2 players" "$jl" ||
+		fail "the joiner's report was not the old host's team game of two players"
+	grep -aq "carnage: row .* score 0 kills 0 deaths 3 .*\[this machine\]" "$jl" ||
+		fail "the joiner's report did not show its own three deaths"
+	grep -aq "menus: h3 carnage: page 1, .*joined" "$jl" || fail "R did not show the joiner DETAILS"
+	grep -aq "menus: h3 carnage: closed with the game" "$jl" || fail "the joiner did not leave the report when the old host went on"
+	grep -av "render assertion skipped" "$jl" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+		fail "the joiner: an assertion, exception or crash"
+	;;
+h3liveonline)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	mkdir -p "$out/host/save/u/UDATA/869079979327"
+	cp "$HALO_TEST_PROFILE" "$out/host/save/u/UDATA/869079979327/blam.sav"
+	[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+		cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/host/save/u/UDATA/869079979327/"
+	# (MULTIPLAYER: the lobby live on SYSTEM LINK; NETWORK (A), up to ONLINE, A: its game
+	# closed; 20 s on ONLINE, not hosted; L: INVITE FRIENDS hosts it; B: the live lobby; B: left
+	# (closed); A: MULTIPLAYER again, ONLINE kept; 15 s, not hosted; down three to START GAME, A:
+	# hosted, its game's lobby; B: back to the live lobby)
+	d="down:150:500"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:8000 a wait:150:2500 up:150:600 a wait:150:20000 lt wait:150:5000 b wait:150:4000 b wait:150:5000 a wait:150:15000 $d $d $d a wait:150:6000 b wait:150:5000" \
+		; host_pid=$last_pid
+	wait $host_pid 2>/dev/null
+	hl=$out/host/run.log
+	grep -aE "network: (switching|Online|status)|menus: h3 (live lobby: |mp: network|invite: INVITE)|ui: screen pc.h3.(pregame|invite|join)|Internet play: hosting;|frame-hitch: " "$hl" | cut -c1-200 | head -40
+	grep -av "assertion skipped (torn read?)" "$hl" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+		fail "the host: an assertion, exception or crash"
+	grep -aq "menus: h3 live lobby: open on SYSTEM LINK" "$hl" || fail "the lobby did not open live on SYSTEM LINK"
+	grep -aq "menus: h3 live lobby: closed (another network chosen)" "$hl" || fail "ONLINE did not close the System Link game"
+	grep -aq "network: Online (a broker reached)" "$hl" || fail "the host did not reach the broker"
+	# (hosted on demand: ready, not hosted, each time the lobby is up on ONLINE; live only after L,
+	# then START GAME)
+	ready=$(grep -ac "menus: h3 live lobby: ready on ONLINE, not hosted" "$hl")
+	echo "the lobby ready on ONLINE, not hosted, $ready times"
+	[ "$ready" -ge 2 ] || fail "the lobby on ONLINE did not wait for the player both times ($ready)"
+	grep -aq "menus: h3 live lobby: a friend is online\|menus: h3 live lobby: in a party" "$hl" &&
+		fail "a friend or a party was seen with neither"
+	first=$(grep -an "menus: h3 live lobby: open on ONLINE" "$hl" | head -1 | cut -d: -f1)
+	asked=$(grep -an "menus: h3 live lobby: INVITE FRIENDS: its game hosted now" "$hl" | head -1 | cut -d: -f1)
+	[ -n "$asked" ] || fail "L (INVITE FRIENDS) did not host the lobby's game"
+	[ -n "$first" ] && [ -n "$asked" ] && [ "$first" -gt "$asked" ] || fail "the lobby went live on ONLINE before L asked for it"
+	sed -n '/menus: h3 live lobby: closed (another network chosen)/,/menus: h3 live lobby: INVITE FRIENDS: its game hosted now/p' "$hl" |
+		grep -aq "Internet play: hosting;" && fail "the lobby's game was hosted online before the player asked"
+	grep -aq "menus: h3 invite: INVITE FRIENDS opens" "$hl" && grep -aq "ui: screen pc.h3.invite.screen" "$hl" ||
+		fail "INVITE FRIENDS did not open once the lobby was hosted"
+	grep -aq "menus: h3 live lobby: closed (the host left the lobby)" "$hl" || fail "B did not close the online lobby"
+	again=$(grep -an "menus: h3 live lobby: START GAME: its game hosted now" "$hl" | head -1 | cut -d: -f1)
+	[ -n "$again" ] || fail "START GAME did not host the lobby's game"
+	[ -n "$again" ] && sed -n "/menus: h3 live lobby: closed (the host left the lobby)/,${again}p" "$hl" |
+		grep -aq "menus: h3 live lobby: open on ONLINE" && fail "the lobby opened again went live by itself"
+	grep -aq "menus: h3 live lobby: START GAME: the game's lobby, its countdown begun" "$hl" &&
+		grep -aq "ui: screen pc.h3.pregame.screen" "$hl" || fail "START GAME did not open the hosted game's lobby"
+	grep -aq "ui: screen pc.h3.join.screen" "$hl" && fail "SELECT PROFILE was asked (the nameplate's profile plays)"
+	grep -aq "the game's server started" "$hl" && fail "START GAME started another server"
+	grep -aq "menus: h3 live lobby: back from the game's lobby: the countdown stopped, the game kept" "$hl" ||
+		fail "B on the game's lobby did not go back to the live lobby"
+	grep -aq "menus: party plates: none (the nameplate hidden)" "$hl" &&
+		fail "the nameplate was hidden with no other machine in the lobby's game"
+	grep -aq "starting precaching of map 'carousel'" "$out/host/data/debug.txt" &&
+		fail "a lobby going live began a copy of the playlist's first map (Carousel)"
+	worst=$(sed -n 's/.*frame-hitch: \([0-9.]*\) ms.*/\1/p' "$hl" | sort -n | tail -1)
+	echo "the host's longest frame over 100 ms: ${worst:-none}"
+	if [ -n "$worst" ] && awk -v w="$worst" 'BEGIN { exit !(w >= 500) }'; then
+		grep -a "frame-hitch: " "$hl" | cut -c1-200
+		fail "a frame of ${worst} ms (500 allowed)"
+	fi
+	;;
+h3online|h3pickjoin|h3onlinelan)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	# (h3pickjoin: the host stays on the map list a minute, the joiner joining its lobby meanwhile)
+	pick=5000
+	[ $mode = h3pickjoin ] && pick=${HALO_TEST_PICK_WAIT:-60000}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS)"; exit 0
+	fi
+	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A: online, live; a while for
+	# the broker; Square: GAME OPTIONS (Create Game); down two to NAME, A: typed; down six to
+	# START GAME (past WHO CAN JOIN and BOTS), A: the profile (A joins, A the profile, A): the game's lobby (h3pickjoin: a
+	# minute there); a while for the joiner, then A starts the game, a few times)
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true \
+		HALO_TEST_TEXT_INPUT=NetHost \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 x wait:150:4000 down:150:500 down:150:500 a wait:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:4000 a wait:150:2000 a wait:150:2000 a wait:150:$pick wait:150:4000 wait:150:${HALO_TEST_H3ONLINE_WAIT:-45000} a wait:150:5000 a wait:150:5000 a" \
+		; host_pid=$last_pid
+	sleep 25
+	# (MULTIPLAYER: the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while for the broker;
+	# down five to BROWSE GAMES, A: the profile (A joins, A the profile, A): the games browser;
+	# a while, A on the host's game: joined from there once the host is reached)
+	# (h3onlinelan: the joiner on the host's LAN, as h3lan's: the host's game both in its System
+	# Link search and listed online - one row, its online one, the browser's rows logged)
+	joiner_ns=$join_machine joiner_rows=
+	if [ $mode = h3onlinelan ]; then
+		holder; joiner_ns=$held
+		in_ns "$host_router" ip link add l2_host type veth peer name m2_host
+		in_ns "$host_router" ip link set m2_host netns "$joiner_ns"
+		in_ns "$host_router" ip link set l2_host master b_host
+		in_ns "$host_router" ip link set l2_host up
+		in_ns "$joiner_ns" ip link set lo up
+		in_ns "$joiner_ns" ip addr add 192.168.1.3/24 broadcast 192.168.1.255 dev m2_host
+		in_ns "$joiner_ns" ip link set m2_host up
+		in_ns "$joiner_ns" ip route add default via 192.168.1.1
+		joiner_rows=HALO_TEST_BROWSER_NAMES=1
+	fi
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$joiner_ns" "$vita" "$cpu_b" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:2 $joiner_rows \
+		"HALO_TEST_PAD=wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:10000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:10000 a" \
+		; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -aE "network:|ui: screen|menus: (h3 mp|Server Setup|Create Game)|system link: (hosting|in a)" "$hl" | head -24
+	echo "--- joiner"; grep -aE "network:|ui: screen|menus: (h3 mp|joining|the server)|system link: (joining|in a)" "$jl" | head -24
+	for side in host joiner; do
+		log=$out/$side/run.log
+		grep -aq "network: switching from Same Wi-Fi to Online" "$log" || fail "the $side's NETWORK: ONLINE did not switch live"
+		grep -aq 'network: status "Connecting..."' "$log" || fail "the $side's status did not say Connecting..."
+		grep -aq "network: Online (a broker reached)" "$log" || fail "the $side did not reach the broker"
+		grep -aq 'network: status "Online"' "$log" || fail "the $side's status did not say Online"
+	done
+	grep -aq "menus: Server Setup: NetHost, 16 players, public" "$hl" || fail "the host's Create Game did not set the game up"
+	grep -aq "menus: Create Game > Internet: the game's server started" "$hl" || fail "the host's game was not created"
+	grep -aq "ui: screen pc.h3.lan.screen" "$jl" || fail "the joiner's BROWSE GAMES did not open the Halo 3 games browser"
+	grep -aq "menus: joining the public game NetHost" "$jl" || fail "the joiner did not join the host's game from the browser"
+	grep -aq "menus: the games browser joins the joined host's game" "$jl" ||
+		fail "the host's game was not joined from the games browser"
+	grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected.server_list" "$jl" &&
+		fail "the Xbox's System Link list opened"
+	grep -aq "system link: in another's lobby" "$jl" || fail "the joiner did not reach the host's lobby"
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 15 ] || fail "the joiner played the host's game for $two s with two players (15 wanted)"
+	grep -aq "network: the host chose the map levels.test.beavercreek.beavercreek (0 joins held meanwhile)" "$hl" ||
+		fail "the host's game was not hosted on the lobby's map as its server started"
+	grep -aq "ui: screen ui.shell.main_menu.multiplayer_type_select.connected" "$hl" &&
+		fail "an Xbox screen (the map or game type list) opened on the host's way"
+	if [ $mode = h3onlinelan ]; then
+		echo "--- the joiner's browser rows"; grep -a "menus: browser row" "$jl" | head -12
+		grep -aq "menus: browser row [0-9]*: .*NetHost" "$jl" || fail "the joiner's browser never showed the host's game"
+		# (the one game: on one row, its group's count 1 - a System Link row as well as its online
+		# one made it two rows, VITA GAMES (2))
+		rows=$(grep -a "menus: browser row [0-9]*: .*NetHost" "$jl" | sed 's/.*browser row \([0-9]*\):.*/\1/' | sort -u | wc -l)
+		[ "$rows" -le 1 ] || fail "the host's game shown on $rows rows (listed twice)"
+		grep -aq "menus: browser row [0-9]*: \[VITA GAMES (2)\]" "$jl" && fail "the browser counted the one game twice"
+	fi
+	if [ $mode = h3pickjoin ]; then
+		grep -aq "network: holding machine" "$hl" && fail "a join was held (the map is set as the server starts)"
+		grep -aq "join: the host's map is levels" "$jl" || fail "the joiner was not told the host's map"
+	fi
+	;;
+netswitch)
+	rounds=${HALO_TEST_SWITCH_ROUNDS:-5}
+	list=
+	for i in $(seq 1 "$rounds"); do list="$list${list:+,}online,wifi,adhoc,wifi,online,adhoc,online,wifi"; done
+	seconds=$((rounds * 8 * 7 + 30))
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false HALO_UI_LOG=1 \
+		HALO_NET_ADHOC_EMULATE=192.168.1.2 "HALO_NETWORK_TEST_SWITCH=$list" HALO_NETWORK_TEST_SWITCH_SECONDS=7 \
+		; host_pid=$last_pid
+	wait $host_pid 2>/dev/null
+	hl=$out/host/run.log
+	grep -a "network test:\|network: Online (a\|network: Online failed" "$hl" | head -80
+	grep -aqiE "assert|exception|segmentation|halt" "$hl" && fail "an assertion, exception or crash"
+	grep -aq "network test: the switches are done" "$hl" || fail "the copy did not switch through the whole list"
+	onlines=$(grep -ac "network test: switch [0-9]*: online" "$hl")
+	reached=$(grep -ac "network: Online (a broker reached)" "$hl")
+	echo "Online chosen $onlines times, the broker reached $reached times"
+	[ "$reached" -ge "$onlines" ] || fail "Online did not reach the broker each time ($reached of $onlines)"
+	# (the program's own threads, not the graphics driver's, which come and go with the shaders)
+	wifi=$(grep -a "network test: Same Wi-Fi:" "$hl" | sed 's/.*Same Wi-Fi: \([0-9]*\) of its own threads ([0-9]* in all), \([0-9]*\) open files.*/\1 threads, \2 files/' | sort -u)
+	echo "Same Wi-Fi's own threads and open files: $(echo "$wifi" | tr '\n' ';')"
+	[ "$(echo "$wifi" | wc -l)" = 1 ] || fail "Same Wi-Fi's threads or open files changed: something was left behind"
+	[ "$(grep -ac "Internet play: stopped (its thread, sockets and peers gone)" "$hl")" -ge $((rounds * 5)) ] ||
+		fail "internet play did not stop each time"
+	;;
 coopmenu)
 	joiners=${HALO_TEST_COOP_JOINERS:-1}
 	players=$((joiners + 1))
@@ -1789,7 +3664,7 @@ coopmenu)
 	echo "--- joiner"; grep -aE "ui: screen|system link: (joining|in another)|test command" "$jl" | head -12
 	grep -aq "co-op: hosting levels.a10.a10 on difficulty 2 from the campaign's menus" "$hl" ||
 		fail "the host did not host The Pillar of Autumn on Heroic from the campaign's menus"
-	grep -aq "ui: screen .*connected_pregame_screen" "$hl" || fail "the host's lobby (the waiting screen) did not open"
+	grep -aqE "ui: screen .*(connected_pregame_screen|pc.h3.pregame.screen)" "$hl" || fail "the host's lobby (the waiting screen) did not open"
 	grep -aq "co-op: the partner is in: the countdown starts" "$hd" || fail "the partner's joining did not start the countdown"
 	# (the countdown from its last start to the loading: 15 s while a game of
 	# more, network.coop_players, has room, 6 s once it is full)
@@ -1949,7 +3824,7 @@ time.sleep(100000)' "$2" > /dev/null 2>&1 & busy_pid=$!; pids="$pids $busy_pid"
 	# choice)
 	grep -aq "co-op: hosting levels.a10.a10 on difficulty [0-3] from the campaign's menus" "$out/host/run.log" ||
 		fail "co-op was not hosted from the campaign's menus once the port was free"
-	sed -n '/network: could not host/,$p' "$out/host/run.log" | grep -aq "ui: screen .*connected_pregame_screen" ||
+	sed -n '/network: could not host/,$p' "$out/host/run.log" | grep -aqE "ui: screen .*(connected_pregame_screen|pc.h3.pregame.screen)" ||
 		fail "the co-op lobby did not open once the port was free"
 	grep -aq "network test: hosting bloodgulch" "$out/joiner/run.log" || fail "the harness did not host once the port was free"
 	two=$(grep -a "network test: tick" "$out/harness_joiner/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
@@ -1974,7 +3849,7 @@ solo)
 	echo "seconds of solo game logged: $ticks"
 	[ "$ticks" -ge 30 ] || fail "the solo game ran $ticks s"
 	;;
-dedicated|dedicatedpc|dedicatedban|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed|swat|swatmixed)
+dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|dedicatedcoop|dedicatedmulti|dedicatedfullcache|dedicatedreload|scoreboard|pings|pingsmixed|mapmid|mapmidmixed|swat|swatmixed)
 	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
 	if [ "$mode" = swatmixed ]; then
 		vita_old=${HALO_TEST_VITA_OLD:-}
@@ -2213,6 +4088,41 @@ sv_end_empty 20
 sv_port 2302
 INIT
 	fi
+	# (dedicatedbots: Infection, the bots filling it)
+	if [ "$mode" = dedicatedbots ]; then
+		bots_game=${HALO_TEST_BOTS_GAME:-prisoner infection}
+		cat > "$out/server/data/init.txt" <<INIT
+sv_name "Netns Bots"
+sv_maxplayers ${HALO_TEST_BOTS_MAX:-16}
+sv_public 1
+sv_bots_fill 1
+sv_mapcycle_add $bots_game
+sv_timelimit ${HALO_TEST_BOTS_MINUTES:-3}
+sv_start_delay 5
+sv_postgame 5
+sv_end_empty 20
+sv_port 2302
+INIT
+	fi
+	# (dedicatedcompat: netns_dedicated_compat.sh's)
+	if [ "$mode" = dedicatedcompat ]; then
+		. "$here/netns_dedicated_compat.sh"
+		dedicated_compat_init "$out/server/data/init.txt"
+	fi
+	if [ "$mode" = partyserver ]; then
+		cat > "$out/server/data/init.txt" <<INIT
+sv_name "Netns Party Bots"
+sv_maxplayers ${HALO_TEST_PARTY_MAX:-4}
+sv_public 1
+sv_bots_fill 1
+sv_mapcycle_add ${HALO_TEST_PARTY_GAME:-chillout slayer}
+sv_timelimit 5
+sv_start_delay 5
+sv_postgame 5
+sv_end_empty 20
+sv_port 2302
+INIT
+	fi
 	[ "${HALO_TEST_SERVER_PUBLIC:-0}" = 1 ] && echo "sv_public_address 10.10.1.2:2302" >> "$out/server/data/init.txt"
 	# (HALO_TEST_SERVER_INIT: another init.txt, e.g. one map for measuring)
 	[ -n "${HALO_TEST_SERVER_INIT:-}" ] && cp "$HALO_TEST_SERVER_INIT" "$out/server/data/init.txt"
@@ -2223,6 +4133,254 @@ INIT
 	fi
 	sl=$out/server/run.log sd=$out/server/data/debug.txt
 	case $mode in
+	partyserver)
+		# (Alpha in the host's place: a joiner of the server, on a machine of
+		# its own; Bravo and Charlie its friends, following its party)
+		side alpha 10.10.24 192.168.24
+		ac=$out/alpha.code jc=$out/joiner.code j2c=$out/joiner2.code add=$out/alpha.add
+		(for i in $(seq 1 60); do [ -s "$jc" ] && [ -s "$j2c" ] && break; sleep 1; done
+			cat "$jc" "$j2c" > "$add.tmp" 2>/dev/null; mv "$add.tmp" "$add") &
+		run_copy alpha "$alpha_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_TEST_INPUT=bot:1 HALO_NET_LOBBY_NAME=Alpha HALO_NET_PLAYER_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$ac,add-file=$add" \
+			"HALO_TEST_PARTY=invite-at=${HALO_TEST_PARTY_INVITE_AT:-40}" HALO_EXIT_AFTER=$((seconds - 10)); alpha_pid=$last_pid
+		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo HALO_NET_PLAYER_NAME=Bravo \
+			"HALO_TEST_FRIENDS=code-file=$jc,accept" HALO_TEST_PARTY_ANSWER=accept HALO_EXIT_AFTER=$((seconds - 10)) \
+			"HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join_pid=$last_pid
+		run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie HALO_NET_PLAYER_NAME=Charlie \
+			"HALO_TEST_FRIENDS=code-file=$j2c,accept" HALO_TEST_PARTY_ANSWER=accept HALO_EXIT_AFTER=$((seconds - 10)) \
+			"HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join2_pid=$last_pid
+		(
+			for i in $(seq 1 $(((seconds - 20) / 5))); do
+				sleep 5
+				echo sv_status >&"$console_fd" 2>/dev/null || exit 0
+				[ $((i % 6)) = 0 ] && { echo sv_players >&"$console_fd" 2>/dev/null || exit 0; }
+			done
+		) & status_pid=$!; pids="$pids $status_pid"
+		wait $join_pid $join2_pid $alpha_pid 2>/dev/null
+		kill "$status_pid" 2>/dev/null; wait "$status_pid" 2>/dev/null
+		kill -TERM "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null
+		echo "--- server"
+		grep -aE "^server: (the game|player #[0-9]+ (Alpha|Bravo|Charlie) (joined|left)|bots:)" "$sl" | head -30
+		grep -aE "^server: .* of [0-9]+ players \(" "$sl" | uniq -c | head -20
+		for side in alpha joiner joiner2; do
+			echo "--- $side"; grep -a "party:" "$out/$side/run.log" | head -12
+		done
+		grep -aq "game is full\|its address has its share" "$sl" "$sd" && fail "the server refused a party member"
+		for side in joiner joiner2; do
+			log=$out/$side/run.log
+			grep -aq "party: following Alpha: joining" "$log" || fail "the $side did not follow Alpha"
+			grep -aq "system link: in another's lobby\|system link: in a network game" "$log" ||
+				fail "the $side did not get into the server's game"
+		done
+		for name in Alpha Bravo Charlie; do
+			grep -aq "^server: player #[0-9]* $name joined" "$sl" || fail "$name never joined the server's game"
+		done
+		grep -aqE "server: bots: a bot left \((room for a player|a player's slot)" "$sl" || fail "no bot left for the party"
+		for side in alpha joiner joiner2; do
+			n=$(grep -a "network test: tick" "$out/$side/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+			echo "$side's seconds playing with another player: $n"
+			[ "$n" -ge 20 ] || fail "the $side played the server's game for $n s with another player (20 wanted)"
+		done
+		party_most=${HALO_TEST_PARTY_MAX:-4}
+		party_game=${HALO_TEST_PARTY_GAME:-chillout slayer}
+		party_type=${party_game#* }
+		# (three people and the bots: one slot free, the party in)
+		grep -aqE "^server: $party_type on ${party_game%% *}, $((party_most - 1)) of $party_most players \(($((party_most - 4))) bots" "$sl" ||
+			fail "the server never had the three of the party and the bots one short of full"
+		# (a team game: the party on one team, the bots that left for it of that
+		# team, the teams within one of each other once they are in)
+		case $party_type in
+		team_*|ctf|btb)
+			python3 - "$sl" "$party_most" <<'TEAMS' || fail "the party's team balance"
+import re, sys
+lines = open(sys.argv[1], errors="replace").read().splitlines()
+most = int(sys.argv[2])
+team = {}
+for l in lines:
+    m = re.search(r"^server: player #\d+ (Alpha|Bravo|Charlie) joined from \S+ \(team (\d)\)", l)
+    if m:
+        team[m.group(1)] = int(m.group(2))
+    m = re.search(r"^server: #\d+\s+(Alpha|Bravo|Charlie)\s+team (\d)\s+machine", l)
+    if m:
+        team[m.group(1)] = int(m.group(2))
+print("the party's teams on the server: %s" % team)
+bad = len(team) != 3 or len(set(team.values())) != 1
+party = list(team.values())[0] if team else None
+# (the bots that left once the members came, for them: of the party's team)
+first = next((i for i, l in enumerate(lines) if re.search(r"^server: player #\d+ (Bravo|Charlie) joined", l)), len(lines))
+left = [re.search(r"a bot left \((room for a player|a player's slot); team (\d)\)", l) for l in lines[first:]]
+left = [int(m.group(2)) for m in left if m]
+print("bots that left for the members, their teams: %s" % left)
+if not left or any(t != party for t in left[:2]):
+    bad = True
+sizes = []
+for l in lines[first:]:
+    m = re.search(r"^server: teams: red (\d+)\+(\d+), blue (\d+)\+(\d+)", l)
+    if m:
+        p0, b0, p1, b1 = map(int, m.groups())
+        if p0 + p1 == 3 and p0 + b0 + p1 + b1 == most - 1:
+            sizes.append((p0, b0, p1, b1))
+print("teams once the party is in (people+bots each): %s" % sorted(set(sizes)))
+if len(sizes) < 3 or any(abs((s[0] + s[1]) - (s[2] + s[3])) > 1 for s in sizes) or \
+        any(not (s[0] == 3 or s[2] == 3) for s in sizes):
+    bad = True
+sys.exit(1 if bad else 0)
+TEAMS
+			;;
+		esac
+		;;
+	dedicatedbots)
+		most=${HALO_TEST_BOTS_MAX:-16}
+		old=${HALO_TEST_VITA_OLD:-}
+		join_pids= names="joiner joiner2 joiner3"
+		# (the empty server: its bots play (sv_bots_when_empty), and the server
+		# browser lists it one short of full - a copy that browses alone, never
+		# joining: its join file never made)
+		side d0 10.10.20 192.168.20
+		run_copy browser "$d0_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+			"HALO_NETWORK_TEST_PUBLIC_NAME=Netns Bots" HALO_NETWORK_TEST_JOIN_FILE=never-made HALO_EXIT_AFTER=40
+		sleep 45
+		grep -a 'network test: the public games list "Netns Bots"' "$out/browser/run.log" | head -1
+		grep -aqE "network test: the public games list \"Netns Bots\".*$((most - 2)) of $most: 0 players, $((most - 2)) bots" \
+			"$out/browser/run.log" || fail "the empty server was not listed two short of full with bots alone"
+		run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_NET_PLAYER_NAME=Vita1 HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:2 HALO_NETWORK_TEST_SHOOT=2
+		join_pids="$join_pids $last_pid"
+		# (the server's sv_status every 5 s from now, its sv_items every 20 s)
+		(
+			for i in $(seq 1 $(((seconds - 20) / 5))); do
+				sleep 5
+				echo sv_status >&"$console_fd" 2>/dev/null || exit 0
+				[ $((i % 4)) = 0 ] && { echo sv_items >&"$console_fd" 2>/dev/null || exit 0; }
+			done
+		) & status_pid=$!; pids="$pids $status_pid"
+		sleep 25
+		side d2 10.10.22 192.168.22
+		run_copy joiner2 "$d2_machine" "${old:-$vita}" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+			HALO_NET_PLAYER_NAME=Vita2 HALO_EXIT_AFTER=$((seconds - 35)) HALO_TEST_INPUT=bot:3 HALO_NETWORK_TEST_SHOOT=2
+		join_pids="$join_pids $last_pid"
+		sleep 25
+		side d3 10.10.23 192.168.23
+		run_copy joiner3 "$d3_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+			"HALO_NETWORK_TEST_PUBLIC_NAME=Netns Bots" HALO_NET_PLAYER_NAME=Vita3 HALO_EXIT_AFTER=110 HALO_TEST_INPUT=bot:4
+		join_pids="$join_pids $last_pid"
+		sleep 60
+		console sv_players
+		wait $join_pids 2>/dev/null
+		kill "$status_pid" 2>/dev/null; wait "$status_pid" 2>/dev/null
+		kill -TERM "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null
+		echo "--- server"
+		grep -aE "^server: (the next game|the game|player #[0-9]+ Vita[0-9] (joined|left)|bots:)|game rules net|infection: (the round|.* is a zombie)" "$sl" | head -60
+		grep -aE "^server: .* of [0-9]+ players \(" "$sl" | uniq -c | head -40
+		grep -aq "refused from the Infection game\|game is full\|its address has its share" "$sl" "$sd" && fail "the server refused a person"
+		grep -aq "server: bots: a bot joined" "$sl" || fail "no bot joined"
+		grep -aqE "server: bots: a bot left \((a player's slot|room for a player)" "$sl" || fail "no bot left for a person"
+		# (once settled - 20 s after each person came or went - every count one
+		# short of the most: people + bots = most - 2, people never refused)
+		python3 - "$sl" "$most" <<'CHECK' || fail "the bots did not keep the game two slots short of full"
+import re, sys
+log, most = sys.argv[1], int(sys.argv[2])
+lines = open(log, errors="replace").read().splitlines()
+status = []
+for line in lines:
+    m = re.match(r"server: \S+ on \S+, (\d+) of (\d+) players \((\d+) bots", line)
+    if m:
+        status.append((int(m.group(1)), int(m.group(3))))
+settled = [s for s in status if s[0] > s[1]]
+full = [s for s in settled if s[0] == most - 2]
+print("sv_status in a game with people: %d; two short of full: %d; counts (players, bots): %s" % (
+    len(settled), len(full), sorted(set(settled))))
+over = [s for s in settled if s[0] > most - 2 and s[1] > 0]
+if over:
+    print("full with bots in it: %s" % over); sys.exit(1)
+if len(settled) < 10 or len(full) < len(settled) * 0.7:
+    sys.exit(1)
+CHECK
+		grep -aq "infection: the round begins" "$sl" || fail "the server's round never began"
+		grep -aq "infection: the round is over" "$sl" || fail "the server's round never ended"
+		for name in $names; do
+			n=$(grep -a "network test: tick" "$out/$name/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+			echo "$name's seconds playing with another player: $n"
+			[ "$n" -ge 40 ] || fail "$name played the server's game with another player for $n s (40 wanted)"
+			grep -aq "XLaunchNewImage" "$out/$name/run.log" && fail "$name went to the dashboard"
+		done
+		grep -a 'network test: the public games list "Netns Bots"' "$out/joiner3/run.log" | head -2
+		grep -aqE 'network test: the public games list "Netns Bots" \[dedicated\].*[0-9]+ of [0-9]+: [0-9]+ players, [0-9]+ bots' \
+			"$out/joiner3/run.log" || fail "the server browser did not list the bots apart"
+		if [ -n "$old" ]; then
+			grep -aq "game rules net: machine [0-9]* did not answer in [0-9]* ms (a build without Infection): it plays the Infection game as Team Slayer" "$sl" ||
+				fail "the server did not take the old joiner as Team Slayer"
+			grep -aq "infection: Vita2 is a zombie" "$sl" || echo "(Vita2, the old joiner, was never infected this run)"
+			# (its own player, as it has it: the skull in its hands once a zombie)
+			python3 - "$out/joiner2/run.log" "$sl" <<'OLD' || fail "the old joiner did not play on as a zombie"
+import re, sys
+log, server = sys.argv[1], sys.argv[2]
+turned = any("infection: Vita2 is a zombie" in l for l in open(server, errors="replace"))
+local = None; skull_seconds = 0; seconds = 0; over = False
+for line in open(log, errors="replace"):
+    m = re.search(r"network test: tick (\d+)(.*)\| (playing|game over) to .*\| local (-?\d+)", line)
+    if not m:
+        continue
+    seconds += 1
+    over |= m.group(3) == "game over"
+    local = m.group(4)
+    pm = re.search(r" player %s: (.*?)(?= player \d+:| \| |$)" % local, m.group(2))
+    if pm and re.search(r" w.* [0-9a-f]+:\d+", pm.group(1)):
+        weapons = re.findall(r" ([0-9a-f]+):\d+", pm.group(1).split(" w", 1)[1])
+        if len(weapons) == 1 and turned:
+            skull_seconds += 1
+print("old joiner: %d s logged, %d s holding one weapon after being infected, the game's end seen: %s" % (
+    seconds, skull_seconds, over))
+if seconds < 40 or not over or (turned and skull_seconds < 3):
+    sys.exit(1)
+OLD
+		fi
+		;;
+	dedicatedcompat)
+		dedicated_compat_run
+		;;
+	dedicatedfill)
+		# five machines of one home - the joiners' LAN behind one NAT: one
+		# real address, a stand-in of its own each (a run of the game an
+		# identity) - join the server's 8-player game by its code, one every
+		# 8 s: four play, the fifth is refused (security review F-11: one
+		# person's machines no more than half a game's players)
+		join_lan() { # join_lan N: a machine on the joiners' LAN (192.168.2.N) -> lan
+			holder; lan=$held
+			in_ns "$join_router" ip link add "l${1}_join" type veth peer name "m${1}_join"
+			in_ns "$join_router" ip link set "m${1}_join" netns "$lan"
+			in_ns "$join_router" ip link set "l${1}_join" master b_join
+			in_ns "$join_router" ip link set "l${1}_join" up
+			in_ns "$lan" ip link set lo up
+			in_ns "$lan" ip addr add "192.168.2.$1/24" broadcast 192.168.2.255 dev "m${1}_join"
+			in_ns "$lan" ip link set "m${1}_join" up
+			in_ns "$lan" ip route add default via 192.168.2.1
+		}
+		fill_pids=
+		for n in 1 2 3 4 5; do
+			machine=$join_machine
+			[ "$n" = 1 ] || { join_lan $((n + 1)); machine=$lan; }
+			run_copy "fill$n" "$machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+				HALO_NETWORK_TEST_RETRY=2 HALO_NET_PLAYER_NAME=Fill$n HALO_TEST_INPUT=bot:$((n + 1)) \
+				HALO_EXIT_AFTER=$((seconds - 15))
+			fill_pids="$fill_pids $last_pid"
+			sleep 8
+		done
+		wait $fill_pids 2>/dev/null
+		played=0
+		for n in 1 2 3 4 5; do
+			t=$(grep -a "network test: tick" "$out/fill$n/run.log" 2>/dev/null | grep -a "| playing" | grep -ac "player [0-9]*:")
+			echo "fill$n played $t s"
+			[ "$t" -ge 15 ] && played=$((played + 1))
+		done
+		refused=$(grep -ac "its address has its share of this game's players" "$sd" 2>/dev/null)
+		echo "machines of the one home that played: $played; the server's refusals for the address's share: ${refused:-0}"
+		[ "${refused:-0}" -ge 1 ] || fail "the server never refused a machine past its address's share"
+		[ "$played" -le 4 ] || fail "$played machines of one home played an 8-player game (4 at most)"
+		[ "$played" -ge 4 ] || fail "only $played machines of one home played (its share, 4, wanted)"
+		;;
 	dedicatedmulti)
 		# two Vitas a server, each behind a NAT of its own: VitaNc by the code,
 		# VitaNb from the server browser (the server's name)
@@ -3292,8 +5450,675 @@ CHECK
 		fail "the server crashed"
 	fi
 	;;
+friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsprivate|friendsprivatepw)
+	hc=$out/host.code jc=$out/joiner.code
+	host_steps="code-file=$hc,add-file=$jc"
+	join_steps="code-file=$jc"
+	host_extra="HALO_NET_HOST_PUBLIC=true"
+	join_test=watch
+	# (the scripted player leaves the menus alone while a pad script runs: at the
+	# menus the joiner waits for its invite, as a player would)
+	join_pad="wait:150:1000"
+	case $mode in
+	friends) join_steps="$join_steps,accept"; join_test=join-friend ;;
+	# (the owner, Oct 19 2026: a friend joins a private game with no code;
+	# one with a password asks the friend for it)
+	friendsprivate) join_steps="$join_steps,accept"; join_test=join-friend; host_extra="HALO_NET_HOST_PUBLIC=false" ;;
+	friendsprivatepw)
+		join_steps="$join_steps,accept"; join_test=join-friend:xpfriendpw
+		host_extra="HALO_NET_HOST_PUBLIC=false HALO_NET_LOBBY_PASSWORD=xpfriendpw" ;;
+	friendsdecline) join_steps="$join_steps,decline" ;;
+	friendsblock) join_steps="$join_steps,block" ;;
+	friendsinvite)
+		join_steps="$join_steps,accept"; join_test=join-invite; host_extra="HALO_NET_HOST_PUBLIC=false"
+		join_pad="wait:150:$((seconds * 1000))"
+		host_steps="$host_steps,invite-after=${HALO_TEST_INVITE_AFTER:-50}" ;;
+	friendsoffline) join_steps="$join_steps,accept,appear-offline-at=${HALO_TEST_OFFLINE_AT:-70}" ;;
+	friendsforged) join_steps="$join_steps,accept"; host_steps="$host_steps,replay-at=70,forge-at=85" ;;
+	esac
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $host_extra HALO_NET_LOBBY_NAME=Alpha \
+		"HALO_TEST_FRIENDS=$host_steps" ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=$join_test HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=$join_steps" \
+		HALO_TEST_FRIENDS_ANSWER=accept "HALO_TEST_PAD=$join_pad"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "host's code: $(cat "$hc" 2>/dev/null)  joiner's code: $(cat "$jc" 2>/dev/null)"
+	echo "--- host"; grep -a "friends:" "$hl" | grep -av "is online:" | head -16
+	grep -a "friends: .* is online:" "$hl" | head -3
+	echo "--- joiner"; grep -a "friends:\|network test: \(joining friend\|the friend\)" "$jl" | grep -av "is online:" | head -16
+	grep -a "friends: .* is online:" "$jl" | head -3
+	for side in host joiner; do
+		log=$out/$side/run.log
+		grep -aq "friends: this machine's friend code is [A-Z0-9]\{4\}-[A-Z0-9]\{4\}-[A-Z0-9]\{4\}" "$log" ||
+			fail "the $side said no friend code"
+		grep -aq "friends: online (" "$log" || fail "the $side's friends never went online"
+	done
+	grep -aq "friends: test: adding .*: Friend request sent" "$hl" || fail "the host did not send its request"
+	grep -aq "friends: a friend request from " "$jl" || fail "the joiner did not hear the request"
+	# (the broker: the friends' topics only as hashes, nothing of theirs retained)
+	grep -aq "hcev/f1/i/[0-9a-f]\{32\}" "$out/broker.log" || fail "no request went to a code's inbox topic"
+	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
+	grep -aqE "Alpha|Bravo" "$out/broker.log" && fail "the broker's log shows a player's name"
+	case $mode in
+	friends|friendsinvite|friendsoffline|friendsforged|friendsprivate|friendsprivatepw)
+		grep -aq "friends: .* accepted the friend request; now friends" "$hl" || fail "the host did not become the joiner's friend"
+		grep -aq "friends: accepted .* friend request; now friends" "$jl" || fail "the joiner did not accept"
+		grep -aq "friends: .* is online: " "$hl" || fail "the host never saw the joiner online"
+		grep -aq "friends: .* is online: " "$jl" || fail "the joiner never saw the host online"
+		grep -aq "hcev/f1/m/[0-9a-f]\{32\}" "$out/broker.log" || fail "nothing went to a mailbox topic"
+		;;
+	esac
+	case $mode in
+	friends)
+		grep -aq "friends: .* is online: .* on Blood Gulch (joinable)" "$jl" ||
+			fail "the joiner did not see the host's public game on Blood Gulch, joinable"
+		grep -aq "network test: joining friend .*: Done" "$jl" || fail "the joiner did not join its friend's game"
+		grep -aq "friends: joining .*'s game" "$jl" || fail "the friend's invite link was not joined"
+		;;
+	friendsdecline|friendsblock)
+		grep -aq "now friends" "$hl" "$jl" && fail "a friendship was made"
+		grep -aq "friends: .* is online" "$hl" "$jl" && fail "presence went between machines that are not friends"
+		[ "$(grep -ac "friends: a friend request from " "$jl")" = 1 ] || fail "the request was heard more than once"
+		if [ $mode = friendsdecline ]; then
+			grep -aq "friends: declined .* (nothing sent)" "$jl" || fail "the joiner did not decline"
+		else
+			grep -aq "friends: blocked " "$jl" || fail "the joiner did not block"
+			grep -aq "friends: dropped a friend request from a blocked player" "$jl" ||
+				fail "the blocked player's next request was not dropped"
+		fi
+		;;
+	friendsprivate|friendsprivatepw)
+		grep -aq "friends: .* is online: .*(joinable)" "$jl" || fail "the joiner did not see the host's private game joinable"
+		grep -aq "network test: joining friend .*: Done" "$jl" && [ $mode = friendsprivatepw ] &&
+			fail "the game with a password was joined without asking for it"
+		if [ $mode = friendsprivate ]; then
+			grep -aq "network test: joining friend .*: Done" "$jl" || fail "the joiner did not join its friend's private game"
+			grep -aq "friends: joining .*'s game" "$jl" || fail "the friend's invite link was not joined"
+		else
+			grep -aq "network test: joining friend .*: Their game has a password: type it" "$jl" ||
+				fail "the friend was not asked for the password"
+			grep -aq "network test: the friend's game's password typed: Done" "$jl" || fail "the password was not taken"
+			grep -aq "friends: joining .*'s game with its password" "$jl" || fail "the sealed token was not opened"
+		fi
+		grep -aqE "halo://join/[0-9a-f]{64}" "$out/broker.log" && fail "an invite link went through the broker in clear"
+		;;
+	friendsinvite)
+		grep -aq "friends: invited .* into this machine's game" "$hl" || fail "the host did not invite"
+		grep -aq "friends: .* invited this machine: " "$jl" || fail "the joiner did not hear the invite"
+		grep -aq "friends: .* invited you: .* (the test answers)" "$jl" || fail "the invite's pop-up was not asked"
+		grep -aq "friends: .*'s invite accepted: Done" "$jl" || fail "the invite was not accepted"
+		grep -aq "network test: the friend's invite accepted and its host reached" "$jl" ||
+			fail "the invite's host was not reached"
+		;;
+	friendsoffline)
+		grep -aq "friends: appearing offline" "$jl" || fail "the joiner did not appear offline"
+		awk '/friends: test: appearing offline/ { found = 1 } found && /friends: Alpha is online/ { seen = 1 }
+			END { exit !seen }' "$jl" || fail "the joiner stopped seeing the host while appearing offline"
+		awk '/friends: .* went offline$/ { gone = 1; next } gone && /friends: .* is online/ { exit 1 }
+			END { exit !gone }' "$hl" || fail "the host did not see the joiner go offline, or saw it online again"
+		;;
+	friendsforged)
+		grep -aq "friends: test: the last message sent, sent again as it was" "$hl" || fail "the host did not replay"
+		grep -aq "friends: test: three forged messages sent" "$hl" || fail "the host did not forge"
+		grep -aq "friends: dropped a replayed message from " "$jl" || fail "the replayed message was not dropped"
+		grep -aq "friends: dropped a message from .* whose signature is not theirs" "$jl" ||
+			fail "the message signed by another key was not dropped"
+		forged=$(grep -a "friends: dropped: " "$jl" | sed 's/.* replayed, \([0-9]*\) forged.*/\1/' | awk '{ s += $1 } END { print s + 0 }')
+		echo "the joiner dropped $forged forged or misdirected messages"
+		[ "$forged" -ge 3 ] || fail "the joiner dropped $forged forgeries (3 wanted)"
+		grep -aq "friends: Forged\|Forged is online" "$jl" && fail "a forgery showed"
+		;;
+	esac
+	if [ $mode = friends ] || [ $mode = friendsinvite ] || [ $mode = friendsprivate ] || [ $mode = friendsprivatepw ]; then
+		grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
+		two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "joiner's seconds with two players playing: $two"
+		[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
+	fi
+	;;
+friendsbackup)
+	# (Alpha and Bravo friends; Bravo's backup, then Bravo gone; Charlie restores it)
+	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code
+	password=${HALO_TEST_BACKUP_PASSWORD:-correct-horse-7-backup}
+	backup_at=${HALO_TEST_BACKUP_AT:-45} backup_quit=${HALO_TEST_BACKUP_QUIT:-70}
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_NAME=Alpha \
+		"HALO_TEST_FRIENDS=code-file=$hc,add-file=$jc" ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=watch HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo \
+		"HALO_TEST_FRIENDS=code-file=$jc,accept,backup=$backup_at:bravo-code:$password" "HALO_TEST_PAD=wait:150:1000000" \
+		HALO_EXIT_AFTER=$backup_quit; join_pid=$last_pid
+	wait $join_pid 2>/dev/null
+	jl=$out/joiner/run.log
+	# (the file, as a player copies it to another Vita's ux0:data/haloce-vita)
+	mkdir -p "$out/joiner2/save"
+	cp "$out/joiner/save/bravo-code.hfb" "$out/joiner2/save/" 2>/dev/null || fail "Bravo wrote no bravo-code.hfb"
+	run_copy joiner2 "$join2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=watch HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie \
+		"HALO_TEST_FRIENDS=code-file=$j2c,restore=5:bravo-code:$password" "HALO_TEST_PAD=wait:150:1000000" \
+		HALO_EXIT_AFTER=$((seconds - backup_quit - 10)); join2_pid=$last_pid
+	wait $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log j2l=$out/joiner2/run.log
+	bravo=$(tr -d '\n' < "$jc" 2>/dev/null) charlie=$(tr -d '\n' < "$j2c" 2>/dev/null)
+	echo "Alpha's code: $(cat "$hc" 2>/dev/null)  Bravo's: $bravo  Charlie's own: $charlie"
+	for side in host joiner joiner2; do
+		echo "--- $side"; grep -a "friends:" "$out/$side/run.log" | grep -av "dropped: " | head -16
+	done
+	[ -n "$bravo" ] && [ -n "$charlie" ] && [ "$bravo" != "$charlie" ] || fail "Charlie had no code of its own before the restore"
+	grep -aq "friends: .* accepted the friend request; now friends" "$hl" || fail "Alpha and Bravo did not become friends"
+	grep -aq "friends: backup: written to .*/bravo-code.hfb (the friend code and the friends list)" "$jl" ||
+		fail "Bravo did not write its backup with the list"
+	grep -aq "friends: Bravo went offline" "$hl" || fail "Alpha did not see Bravo go offline"
+	grep -aq "friends: backup: .*bravo-code.hfb opened: the friend code $bravo, 1 friends (its list)" "$j2l" ||
+		fail "Charlie did not open Bravo's backup"
+	grep -aq "friends: backup: restored: this machine's friend code is now $bravo (1 friends" "$j2l" ||
+		fail "Charlie did not take Bravo's code and its friend"
+	grep -aq "friends: Alpha is online" "$j2l" || fail "Charlie did not see Alpha online"
+	# (Bravo gone before Charlie started: the friend online again is Charlie, under the name
+	# Alpha knows until Charlie's game says its profile's - a run's presences carry no other)
+	awk '/friends: Bravo went offline/ { gone = 1 } gone && /friends: (Bravo|Charlie) is online/ { seen = 1 }
+		END { exit !seen }' "$hl" || fail "Alpha did not see its friend (Bravo's code) online again, from Charlie"
+	grep -aq "friends: a friend request from" "$hl" && fail "Alpha heard a friend request (a new friend, not the same one)"
+	grep -aqF -- "$charlie" "$hl" && fail "Alpha heard of Charlie's own code"
+	[ "$(grep -ac "now friends" "$hl")" = 1 ] || fail "Alpha made more than one friend"
+	grep -arqF -- "$password" "$out/host" "$out/joiner" "$out/joiner2" "$out/broker.log" &&
+		fail "a log or file holds the backup's password"
+	grep -aqF -- "$password" "$out/joiner2/save/bravo-code.hfb" && fail "the backup holds its password"
+	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
+	;;
+hostbots)
+	most=${HALO_TEST_HOSTBOTS_MAX:-16}
+	old=${HALO_TEST_VITA_OLD:-$root/../wt-v110client/build/linux/halo}
+	[ -x "$old" ] || { echo "hostbots: no 1.1.0 build at $old (HALO_TEST_VITA_OLD)"; exit 2; }
+	jc=$out/joiner.code j2c=$out/joiner2.code add=$out/joiner.add
+	(for i in $(seq 1 90); do [ -s "$j2c" ] && break; sleep 1; done
+		cat "$j2c" > "$add.tmp" 2>/dev/null; mv "$add.tmp" "$add") &
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=${HALO_TEST_HOST_GAME:-host:prisoner:team_slayer} \
+		HALO_NETWORK_TEST_START=${HALO_TEST_HOSTBOTS_START:-80} HALO_NETWORK_TEST_SCORE=${HALO_TEST_SCORE:-250} \
+		HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=true HALO_NET_LOBBY_NAME=Alpha HALO_NET_PLAYER_NAME=Alpha \
+		HALO_NET_MAX_PLAYERS=$most HALO_BOTS_ONLINE=${HALO_TEST_BOTS_ONLINE:-full} HALO_BOT_SKILL=easy; host_pid=$last_pid
+	code=$(wait_code)
+	echo "the host's code: ${code:-none}"
+	[ -n "$code" ] || { fail "the host showed no code"; }
+	# (a copy that browses alone, never joining: its join file never made)
+	side d0 10.10.20 192.168.20
+	run_copy browser "$d0_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-public \
+		"HALO_NETWORK_TEST_PUBLIC_NAME=Alpha" HALO_NETWORK_TEST_JOIN_FILE=never-made HALO_EXIT_AFTER=40
+	sleep 20
+	side d2 10.10.22 192.168.22
+	run_copy old "$d2_machine" "$old" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+		HALO_NET_PLAYER_NAME=Old110 HALO_NET_LOBBY_NAME=Old110 HALO_EXIT_AFTER=$((seconds - 10)) HALO_TEST_INPUT=bot:2 \
+		HALO_NETWORK_TEST_SHOOT=2; old_pid=$last_pid
+	sleep 15
+	# (Bravo joins by the code and invites Charlie to its party; Charlie follows)
+	run_copy joiner "$join_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-code:$code \
+		HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Bravo HALO_NET_PLAYER_NAME=Bravo \
+		"HALO_TEST_FRIENDS=code-file=$jc,add-file=$add" "HALO_TEST_PARTY=invite-at=${HALO_TEST_PARTY_INVITE_AT:-35}" \
+		HALO_EXIT_AFTER=$((seconds - 25)); join_pid=$last_pid
+	run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true HALO_NETWORK_TEST=join-invite \
+		HALO_TEST_INPUT=bot:4 HALO_NET_LOBBY_NAME=Charlie HALO_NET_PLAYER_NAME=Charlie \
+		"HALO_TEST_FRIENDS=code-file=$j2c,accept" HALO_TEST_PARTY_ANSWER=accept HALO_EXIT_AFTER=$((seconds - 25)) \
+		"HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join2_pid=$last_pid
+	wait $old_pid $join_pid $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log
+	echo "--- host"
+	grep -aE "server: bots:|party net:" "$hl" "$out/host/data/debug.txt" | sed 's/^[^:]*://' | head -40
+	grep -a 'network test: the public games list "Alpha"' "$out/browser/run.log" | head -2
+	grep -aqE "network test: the public games list \"Alpha\".*$((most - 1)) of $most: 1 players, $((most - 2)) bots" \
+		"$out/browser/run.log" || fail "the host's game was not listed one short of full with its bots apart"
+	n=$(grep -ac "server: bots: a bot joined" "$hl")
+	echo "bots joined on the host: $n"
+	[ "$n" -ge $((most - 2)) ] || fail "the host filled its lobby with $n bots ($((most - 2)) wanted)"
+	grep -aqE "server: bots: a bot left \((room for a player|a player's slot)" "$hl" || fail "no bot left for a joiner"
+	grep -aq "party: following Bravo: joining" "$out/joiner2/run.log" || fail "Charlie did not follow Bravo"
+	python3 - "$here" "$hl" "$out/old/run.log" "$most" <<'HOSTBOTS' || fail "the host's bots, teams or the 1.1.0 joiner's view"
+import re, sys
+sys.path.insert(0, sys.argv[1])
+from netns_compat_check import parse_ticks, read, games_of, quitters
+host, old, most = parse_ticks(read(sys.argv[2])), parse_ticks(read(sys.argv[3])), int(sys.argv[4])
+bad = False
+def people_of(players, names):
+    return {names.get(n, n): v[0] for n, v in players.items()}
+# (players who left - bots that left for people in play - stay on Halo's
+# scores, dead to the game's end: not counted)
+gone = quitters(host)
+playing = []
+for game, t in zip(games_of(host), host):
+    if t[1] == "playing":
+        playing.append((t[0], t[1], t[2], {n: v for n, v in t[3].items() if (game, n) not in gone}, t[4]))
+everyone = []
+for tick, state, local, players, names in playing:
+    named = people_of(players, names)
+    if all(p in named for p in ("Alpha", "Old110", "Bravo", "Charlie")):
+        everyone.append((tick, players, named))
+print("host seconds playing: %d; with Alpha, Old110, Bravo and Charlie in: %d" % (len(playing), len(everyone)))
+if len(everyone) < 20:
+    print("the four were never in together long enough"); bad = True
+counts = [len(p) for _, p, _ in everyone]
+short = [c for c in counts if c == most - 1]
+full = [c for c in counts if c >= most]
+print("players then: %s; one short of full %d of %d s, full %d s" % (sorted(set(counts)), len(short), len(counts), len(full)))
+if everyone and (len(short) < 0.7 * len(counts) or len(full) > 3):
+    bad = True
+apart = [t for t, _, named in everyone if named["Bravo"] != named["Charlie"]]
+print("Bravo and Charlie on one team: %s (apart %d s)" % (not apart, len(apart)))
+if apart:
+    bad = True
+uneven = [t for t, p, _ in everyone if len(p) >= most - 1 and abs(sum(1 for v in p.values() if v[0] == 0) - sum(1 for v in p.values() if v[0] == 1)) > 1]
+print("full seconds with the teams more than one apart: %d" % len(uneven))
+if len(uneven) > max(2, len(everyone) // 10):
+    bad = True
+# (the 1.1.0 joiner: played with the others, saw them all, and every team as the host has it)
+oplaying = [t for t in old if t[1] == "playing" and len(t[3]) >= 2]
+seen = max([len(t[3]) for t in old], default=0)
+print("the 1.1.0 joiner: %d s playing with others, at most %d players seen" % (len(oplaying), seen))
+if len(oplaying) < 40 or seen < most - 1:
+    bad = True
+hosts = {t[0]: t[3] for t in playing}
+keys = sorted(hosts)
+import bisect
+agree = samples = 0
+for tick, state, _, players, _ in old:
+    if state != "playing" or not keys:
+        continue
+    i = bisect.bisect_left(keys, tick)
+    near = min(keys[max(0, i - 1):i + 1], key=lambda k: abs(k - tick))
+    if abs(near - tick) > 15:
+        continue
+    for n, v in players.items():
+        if n in hosts[near]:
+            samples += 1
+            agree += hosts[near][n][0] == v[0]
+print("the 1.1.0 joiner's teams as the host's: %d of %d player-seconds" % (agree, samples))
+if samples < 100 or agree < 0.98 * samples:
+    bad = True
+sys.exit(1 if bad else 0)
+HOSTBOTS
+	for side in host old joiner joiner2; do
+		grep -aq "XLaunchNewImage" "$out/$side/run.log" && fail "$side went to the dashboard"
+	done
+	;;
+party)
+	# (the party, p2p_party.h: Alpha (the host) friends with Bravo (joiner) and Charlie
+	# (joiner2), its game private (no one joins it from presence or the browser); Alpha invites
+	# both to a party, they accept (the invite's question answered: friends_game.c), and its
+	# FOLLOW takes them into Alpha's game through its invite's own join; Alpha chats, Charlie's
+	# quick chat; then Alpha leaves the party: Bravo, the longest-standing, leads)
+	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code add=$out/host.add
+	(for i in $(seq 1 60); do [ -s "$jc" ] && [ -s "$j2c" ] && break; sleep 1; done
+		cat "$jc" "$j2c" > "$add.tmp" 2>/dev/null; mv "$add.tmp" "$add") &
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=false HALO_NET_LOBBY_NAME=Alpha HALO_NET_PLAYER_NAME=Alpha \
+		"HALO_TEST_FRIENDS=code-file=$hc,add-file=$add" \
+		"HALO_TEST_PARTY=invite-at=${HALO_TEST_PARTY_INVITE_AT:-40},chat-at=${HALO_TEST_PARTY_CHAT_AT:-110}:hello party |%^,leave-at=${HALO_TEST_PARTY_LEAVE_AT:-170}" \
+		${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo HALO_NET_PLAYER_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" \
+		HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join_pid=$last_pid
+	run_copy joiner2 "$join2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie HALO_NET_PLAYER_NAME=Charlie "HALO_TEST_FRIENDS=code-file=$j2c,accept" \
+		"HALO_TEST_PARTY=chat-at=${HALO_TEST_PARTY_CHAT2_AT:-125}:gg" \
+		HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log j2l=$out/joiner2/run.log
+	for side in host joiner joiner2; do
+		echo "--- $side"; grep -a "party:" "$out/$side/run.log" | head -24
+	done
+	grep -aq "party: invited Bravo to the party" "$hl" && grep -aq "party: invited Charlie to the party" "$hl" ||
+		fail "Alpha did not invite both friends"
+	grep -aq "party: Bravo joined the party" "$hl" && grep -aq "party: Charlie joined the party" "$hl" ||
+		fail "the friends did not join Alpha's party"
+	# (the longest-standing member: the first to join, who leads once Alpha leaves)
+	first=$(grep -a "party: \(Bravo\|Charlie\) joined the party" "$hl" | head -1 | sed 's/.*party: \([A-Za-z]*\) joined.*/\1/')
+	echo "the longest-standing member: ${first:-none}"
+	for side in joiner joiner2; do
+		log=$out/$side/run.log
+		grep -aq "party: Alpha's party invite accepted: Done" "$log" || fail "the $side did not accept the party invite"
+		grep -aq "party: You joined Alpha's party" "$log" || fail "the $side did not join the party"
+		grep -aq "party: the leader, Alpha, hosts a game: .*; following" "$log" || fail "the $side was not told to follow"
+		grep -aq "party: following Alpha: joining" "$log" || fail "the $side did not follow Alpha"
+		grep -aq "network test: the friend's invite accepted and its host reached" "$log" ||
+			fail "the $side did not reach Alpha's game"
+		grep -aq "system link: in another's lobby\|system link: in a network game" "$log" ||
+			fail "the $side did not get into Alpha's game"
+		grep -aq "party: chat from Alpha: hello party" "$log" || fail "the $side did not read Alpha's chat (cleaned)"
+		grep -aq "party: chat shown over the game: Alpha: hello party" "$log" ||
+			fail "the $side did not show Alpha's chat over the game"
+		grep -aqE "party: $first( #[A-Z0-9]{4})? leads the party now" "$log" ||
+			fail "the $side did not see $first, the longest-standing, lead once Alpha left"
+	done
+	grep -aq "party: chat from Charlie[^:]*: gg" "$hl" || fail "Alpha did not read Charlie's chat"
+	grep -aq "party: chat from Charlie #[A-Z0-9]\{4\}: Ready!" "$jl" ||
+		fail "Bravo did not read Charlie's quick chat under Charlie's name and code (not a friend of Bravo's)"
+	# (since Oct 19 2026 a friend joins a private game from presence, the join
+	# sealed to each friend: Bravo, Alpha's friend, sees it joinable)
+	grep -aq "friends: Alpha is online: .* (joinable)" "$jl" ||
+		fail "Alpha's private game did not show joinable to Bravo, a friend"
+	# (the broker: the party's traffic sealed - no names, no chat - on the friends' hashed topics)
+	grep -aqE "hello party|Alpha|Bravo|Charlie|Ready!" "$out/broker.log" && fail "the broker's log shows a name or a chat"
+	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
+	for side in joiner joiner2; do
+		two=$(grep -a "network test: tick" "$out/$side/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "$side's seconds with two or more players playing: $two"
+		[ "$two" -ge 20 ] || fail "the $side played Alpha's game for $two s with another player (20 wanted)"
+	done
+	;;
+chat)
+	# (the in-game chat among the party's three, as in party: Alpha hosts Team
+	# Slayer, Bravo and Charlie follow it into its game; each machine's script
+	# counts from when it is in the game)
+	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code add=$out/host.add
+	# (a slur of the shipped list, in leet - the script holds none: the
+	# list's first whole word, ROT13'd there, its vowels digits)
+	slur=$(awk '$1 == "whole" { print $2; exit }' "$root/port/vita/app0/chat/filter.txt" | tr 'A-Za-z' 'N-ZA-Mn-za-m')
+	leet=$(printf '%s' "$slur" | sed 's/a/4/; s/e/3/; s/i/1/; s/o/0/')
+	[ -n "$slur" ] || fail "no word in the filter's list"
+	(for i in $(seq 1 60); do [ -s "$jc" ] && [ -s "$j2c" ] && break; sleep 1; done
+		cat "$jc" "$j2c" > "$add.tmp" 2>/dev/null; mv "$add.tmp" "$add") &
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env HALO_NET_HOST_PUBLIC=false HALO_NET_LOBBY_NAME=Alpha \
+		HALO_NET_PLAYER_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$hc,add-file=$add" \
+		"HALO_TEST_PARTY=invite-at=${HALO_TEST_PARTY_INVITE_AT:-40}" \
+		"HALO_TEST_CHAT=95:teams;100:all:hello everyone from alpha;104:team:alpha team only;108:party:alpha to the party;112:preset:7;150:all:you $leet;154:all:big $leet there;158:all:$leet again;164:all:alpha after the filter" \
+		${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo "HALO_TEST_FRIENDS=code-file=$jc,accept" \
+		HALO_TEST_PARTY_ANSWER=accept HALO_CHAT_FILTER=0 HALO_NET_PLAYER_NAME=Bravo "HALO_TEST_PAD=wait:150:$((seconds * 1000))" \
+		"HALO_TEST_CHAT=30:teams;35:all:bravo says hi;39:team:bravo team only;40:mute:Charlie;47:wheel:7:0;60:flood:12;66:malformed;70:all:see www.example.com now"
+	join_pid=$last_pid
+	mkdir -p "$out/shots"
+	run_copy joiner2 "$join2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-invite HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie "HALO_TEST_FRIENDS=code-file=$j2c,accept" \
+		HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=wait:150:$((seconds * 1000))" "HALO_TEST_CHAT_TYPED=typed by charlie" \
+		HALO_SCREENSHOT_DIR="$out/shots" HALO_GL_VITA_DISPLAY=1 HALO_NET_PLAYER_NAME=Charlie \
+		"HALO_TEST_CHAT=30:teams;56:all:charlie here;60:team:charlie team only;64:party:charlie to the party;68:type;72:shot:chat-lines;73:open;75:shot:chat-wheel;77:close"
+	join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log j2l=$out/joiner2/run.log
+	for side in host joiner joiner2; do
+		echo "--- $side"; grep -a "chat: \|party: chat" "$out/$side/run.log" | grep -av "$slur\|$leet" | head -60
+	done
+	for side in host joiner joiner2; do
+		grep -aq "system link: in another's lobby\|system link: in a network game\|chat: in a network game (hosting)" \
+			"$out/$side/run.log" || fail "the $side was not in Alpha's game"
+	done
+	# (the teams, each name's, as Alpha saw them when its script asked)
+	teams=$(grep -a "chat: test: teams" -A1 "$hl" | grep -a "chat: teams:" | tail -1)
+	echo "teams: ${teams:-none logged}"
+	team_of() { printf '%s\n' "$teams" | grep -o "$1 t[0-9]*" | head -1 | sed 's/.* t//'; }
+	alpha_team=$(team_of Alpha) bravo_team=$(team_of Bravo) charlie_team=$(team_of Charlie)
+	[ -n "$alpha_team" ] && [ -n "$bravo_team" ] && [ -n "$charlie_team" ] || fail "the teams were not logged"
+	# ALL: every machine shows every line (its own too)
+	for side in host joiner joiner2; do
+		log=$out/$side/run.log
+		grep -aq "chat: shown (all): Alpha: hello everyone from alpha" "$log" || fail "the $side did not show Alpha's line to ALL"
+		grep -aq "chat: shown (all): Bravo: bravo says hi" "$log" || fail "the $side did not show Bravo's line to ALL"
+		# (Bravo has muted Charlie: theirs below)
+		[ $side = joiner ] || grep -aq "chat: shown (all): Charlie: typed by charlie" "$log" ||
+			fail "the $side did not show Charlie's typed line"
+		grep -aq "chat: shown (all): Alpha: Nice shot!" "$log" || fail "the $side did not show Alpha's phrase"
+		grep -aq "chat: shown (all): Bravo: Nice shot!" "$log" || fail "the $side did not show Bravo's phrase from the wheel"
+	done
+	# TEAM: the sender's team alone (and the sender)
+	team_check() { # SENDER SENDER_TEAM TEXT [SKIPPED: a machine that muted the sender]
+		local who side name
+		for side in host:Alpha joiner:Bravo joiner2:Charlie; do
+			name=${side#*:}
+			[ "$name" = "${4:-}" ] && continue
+			who=$(team_of "$name")
+			if [ "$who" = "$2" ]; then
+				grep -aq "chat: shown (team): $1: $3" "$out/${side%%:*}/run.log" ||
+					fail "$name (team $who) did not show $1's team line"
+			else
+				grep -aq "chat: shown (team): $1: $3" "$out/${side%%:*}/run.log" &&
+					fail "$name (team $who) showed $1's team line (team $2)"
+			fi
+		done
+	}
+	team_check Alpha "$alpha_team" "alpha team only"
+	team_check Bravo "$bravo_team" "bravo team only"
+	team_check Charlie "$charlie_team" "charlie team only" Bravo
+	# PARTY: over the friends channel, shown over the game
+	grep -aq "party: chat shown over the game: Alpha: alpha to the party" "$jl" || fail "Bravo did not show Alpha's party line"
+	grep -aq "party: chat shown over the game: Alpha: alpha to the party" "$j2l" || fail "Charlie did not show Alpha's party line"
+	grep -aq "party: chat shown over the game: Charlie[^:]*: charlie to the party" "$hl" ||
+		fail "Alpha did not show Charlie's party line"
+	# the wheel and the keyboard
+	grep -aq "chat: the wheel opened" "$jl" && grep -aq "chat: sent (all): Nice shot!" "$jl" ||
+		fail "Bravo's wheel did not send its phrase"
+	grep -aq "chat: typing: answered by the test" "$j2l" || fail "Charlie's keyboard was not asked"
+	# the mute: Charlie hidden on Bravo alone
+	grep -aq "chat: a line from Charlie hidden: muted here" "$jl" || fail "Bravo did not hide muted Charlie"
+	grep -aq "chat: shown ([a-z]*): Charlie: " "$jl" && fail "Bravo showed a line of muted Charlie's"
+	grep -aq "chat: shown (all): Charlie: charlie here" "$hl" || fail "Alpha did not show Charlie's line"
+	# the filter: off on Bravo (as sent), on on Charlie (masked; Alpha muted after the third)
+	grep -aq "chat: shown (all): Alpha: you $leet" "$jl" || fail "Bravo (filter off) did not show the line as sent"
+	grep -aq "chat: shown (all): Alpha: you \*\** \[filtered\]" "$j2l" || fail "Charlie (filter on) did not mask the line"
+	grep -a "chat: shown (all): Alpha:" "$j2l" | grep -aq "$leet" && fail "Charlie showed the word unmasked"
+	grep -aq "chat: a player muted here by the filter" "$j2l" || fail "Charlie did not mute Alpha after three"
+	grep -aq "chat: a line from Alpha hidden: muted here" "$j2l" || fail "Charlie showed Alpha's line after muting"
+	grep -aq "chat: shown (all): Alpha: alpha after the filter" "$jl" || fail "Bravo did not show Alpha's last line"
+	# the host's limits: the flood, malformed lines, a link
+	floods=$(grep -ac "chat: host: dropped a line from machine [0-9]*: too fast" "$hl")
+	echo "the host dropped $floods lines of Bravo's flood"
+	[ "$floods" -ge 5 ] || fail "the host dropped $floods of a flood of 12 (5 or more wanted)"
+	shown=$(grep -ac "chat: shown (all): Bravo: flood " "$hl")
+	[ "$shown" -le "$((5 + 1))" ] || fail "the host showed $shown lines of the flood"
+	grep -aq "chat: notice: You're sending messages too fast" "$jl" || fail "Bravo was not told it floods"
+	grep -aq "dropped a line from machine [0-9]*: malformed" "$hl" || fail "the host took a malformed line"
+	grep -aq "dropped a line from machine [0-9]*: not that machine's player" "$hl" || fail "the host took a line as another's player"
+	grep -aq "dropped a line from machine [0-9]*: not over its stream" "$hl" || fail "the host took a line over a datagram"
+	grep -aE "chat: shown .*(two at once|cut short|a forged notice|as the host's player|over a datagram|: flags$)" "$out"/*/run.log &&
+		fail "a malformed line was shown"
+	grep -aq "chat: notice: Links aren't allowed in this game" "$jl" || fail "Bravo's link was not refused"
+	grep -aq "www.example.com" "$hl" "$j2l" && fail "a link reached another machine"
+	# (the party's and the game's lines: no name nor line on the broker)
+	grep -aqE "hello everyone|bravo says hi|charlie here|alpha to the party|$leet" "$out/broker.log" &&
+		fail "the broker's log shows a line"
+	for side in joiner joiner2; do
+		two=$(grep -a "network test: tick" "$out/$side/run.log" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+		echo "$side's seconds with two or more players playing: $two"
+		[ "$two" -ge 20 ] || fail "the $side played Alpha's game for $two s with another player (20 wanted)"
+	done
+	;;
+partyfollow)
+	menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+	if [ ! -r "$menus_data/maps/bitmaps.map" ] || [ ! -r "${HALO_TEST_PROFILE:-}" ]; then
+		echo "SKIP: no Halo PC files in $menus_data/maps (HALO_TEST_DATA_MENUS) or no HALO_TEST_PROFILE"; exit 0
+	fi
+	bound=${PARTY_FOLLOW_BOUND:-8}
+	for name in host joiner joiner2; do
+		mkdir -p "$out/$name/save/u/UDATA/869079979327"
+		cp "$HALO_TEST_PROFILE" "$out/$name/save/u/UDATA/869079979327/blam.sav"
+		[ -r "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" ] &&
+			cp "$(dirname "$HALO_TEST_PROFILE")/SaveMeta.xbx" "$out/$name/save/u/UDATA/869079979327/"
+	done
+	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code add=$out/host.add
+	(for i in $(seq 1 90); do [ -s "$jc" ] && [ -s "$j2c" ] && break; sleep 1; done
+		cat "$jc" "$j2c" > "$add.tmp" 2>/dev/null; mv "$add.tmp" "$add") &
+	# (Alpha: MULTIPLAYER, the lobby on SYSTEM LINK; NETWORK, up to ONLINE, A; a while (the
+	# friends made); NETWORK, down three to OFFLINE, A; the party made at 45 s: ONLINE again by
+	# itself, live, the members in; B at 95 s: the lobby left; MULTIPLAYER again at 112 s: hosted
+	# again, the members in again)
+	follow_pad="wait:150:3000 down:150:700 a wait:150:3000 a wait:150:2500 up:150:600 a wait:150:8000"
+	follow_pad="$follow_pad a wait:150:2500 down:150:500 down:150:500 down:150:500 a wait:150:73000 b wait:150:15000 a wait:150:40000"
+	# (then down five to BROWSE GAMES, A: the lobby closed, the games browser (the profile chosen
+	# before); A on its first row, the dedicated server's game, a few times)
+	follow_pad="$follow_pad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:12000 a wait:150:3000 a wait:150:3000 a wait:150:40000"
+	# (the dedicated server, behind its own NAT, its port forwarded: public, Blood Gulch)
+	server=${HALO_TEST_SERVER:-$root/build/linux/halo-server}
+	[ -x "$server" ] || { echo "partyfollow needs the dedicated server (ninja linux-server, HALO_TEST_SERVER)"; exit 2; }
+	in_ns "$join3_router" iptables -t nat -A PREROUTING -i w_join3 -p udp --dport 2302 -j DNAT --to-destination 192.168.4.2:2302
+	mkdir -p "$out/server/data"
+	ln -sfn "$(cd "$data" && pwd)/maps" "$out/server/data/maps"
+	printf '%s\n' 'sv_name "Netns Party"' 'sv_maxplayers 8' 'sv_public 1' 'sv_mapcycle_add bloodgulch slayer' \
+		'sv_timelimit 5' 'sv_start_delay 5' 'sv_end_empty 60' 'sv_port 2302' > "$out/server/data/init.txt"
+	mkfifo "$out/server/console"
+	(cd "$out/server" && exec nsenter -t "$join3_machine" -n env HALO_EXIT_AFTER="$seconds" HALO_UPDATE_AUTO=false \
+		HALO_NET_ALLOW_UPNP=false HALO_NET_BROKERS=198.51.100.1:1883 HALO_NET_STUN=198.51.100.1:3478 \
+		HALO_NET_RELAYS=198.51.100.1:47320 HALO_LOG_TIMES=1 taskset -c "$cpu_c" timeout -k 5 $((seconds + 60)) "$server" \
+		-path "$out/server/data" < "$out/server/console" > "$out/server/run.log" 2>&1) &
+	pids="$pids $!"
+	exec {party_console}>"$out/server/console"
+	HALO_TEST_DATA_HOST=$menus_data run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=false \
+		HALO_NETWORK_TEST=watch HALO_LOG_TIMES=1 HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:1 HALO_NET_HOST_PUBLIC=false \
+		HALO_NET_LOBBY_NAME=Alpha "HALO_TEST_FRIENDS=code-file=$hc,add-file=$add" \
+		"HALO_TEST_PARTY=invite-at=${HALO_TEST_PARTY_INVITE_AT:-45}" "HALO_TEST_PAD=$follow_pad"; host_pid=$last_pid
+	# (each member: CAMPAIGN, its profile chosen (A), B: the main menu, where it waits; the
+	# party's invite answered, the follow joined by the menus alone)
+	member_pad="wait:150:4000 a wait:150:3000 a wait:150:3000 b wait:150:3000 b wait:150:$((seconds * 1000))"
+	HALO_TEST_DATA_JOINER=$menus_data run_copy joiner "$join_machine" "$vita" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=watch HALO_LOG_TIMES=1 HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo \
+		"HALO_TEST_FRIENDS=code-file=$jc,accept" HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=$member_pad"; join_pid=$last_pid
+	HALO_TEST_DATA_JOINER2=$menus_data run_copy joiner2 "$join2_machine" "$vita" "$cpu_c" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=watch HALO_LOG_TIMES=1 HALO_UI_LOG=1 HALO_MENU_STYLE=halo3 HALO_TEST_INPUT=bot:3 HALO_NET_LOBBY_NAME=Charlie \
+		"HALO_TEST_FRIENDS=code-file=$j2c,accept" HALO_TEST_PARTY_ANSWER=accept "HALO_TEST_PAD=$member_pad"; join2_pid=$last_pid
+	wait $join_pid $join2_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log
+	for side in host joiner joiner2; do
+		echo "--- $side"
+		grep -aE "party: |menus: (in a party|h3 live lobby: (open|closed|.*players)|h3 mp lobby: NETWORK|the host's game closed)|system link: (in another|hosting)|Internet play: already" \
+			"$out/$side/run.log" | grep -av "chat shown" | head -40
+		grep -av "assertion skipped (torn read?)" "$out/$side/run.log" | grep -aqiE "assert|exception|halt_and_catch_fire|segmentation" &&
+			fail "the $side: an assertion, exception or crash"
+	done
+	# (seconds of a log line: its time, HALO_LOG_TIMES's, the second field)
+	at() { grep -a "$2" "$1" | sed -n "${3:-1}p" | awk '{print $2}'; }
+	# (the names: the profiles' once chosen, else the lobby's: not relied on)
+	[ "$(grep -ac "party: .* joined the party" "$hl")" -ge 2 ] || fail "the friends did not join Alpha's party"
+	# (a party plays online: OFFLINE before, ONLINE again once in the party)
+	grep -aq "menus: h3 mp: network OFFLINE" "$hl" || fail "Alpha's lobby was not put on OFFLINE first"
+	grep -aq "menus: in a party (.*): the lobbies' NETWORK is ONLINE (a party plays online)" "$hl" ||
+		fail "the party did not put Alpha's lobby on ONLINE"
+	# (the follows: the first hosting, and the second, after the lobby left)
+	hosted1=$(at "$hl" "party: the party follows this machine: hosting" 1)
+	menus=$(at "$hl" "party: the party follows this machine: back in the menus" 1)
+	hosted2=$(sed -n '/party: the party follows this machine: back in the menus/,$p' "$hl" |
+		grep -a "party: the party follows this machine: hosting" | head -1 | awk '{print $2}')
+	echo "Alpha hosts at ${hosted1:-never}, back in the menus at ${menus:-never}, hosts again at ${hosted2:-never}"
+	[ -n "$hosted1" ] && [ -n "$menus" ] && [ -n "$hosted2" ] || fail "Alpha's follows were not hosting, the menus, hosting again"
+	grep -aq "party: the party follows this machine: in a game no member can reach" "$hl" &&
+		fail "Alpha told the party it was in a game no member can reach (it left its lobby)"
+	in3=$(grep -a "menus: h3 \(live lobby\|pregame\): .*players: [^;]*, [^;]*, [^;]*; 3/" "$hl" | awk '{print $2}' | tr '\n' ' ')
+	first3=; second3=
+	for t in $in3; do
+		[ -z "$first3" ] && [ -n "$hosted1" ] && awk "BEGIN{exit !($t >= $hosted1)}" && first3=$t
+		[ -z "$second3" ] && [ -n "$hosted2" ] && awk "BEGIN{exit !($t >= $hosted2)}" && second3=$t
+	done
+	echo "the party in Alpha's lobby (3 players) at ${first3:-never} and, hosted again, at ${second3:-never}"
+	[ -n "$first3" ] && awk "BEGIN{exit !($first3 - $hosted1 <= $bound)}" ||
+		fail "the members were not in Alpha's lobby within $bound s of its follow (${first3:-never} - $hosted1)"
+	[ -n "$second3" ] && awk "BEGIN{exit !($second3 - $hosted2 <= $bound)}" ||
+		fail "the members were not in Alpha's new game within $bound s of its follow (${second3:-never} - ${hosted2:-never})"
+	for side in joiner joiner2; do
+		log=$out/$side/run.log
+		grep -aq "party: You joined .*'s party" "$log" || fail "the $side did not join the party"
+		[ "$(grep -ac "party: the leader, .*, hosts a game: .*; following" "$log")" -ge 2 ] ||
+			fail "the $side was not told twice to follow Alpha's game"
+		grep -aq "party: .* is back in the menus" "$log" || fail "the $side was not told Alpha is back in the menus"
+		grep -aqi "could.n.t follow\|reached online" "$log" && fail "the $side was told it could not follow"
+		grep -aq "menus: the host's game closed: said for" "$log" && fail "the $side was told the online game closed (an error)"
+		grep -aq "menus: the host's game closed: the party's leader closed it; no error" "$log" ||
+			fail "the $side's game closed by the leader was not taken quietly"
+		[ "$(grep -ac "system link: in another's lobby" "$log")" -ge 2 ] || fail "the $side was not in Alpha's lobby twice"
+	done
+	grep -aqi "could not follow" "$hl" && fail "Alpha heard a member could not follow"
+	# (Alpha joins the dedicated server's game: the members follow it there)
+	joined=$(at "$hl" "party: the party follows this machine: joined a game" 1)
+	echo "Alpha joined the server's game at ${joined:-never}"
+	[ -n "$joined" ] || fail "Alpha did not join the dedicated server's game (its follow: joined a game)"
+	jbound=${PARTY_FOLLOW_JOIN_BOUND:-15}
+	for side in joiner joiner2; do
+		log=$out/$side/run.log
+		grep -aq "party: the leader, .*, joined a game: .*; following" "$log" ||
+			fail "the $side was not told to follow Alpha into the server's game"
+		there=
+		[ -n "$joined" ] && there=$(grep -a "system link: in another's lobby\|system link: in a network game" "$log" |
+			awk -v t="$joined" '$2 >= t {print $2; exit}')
+		echo "the $side in the server's game at ${there:-never}"
+		[ -n "$there" ] && awk "BEGIN{exit !($there - $joined <= $jbound)}" ||
+			fail "the $side was not in the server's game within $jbound s of Alpha's follow"
+	done
+	echo "--- server"; grep -a "joined\|left\|players" "$out/server/run.log" | head -12
+	;;
+friendsplayers|friendsplayersoff|friendsplayersnone)
+	# (no codes typed: the joiner adds the host from the game's players, the two
+	# machines' friend cards exchanged over internet play first)
+	host_steps="accept"
+	host_extra="HALO_NET_HOST_PUBLIC=true"
+	case $mode in
+	friendsplayersoff) host_extra="$host_extra HALO_FRIENDS_APPEAR_OFFLINE=true" ;;
+	friendsplayersnone) host_extra="$host_extra HALO_FRIENDS=false" ;;
+	esac
+	run_copy host "$host_machine" "$vita" "$cpu_a" $host_env $host_extra HALO_NET_LOBBY_NAME=Alpha \
+		"HALO_TEST_FRIENDS=$host_steps" ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true \
+		HALO_NETWORK_TEST=join-public HALO_TEST_INPUT=bot:2 HALO_NET_LOBBY_NAME=Bravo \
+		"HALO_TEST_FRIENDS_PLAYERS=add@${HALO_TEST_ADD_AT:-25}"; join_pid=$last_pid
+	wait $join_pid $host_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	echo "--- host"; grep -a "friends:" "$hl" | grep -av "is online:" | head -16
+	echo "--- joiner"; grep -a "friends:\|PLAYERS screen\|h3 players: options" "$jl" | grep -av "is online:" | head -16
+	grep -aq "system link: in another's lobby\|system link: in a network game" "$jl" || fail "the joiner did not get into the host's game"
+	grep -aq "friends: in a game, machine 0, hosting (cards relayed)" "$hl" || fail "the host was not told its game"
+	grep -aq "friends: in a game, machine [1-9]" "$jl" || fail "the joiner was not told its game"
+	# (the screen itself needs the menus' files, which these copies' data may not
+	# have: run_menus_test.sh h3players opens it; its ADD FRIEND's steps run either way)
+	if grep -aq "menus: Halo 3 set: " "$jl"; then
+		grep -aq "friends: test: the PLAYERS screen opened" "$jl" || fail "the joiner's PLAYERS screen did not open"
+	else
+		grep -aq "friends: test: the PLAYERS screen" "$jl" || fail "the joiner's PLAYERS step did not run"
+	fi
+	grep -aq "menus: h3 players: options for .* (machine 0)" "$jl" || fail "the joiner did not choose the host's player"
+	grep -aq "friends: asked machine 0 for its friend card (to add it)" "$jl" || fail "the joiner did not ask for the host's card"
+	[ $mode = friendsplayersnone ] && grep -aq "friends: online (" "$hl" && fail "the host's friends went online, though off"
+	case $mode in
+	friendsplayers)
+		grep -aq "friends: a player in this game (machine [1-9]) asked for this machine's friend card; answered" "$hl" ||
+			fail "the host did not answer with its card"
+		grep -aq "friends: .* (machine 0) answered with their friend card" "$jl" || fail "the joiner did not hear the host's card"
+		grep -aq "friends: adding .* (a player in this game): Friend request sent" "$jl" || fail "the joiner did not send a request"
+		grep -aq "friends: a friend request from " "$hl" || fail "the host did not hear the request"
+		grep -aq "friends: accepted .* friend request; now friends" "$hl" || fail "the host did not accept"
+		grep -aq "friends: .* accepted the friend request; now friends" "$jl" || fail "the joiner did not become the host's friend"
+		grep -aq "friends: a friend card that is not its key's dropped" "$jl" && fail "the host's card did not verify"
+		;;
+	friendsplayersoff|friendsplayersnone)
+		grep -aq "asked for this machine's friend card; answered" "$hl" && fail "the host answered with its card"
+		grep -aq "answered with their friend card" "$jl" && fail "the joiner got the host's card"
+		grep -aq "friends: machine 0 did not answer for its friend card" "$jl" || fail "the joiner was not told no answer came"
+		grep -aq "friends: a friend request from " "$hl" && fail "a request reached the host"
+		grep -aq "now friends" "$hl" "$jl" && fail "a friendship was made"
+		;;
+	esac
+	two=$(grep -a "network test: tick" "$jl" | grep -a "| playing" | grep -aEc "player [0-9]+:.* player [0-9]+:")
+	echo "joiner's seconds with two players playing: $two"
+	[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
+	;;
+forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant)
+	# network Forge (port/linux/game/forge_net.inc), on the host's LAN (system
+	# link): the host hosts a Forge game of Blood Gulch (the network test's
+	# host:bloodgulch:forge), the joiners join it by the System Link search;
+	# each machine's monitor edits by the console (HALO_TEST_COMMANDS,
+	# forge.c's commands), every edit a request the host checks and makes
+	forge_lan_machine() { # NAME_VARIABLE ADDRESS: a machine on the host's LAN
+		holder
+		local machine=$held number=${2##*.}
+		in_ns "$host_router" ip link add "l${number}_host" type veth peer name "m${number}_host"
+		in_ns "$host_router" ip link set "m${number}_host" netns "$machine"
+		in_ns "$host_router" ip link set "l${number}_host" master b_host
+		in_ns "$host_router" ip link set "l${number}_host" up
+		in_ns "$machine" ip link set lo up
+		in_ns "$machine" ip addr add "$2/24" broadcast 192.168.1.255 dev "m${number}_host"
+		in_ns "$machine" ip link set "m${number}_host" up
+		in_ns "$machine" ip route add default via 192.168.1.1
+		eval "$1=$machine"
+	}
+	forge_lan_machine lan 192.168.1.3
+	. "$here/netns_forge_cases.sh"
+	forge_case
+	;;
 *)
-	echo "usage: $0 code|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|browserscroll|menushost|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menusjoinpress|onlinebrowser|onlinebrowserded|onlinebrowsertab|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3livebots|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin" >&2
 	exit 2
 	;;
 esac
@@ -3309,6 +6134,16 @@ if [ "$mode" != relay ]; then
 			fail "$(basename "$(dirname "$log")") went through the relay although a direct path was there"
 	done
 fi
+# (lan, adhoc, h3lan, h3adhoc: Bots online on, and no bot off the Online connection)
+case $mode in
+lan|adhoc|h3lan|h3adhoc)
+	if grep -aq "server: bots: a bot joined\|the game is filled with bots" "$out/host/run.log"; then
+		fail "the host filled its $mode game with bots (Bots online is for the Online connection alone)"
+	else
+		echo "no bots in the host's $mode game (Bots online on: Online alone)"
+	fi
+	;;
+esac
 grep -aiE "segmentation|assert|crash|fatal" "$out"/*/run.log | grep -v "assertions" | head -5
 [ $status = 0 ] && echo "PASS ($mode)"
 echo "logs in $out"

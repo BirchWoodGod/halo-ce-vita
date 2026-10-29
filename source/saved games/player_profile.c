@@ -220,6 +220,272 @@ static long profile_color_table[NUMBER_OF_AVAILABLE_PRIMARY_COLORS] =
 
 struct player_profile_runtime_globals player_profile_globals = { 0 };
 
+#ifdef HALO_LINUX
+/* port: the profiles as last read or written, by their index. Every look
+at a profile read its file on the game thread (an open, a read and a close):
+the Halo 3 nameplate, SELECT PROFILE's cards, the lobbies' scenes in the
+profile's colour, the live lobby's players, the friends list's name each
+second; a frame of the live lobby opened blam.sav 45 times, and on the Vita
+each open waited for the memory card behind a map copy (insider.15's
+testers: 3-6 opens a frame, the slowest 165 ms). Written through as a
+profile is saved (the write's own thread then writes the same profile), and
+forgotten whenever the profiles' list changes (their indices are places in
+it: saved_game_files.c's mapfile image) or a write fails. Any thread may
+look (a lock of a few copies' length) */
+#define PLAYER_PROFILE_CACHE_SIZE 8
+
+static struct
+{
+	long indices[PLAYER_PROFILE_CACHE_SIZE];
+	struct player_profile profiles[PLAYER_PROFILE_CACHE_SIZE];
+	long count;
+	long next;
+	int lock;
+} player_profile_cache;
+
+/* (port: the cosmetics' extension held: player_profile_extension_get) */
+#define PLAYER_PROFILE_EXTENSION_CACHE_SIZE 16
+
+static struct
+{
+	long indices[PLAYER_PROFILE_EXTENSION_CACHE_SIZE];
+	byte values[PLAYER_PROFILE_EXTENSION_CACHE_SIZE][2];
+	long count;
+	long next;
+} player_profile_extension_cache;
+
+static void player_profile_cache_lock(
+	void)
+{
+	while (__atomic_exchange_n(&player_profile_cache.lock, 1, __ATOMIC_ACQUIRE))
+	{
+	}
+}
+
+static void player_profile_cache_unlock(
+	void)
+{
+	__atomic_store_n(&player_profile_cache.lock, 0, __ATOMIC_RELEASE);
+}
+
+void player_profile_cache_forget(
+	void)
+{
+	player_profile_cache_lock();
+	player_profile_cache.count = 0;
+	player_profile_cache.next = 0;
+	player_profile_extension_cache.count = 0;
+	player_profile_extension_cache.next = 0;
+	player_profile_cache_unlock();
+}
+
+static boolean player_profile_cache_get(
+	long player_profile_index,
+	struct player_profile *profile)
+{
+	boolean found = FALSE;
+	long i;
+
+	player_profile_cache_lock();
+	for (i = 0; i < player_profile_cache.count; i++)
+	{
+		if (player_profile_cache.indices[i] == player_profile_index)
+		{
+			csmemcpy(profile, &player_profile_cache.profiles[i], sizeof(struct player_profile));
+			found = TRUE;
+			break;
+		}
+	}
+	player_profile_cache_unlock();
+
+	return found;
+}
+
+static void player_profile_cache_set(
+	long player_profile_index,
+	struct player_profile const *profile)
+{
+	long i;
+
+	player_profile_cache_lock();
+	for (i = 0; i < player_profile_cache.count; i++)
+	{
+		if (player_profile_cache.indices[i] == player_profile_index)
+		{
+			break;
+		}
+	}
+	if (i == player_profile_cache.count)
+	{
+		if (player_profile_cache.count < PLAYER_PROFILE_CACHE_SIZE)
+		{
+			player_profile_cache.count++;
+		}
+		else
+		{
+			i = player_profile_cache.next;
+			player_profile_cache.next = (player_profile_cache.next + 1) % PLAYER_PROFILE_CACHE_SIZE;
+		}
+	}
+	player_profile_cache.indices[i] = player_profile_index;
+	csmemcpy(&player_profile_cache.profiles[i], profile, sizeof(struct player_profile));
+	player_profile_cache_unlock();
+}
+
+/* port: the platform's cosmetics (port/linux/game/player_cosmetics.h) in
+the profile's file: the block's bytes after the stock checksum, which the
+game never read and wrote as zeros - a mark, a version, the extended armour
+colour (its index + 1, 0 none), the visor (0 the stock gold) and a check
+byte. A build without them reads the stock profile (in the nearest of the
+eighteen colours) and writes them away. Held in memory beside the
+profiles (any index: a read that found none holds zeros) */
+#define PLAYER_PROFILE_EXTENSION_MARK "HCVX"
+#define PLAYER_PROFILE_EXTENSION_VERSION 1
+#define PLAYER_PROFILE_EXTENSION_SIZE 8
+
+/* (the write thread's: the extension written with the request's profile) */
+static byte player_profile_write_extension[2];
+
+static void player_profile_extension_store(
+	long player_profile_index,
+	byte color_plus_one,
+	byte visor)
+{
+	long i;
+
+	player_profile_cache_lock();
+	for (i = 0; i < player_profile_extension_cache.count &&
+		player_profile_extension_cache.indices[i] != player_profile_index; i++)
+	{
+	}
+	if (i == player_profile_extension_cache.count)
+	{
+		if (player_profile_extension_cache.count < PLAYER_PROFILE_EXTENSION_CACHE_SIZE)
+		{
+			player_profile_extension_cache.count++;
+		}
+		else
+		{
+			i = player_profile_extension_cache.next;
+			player_profile_extension_cache.next = (player_profile_extension_cache.next + 1) %
+				PLAYER_PROFILE_EXTENSION_CACHE_SIZE;
+		}
+	}
+	player_profile_extension_cache.indices[i] = player_profile_index;
+	player_profile_extension_cache.values[i][0] = color_plus_one;
+	player_profile_extension_cache.values[i][1] = visor;
+	player_profile_cache_unlock();
+}
+
+static boolean player_profile_extension_cached(
+	long player_profile_index,
+	byte *color_plus_one,
+	byte *visor)
+{
+	boolean found = FALSE;
+	long i;
+
+	player_profile_cache_lock();
+	for (i = 0; i < player_profile_extension_cache.count; i++)
+	{
+		if (player_profile_extension_cache.indices[i] == player_profile_index)
+		{
+			*color_plus_one = player_profile_extension_cache.values[i][0];
+			*visor = player_profile_extension_cache.values[i][1];
+			found = TRUE;
+			break;
+		}
+	}
+	player_profile_cache_unlock();
+
+	return found;
+}
+
+static byte player_profile_extension_check(
+	byte const *extension)
+{
+	return (byte)(0x5A ^ extension[4] ^ (extension[5] * 3) ^ (extension[6] * 7));
+}
+
+/* (a file's block) its extension, or zeros */
+static void player_profile_extension_parse(
+	byte const *block,
+	byte *color_plus_one,
+	byte *visor)
+{
+	byte const *extension = block + sizeof(struct player_profile) + sizeof(XCALCSIG_SIGNATURE);
+
+	*color_plus_one = 0;
+	*visor = 0;
+	if (!csmemcmp(extension, PLAYER_PROFILE_EXTENSION_MARK, 4) &&
+		extension[4] == PLAYER_PROFILE_EXTENSION_VERSION &&
+		extension[7] == player_profile_extension_check(extension))
+	{
+		*color_plus_one = extension[5];
+		*visor = extension[6];
+	}
+}
+
+static void player_profile_extension_build(
+	byte *block,
+	byte const *values)
+{
+	byte *extension = block + sizeof(struct player_profile) + sizeof(XCALCSIG_SIGNATURE);
+
+	if (!values[0] && !values[1])
+	{
+		return;
+	}
+	csmemcpy(extension, PLAYER_PROFILE_EXTENSION_MARK, 4);
+	extension[4] = PLAYER_PROFILE_EXTENSION_VERSION;
+	extension[5] = values[0];
+	extension[6] = values[1];
+	extension[7] = player_profile_extension_check(extension);
+}
+
+boolean player_profile_extension_get(
+	long player_profile_index,
+	byte *color_plus_one,
+	byte *visor)
+{
+	struct player_profile profile;
+
+	*color_plus_one = 0;
+	*visor = 0;
+	if (player_profile_index == NONE)
+	{
+		return FALSE;
+	}
+	if (player_profile_extension_cached(player_profile_index, color_plus_one, visor))
+	{
+		return TRUE;
+	}
+	/* (read from its file: player_profile_read holds what it found) */
+	if (!player_profile_read(player_profile_index, &profile))
+	{
+		player_profile_extension_store(player_profile_index, 0, 0);
+		return FALSE;
+	}
+	return player_profile_extension_cached(player_profile_index, color_plus_one, visor);
+}
+
+boolean player_profile_extension_set(
+	long player_profile_index,
+	byte color_plus_one,
+	byte visor)
+{
+	struct player_profile profile;
+
+	if (player_profile_index == NONE || !player_profile_get(player_profile_index, &profile))
+	{
+		return FALSE;
+	}
+	player_profile_extension_store(player_profile_index, color_plus_one, visor);
+	player_profile_write(player_profile_index, &profile);
+	return TRUE;
+}
+#endif
+
 /* ---------- public code */
 
 void player_profiles_dispose(
@@ -331,10 +597,23 @@ real_rgb_color player_profile_get_rgb_color(
 	long color;
 	real_rgb_color rgb_color;
 
+#ifdef HALO_LINUX
+	/* port: the platform's colours after the eighteen
+	(port/linux/game/player_cosmetics.h) */
+	if (color_index >= NUMBER_OF_AVAILABLE_PRIMARY_COLORS)
+	{
+		unsigned long player_cosmetics_color_rgb(short color);
+
+		color = (long)player_cosmetics_color_rgb((short)color_index);
+	}
+	else
+#endif
+	{
 	color_index = color_index < NUMBER_OF_AVAILABLE_PRIMARY_COLORS - 1 ?
 		color_index : NUMBER_OF_AVAILABLE_PRIMARY_COLORS - 1;
 	color_index = color_index < 0 ? 0 : color_index;
 	color = profile_color_table[color_index];
+	}
 
 	rgb_color.red = ((color >> 16) & 0xFF) / 255.f;
 	rgb_color.green = ((color >> 8) & 0xFF) / 255.f;
@@ -450,9 +729,16 @@ long player_profile_new(
 			saved_game_file_generate_checksum(&block.profile, sizeof(block.profile),
 				&block.checksum);
 
+#ifdef HALO_LINUX
+			/* port: written whole or not at all, as every save of it
+			(saved_game_file_write_block) */
+			saved_game_file_close(&file, player_profile_index);
+			succeeded = saved_game_file_write_block(player_profile_index, &block, sizeof(block.profile));
+#else
 			succeeded = file_set_position(&file, 0) &&
 				file_write(&file, sizeof(block), &block);
 			saved_game_file_close(&file, player_profile_index);
+#endif
 
 			if (!succeeded)
 			{
@@ -493,7 +779,20 @@ boolean player_profile_get(
 	}
 	else
 	{
+#ifdef HALO_LINUX
+		/* port: held in memory (player_profile_cache) */
+		if (player_profile_cache_get(player_profile_index, profile))
+		{
+			return TRUE;
+		}
+#endif
 		succeeded = player_profile_read(player_profile_index, profile);
+#ifdef HALO_LINUX
+		if (succeeded)
+		{
+			player_profile_cache_set(player_profile_index, profile);
+		}
+#endif
 	}
 
 	return succeeded;
@@ -742,6 +1041,14 @@ static boolean player_profile_read(
 					if (!csmemcmp(&checksum, block+sizeof(struct player_profile), sizeof(checksum)))
 					{
 						csmemcpy(profile, block, sizeof(struct player_profile));
+#ifdef HALO_LINUX
+						{
+							byte color_plus_one, visor;
+
+							player_profile_extension_parse(block, &color_plus_one, &visor);
+							player_profile_extension_store(player_profile_index, color_plus_one, visor);
+						}
+#endif
 					}
 					else
 					{
@@ -839,6 +1146,28 @@ static unsigned long __stdcall player_profile_write_thread_proc(
 		boolean failed = FALSE;
 		struct player_profile *profile = &request->profile;
 
+#ifdef HALO_LINUX
+		/* port: written whole or not at all (saved_game_file_write_block:
+		a new file, read back, the old one kept as the backup); a write that
+		fails leaves the profile's file as it was - the Xbox deleted the
+		profile -, and what is held in memory is read again from it */
+		(void)file;
+		csmemcpy(&block.profile, profile, sizeof(struct player_profile));
+		saved_game_file_generate_checksum(&block.profile, sizeof(block.profile),
+			&block.checksum);
+		player_profile_extension_build((byte *)&block, player_profile_write_extension);
+		if (!saved_game_file_write_block(player_profile_index, &block, sizeof(block.profile)))
+		{
+			error(_error_silent, "failed to write player profile to file (the file before it kept)");
+			player_profile_cache_forget();
+			failed = TRUE;
+		}
+		else if (!synchronize_metadata_display_name_with_profile_name(player_profile_index, profile->player_name))
+		{
+			error(_error_silent, "metadata name may not match game display name");
+		}
+		(void)failed;
+#else
 		if (saved_game_file_open(&file, player_profile_index))
 		{
 			csmemcpy(&block.profile, profile, sizeof(struct player_profile));
@@ -867,6 +1196,7 @@ static unsigned long __stdcall player_profile_write_thread_proc(
 		{
 			delete_enumerated_saved_game_file(player_profile_index);
 		}
+#endif
 
 		saved_game_files_release_mutex();
 	}
@@ -931,11 +1261,94 @@ static void player_profile_create_default_profiles_on_disk(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: whether a profile in memory is one the game could have made (every
+field in the range its screens and the campaign set), checked before it is
+written over a profile's file. A profile in memory that something else
+overwrote (insider.15: the Halo 3 menus overflowed the UI's widget memory,
+corrupting what lay beside it) would otherwise be saved, its checksum made
+good over garbage, over the last good file; refused, the file stays as it
+was. why: the first field found wrong */
+static boolean player_profile_sane(
+	struct player_profile const *profile,
+	char *why,
+	int why_size)
+{
+	struct player_profile_controller_settings const *settings = &profile->controller_settings;
+	long i;
+
+	for (i = 0; i < MAXIMUM_PLAYER_PROFILE_NAME_LENGTH && profile->player_name[i]; i++)
+	{
+		if ((unsigned long)profile->player_name[i] < 0x20 || (unsigned long)profile->player_name[i] >= 0xFFFE)
+		{
+			_snprintf(why, why_size, "name character %ld is 0x%04lX", i, (unsigned long)profile->player_name[i]);
+			return FALSE;
+		}
+	}
+	if (i == 0 || i == MAXIMUM_PLAYER_PROFILE_NAME_LENGTH)
+	{
+		_snprintf(why, why_size, "the name is %s", i ? "not terminated" : "empty");
+		return FALSE;
+	}
+	if (profile->primary_color_index < NONE || profile->primary_color_index >= NUMBER_OF_AVAILABLE_PRIMARY_COLORS)
+	{
+		_snprintf(why, why_size, "colour %d", profile->primary_color_index);
+		return FALSE;
+	}
+	for (i = 0; i < NUMBER_OF_SINGLE_PLAYER_LEVELS; i++)
+	{
+		if (profile->single_player_map_flags[i] & ~((1 << NUMBER_OF_GAME_DIFFICULTY_LEVELS) - 1))
+		{
+			_snprintf(why, why_size, "level %ld's flags 0x%02X", i, profile->single_player_map_flags[i]);
+			return FALSE;
+		}
+	}
+	if (profile->last_single_player_map_played < NONE ||
+		profile->last_single_player_map_played >= NUMBER_OF_SINGLE_PLAYER_LEVELS)
+	{
+		_snprintf(why, why_size, "last level %d", profile->last_single_player_map_played);
+		return FALSE;
+	}
+	if (settings->button_preset >= NUMBER_OF_BUTTON_PRESETS || settings->joystick_preset >= NUMBER_OF_JOYSTICK_PRESETS ||
+		settings->look_sensitivity < 1 || settings->look_sensitivity > NUMBER_OF_LOOK_SENSITIVITY_SETTINGS)
+	{
+		_snprintf(why, why_size, "buttons %d, stick %d, look %d", settings->button_preset, settings->joystick_preset,
+			settings->look_sensitivity);
+		return FALSE;
+	}
+	if (settings->invert_look > 1 || settings->vibration_disabled > 1 || settings->flight_stick_aircraft_controls > 1 ||
+		settings->autocenter > 1 || settings->ingame_help_disabled > 1)
+	{
+		_snprintf(why, why_size, "a yes/no setting not 0 or 1 (%d %d %d %d %d)", settings->invert_look,
+			settings->vibration_disabled, settings->flight_stick_aircraft_controls, settings->autocenter,
+			settings->ingame_help_disabled);
+		return FALSE;
+	}
+
+	return TRUE;
+}
+#endif
+
 static void player_profile_write(
 	long player_profile_index,
 	struct player_profile *profile)
 {
 	match_vassert("c:\\halo\\SOURCE\\saved games\\player_profile.c", 0x2C0, profile, "profile");
+#ifdef HALO_LINUX
+	{
+		char why[96];
+
+		if (!player_profile_sane(profile, why, sizeof(why)))
+		{
+			void platform_log(const char *format, ...);
+
+			why[sizeof(why)-1] = 0;
+			error(_error_silent, "player profile write refused: the profile in memory is corrupt (%s); its file kept", why);
+			platform_log("profile: write refused, the profile in memory is corrupt (%s); its file kept", why);
+			return;
+		}
+	}
+#endif
 
 	if (player_profile_globals.thread)
 	{
@@ -949,11 +1362,21 @@ static void player_profile_write(
 		player_profile_globals.thread = NULL;
 	}
 
+#ifdef HALO_LINUX
+	/* port: the cosmetics written with it (read from the file first when
+	not held: the write must not lose them) */
+	player_profile_extension_get(player_profile_index, &player_profile_write_extension[0],
+		&player_profile_write_extension[1]);
+#endif
 	player_profile_globals.write_request.player_profile_index = player_profile_index;
 	csmemcpy(
 		&player_profile_globals.write_request.profile,
 		profile,
 		sizeof(struct player_profile));
+#ifdef HALO_LINUX
+	/* port: what is looked at from now on (player_profile_cache) */
+	player_profile_cache_set(player_profile_index, profile);
+#endif
 
 	create_thread(
 		0,

@@ -160,6 +160,44 @@ MINIUPNPC_DEFINES = ["-DMINIUPNP_STATICLIB", "-DMINIUPNPC_SET_SOCKET_TIMEOUT", "
                      "-D_BSD_SOURCE", "-D_DEFAULT_SOURCE"]
 
 
+# configure.py --vita-version: a release's x.y.z, its insider builds'
+# -insider.n, its betas' and candidates' -beta.n and -rc.n, each with an
+# optional -<word> of a candidate's (1.1.1-beta.1-rc), or a test build's own
+# word (1.1.1-forge). The updater orders a pre-release below its x.y.z,
+# insider < beta < rc (update_check.c); a -<word> after the number orders
+# above every number of its kind (beta.1-rc above beta.99)
+VERSION_PATTERN = r"\d{1,3}\.\d{1,3}\.\d{1,3}(-(((insider|beta|rc)\.\d{1,3})(-[a-z]{1,16})?|[a-z]{1,16}))?"
+
+
+def version_defines(sln: Any) -> List[str]:
+    """configure.py's --vita-version as the define every build reads
+    (HALO_VITA_VERSION, port/vita/include/vita_version.h: halo.log's first
+    line, the main menu, the window's title, the settings panel, the update
+    check): the Vita's, Linux's and Windows'. None without it: the header's"""
+    defines = testers_test_defines(sln)
+    version = getattr(sln, "vita_version", None)
+    if not version:
+        return defines
+    if not re.fullmatch(VERSION_PATTERN, version):
+        raise RuntimeError("--vita-version: x.y.z, x.y.z-insider.n, x.y.z-beta.n, x.y.z-rc.n (each with an optional "
+                           "-<word>: 1.1.1-beta.1-rc) or x.y.z-<word> (1.1.1-forge)")
+    return defines + [f'-DHALO_VITA_VERSION=\\"{version}\\"']
+
+
+def testers_test_defines(sln: Any) -> List[str]:
+    """configure.py's --testers-test-key: a TEST build (never a release:
+    refused with --release) that trusts a throwaway key's signed tester list
+    (port/linux/src/tester_list.h) in place of the owner's release key"""
+    key = getattr(sln, "testers_test_key", None)
+    if not key:
+        return []
+    if getattr(sln, "port_release", False):
+        raise RuntimeError("--testers-test-key is for test builds only, never with --release")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", key) or not key.strip("0"):
+        raise RuntimeError("--testers-test-key: 64 hexadecimal digits, not all zero")
+    return [f'-DHALO_TESTERS_TEST_KEY=\\"{key.lower()}\\"']
+
+
 def miniupnpc_sources() -> List[Path]:
     """miniupnpc's library sources (port/third_party/miniupnpc/src)"""
     return sorted((MINIUPNPC_DIR / "src").glob("*.c"))
@@ -400,7 +438,10 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
     )
 
     abi = " ".join(LINUX_ABI_FLAGS + [march_flag(sln)] + (["-DHALO_RELEASE"] if getattr(sln, "port_release", False) else [])
-                   + (["-DHALO_NET_AS_VITA=1"] if getattr(sln, "linux_net_vita", False) else []))
+                   + (["-DHALO_NET_AS_VITA=1"] if getattr(sln, "linux_net_vita", False) else [])
+                   # (configure.py --vita-version: the PC build says the
+                   # version the Vita's does)
+                   + version_defines(sln))
     port_include = PORT_DIR / "include"
     sdk_flags = f"-idirafter {XDK_INCLUDE}"
     excluded = set(config.get("exclude_sources", []))
@@ -578,8 +619,9 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
 
         # (from OpenCE) the tag validator (port/linux/game/tag_validate.c,
         # tag_schema*.c) alone on map files: the game's objects of it and of
-        # the Custom Edition loader (cache_file_formats.c), the port's zlib,
-        # and a program that reads maps (tools/map_validate.c)
+        # the Custom Edition loader (cache_file_formats.c), the tag walk that
+        # moves a Halo: CE Anniversary map's tags (tag_relocate.c), the port's
+        # zlib, and a program that reads maps (tools/map_validate.c)
         if validator is not None:
             game_dir = Path(config["game_sources"])
             tool = Path("tools/map_validate.c")
@@ -596,6 +638,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             )
             tool_objects = [tool_object, obj_dir / (game_dir / "tag_validate.o"),
                             obj_dir / (game_dir / "cache_file_formats.o"),
+                            obj_dir / "port/linux/src/tag_relocate.o",
                             *(obj_dir / source.with_suffix(".o") for source in sorted(game_dir.glob("tag_schema*.c"))),
                             *(obj_dir / (ZLIB_DIR / name).with_suffix(".o") for name in ZLIB_SOURCES)]
             n.build(
@@ -603,6 +646,40 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
                 rule="linux_tool_link",
                 inputs=tool_objects,
                 variables={"ldflags": " ".join(["--target=i686-linux-gnu", "-m32", "-no-pie", "-g", *extra_ldflags])},
+            )
+
+            # (port) the scene packs alone (port/linux/game/scene_pack.c): the
+            # builder, the checks and the fuzzing of tools/scene_pack_test.c,
+            # with the validator and the tag walk as above
+            pack_tool = Path("tools/scene_pack_test.c")
+            pack_tool_object = obj_dir / pack_tool.with_suffix(".o")
+            n.build(
+                outputs=pack_tool_object,
+                rule="linux_cc",
+                inputs=pack_tool,
+                variables={"cflags": " ".join([posix_cflags, "-malign-double", "-freg-struct-return",
+                                               f"-I{ZLIB_DIR}", *ZLIB_DEFINES, posix_extra])},
+            )
+            # (and the Custom Edition source's: scene_pack_ce.c, the loader's
+            # format code, the Ogg Vorbis decoder and the Xbox ADPCM encoder)
+            pack_tool_objects = [pack_tool_object, obj_dir / (game_dir / "scene_pack.o"),
+                                 obj_dir / (game_dir / "scene_pack_ce.o"),
+                                 obj_dir / (game_dir / "scene_pack_blocks.o"),
+                                 obj_dir / (game_dir / "cache_file_formats.o"),
+                                 obj_dir / "port/linux/src/ogg_sound.o",
+                                 obj_dir / "port/linux/src/xbox_adpcm_encoder.o",
+                                 *(obj_dir / source.with_suffix(".o") for source in ogg_sound_sources()),
+                                 obj_dir / (game_dir / "tag_validate.o"),
+                                 obj_dir / "port/linux/src/tag_relocate.o",
+                                 *(obj_dir / source.with_suffix(".o") for source in sorted(game_dir.glob("tag_schema*.c"))),
+                                 *(obj_dir / (ZLIB_DIR / name).with_suffix(".o") for name in ZLIB_SOURCES)]
+            n.build(
+                outputs=validator.parent / "scene_pack_test",
+                rule="linux_tool_link",
+                inputs=pack_tool_objects,
+                # (-lm: the Custom Edition source's vertex compression calls floor)
+                variables={"ldflags": " ".join(["--target=i686-linux-gnu", "-m32", "-no-pie", "-g", *extra_ldflags,
+                                                "-lm"])},
             )
 
     # Profile-guided optimisation: with the committed profile, or with
@@ -626,7 +703,25 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
     cflags += profile_use_flags(profile)
     validator = build_dir / "map_validate"
     emit(obj_dir, output, cflags, ldflags, [profile] if profile else [], validator)
-    n.build(outputs="linux", rule="phony", inputs=[output, validator])
+    n.build(outputs="linux", rule="phony", inputs=[output, validator, build_dir / "scene_pack_test"])
+
+    # (--linux-fuzz, test builds) the network fuzz builds: the game with
+    # HALO_NET_FUZZ_TWIN (port/linux/game/net_fuzz_twin.h) under
+    # AddressSanitizer + UBSan (halo-fuzz: the fuzzed host's) and UBSan alone
+    # (halo-fuzz-ub: a fuzzed joiner, which must make and load a Halo 2 level
+    # before its host stops waiting), each in objects of its own, without
+    # LTO or a profile: `ninja linux-fuzz` (run_netns_online_test.sh
+    # hostfuzz*). pointer-overflow is left out: musl-math's __rem_pio2_large
+    # does not compile with it on i686
+    if getattr(sln, "linux_fuzz", False):
+        fuzz_outputs = []
+        for name, sanitizers in (("halo-fuzz", "address,undefined"), ("halo-fuzz-ub", "undefined")):
+            fuzz_output = build_dir / name
+            emit(build_dir / "fuzz" / name / "obj", fuzz_output,
+                 [f"-fsanitize={sanitizers}", "-fno-sanitize=pointer-overflow", "-fno-omit-frame-pointer",
+                  "-DHALO_NET_FUZZ_TWIN=1"], [f"-fsanitize={sanitizers}"], [])
+            fuzz_outputs.append(fuzz_output)
+        n.build(outputs="linux-fuzz", rule="phony", inputs=fuzz_outputs)
 
     # The dedicated server (ninja linux-server: port/linux/DEDICATED_SERVER.md):
     # the same game compiled once more as a headless host on the Vitas' side

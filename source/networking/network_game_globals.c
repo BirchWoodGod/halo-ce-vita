@@ -274,6 +274,25 @@ struct player_action_collection_definition player_action_collection_definition =
 
 /* ---------- public code */
 
+/* whether this machine's client is in a host's game (loading it, playing it,
+or at its end): the distributed netcode's client side runs and sends only
+then. A client searching for games (the server browser's, the System Link
+list's) or joining one has no host to send to: the main menu ticks under it
+(main_menu_ensure_player_queues_exist), and a reliable message written there
+closed the client's connection, so that the join made next on it never sent
+its request and failed ("connection lost": the server browser's first join
+after its network was switched, 1.1.1 RC8) */
+boolean network_distributed_client_in_game(
+	void)
+{
+	short state;
+
+	if (!global_network_game_client)
+		return FALSE;
+	state = network_game_client_get_state(global_network_game_client, NULL);
+	return state == _network_game_client_state_ingame || state == _network_game_client_state_postgame;
+}
+
 /* the distributed netcode's per-tick state (port/linux/game/network_distributed.c),
 unreliably to the host, as the game update is */
 boolean network_distributed_client_send(
@@ -282,7 +301,7 @@ boolean network_distributed_client_send(
 {
 	byte buffer[0x1000];
 
-	if (!global_network_game_client || size > sizeof(buffer))
+	if (!network_distributed_client_in_game() || size > sizeof(buffer))
 		return FALSE;
 	/* (the write swaps the header in place) */
 	csmemcpy(buffer, message, size);
@@ -299,7 +318,7 @@ boolean network_distributed_client_send_reliably(
 {
 	byte buffer[0x1000];
 
-	if (!global_network_game_client || size > sizeof(buffer))
+	if (!network_distributed_client_in_game() || size > sizeof(buffer))
 		return FALSE;
 	/* (the write swaps the header in place) */
 	csmemcpy(buffer, message, size);
@@ -549,6 +568,9 @@ boolean network_game_client_start_frame(
 		reaches */
 		game_connection_set(0);
 		main_menu_ensure_player_queues_exist();
+#ifdef HALO_LINUX
+		main_menu_player_queues_from_clock();
+#endif
 		result = TRUE;
 	}
 	else
@@ -622,6 +644,9 @@ boolean network_game_client_end_frame(
 	{
 		game_connection_set(0);
 		main_menu_ensure_player_queues_exist();
+#ifdef HALO_LINUX
+		main_menu_player_queues_from_clock();
+#endif
 	}
 	else if (network_game_client_get_state(global_network_game_client, NULL) == _network_game_client_state_ingame)
 	{
@@ -795,28 +820,6 @@ void network_game_client_request_immediate_start(
 	return;
 }
 
-#ifdef HALO_LINUX
-/* port: whether this machine must not host a game others can join (the
-crossplay wire: a Vita joins PC games and never hosts them,
-network_wire.h); if so the player is told why (controller_index, or NONE)
-and to turn Crossplay off to host. The hosting paths ask first (Create
-Game, co-op, the fast setup), and create_global_network_game_server refuses
-regardless */
-boolean network_game_wire_refuses_hosting(
-	short controller_index)
-{
-	char const *why = NULL;
-	void platform_log(const char *format, ...);
-
-	if (!network_wire_hosting_refused(&why))
-		return FALSE;
-	platform_log("network: not hosting a game: %s", why);
-	display_error_text_deferred(
-		TW(L"Crossplay is on:\r\nthe Vita joins PC\r\ngames but does not\r\nhost. Turn Crossplay\r\noff to host a game."),
-		controller_index);
-	return TRUE;
-}
-#endif
 
 boolean create_global_network_game_server(
 	void)
@@ -827,13 +830,23 @@ boolean create_global_network_game_server(
 		global_network_game_server==NULL);
 
 #ifdef HALO_LINUX
-	/* port: a server other machines can join, never on the crossplay wire
-	(a local game's, split screen or bots, is no network game) */
-	if (bss_004566dc.accept_remote_connections && network_wire_hosting_refused(NULL))
+	/* port: the game's wire (network_wire.h): a server other machines can
+	join speaks the one its host chose (network.host_crossplay, "Who can
+	join": Vitas only, Vitas and Halo CE Vita PC, or everyone on the
+	crossplay wire: network.who_can_join); a local game's
+	(split screen, bots) is no network game, on the legacy wire. For the
+	game's whole life: nothing switches under it */
+	if (bss_004566dc.accept_remote_connections)
 	{
-		error(_error_silent, "not hosting a network game on the crossplay wire");
-		return FALSE;
+		/* (a test's stand-in for a PC host is OpenCE's: 2, crossplay_guard.h's
+		CROSSPLAY_PLATFORM_OPENCE) */
+		network_wire_choose(network_wire_host_crossplay(), network_wire_host_pc_stand_in() ? 2 : 0,
+			network_wire_host_crossplay() ? "hosting for Vitas and PC" :
+			network_wire_host_audience() == NETWORK_AUDIENCE_VITA_PC ? "hosting for Vitas and Vita PC" :
+			"hosting for Vitas");
 	}
+	else
+		network_wire_choose(0, 0, "a local game");
 #endif
 	global_network_game_server = network_game_server_create();
 	if (global_network_game_server)

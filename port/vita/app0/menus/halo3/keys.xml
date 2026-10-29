@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- KEYBOARD & MOUSE (Menu style Halo 3): the PC's keyboard and mouse bindings and the mouse's
+settings (port/linux/game/controls_menu.c, "port keys ...": one set of functions behind each style's
+page; the bindings are port/linux/include/halo_key_bindings.h's, config.toml's [controls.keyboard]),
+opened from CUSTOMIZATION's editor (customize.xml's KEYBOARD & MOUSE row, hidden on the PS Vita).
+Laid out as the editor: rows with the action at the left and its two keys in ice blue, the chosen
+key between > <; SHOW (left and right) picks the movement, weapon or other actions' rows, or the
+mouse's (sensitivity, invert, raw input); A binds the key (the next key or mouse button pressed;
+Escape cancels, Delete clears), X clears it, Y puts every key back at Halo MCC's defaults. The
+art is the Halo 3 set's own (tools/halo3_menu_art.py). -->
+<menus>
+	<strings name="h3/keys_text">
+		<string text="KEYBOARD &amp; MOUSE"/>
+		<string text="This PC's keys and mouse, for every profile. Changes are kept at once."/>
+		<string text="SHOW"/>
+		<string text="RESET TO MCC DEFAULTS"/>
+		<string text="Bind"/>
+		<string text="Clear"/>
+		<string text="Defaults"/>
+		<string text="FIRST"/>
+		<string text="SECOND"/>
+	</strings>
+
+	<!-- a row: the action (label), its first and second keys (key1, key2), or a mouse setting's
+	value (key1) -->
+	<widget name="h3/keys/label" type="text" left="0" top="0" width="250" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2"/>
+	<widget name="h3/keys/key1" type="text" left="250" top="0" width="143" height="20" align="center" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/keys/key2" type="text" left="393" top="0" width="143" height="20" align="center" font="h3/font_item" color="#FFAABED6" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/keys/op_row1" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="h3/keys/label"/>
+		<child widget="h3/keys/key1"/>
+		<child widget="h3/keys/key2"/>
+	</widget>
+	<widget name="h3/keys/op_row2" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="h3/keys/label"/>
+		<child widget="h3/keys/key1"/>
+		<child widget="h3/keys/key2"/>
+	</widget>
+	<widget name="h3/keys/op_row3" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="h3/keys/label"/>
+		<child widget="h3/keys/key1"/>
+		<child widget="h3/keys/key2"/>
+	</widget>
+	<widget name="h3/keys/op_row4" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="h3/keys/label"/>
+		<child widget="h3/keys/key1"/>
+		<child widget="h3/keys/key2"/>
+	</widget>
+	<widget name="h3/keys/op_row5" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="h3/keys/label"/>
+		<child widget="h3/keys/key1"/>
+		<child widget="h3/keys/key2"/>
+	</widget>
+	<widget name="h3/keys/op_row6" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="h3/keys/label"/>
+		<child widget="h3/keys/key1"/>
+		<child widget="h3/keys/key2"/>
+	</widget>
+	<widget name="h3/keys/op_row7" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="h3/keys/label"/>
+		<child widget="h3/keys/key1"/>
+		<child widget="h3/keys/key2"/>
+	</widget>
+	<!-- SHOW: which rows; its value between the arrows -->
+	<widget name="h3/keys/group_label" type="text" left="0" top="0" width="250" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/keys_text" string_index="2"/>
+	<widget name="h3/keys/value" type="text" left="250" top="0" width="286" height="20" align="center" font="h3/font_item" color="#FFF2F6FA" text_y="2" text_flags="no_focus_test"/>
+	<widget name="h3/keys/arrow_left" left="300" top="2" width="8" height="16" bitmap="h3/arrow_left"/>
+	<widget name="h3/keys/arrow_right" left="478" top="2" width="8" height="16" bitmap="h3/arrow_right"/>
+	<widget name="h3/keys/op_group" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a right stick_right" run="port keys right"/>
+		<on event="left stick_left" run="port keys left"/>
+		<child widget="h3/keys/group_label"/>
+		<child widget="h3/keys/value"/>
+		<child widget="h3/keys/arrow_left"/>
+		<child widget="h3/keys/arrow_right"/>
+	</widget>
+	<widget name="h3/keys/reset_label" type="text" left="0" top="0" width="536" height="20" font="h3/font_item" color="#FFE6ECF2" text_x="10" text_y="2" string_list="h3/keys_text" string_index="3"/>
+	<widget name="h3/keys/op_reset" width="536" height="20" flags="pass_unhandled_to_focused_child" bitmap="h3/row">
+		<on event="a" run="port keys reset"/>
+		<child widget="h3/keys/reset_label"/>
+	</widget>
+	<widget name="h3/keys/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port keys"/>
+		<child widget="h3/keys/op_group" x="52" y="104"/>
+		<child widget="h3/keys/op_row1" x="52" y="132"/>
+		<child widget="h3/keys/op_row2" x="52" y="152"/>
+		<child widget="h3/keys/op_row3" x="52" y="172"/>
+		<child widget="h3/keys/op_row4" x="52" y="192"/>
+		<child widget="h3/keys/op_row5" x="52" y="212"/>
+		<child widget="h3/keys/op_row6" x="52" y="232"/>
+		<child widget="h3/keys/op_row7" x="52" y="252"/>
+		<child widget="h3/keys/op_reset" x="52" y="280"/>
+	</widget>
+
+	<widget name="h3/keys/panel" left="40" top="40" width="560" height="400" bitmap="h3/panel"/>
+	<widget name="h3/keys/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/keys_text" string_index="0"/>
+	<widget name="h3/keys/subtitle" type="text" left="52" top="76" width="536" height="16" font="h3/font_small" color="#FFCFD9E3" string_list="h3/keys_text" string_index="1"/>
+	<widget name="h3/keys/first" type="text" left="302" top="90" width="143" height="14" align="center" font="h3/font_small" color="#FF9FB6CC" string_list="h3/keys_text" string_index="7"/>
+	<widget name="h3/keys/second" type="text" left="445" top="90" width="143" height="14" align="center" font="h3/font_small" color="#FF9FB6CC" string_list="h3/keys_text" string_index="8"/>
+	<widget name="h3/keys/keys_help" type="text" left="52" top="308" width="536" height="34" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/keys/keys_status" type="text" left="52" top="350" width="536" height="34" font="h3/font_small" color="#FFF0B070" text_y="1"/>
+	<widget name="h3/keys/bind" type="text" left="72" top="421" width="60" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/keys_text" string_index="4"/>
+	<widget name="h3/keys/x_butn" left="240" top="422" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="h3/keys/clear" type="text" left="260" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/keys_text" string_index="5"/>
+	<widget name="h3/keys/y_butn" left="334" top="422" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="h3/keys/defaults" type="text" left="354" top="421" width="120" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/keys_text" string_index="6"/>
+	<widget name="h3/keys/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 25 0">
+		<on event="created" run="port keys init"/>
+		<on event="created" run="port h3 scene"/>
+		<on event="deleted" run="port keys close"/>
+		<on event="b back" run="port keys back" back="true"/>
+		<on event="x" run="port keys clear"/>
+		<on event="y" run="port keys reset"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/keys/panel"/>
+		<child widget="h3/keys/title"/>
+		<child widget="h3/keys/subtitle"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/keys/first"/>
+		<child widget="h3/keys/second"/>
+		<child widget="h3/keys/keys_help"/>
+		<child widget="h3/keys/keys_status"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/keys/bind"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/keys/x_butn"/>
+		<child widget="h3/keys/clear"/>
+		<child widget="h3/keys/y_butn"/>
+		<child widget="h3/keys/defaults"/>
+		<child widget="h3/keys/list"/>
+	</widget>
+</menus>

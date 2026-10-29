@@ -28,3 +28,19 @@ test_out_done() {
 	fi
 	return 0
 }
+
+# The Linux builds the tests run stand in for Vitas (configure.py
+# --linux-net-vita). Since the port's PC build says it is one (network_wire.h,
+# Oct 20 2026: VITA (PC) tags, no Vita-only hosting), they say they are Vitas,
+# unless a test gives a copy HALO_TEST_PLATFORM=pc itself (a test build only:
+# a release build ignores it)
+HALO_TEST_PLATFORM=${HALO_TEST_PLATFORM:-vita}
+export HALO_TEST_PLATFORM
+
+# The harness tests play the Xbox maps alone unless a test names a Halo
+# content folder (paths.content, port/linux/game/mcc_content.c): on a PC with
+# Halo: The Master Chief Collection installed the game finds it by itself, and
+# its maps would join the lists the tests walk. "none": none looked for (a
+# folder that is not there is looked for by itself on a PC, as "auto")
+HALO_CONTENT_ROOT=${HALO_CONTENT_ROOT:-none}
+export HALO_CONTENT_ROOT

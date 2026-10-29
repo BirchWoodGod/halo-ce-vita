@@ -692,7 +692,20 @@ struct widget_instance;
 
 enum
 {
+#ifdef HALO_LINUX
+	/* port: 128 KB, not the Xbox's 16 KB. OpenCE's screens and the Halo 3
+	ones (port/vita/app0/menus) are far bigger than the Xbox's: the games
+	browsers alone took 14-16 KB of it with a page of games (run_menus_test.sh
+	browserreopen), and a screen's first widget is made before the one it
+	replaces is let go. Past 16 KB a text drew blank (the classic browser's
+	empty cells, the owner's photo of insider.15), a screen did not open (the
+	game's lobby after a join from the Halo 3 games browser: the browser
+	stayed, its client in that game's lobby, so a game picked next was never
+	joined) and a widget missing crashed the menus */
+	WIDGET_MEMORY_POOL_SIZE = 0x20000,
+#else
 	WIDGET_MEMORY_POOL_SIZE = 0x4000,
+#endif
 	MAXIMUM_WIDGET_MEMORY_POOL_BLOCKS = 4096
 };
 
@@ -1949,6 +1962,19 @@ boolean filesystem_check_thread_is_active(
 void display_error_when_main_menu_loaded(
 	short error_code)
 {
+#ifdef HALO_LINUX
+	/* (port: the host's game closed by the party's leader - back in the
+	menus, or hosting again -, its members following: no error, the party
+	says where the leader went; insider.21, "disconnected" each time the
+	leader left the lobby) */
+	if (error_code == _error_network_server_shut_down)
+	{
+		boolean pc_menu_functions_host_left_quiet(void);
+
+		if (pc_menu_functions_host_left_quiet())
+			return;
+	}
+#endif
 	if (widget_globals.main_menu_deferred_error_code == NONE)
 	{
 		widget_globals.main_menu_deferred_error_code = error_code;
@@ -2123,6 +2149,15 @@ static void pool_free(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* port: the screens held up over the players' views (ui_widget_port_held_screen_show) */
+static struct
+{
+	struct widget_instance *screen;
+	point2d offset;
+} ui_widget_port_held[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+#endif
+
 void ui_widgets_initialize(
 	void)
 {
@@ -2130,18 +2165,33 @@ void ui_widgets_initialize(
 	byte *base_address;
 	long local_player_index;
 
-	base_address = pool_alloc(WIDGET_MEMORY_POOL_SIZE);
-	if (base_address)
 	{
-		widget_memory_pool->base_address = base_address;
-		widget_memory_pool->size = WIDGET_MEMORY_POOL_SIZE;
+		long pool_size = WIDGET_MEMORY_POOL_SIZE;
+
+#if defined(HALO_LINUX) && !defined(HALO_RELEASE)
+		/* (automated tests only, never in release builds)
+		HALO_TEST_WIDGET_POOL_BYTES: another size, the Xbox's 16384 to show
+		what it did (run_netns_crossplay_test.sh h3pcjoin) */
+		if (getenv("HALO_TEST_WIDGET_POOL_BYTES") && atol(getenv("HALO_TEST_WIDGET_POOL_BYTES")) >= 4096)
+			pool_size = atol(getenv("HALO_TEST_WIDGET_POOL_BYTES"));
+#endif
+		base_address = pool_alloc(pool_size);
+		if (base_address)
+		{
+			widget_memory_pool->base_address = base_address;
+			widget_memory_pool->size = pool_size;
+		}
 	}
-	else
+	if (!base_address)
 	{
 		success = FALSE;
 	}
 	stack_memory_pool_reset(widget_memory_pool);
 
+#ifdef HALO_LINUX
+	/* port: (the pool made again) no screen held up */
+	memset(ui_widget_port_held, 0, sizeof(ui_widget_port_held));
+#endif
 	memset(&widget_globals, 0, sizeof(widget_globals));
 	widget_globals.main_menu_deferred_error_code = NONE;
 	widget_globals.deferred_dashboard_error_code = NONE;
@@ -2576,6 +2626,24 @@ static void widget_instance_give_focus_directly(
 			focused_child = focused_child->focused_child;
 		}
 	}
+#ifdef HALO_LINUX
+	/* port: the clearing above walked the old focus's whole chain, so a row
+	that held the focus (a list row with its spinner: the Halo 3 GAME OPTIONS)
+	has lost the focused child it was made with, and left or right on it,
+	when it takes the focus again, reached nothing: the spinner is locked
+	until the screen is made again. The row's focused child is given again
+	as the widget's own start gives it (the last child that handles events) */
+	if (!new_focus->focused_child && new_focus->child)
+	{
+		struct widget_instance *inner;
+
+		for (inner = new_focus->child; inner; inner = inner->next)
+		{
+			if (widget_instance_can_handle_events(inner))
+				new_focus->focused_child = inner;
+		}
+	}
+#endif
 	while (new_focus->parent)
 	{
 		new_focus->parent->focused_child = new_focus;
@@ -2610,6 +2678,135 @@ struct widget_instance *ui_widget_port_active_screen(
 	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
 		return NULL;
 	return widget_globals.active_widgets[local_player_index];
+}
+
+/* port: the screen open at that place (ui_widget_port_active_screen's)
+gone back from, to the one before it in its history, as an event handler's
+back= goes (port/linux/game/menu_functions.c: a Halo 3 dialog's choice that
+closes the screen under it too) */
+void ui_widget_port_go_back(
+	short screen_index)
+{
+	struct widget_instance *screen;
+
+	if (screen_index < 0 || screen_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return;
+	screen = widget_globals.active_widgets[screen_index];
+	if (screen)
+		widget_instance_go_back_to_previous(screen);
+}
+
+/* port: (tests: the scripted pad's "until/" steps, xinput_sdl.c) the name of
+the first local player's screen open, "" with none */
+char const *ui_widget_port_active_screen_name(
+	void)
+{
+	struct widget_instance *screen = widget_globals.initialized ? widget_globals.active_widgets[0] : NULL;
+	char const *name = screen ? tag_get_name(screen->definition_tag_index) : NULL;
+
+	return name ? name : "";
+}
+
+/* port: a screen held up over a local player's view without being open
+(port/linux/game/menu_functions.c "port h3 scoreboard": the Halo 3
+scoreboard while Back is held): drawn under the screens open, at the place
+given in the player's view, its game data functions run as it is drawn, but
+on no stack - it takes no event and no controller (the player plays on),
+has no history, and the menus do not count it as up. One a local player;
+gone with the widgets (ui_widgets_close_all). (ui_widget_port_held is
+declared before ui_widgets_initialize, which forgets it) */
+
+static void ui_widget_port_held_delete(
+	short local_player_index)
+{
+	struct widget_instance *screen = ui_widget_port_held[local_player_index].screen;
+
+	ui_widget_port_held[local_player_index].screen = NULL;
+	if (screen && widget_globals.initialized)
+	{
+		/* (no player's buttons held back for it, as an open screen's are:
+		it had none of them) */
+		screen->local_player_index = NONE;
+		ui_widget_delete(screen);
+	}
+}
+
+/* the screen (a widget tag) held up for the local player at that place,
+made the first time (and again for another tag): it, NULL if it could not
+be made */
+struct widget_instance *ui_widget_port_held_screen_show(
+	short local_player_index,
+	long tag_index,
+	short x,
+	short y)
+{
+	struct widget_instance *screen;
+	struct ui_widget_definition *definition;
+
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS || tag_index == NONE ||
+		!widget_globals.initialized)
+	{
+		return NULL;
+	}
+	screen = ui_widget_port_held[local_player_index].screen;
+	if (screen && screen->definition_tag_index != tag_index)
+	{
+		ui_widget_port_held_delete(local_player_index);
+		screen = NULL;
+	}
+	ui_widget_port_held[local_player_index].offset.x = x;
+	ui_widget_port_held[local_player_index].offset.y = y;
+	if (screen)
+		return screen;
+	definition = ui_widget_definition_get(tag_index);
+	screen = pool_new_pointer(widget_memory_pool, sizeof(struct widget_instance), __FILE__, __LINE__);
+	if (!screen)
+		return NULL;
+	widget_instance_initialize(screen, NULL, definition, tag_index, local_player_index, local_player_index);
+	/* (a screen that would pause the game is never held up) */
+	if (screen->pause_game_time)
+	{
+		ui_widget_port_held[local_player_index].screen = screen;
+		ui_widget_port_held_delete(local_player_index);
+		return NULL;
+	}
+	ui_widget_port_held[local_player_index].screen = screen;
+	return screen;
+}
+
+void ui_widget_port_held_screen_hide(
+	short local_player_index)
+{
+	if (local_player_index >= 0 && local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		ui_widget_port_held_delete(local_player_index);
+}
+
+struct widget_instance *ui_widget_port_held_screen(
+	short local_player_index)
+{
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return NULL;
+	return ui_widget_port_held[local_player_index].screen;
+}
+
+/* (render_ui_widgets) the player's held screen drawn, in its view */
+static void ui_widget_port_held_render(
+	short local_player_index,
+	rectangle2d const *window_bounds)
+{
+	struct widget_instance *screen;
+	rectangle2d bounds;
+
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return;
+	screen = ui_widget_port_held[local_player_index].screen;
+	if (!screen)
+		return;
+	bounds.x0 = 0;
+	bounds.y0 = 0;
+	bounds.x1 = window_bounds->x1 - window_bounds->x0;
+	bounds.y1 = window_bounds->y1 - window_bounds->y0;
+	widget_instance_render_recursive(screen, &bounds, ui_widget_port_held[local_player_index].offset, TRUE, FALSE);
 }
 
 #endif
@@ -2922,6 +3119,10 @@ void ui_widgets_close_all(
 		local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
 		local_player_index++)
 	{
+#ifdef HALO_LINUX
+		/* port: a screen held up goes too */
+		ui_widget_port_held_delete((short)local_player_index);
+#endif
 		if (widget_globals.active_widgets[local_player_index])
 			ui_widget_delete(widget_globals.active_widgets[local_player_index]);
 		if (widget_globals.widget_stack[local_player_index])
@@ -3236,6 +3437,22 @@ static void widget_instance_go_back_to_previous(
 	{
 		previous_widget_tag = NONE;
 	}
+#ifdef HALO_LINUX
+	/* port: back to a screen whose live backdrop's camera is elsewhere: this
+	one stays and fades to black, the one behind opened then
+	(menu_functions.c) */
+	{
+		extern int menu_functions_screen_back_deferred(long tag_index, short local_player_index,
+			long focused_child_parent_widget_tag, short focused_child_index);
+
+		if (previous_widget_tag != NONE && widget_instance_get_topmost_parent(widget) == widget_globals.active_widgets[widget_stack] &&
+			menu_functions_screen_back_deferred(previous_widget_tag, previous_local_player_index,
+				data.focused_child_parent_widget_tag, data.focused_child_index))
+		{
+			return;
+		}
+	}
+#endif
 	ui_widget_delete(widget_instance_get_topmost_parent(widget));
 	if (previous_widget_tag != NONE)
 	{
@@ -3296,6 +3513,24 @@ static void event_handler_dispatch(
 	boolean close_current = FALSE;
 	boolean close_all = FALSE;
 
+#ifdef HALO_LINUX
+	/* (port, debug) HALO_UI_LOG=2: each handler that runs, with its function
+	and flags, to map another menu map's functions to this build's */
+	{
+		static int log_handlers = -1;
+
+		if (log_handlers < 0)
+			log_handlers = getenv("HALO_UI_LOG") ? atoi(getenv("HALO_UI_LOG")) : 0;
+		if (log_handlers >= 2)
+		{
+			void platform_log(const char *format, ...);
+
+			platform_log("ui: handler of %s: event %ld, function %ld%s, flags 0x%lX", tag_get_name(widget->definition_tag_index),
+				(long)handler->event_type, (long)handler->function,
+				TEST_FLAG(handler->flags, _event_handler_run_function_bit) ? "" : " (not run)", (unsigned long)handler->flags);
+		}
+	}
+#endif
 	if (TEST_FLAG(handler->flags, _event_handler_run_scenario_script_bit) &&
 		handler->script[0])
 	{
@@ -3311,6 +3546,16 @@ static void event_handler_dispatch(
 			&widget_deleted))
 	{
 		error(_error_silent, "event handler function failed");
+#ifdef HALO_LINUX
+		/* port: with MCC's own ui.map as the menus' map, a function of Halo
+		PC's own, which this build has none of, is said and told to the
+		player (port/linux/game/custom_edition_cache.c) */
+		{
+			extern void custom_edition_cache_menu_handler_failed(long definition_tag_index, long function_index);
+
+			custom_edition_cache_menu_handler_failed(widget->definition_tag_index, handler->function);
+		}
+#endif
 		function_failed = TRUE;
 	}
 	else
@@ -3766,9 +4011,14 @@ static void widget_instance_initialize(
 	widget->render_regardless_of_controller_index =
 		TEST_FLAG(definition->flags, _widget_render_regardless_of_controller_index_bit);
 	/* port: a network co-op game never pauses (it opens the campaign's pause
-	screen, which would) */
-	widget->pause_game_time = TEST_FLAG(definition->flags, _widget_pause_game_time_bit) &&
-		!network_coop_active();
+	screen, which would), nor a network Forge game (its Forge menu, opened
+	for the multiplayer pause: menu_tags.c) */
+	{
+		extern boolean forge_game_active(void);
+
+		widget->pause_game_time = TEST_FLAG(definition->flags, _widget_pause_game_time_bit) &&
+			!network_coop_active() && !(network_game_is_active() && forge_game_active());
+	}
 	widget->creation_time = widget_globals.current_system_milliseconds;
 	widget->milliseconds_to_auto_close = MAX(definition->milliseconds_to_auto_close, 0);
 	widget->auto_close_fade_time = MAX(definition->auto_close_fade_time, 0);
@@ -3869,6 +4119,19 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 		extern long menu_tags_screen(long tag_index);
 
 		tag_index = menu_tags_screen(tag_index);
+		/* port: a screen whose live backdrop's camera is elsewhere opened
+		once the old one has faded to black (menu_functions.c): nothing
+		opens now, the old screen stays and fades */
+		{
+			extern int menu_functions_screen_open_deferred(long tag_index, short local_player_index,
+				long invoking_widget_tag, long focused_child_parent_widget_tag, short focused_child_index);
+
+			if (tag_index != NONE && menu_functions_screen_open_deferred(tag_index, local_player_index, invoking_widget_tag,
+				focused_child_parent_widget_tag, focused_child_index))
+			{
+				return NULL;
+			}
+		}
 	}
 #endif
 	if (tag_index != NONE)
@@ -3908,7 +4171,14 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 					{
 						void platform_log(const char *format, ...);
 
+						void stack_memory_pool_port_usage(struct stack_memory_pool const *pool, long *bytes_used,
+							long *maximum_bytes_used, long *block_count, long *size);
+						long used, most, blocks, size;
+
+						stack_memory_pool_port_usage(widget_memory_pool, &used, &most, &blocks, &size);
 						platform_log("ui: screen %s", tag_get_name(tag_index));
+						platform_log("ui: widget memory %ld of %ld bytes, %ld blocks (at most %ld bytes)", used, size,
+							blocks, most);
 					}
 				}
 #endif
@@ -4003,18 +4273,18 @@ static void render_state_bitmap(
 	real_rectangle2d const *clip;
 	real scale;
 	point2d point;
-#ifdef HALO_VITA
+#ifdef HALO_BUTTON_GLYPHS
 	/* (port) the Vita's button icons, PlayStation's (hud_draw.c): a button
-	icon shows the Vita button its Xbox button is on, a word in the font or
-	drawn in the sprite's place (the caller's colour: the Xbox face button's
-	there) */
+	icon shows the Vita button its Xbox button is on, drawn in the sprite's
+	place (the Halo 3 menus' icon, at the caller's alpha) or a word in the
+	font */
 	struct icon_hud_element_definition *button_icons = hud_globals->messaging.button_icons.address;
 	short glyph = icon >= button_icons && icon < button_icons + hud_globals->messaging.button_icons.count ?
 		hud_vita_button_glyph((short)(icon - button_icons)) : NONE;
 
-	if (hud_vita_glyph_text(glyph))
+	if (hud_vita_glyph_word(glyph))
 	{
-		render_state_text(bounds, cursor_bounds, hud_vita_glyph_text(glyph));
+		render_state_text(bounds, cursor_bounds, hud_vita_glyph_word(glyph));
 		return;
 	}
 #endif
@@ -4045,8 +4315,8 @@ static void render_state_bitmap(
 		scale = hud_globals_get_scale(local_player_count() > 1);
 		point.x = (short)(icon->offset.x * scale + cursor_bounds->x0 + 1.0f);
 		point.y = (short)(cursor_bounds->y1 - icon->offset.y * scale - 2.0f);
-#ifdef HALO_VITA
-		if (hud_vita_glyph_face_icon(glyph) == NONE || !hud_vita_glyph_draw(
+#ifdef HALO_BUTTON_GLYPHS
+		if (!hud_vita_glyph_drawn(glyph) || !hud_vita_glyph_draw(
 			glyph,
 			bitmap,
 			_hud_anchor_bottom_left,
@@ -4070,42 +4340,38 @@ static void render_state_bitmap(
 			cursor_bounds->x0 = (short)((clip->x1 - clip->x0) * bitmap->width + icon->width_offset + point.x);
 		else
 			cursor_bounds->x0 = bitmap->width + icon->width_offset + point.x;
+#ifdef HALO_KEY_GLYPHS
+		/* (port) a wider keycap (SPACE ...): the text after it moved on */
+		if (hud_vita_glyph_drawn(glyph))
+			cursor_bounds->x0 += (short)hud_vita_glyph_flow_extra(glyph, bitmap, _hud_anchor_bottom_left, clip, scale);
+#endif
 	}
 
 	return;
 }
 
-#ifdef HALO_VITA
+#ifdef HALO_BUTTON_GLYPHS
 /* (port) a menu's button hint (the a_butn ... widgets) with the settings
 panel's Button icons PlayStation: the Vita button drawn over the hint's
-rectangle, in the colour of the Xbox button the art shows (hud_draw.c), at
-the widget's alpha. FALSE when the widget is not a hint, or the icons are
-the Xbox's (its art is drawn) */
+rectangle (hud_draw.c: the Halo 3 menus' icon), at the widget's alpha.
+FALSE when the widget is not a hint, or the icons are the Xbox's (its art
+is drawn) */
 static boolean vita_button_hint_draw(
 	long bitmap_group_index,
 	rectangle2d const *bounds,
 	pixel32 color)
 {
 	short glyph = hud_vita_menu_button_glyph(bitmap_group_index);
-	short face_icon = hud_vita_glyph_face_icon(glyph);
-	pixel32 face_color = 0xFFFFFFFF;
 	real_rectangle2d rectangle;
 
-	if (face_icon == NONE)
+	if (!hud_vita_glyph_drawn(glyph))
 		return FALSE;
-	if (face_icon < hud_globals->messaging.button_icons.count)
-	{
-		face_color = TAG_BLOCK_GET_ELEMENT(
-			&hud_globals->messaging.button_icons,
-			face_icon,
-			struct icon_hud_element_definition)->color;
-	}
 	rectangle.x0 = bounds->x0;
 	rectangle.x1 = bounds->x1;
 	rectangle.y0 = bounds->y0;
 	rectangle.y1 = bounds->y1;
 
-	return hud_vita_glyph_draw_in_rect(glyph, &rectangle, (face_color & 0x00FFFFFF) | (color & 0xFF000000));
+	return hud_vita_glyph_draw_in_rect(glyph, &rectangle, color);
 }
 #endif
 
@@ -4225,9 +4491,10 @@ void draw_string_and_hack_in_icons(
 				long alpha;
 				struct icon_hud_element_definition *color_icon = icon;
 
-#ifdef HALO_VITA
+#ifdef HALO_BUTTON_GLYPHS
 				/* (port) a PlayStation glyph drawn in the icon's place takes
-				the colour of the Xbox face button there (hud_draw.c) */
+				the colour of the Xbox face button there (hud_draw.c; only
+				its alpha counts) */
 				{
 					short face_icon = hud_vita_glyph_face_icon(hud_vita_button_glyph(icon_index));
 
@@ -4494,6 +4761,16 @@ void display_error(
 			port_text = ui_widget_port_error_pending_text;
 			ui_widget_port_error_pending_text = NULL;
 		}
+#ifdef HALO_LINUX
+		/* (the host's game closed: said for the network it was on, online,
+		System Link or ad hoc, not always System Link: menu_functions.c) */
+		else if (error_code == _error_network_server_shut_down)
+		{
+			wchar_t const *pc_menu_functions_host_left_text(void);
+
+			port_text = pc_menu_functions_host_left_text();
+		}
+#endif
 		if (local_player_index != NONE)
 		{
 			short index;
@@ -4750,6 +5027,11 @@ void display_error_damaged_media(
 	return;
 }
 
+#ifdef HALO_LINUX
+boolean pc_menu_functions_live_lobby_after_game(void);
+boolean pc_menu_functions_local_lobby_after_game(void);
+#endif
+
 void network_game_reset_to_pregame_ui(
 	void)
 {
@@ -4760,6 +5042,10 @@ void network_game_reset_to_pregame_ui(
 		/* port: the bots' playlist's next game: its lobby with the
 		countdown on, not the map choice (port/linux/game/bots_playlist.c) */
 		if (bots_playlist_pregame_ui())
+			return;
+		/* port: Menu style Halo 3, the Halo 3 multiplayer lobby, not split
+		screen's map list (menu_functions.c) */
+		if (!network_game_is_quickstart_local() && pc_menu_functions_local_lobby_after_game())
 			return;
 #endif
 		if (network_game_is_quickstart_local())
@@ -4796,6 +5082,13 @@ void network_game_reset_to_pregame_ui(
 				error(_error_silent, "failed to load networked pregame status screen");
 			}
 		}
+#ifdef HALO_LINUX
+		/* port: a game the Halo 3 live lobby started: the host back in that
+		lobby, its game kept, not the map choice (menu_functions.c) */
+		else if (global_network_game_server_get() && pc_menu_functions_live_lobby_after_game())
+		{
+		}
+#endif
 		else if (global_network_game_server_get())
 		{
 			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);
@@ -5177,6 +5470,15 @@ void ui_widget_port_text_override(
 		NUMBEROF(ui_widget_port_text_overrides[override_index].text) - 1] = 0;
 }
 
+/* port: the port's own text an error's text box shows in place of the
+error's (display_error_text_deferred, the host's game closed), or NULL: the
+Halo 3 dialog's (port/linux/game/menu_functions.c "port h3 dialog") */
+wchar_t const *ui_widget_port_error_text_of(
+	struct widget_instance const *widget)
+{
+	return widget && widget == ui_widget_port_error_text_box ? ui_widget_port_error_text : NULL;
+}
+
 /* port: whether the text is wider than width in the text box's font */
 boolean ui_widget_port_text_too_wide(
 	struct widget_instance *widget,
@@ -5199,6 +5501,16 @@ boolean ui_widget_port_text_too_wide(
 	}
 	draw_unicode_string_compute_bounds(&bounds, text, &text_bounds, &cursor_bounds);
 	return text_bounds.x1 - text_bounds.x0 > width;
+}
+
+/* port: the width of a text box (its definition's bounds), which a line
+of its text fits in */
+short ui_widget_port_text_box_width(
+	struct widget_instance *widget)
+{
+	struct ui_widget_definition *definition = ui_widget_definition_get(widget->definition_tag_index);
+
+	return (short)(definition->bounds.x1 - definition->bounds.x0);
 }
 
 /* port: the font and text colour of a widget definition (its tag's name),
@@ -5509,6 +5821,16 @@ static void widget_instance_render_text_box(
 	{
 		color = get_ui_argb_white();
 		color_alpha = definition->text_color.alpha;
+#ifdef HALO_LINUX
+		/* (Menu style Online: the focused row's text white on its orange
+		bar, not the game's highlight tint) */
+		{
+			extern int halo_menu_style_online(void);
+
+			if (halo_menu_style_online())
+				color.red = color.green = color.blue = 1.0f;
+		}
+#endif
 	}
 	else
 	{
@@ -5774,8 +6096,21 @@ enum ui_mouse_target_kind
 	list steps to it, and a click then presses A */
 	_ui_mouse_target_list_slot,
 	/* a button's icon and label in a screen's key: a click presses it */
-	_ui_mouse_target_button
+	_ui_mouse_target_button,
+	/* (port) a part of a screen the port's menus pick themselves - a tab, a
+	filter, a colour of a grid (menu_functions.c
+	menu_functions_mouse_kind): a click is theirs */
+	_ui_mouse_target_port,
+	/* (port) a focused row's value arrows: a click steps it left or right */
+	_ui_mouse_target_arrow_left,
+	_ui_mouse_target_arrow_right
 };
+
+/* (port/linux/game/menu_functions.c) what a widget the menus do not pick by
+themselves is to the mouse: 0 nothing, 1 the port's own (a click is
+menu_functions_mouse_click's), 2 and 3 a value's left and right arrows */
+int menu_functions_mouse_kind(struct widget_instance *widget);
+void menu_functions_mouse_click(struct widget_instance *widget);
 
 struct ui_mouse_target
 {
@@ -5989,7 +6324,11 @@ static void ui_mouse_note_target(
 	}
 	else
 	{
-		return;
+		short port = (short)menu_functions_mouse_kind(widget);
+
+		if (!port)
+			return;
+		kind = port == 1 ? _ui_mouse_target_port : port == 2 ? _ui_mouse_target_arrow_left : _ui_mouse_target_arrow_right;
 	}
 	target = &ui_mouse_targets[ui_mouse_target_count++];
 	target->widget = widget;
@@ -6145,6 +6484,47 @@ static boolean ui_mouse_menus_active(
 	return virtual_keyboard_active() || ui_mouse_menu() != NULL;
 }
 
+#if defined(HALO_BUTTON_GLYPHS) && !defined(HALO_VITA)
+/* (port) whether the menus are up, for the Linux harness's PlayStation
+button icons (hud_draw.c: the menus' layout or play's), as the Vita's pad
+is told it each frame (halo_ui_pointer_update) */
+int ui_widget_menus_active(
+	void)
+{
+	return ui_mouse_menus_active();
+}
+#endif
+
+/* port: where the pointer is this frame and whether a finger is down on
+it (the touch screen's), for a screen that scrolls by a drag (menu_functions.c
+"port h3 scoreboard"); while that screen says a drag is on
+(ui_widget_port_pointer_drag), the pointer's moves and lifts are the drag's,
+not the highlight's or a tap's */
+static struct
+{
+	boolean present;
+	boolean held;
+	short x, y;
+	boolean dragging;
+} ui_widget_port_pointer_state;
+
+boolean ui_widget_port_pointer(
+	short *x,
+	short *y,
+	boolean *held)
+{
+	*x = ui_widget_port_pointer_state.x;
+	*y = ui_widget_port_pointer_state.y;
+	*held = ui_widget_port_pointer_state.held;
+	return ui_widget_port_pointer_state.present;
+}
+
+void ui_widget_port_pointer_drag(
+	boolean dragging)
+{
+	ui_widget_port_pointer_state.dragging = dragging;
+}
+
 /* the pointer's motion, clicks and wheel since the last frame, as the first
 player's controller events */
 static void ui_widgets_process_mouse(
@@ -6153,13 +6533,28 @@ static void ui_widgets_process_mouse(
 	struct halo_ui_pointer pointer;
 	struct ui_mouse_target *target;
 	short controller_index = 0;
+	boolean present = halo_ui_pointer_update(ui_mouse_menus_active(), &pointer);
 
-	if (!halo_ui_pointer_update(ui_mouse_menus_active(), &pointer) ||
-		virtual_keyboard_active())
+	ui_widget_port_pointer_state.present = present;
+	ui_widget_port_pointer_state.held = present && pointer.held;
+	if (present)
+	{
+		ui_widget_port_pointer_state.x = pointer.x;
+		ui_widget_port_pointer_state.y = pointer.y;
+	}
+	if (!present || virtual_keyboard_active())
 	{
 		ui_mouse_press_count = 0;
 		ui_mouse_hover_pending = FALSE;
 		ui_mouse_click_pending = FALSE;
+	}
+	else if (ui_widget_port_pointer_state.dragging)
+	{
+		/* (a drag's: nothing highlighted or tapped by it) */
+		ui_mouse_hover_pending = FALSE;
+		ui_mouse_click_pending = FALSE;
+		if (!pointer.held)
+			ui_widget_port_pointer_state.dragging = FALSE;
 	}
 	else
 	{
@@ -6237,6 +6632,17 @@ static void ui_widgets_process_mouse(
 					break;
 				case _ui_mouse_target_button:
 					ui_mouse_press(target->button_index);
+					break;
+				case _ui_mouse_target_port:
+					menu_functions_mouse_click(target->widget);
+					ui_play_audio_feedback_sound(_ui_audio_feedback_cursor);
+					break;
+				case _ui_mouse_target_arrow_left:
+				case _ui_mouse_target_arrow_right:
+					if (target->widget->parent)
+						ui_mouse_give_focus(target->widget->parent);
+					ui_mouse_press(target->kind == _ui_mouse_target_arrow_left ? _widget_event_dpad_left :
+						_widget_event_dpad_right);
 					break;
 				}
 			}
@@ -6378,6 +6784,11 @@ static void widget_instance_render_recursive(
 			short margin = (short)((halo_screen_width() - 640) / 2);
 			rectangle2d destination = bounds;
 			rectangle2d wide_clip;
+			extern boolean menu_tags_bitmap_fits_widget(long bitmap_tag_index);
+			/* (a menus folder picture drawn whole into the widget, scaled:
+			menu_tags.c, <bitmap fit="widget">) */
+			boolean fit = !custom_edition_picture &&
+				menu_tags_bitmap_fits_widget(definition->background_bitmap.index);
 
 			if (margin > 0 && bounds.x0 <= 0 && bounds.x1 >= 640)
 			{
@@ -6391,20 +6802,20 @@ static void widget_instance_render_recursive(
 					clip = &wide_clip;
 				}
 			}
-#ifdef HALO_VITA
+#ifdef HALO_BUTTON_GLYPHS
 			if (!vita_button_hint_draw(definition->background_bitmap.index, &bounds, color))
 #endif
 			draw_bitmap_in_rect(
 				bitmap,
 				&destination,
-				&bounds,
+				fit ? NULL : &bounds,
 				clip,
 				color,
 				&multitexture_params,
 				FALSE);
 		}
 #else
-#ifdef HALO_VITA
+#ifdef HALO_BUTTON_GLYPHS
 		if (!vita_button_hint_draw(definition->background_bitmap.index, &bounds, color))
 #endif
 		draw_bitmap_in_rect(
@@ -6580,6 +6991,10 @@ void render_ui_widgets(
 			local_player_index,
 			0,
 			MAXIMUM_NUMBER_OF_LOCAL_PLAYERS - 1);
+#ifdef HALO_LINUX
+		/* port: the player's held screen first, under the screens open */
+		ui_widget_port_held_render(local_player_index, window_bounds);
+#endif
 		for (widget_index = 0;
 			widget_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
 			widget_index++)
@@ -6623,6 +7038,30 @@ void render_ui_widgets(
 				offset.x = 0;
 				offset.y = 0;
 #ifdef HALO_LINUX
+				/* (Menu style Online: its screens reach into the wide
+				screen's margins, around the centered 640 columns: their
+				clip the whole screen, as the fade to black's) */
+				{
+					extern int halo_menu_style_online(void);
+					extern boolean pc_menu_tag(long tag_index);
+					void platform_log(char const *format, ...);
+
+					static short said_x1 = -1;
+
+					if (halo_menu_style_online() && bounds.x0 == 0 && halo_screen_width() > 640 &&
+						pc_menu_tag(widget_globals.active_widgets[widget_index]->definition_tag_index))
+					{
+						if (said_x1 != bounds.x1)
+						{
+							said_x1 = bounds.x1;
+							platform_log("ui: online menus' clip widened from 0-%d (screen %d)", (int)bounds.x1,
+								(int)halo_screen_width());
+						}
+						bounds.x0 = (short)(-(halo_screen_width() - 640) / 2);
+						if (bounds.x1 < 640 + (halo_screen_width() - 640) / 2)
+							bounds.x1 = (short)(640 + (halo_screen_width() - 640) / 2);
+					}
+				}
 				/* the mouse drives the first player's menus */
 				ui_mouse_noting_targets = widget->local_player_index == NONE ||
 					widget->local_player_index == 0;
@@ -7781,6 +8220,20 @@ void process_ui_widgets(
 				ui_widget_definition_get(widget->definition_tag_index);
 			struct event_record event = {0};
 
+#ifdef HALO_LINUX
+			/* port: a screen opening at black (menu_functions.c's fade):
+			the pad's presses meanwhile let go, none taken twice */
+			{
+				extern int menu_functions_fade_input_held(void);
+
+				if (menu_functions_fade_input_held())
+				{
+					while (get_next_event(&event, widget->local_player_index))
+						;
+					memset(&event, 0, sizeof(event));
+				}
+			}
+#endif
 			if (widget_globals.processing_inhibited ||
 				!get_next_event(&event, widget->local_player_index))
 			{
@@ -7849,3 +8302,13 @@ void process_ui_widgets(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* port (menu_functions.c, a screen opened at black going back): the focus
+the screen behind had */
+void ui_widget_port_focus_child_by_index(long focused_child_parent_widget_tag, struct widget_instance *widget,
+	short focused_child_index)
+{
+	widget_instance_set_focused_child_by_index(focused_child_parent_widget_tag, widget, focused_child_index);
+}
+#endif

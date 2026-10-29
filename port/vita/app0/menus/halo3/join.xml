@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The Halo 3-style SELECT PROFILE for a multiplayer game (Menu style Halo 3): it stands for the
+Xbox's four-way "press START to join" screen of System Link (connected\4way_profile_select:
+START GAME and BROWSE GAMES on SYSTEM LINK, AD HOC and ONLINE, Create Game, the settings panel's
+Join a game; halo3/join_split.xml for split screen's) and does what it did with the game's own
+functions (menu_functions.c "port h3 join ..."): the Xbox's "clear multiplayer player joins" as it
+opens, a controller's player joined to the game ("join controller to mp game"), its profile set
+("1wide plyr prof set for game", with its checks: a profile another player has, a name the game
+cannot use), and the screen the Xbox's goes on to (the games list, or the new game's map list:
+the flows' own screens then). Four players' plates, one a controller (child controller=), laid out
+as Halo 3's party: "Press Cross to join"; then the profile, chosen with left and right (its colour
+and name); Cross again and it is ready; Cross once every player in is ready goes on. Circle
+un-readies, leaves, and with no one in goes back. The art is this folder's own. -->
+<menus root="h3/join/screen" replaces="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen">
+	<strings name="h3/join_text">
+		<string text="SELECT PROFILE"/>
+		<string text="PLAYER 1"/>
+		<string text="PLAYER 2"/>
+		<string text="PLAYER 3"/>
+		<string text="PLAYER 4"/>
+		<string text="Join"/>
+	</strings>
+
+	<!-- a player's plate: PLAYER n, the profile's colour and name between the arrows while it is
+	chosen, and what to press (port h3 join) -->
+	<widget name="h3/join/slot_title" type="text" left="10" top="6" width="200" height="20" font="h3/font_item" color="#FF9FB6CC" text_y="2"/>
+	<widget name="h3/join/slot_swatch" left="22" top="44" width="16" height="16" bitmap="h3/swatch"/>
+	<widget name="h3/join/slot_left" left="10" top="44" width="8" height="16" bitmap="h3/arrow_left"/>
+	<widget name="h3/join/slot_name" type="text" left="44" top="40" width="180" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/join/slot_right" left="234" top="44" width="8" height="16" bitmap="h3/arrow_right"/>
+	<widget name="h3/join/slot_state" type="text" left="10" top="74" width="240" height="40" font="h3/font_small" color="#FFCFD9E3" text_y="1"/>
+	<widget name="h3/join/slot_rule" left="0" top="30" width="252" height="2" bitmap="h3/rule"/>
+
+	<widget name="h3/join/slot_1" width="252" height="120" bitmap="h3/column">
+		<on event="a start" run="port h3 join a" open="ui\shell\main_menu\multiplayer_type_select\connected\server_list\server_list_screen"/>
+		<on event="left stick_left" run="port h3 join previous"/>
+		<on event="right stick_right up down" run="port h3 join next"/>
+		<on event="b back" run="port h3 join leave" back="true"/>
+		<child widget="h3/join/slot_title"/>
+		<child widget="h3/join/slot_rule"/>
+		<child widget="h3/join/slot_left"/>
+		<child widget="h3/join/slot_swatch"/>
+		<child widget="h3/join/slot_name"/>
+		<child widget="h3/join/slot_right"/>
+		<child widget="h3/join/slot_state"/>
+	</widget>
+	<widget name="h3/join/slot_2" width="252" height="120" bitmap="h3/column">
+		<on event="a start" run="port h3 join a" open="ui\shell\main_menu\multiplayer_type_select\connected\server_list\server_list_screen"/>
+		<on event="left stick_left" run="port h3 join previous"/>
+		<on event="right stick_right up down" run="port h3 join next"/>
+		<on event="b back" run="port h3 join leave" back="true"/>
+		<child widget="h3/join/slot_title"/>
+		<child widget="h3/join/slot_rule"/>
+		<child widget="h3/join/slot_left"/>
+		<child widget="h3/join/slot_swatch"/>
+		<child widget="h3/join/slot_name"/>
+		<child widget="h3/join/slot_right"/>
+		<child widget="h3/join/slot_state"/>
+	</widget>
+	<widget name="h3/join/slot_3" width="252" height="120" bitmap="h3/column">
+		<on event="a start" run="port h3 join a" open="ui\shell\main_menu\multiplayer_type_select\connected\server_list\server_list_screen"/>
+		<on event="left stick_left" run="port h3 join previous"/>
+		<on event="right stick_right up down" run="port h3 join next"/>
+		<on event="b back" run="port h3 join leave" back="true"/>
+		<child widget="h3/join/slot_title"/>
+		<child widget="h3/join/slot_rule"/>
+		<child widget="h3/join/slot_left"/>
+		<child widget="h3/join/slot_swatch"/>
+		<child widget="h3/join/slot_name"/>
+		<child widget="h3/join/slot_right"/>
+		<child widget="h3/join/slot_state"/>
+	</widget>
+	<widget name="h3/join/slot_4" width="252" height="120" bitmap="h3/column">
+		<on event="a start" run="port h3 join a" open="ui\shell\main_menu\multiplayer_type_select\connected\server_list\server_list_screen"/>
+		<on event="left stick_left" run="port h3 join previous"/>
+		<on event="right stick_right up down" run="port h3 join next"/>
+		<on event="b back" run="port h3 join leave" back="true"/>
+		<child widget="h3/join/slot_title"/>
+		<child widget="h3/join/slot_rule"/>
+		<child widget="h3/join/slot_left"/>
+		<child widget="h3/join/slot_swatch"/>
+		<child widget="h3/join/slot_name"/>
+		<child widget="h3/join/slot_right"/>
+		<child widget="h3/join/slot_state"/>
+	</widget>
+	<!-- (each plate takes its own controller's buttons, as the Xbox's quarters did) -->
+	<widget name="h3/join/slots" flags="pass_unhandled_to_focused_child no_focused_child pass_unhandled_to_all_children">
+		<child widget="h3/join/slot_1" x="58" y="118" controller="1"/>
+		<child widget="h3/join/slot_2" x="330" y="118" controller="2"/>
+		<child widget="h3/join/slot_3" x="58" y="256" controller="3"/>
+		<child widget="h3/join/slot_4" x="330" y="256" controller="4"/>
+	</widget>
+
+	<widget name="h3/join/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/join_text" string_index="0"/>
+	<widget name="h3/join/next" type="text" left="52" top="80" width="536" height="32" font="h3/font_small" color="#FFCFD9E3" text_y="1"/>
+	<widget name="h3/join/start_butn" left="246" top="422" width="16" height="16" bitmap="h3/glyph_start"/>
+	<widget name="h3/join/join" type="text" left="266" top="421" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/join_text" string_index="5"/>
+
+	<widget name="h3/join/screen" flags="pass_unhandled_to_focused_child no_focused_child pass_unhandled_to_all_children">
+		<on event="created" run="clear multiplayer player joins"/>
+		<on event="created" run="port h3 join system link"/>
+		<data input="system link status check"/>
+		<data input="port h3 join"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/join/title"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/join/next"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/join/start_butn"/>
+		<child widget="h3/join/join"/>
+		<child widget="h3/join/slots"/>
+	</widget>
+</menus>

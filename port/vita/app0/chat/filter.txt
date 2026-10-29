@@ -1,0 +1,238 @@
+# The in-game chat's filter (port/linux/src/chat_filter.c): slurs and hate
+# speech masked as **** in what other players say, on the machine that shows
+# it (Settings > Multiplayer > Chat > Chat filter; on by default). Written by
+# tools/chat_filter_words.py; do not edit by hand.
+#
+# A line is a rule and a word:
+#   whole <word>     only as a whole word (or with "s" / "es" after it)
+#   start <word>     at a word's start
+#   anywhere <word>  inside any word
+#   allow <word>     never masked, nor any part of it (Scunthorpe)
+# The words of the first three are ROT13'd (tr 'A-Za-z' 'N-ZA-Mn-za-m'), so
+# this file is no readable list. Letters a-z only; the matcher reads leet
+# (0 o, 1 i/l, 3 e, @ a, $ s...), spacing, punctuation and repeated letters.
+#
+# Source: OpenCE's streamer mode table (github.com/OpenCommunityEdition/OpenCE,
+# port/linux/game/text_filter_terms.inc and port/assets/text_filter, commit
+# 81a768bc81fa, CC0 1.0), its SLURS group alone (but "flamer": in Halo, the
+# flamethrower). That table is OpenCE's review of
+# Surge AI's profanity list "The Obscenity List" (profanity_en.csv, SHA-256
+# ca4ff7d713a8e6f6ec2616f489cd09f6fb96b8b3af404a207783be58a91f3ede), whose
+# notice follows:
+#
+# MIT License
+#
+# Copyright (c) Surge AI
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+whole arteb
+whole artebvq
+whole arttn
+whole arttne
+whole avpxn
+whole avpxxre
+whole avt
+whole avten
+whole avtn
+whole avtterff
+whole avtttre
+whole cnxv
+whole ergneq
+whole ergneqrq
+whole fcvp
+whole fcvt
+whole fcvx
+whole fnzob
+whole fulybpx
+whole genaal
+whole gneq
+whole jbc
+whole nob
+whole norrq
+whole ornare
+whole oynpxl
+whole pbba
+whole pbbaf
+whole pbbavr
+whole pbbavrf
+whole pbbyvr
+whole puvax
+whole qlxr
+whole qnexl
+whole qntb
+whole snt
+whole sntbg
+whole snttb
+whole snttvat
+whole tbbx
+whole tlc
+whole tlcfl
+whole uror
+whole urro
+whole uvttn
+whole vawha
+whole wnc
+whole wvttf
+whole xvxr
+whole xxx
+whole xyna
+whole zbat
+whole zbatbybvq
+start avppre
+start avtf
+start avtref
+start avxxre
+start cuntbg
+start cunttbg
+start fcvpf
+start jvttre
+start nobr
+start snttl
+start tebvq
+start uvttre
+start uvttref
+anywhere ahpxnf
+anywhere artebrf
+anywhere avpxnf
+anywhere avtabt
+anywhere avtavtf
+anywhere avthu
+anywhere avtnu
+anywhere avtthu
+anywhere avttn
+anywhere avttre
+anywhere avttve
+anywhere avtyrg
+anywhere avxxnf
+anywhere biraqbqtre
+anywhere cbepuzbaxrl
+anywhere cnapnxrsnpr
+anywhere cnpxreshqtrurnq
+anywhere cnpxvatshqtr
+anywhere cnpxzlshqtr
+anywhere crgrechssre
+anywhere cuntf
+anywhere cunttbgf
+anywhere cvyybjovgre
+anywhere enturnq
+anywhere ergneqb
+anywhere erqfxva
+anywhere fcvk
+anywhere furznyr
+anywhere fuznyr
+anywhere fvrturvy
+anywhere fynagl
+anywhere fynagrlr
+anywhere fynagsernx
+anywhere gbjryurnq
+anywhere gneonol
+anywhere gnpburnq
+anywhere jbcurnq
+anywhere jrgonpx
+anywhere jvaqbjyvpxre
+anywhere mvccreurnq
+anywhere mvcvagurjver
+anywhere ornadhrra
+anywhere ornaref
+anywhere pbggbacvpxre
+anywhere pnecrgzhapure
+anywhere pnecrgzhapuvat
+anywhere pnzrywbpxrl
+anywhere puvanivehf
+anywhere puvarfrivehf
+anywhere puvatpubat
+anywhere puvaxl
+anywhere qbgurnq
+anywhere qharpbba
+anywhere qnexvr
+anywhere shesnt
+anywhere shqtrcnpxre
+anywhere sntdhrra
+anywhere sntf
+anywhere sntont
+anywhere sntrg
+anywhere snttbg
+anywhere snttf
+anywhere urvyuvgyre
+anywhere wvtnobb
+anywhere wvttlobb
+anywhere wvttnf
+anywhere wvttnobb
+anywhere wvttnoh
+anywhere wvttreobb
+anywhere xarrtebjf
+anywhere xhxyhkre
+anywhere xlxr
+anywhere xvxrf
+anywhere ynqlobl
+anywhere ynqoblf
+anywhere ynqoblm
+anywhere ynqvobl
+anywhere zrpunsnt
+anywhere zrtnsnt
+allow agapornis
+allow assess
+allow assesses
+allow bereshith
+allow brushite
+allow chashitsu
+allow cushite
+allow cushitic
+allow elkoshite
+allow epornitic
+allow epornitically
+allow girgashite
+allow kaneshite
+allow koreishite
+allow mackintoshite
+allow marshite
+allow matsushita
+allow metabrushite
+allow mishit
+allow mishits
+allow mishitting
+allow niggard
+allow nonporness
+allow peshito
+allow phage
+allow phages
+allow placuntitis
+allow placuntoma
+allow poorness
+allow poornesses
+allow rappist
+allow scunthorpe
+allow shiitake
+allow shiite
+allow shiites
+allow shiitic
+allow shitake
+allow shittah
+allow shittahs
+allow shitterton
+allow shittim
+allow shittims
+allow shittimwood
+allow snigger
+allow spoorn
+allow unniggard
+allow unporness
+allow washita
+allow wiggeries
+allow wiggery

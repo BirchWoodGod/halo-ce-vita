@@ -160,12 +160,19 @@ void network_damage_aftermath(long object_index, struct damage_data const *damag
 act of god: the host's word, network_distributed.c, or the world's) */
 static boolean distributed_damage_authorized;
 
-/* whether this machine runs objects' shields (their stun, recharge and
+/* port/linux/game/network_damage.c's: whether a client runs the object's
+shields itself (a static target's, in a crossplay game of OpenCE's network
+version 34 or later) */
+boolean network_damage_client_runs_shields(long object_index);
+
+/* whether this machine runs the object's shields (their stun, recharge and
 overcharge): not a client of the distributed netcode, which has the host's
-(damage_set_network_state) */
-#define objects_update_shields() (!network_game_distributed_client())
+(damage_set_network_state), but for the static targets of a host of 34 or
+later, whose shields no host sends (ChupathingyCE 2d2ad1d8, GPL) */
+#define objects_update_shields(object_index) \
+	(!network_game_distributed_client() || network_damage_client_runs_shields(object_index))
 #else
-#define objects_update_shields() TRUE
+#define objects_update_shields(object_index) TRUE
 #endif
 
 /* ---------- constants */
@@ -1054,6 +1061,15 @@ static void object_damage_aftermath(
 	/* port: (a client's replay of the host's nonlethal damage too) */
 	damage_data_validate_owner(damage);
 
+#ifdef HALO_LINUX
+	/* port: the blow, for the ragdoll of a death it brings or one it
+	strikes (port/linux/game/ragdolls.c; only the picture) */
+	{
+		void ragdolls_note_damage(long object_index, struct damage_data const *damage);
+
+		ragdolls_note_damage(object_index, damage);
+	}
+#endif
 	if (object_definition->object.acceleration_scale > _real_epsilon)
 	{
 		real_vector3d direction = damage->direction;
@@ -1519,6 +1535,18 @@ void object_cause_damage(
 		total_damage *= game_engine_get_damage_multiplier(
 			get_player_index_from_object_or_parents(damage->owner_object_index),
 			get_player_index_from_object_or_parents(object_index));
+	}
+	/* port: Infection's zombie melee kills a human in one blow, shields
+	and overshield or not */
+	if (game_engine_running() && damage_definition->category == _damage_category_melee &&
+		infection_melee_kills(get_player_index_from_object_or_parents(damage->owner_object_index),
+			get_player_index_from_object_or_parents(object_index)))
+	{
+		if (getenv("HALO_INFECTION_TRACE"))
+			platform_log("infection: trace: zombie melee kills player %ld (shield %.2f)",
+				(long)get_player_index_from_object_or_parents(object_index),
+				object_get(object_index)->object.shield_vitality);
+		SET_FLAG(damage->flags, _damage_kill_instantly_bit, TRUE);
 	}
 	else if (damage->owner_team_index != NONE &&
 		game_team_is_enemy(damage->owner_team_index, _game_team_player))
@@ -2046,10 +2074,10 @@ void object_damage_update(
 				FLAG(_object_die_act_of_god_no_statistics_bit));
 	}
 
-	if (objects_update_shields())
+	if (objects_update_shields(object_index))
 		SET_FLAG(object->object.damage_flags, _object_shield_charging_bit, FALSE);
 	damage_flags = object->object.damage_flags;
-	if (objects_update_shields() &&
+	if (objects_update_shields(object_index) &&
 		object->object.maximum_shield_vitality > 0.f &&
 		!TEST_FLAG(damage_flags, _object_dead_bit))
 	{

@@ -168,11 +168,18 @@ widget drawn before it) */
 void ui_widget_port_text_override(
 	struct widget_instance *widget,
 	wchar_t const *text);
+/* port: the port's own text an error's text box shows in place of the
+error's, or NULL */
+wchar_t const *ui_widget_port_error_text_of(
+	struct widget_instance const *widget);
 /* port: whether the text is wider than width in the text box's font */
 boolean ui_widget_port_text_too_wide(
 	struct widget_instance *widget,
 	wchar_t const *text,
 	short width);
+/* port: the width of a text box (its bounds) */
+short ui_widget_port_text_box_width(
+	struct widget_instance *widget);
 /* port: the font and text colour of a widget definition (its tag's name),
 for the port's own text drawn as the menus draw theirs */
 boolean ui_widget_port_text_style(

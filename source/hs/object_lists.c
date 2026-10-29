@@ -153,12 +153,16 @@ void object_list_add(
 {
 	struct object_list_header_datum *list;
 
-	/* port: no list (object_list_new found none free): the objects are
-	not listed, as when the listed objects run out, rather than the game
-	halting */
+#ifdef HALO_LINUX
+	/* port: a list object_list_new had no room for (NONE) stays empty, as
+	the lists' readers take NONE (object_list_get_first), where the Xbox
+	read past the headers; hs_runtime_update collects the lists between
+	scripts once the headers are nearly all taken, so that a map's scripts
+	making more lists in one update than there are headers (Halo: CE
+	Anniversary maps' expanded encounters, docs/mcc_cea_maps.md) get room */
 	if (object_list_index == NONE)
 		return;
-
+#endif
 	list = object_list_header_get(object_list_index);
 	reference_list_add(object_list_data, &list->first_reference_index, object_index);
 	list->count++;
@@ -197,6 +201,17 @@ void object_list_remove_reference(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port) whether few object list headers are free: hs_runtime_update then
+collects the unreferenced lists between scripts, not only after them all */
+boolean object_lists_nearly_full(
+	void)
+{
+	return object_list_header_data->valid &&
+		object_list_header_data->actual_count >= MAXIMUM_OBJECT_LISTS_PER_MAP * 3 / 4;
+}
+#endif
 
 void object_list_gc(
 	void)

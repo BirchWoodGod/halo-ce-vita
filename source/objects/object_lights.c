@@ -1118,6 +1118,42 @@ static short lights_scene_maximum(
 	}
 	return (short)maximum;
 }
+
+/* (port) a local player's flashlight: the first-person flashlight light
+(the cyborg's characters\cyborg\flashlight_cyborg has the flag) of a unit a
+player on this machine drives - not another player's, whose flashlights a
+network game has many of */
+static boolean lights_local_flashlight(
+	struct light_datum const *light,
+	struct point_light_definition const *definition)
+{
+	long unit_index, player_index;
+
+	if (!TEST_FLAG(definition->flags, _light_definition_is_first_person_flashlight_bit) ||
+		light->object_index == NONE || !object_try_and_get(light->object_index))
+	{
+		return FALSE;
+	}
+	unit_index = object_get_ultimate_parent(light->object_index);
+	player_index = unit_index != NONE ? player_index_from_unit_index(unit_index) : NONE;
+	return player_index != NONE && player_get(player_index)->local_player_index != NONE;
+}
+
+/* (port, debug) HALO_LIGHTS_LOG=1: once a second, the frame's lights - in
+view, submitted, the cap - and each light's tag, its place in the scene's
+list, its object and whether it was submitted (=2: every light) */
+static int lights_log_level(void)
+{
+	static int level = -1;
+
+	if (level < 0)
+	{
+		const char *setting = getenv("HALO_LIGHTS_LOG");
+
+		level = setting ? atoi(setting) : 0;
+	}
+	return level;
+}
 #endif
 
 void lights_preprocess_scene(
@@ -1128,6 +1164,10 @@ void lights_preprocess_scene(
 	short rendered_cluster_index;
 	short scene_light_index;
 	short queued_lens_flare_index;
+#ifdef HALO_LINUX
+	/* (the local players' flashlights submitted past the cap) */
+	short exempt_submitted = 0;
+#endif
 
 	profile_enter(lights_section);
 	debug_rasterizer_light_count = 0;
@@ -1324,8 +1364,15 @@ void lights_preprocess_scene(
 #ifdef HALO_LINUX
 				/* (HALO_MAX_SCENE_LIGHTS, above: the lights past the cap are
 				not submitted; their colour and radius are worked out as
-				before, the game reads them) */
-				if (light->radius != 0.0f && debug_rasterizer_light_count < lights_scene_maximum())
+				before, the game reads them. A local player's flashlight is
+				never one of them, nor counted against the cap: Ben 10,
+				insider.18, c10 on Performance (4 lights) - the flashlight was
+				on but lit the world only looking some ways, where fewer of
+				the lights the walk finds before it were in view) */
+				boolean exempt = light->radius != 0.0f && lights_local_flashlight(light, definition);
+
+				if (light->radius != 0.0f &&
+					(exempt || debug_rasterizer_light_count - exempt_submitted < lights_scene_maximum()))
 #else
 				if (light->radius != 0.0f)
 #endif
@@ -1388,6 +1435,10 @@ void lights_preprocess_scene(
 					light->rasterizer_light_index = rasterizer_light_submit(
 						&light_parameters);
 					debug_rasterizer_light_count = light->rasterizer_light_index + 1;
+#ifdef HALO_LINUX
+					if (exempt && light->rasterizer_light_index != NONE)
+						exempt_submitted++;
+#endif
 				}
 			}
 			else
@@ -1489,6 +1540,41 @@ void lights_preprocess_scene(
 	}
 	lights_globals.queued_lens_flare_count = 0;
 	rasterizer_lights_end();
+	#ifdef HALO_LINUX
+	if (lights_log_level() > 0)
+	{
+		static unsigned long last_ms;
+		unsigned long now_ms = system_milliseconds();
+
+		if (now_ms - last_ms >= 1000)
+		{
+			short index;
+
+			last_ms = now_ms;
+			platform_log("lights: %d in view, %d submitted (cap %d)", lights_globals.scene_point_light_count,
+				debug_rasterizer_light_count, lights_scene_maximum());
+			for (index = 0; index < lights_globals.scene_point_light_count; index++)
+			{
+				struct light_datum *light = light_get(lights_globals.scene_point_lights[index]);
+				struct point_light_definition *definition = light ? light_definition_get(light->definition_index) : NULL;
+				struct object_datum *object = light && light->object_index != NONE ? object_try_and_get(light->object_index) : NULL;
+				long parent = object ? object_get_ultimate_parent(light->object_index) : NONE;
+
+				if (!light || !definition)
+					continue;
+				if (lights_log_level() < 2 && !TEST_FLAG(definition->flags, _light_definition_is_first_person_flashlight_bit) &&
+					!(parent != NONE && player_index_from_unit_index(parent) != NONE))
+				{
+					continue;
+				}
+				platform_log("lights:   %d: %s flags %x, object type %d, a player's %s, radius %.2f, %s", index,
+					tag_get_name(light->definition_index), (unsigned)definition->flags, object ? object->object.type : -1,
+					parent != NONE && player_index_from_unit_index(parent) != NONE ? "yes" : "no", light->radius,
+					light->rasterizer_light_index != NONE ? "submitted" : "NOT submitted");
+			}
+		}
+	}
+#endif
 	profile_exit(lights_section);
 
 	return;
@@ -2336,6 +2422,92 @@ void light_reconnect_to_map(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) HALO_DARK_LIGHTS (1, the default; 0 off). Every unit's, weapon's
+and vehicle's attached lights are taken off the map and put back every
+tick the object's lighting is recomputed (objects.c, object_connect_lights:
+the dynamic lighting flag is never cleared), each with its marker found by
+name, its sphere's clusters walked and its cluster references remade. In a
+multiplayer game most of them are dark: the players' flashlights off, the
+weapons' muzzle flashes between shots (a 32-player crossplay game of moving
+stand-ins: 60% of the lights put back, the rest the plasma weapons'
+flares; the lights were 15-20% of a client's tick,
+triage/perf-111-crossplay.md). The render alone reads the lights' cluster
+lists (lights_preprocess_scene, lights_find_for_object_dynamic; the units'
+illumination is debug only, units.c), and it passes over a dark light: one
+whose colour, worked out from its object's function value and change
+colour as lights_preprocess_scene works it out, is black is given no
+rasterizer light, no lens flare and no new radius, and an object it
+reaches takes nothing from it (rasterizer_light_index NONE). So an
+attached light that is dark when its object's lighting is recomputed -
+after the object's function values, the values the render reads - is left
+off the map (taken off if it was on), its marker not looked up, and is put
+back as before the tick its colour is not black. What a dark light no
+longer does: take one of the MAXIMUM_RENDERED_LIGHTS (128) places of a
+scene's visible lights, which only a scene of more than 128 showed.
+Unattached lights (effects') and a light whose object it cannot get are
+put back as before. */
+static boolean light_attached_dark(
+	struct light_datum const *light)
+{
+	struct point_light_definition *definition;
+	struct object_datum *object;
+	real_rgb_color const *change_color;
+	real_rgb_color color;
+	real intensity;
+
+	if (light->parent_light_index != NONE || light->object_index == NONE)
+		return FALSE;
+	object = object_try_and_get(light->object_index);
+	if (!object)
+		return FALSE;
+	definition = light_definition_get(light->definition_index);
+	object_get_function_value(light->object_index, light->function_index, &intensity);
+	change_color = light->color_function_index == NONE
+		? global_real_rgb_white
+		: &object->object.outgoing_change_colors[light->color_function_index];
+	rgb_colors_interpolate_and_scale(
+		&color,
+		definition->color_interpolation_flags,
+		&definition->color_lower_bound,
+		&definition->color_upper_bound,
+		change_color,
+		intensity);
+	return color.red == 0.0f && color.green == 0.0f && color.blue == 0.0f;
+}
+
+static boolean light_dark_lights_enabled(
+	void)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		char const *setting = getenv("HALO_DARK_LIGHTS");
+
+		enabled = setting && *setting ? atoi(setting) != 0 : 1;
+	}
+	return enabled;
+}
+
+void light_attached_reconnect(
+	long light_index,
+	boolean disconnect,
+	boolean reconnect)
+{
+	struct light_datum *light = light_get(light_index);
+	boolean connects = TEST_FLAG(light->flags, _point_light_connects_to_map_bit);
+
+	/* (one left off the map below has nothing to take off) */
+	if (disconnect && (!connects || TEST_FLAG(light->flags, _point_light_connected_to_map_bit)))
+		light_disconnect_from_map(light_index);
+	if (reconnect && !(connects && light_dark_lights_enabled() && light_attached_dark(light)))
+		light_reconnect_to_map(light_index);
+
+	return;
+}
+#endif
+
 static void find_point_lights_for_object_in_cluster(
 	long object_index,
 	short cluster_index,
@@ -2940,6 +3112,8 @@ boolean lights_distant_lighting_at_point(
 	return result;
 }
 
+boolean menu_scene_objects_lighting(long object_index, struct render_lighting *lighting);
+
 void lights_prepare_for_object_static(
 	long object_index,
 	struct render_lighting *lighting)
@@ -2955,6 +3129,10 @@ void lights_prepare_for_object_static(
 		"c:\\halo\\SOURCE\\objects\\object_lights.c",
 		970,
 		lighting);
+	/* (port) the Halo 3 menus' characters light themselves: ui.map's space
+	has no lightmap under them (menu_scene_objects.c) */
+	if (menu_scene_objects_lighting(object_index, lighting))
+		return;
 	if (TEST_FLAG(object->object.flags, _object_static_lighting_raycast_sideways_bit))
 	{
 		SET_FLAG(flags, _distant_lighting_raycast_sideways_bit, TRUE);

@@ -1,0 +1,344 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- (the game's level pictures are 140x114 in a larger texture: drawn at that size, as the
+menus draw a picture 1:1, ui_widget.c draw_bitmap_in_rect) -->
+<!-- The Halo 3-style campaign lobby (Menu style Halo 3): it stands for the Xbox's level select,
+which the campaign's profile screen opens, and starts the level as its difficulty list does (the
+level and the difficulty set, then "main menu switch to solo game"). Laid out as Halo 3's: the
+column at the left (CAMPAIGN LOBBY, Network, Mission, Difficulty, Start Game, Ready, the mission's
+picture with the difficulty emblem, "<mission> on <difficulty> at Mission Start"), the nameplate
+at the right; Network, Mission and Difficulty open pickers as Halo 3's Select Map. Network is
+LOCAL (Start Game plays the level here) or co-op, ONLINE CO-OP, SYSTEM LINK CO-OP or AD HOC
+CO-OP: Start Game then hosts the level as the Xbox's difficulty list's Y did (port h3 campaign
+host; AD HOC CO-OP's after the ad hoc group is joined, halo3/network.xml), and the game's lobby,
+the waiting screen, opens. The co-op choices are the settings panel's Connection, switched live
+when chosen (network_connection.c), its status under NETWORK. The level pictures and emblems are
+ui.map's own, the rest this folder's art. -->
+<menus root="h3/campaign/screen" replaces="ui\shell\main_menu\solo_level_select\solo_level_select_screen">
+	<bitmap name="h3/sp_levels">
+		<frame map="ui\shell\bitmaps\sp_levels" index="0"/>
+		<frame map="ui\shell\bitmaps\sp_levels" index="1"/>
+		<frame map="ui\shell\bitmaps\sp_levels" index="2"/>
+		<frame map="ui\shell\bitmaps\sp_levels" index="3"/>
+		<frame map="ui\shell\bitmaps\sp_levels" index="4"/>
+		<frame map="ui\shell\bitmaps\sp_levels" index="5"/>
+		<frame map="ui\shell\bitmaps\sp_levels" index="6"/>
+		<frame map="ui\shell\bitmaps\sp_levels" index="7"/>
+		<frame map="ui\shell\bitmaps\sp_levels" index="8"/>
+		<frame map="ui\shell\bitmaps\sp_levels" index="9"/>
+	</bitmap>
+	<bitmap name="h3/difficulty">
+		<frame map="ui\shell\main_menu\difficulty_select\difficulty_options_small" index="0"/>
+		<frame map="ui\shell\main_menu\difficulty_select\difficulty_options_small" index="1"/>
+		<frame map="ui\shell\main_menu\difficulty_select\difficulty_options_small" index="2"/>
+		<frame map="ui\shell\main_menu\difficulty_select\difficulty_options_small" index="3"/>
+	</bitmap>
+	<bitmap name="h3/row">
+		<frame png="halo3/item_off.png" width="128" height="16"/>
+		<frame png="halo3/row_on.png" width="128" height="16"/>
+	</bitmap>
+	<bitmap name="h3/glyph_cross">
+		<frame png="halo3/glyph_cross.png" width="16" height="16"/>
+	</bitmap>
+	<strings name="h3/campaign_text">
+		<string text="CAMPAIGN LOBBY"/>
+		<string text="NETWORK: LOCAL"/>
+		<string text="START GAME"/>
+		<string text="Ready"/>
+		<string text="This party is local to this PS Vita."/>
+		<string text="Select"/>
+		<string text="SELECT MISSION"/>
+		<string text="SELECT DIFFICULTY"/>
+		<string text="SELECT NETWORK"/>
+	</strings>
+	<strings name="h3/campaign_networks">
+		<string text="LOCAL"/>
+		<string text="ONLINE CO-OP"/>
+		<string text="SYSTEM LINK CO-OP"/>
+		<string text="AD HOC CO-OP"/>
+	</strings>
+	<strings name="h3/campaign_network_text">
+		<string text="Play the campaign alone on this PS Vita."/>
+		<string text="Host co-op on the Internet: others join\nwith your game's code, or from the\nserver browser if you make it public (X\nin the waiting screen). Choosing it goes\nonline (the settings panel's Connection:\nOnline)."/>
+		<string text="Host co-op for the PS Vitas on your\nWi-Fi network (the settings panel's\nConnection: Same Wi-Fi). They join from\nMULTIPLAYER, BROWSE GAMES."/>
+		<string text="Host co-op for the PS Vitas near you,\nwith no router: choosing it opens the\nsystem's ad hoc dialog (Connection: Ad\nhoc). They join from MULTIPLAYER, AD\nHOC, BROWSE GAMES."/>
+	</strings>
+	<strings name="h3/missions">
+		<string text="THE PILLAR OF AUTUMN"/>
+		<string text="HALO"/>
+		<string text="THE TRUTH AND RECONCILIATION"/>
+		<string text="THE SILENT CARTOGRAPHER"/>
+		<string text="ASSAULT ON THE CONTROL ROOM"/>
+		<string text="343 GUILTY SPARK"/>
+		<string text="THE LIBRARY"/>
+		<string text="TWO BETRAYALS"/>
+		<string text="KEYES"/>
+		<string text="THE MAW"/>
+	</strings>
+	<strings name="h3/difficulties">
+		<string text="EASY"/>
+		<string text="NORMAL"/>
+		<string text="HEROIC"/>
+		<string text="LEGENDARY"/>
+	</strings>
+	<strings name="h3/difficulty_text">
+		<string text="Your foes are few and slow to react.\nGood for a first look at the story."/>
+		<string text="The fight as it was meant to be:\nthe Covenant hold their ground."/>
+		<string text="The Covenant are smarter, tougher\nand more numerous. Grunts flee less."/>
+		<string text="Every enemy is deadly and relentless.\nOnly the best survive."/>
+	</strings>
+
+	<!-- the lobby -->
+	<widget name="h3/campaign/column" left="8" top="12" width="250" height="456" bitmap="h3/column"/>
+	<widget name="h3/campaign/title" type="text" left="16" top="18" width="240" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/campaign_text" string_index="0"/>
+	<widget name="h3/campaign/rule1" left="8" top="44" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/campaign/network_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" open="h3/campnet/screen"/>
+	</widget>
+	<widget name="h3/campaign/mission_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" open="h3/mission/screen"/>
+	</widget>
+	<widget name="h3/campaign/difficulty_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" open="h3/difficulty/screen"/>
+	</widget>
+	<widget name="h3/campaign/start_row" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/campaign_text" string_index="2">
+		<on event="a start" run="port h3 campaign start"/>
+		<on event="a start" run="main menu switch to solo game"/>
+	</widget>
+	<!-- (co-op: hosted, then the game's lobby; nothing opens when it was not hosted) -->
+	<widget name="h3/campaign/start_coop" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/campaign_text" string_index="2">
+		<on event="a start" run="port h3 campaign host" open="ui\shell\main_menu\multiplayer_type_select\connected\pregame\connected_pregame_screen"/>
+	</widget>
+	<!-- (AD HOC CO-OP's: out of the ad hoc group, the joining dialog, which hosts it once in) -->
+	<widget name="h3/campaign/start_adhoc" type="text" width="250" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/campaign_text" string_index="2">
+		<on event="a start" run="port h3 adhoc coop" otherwise="h3/adhoc/joining"/>
+		<on event="a start" run="port h3 campaign host" open="ui\shell\main_menu\multiplayer_type_select\connected\pregame\connected_pregame_screen"/>
+	</widget>
+	<widget name="h3/campaign/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port h3 campaign focus"/>
+		<on event="y" open="h3/friends/screen"/>
+		<child widget="h3/campaign/network_row" x="0" y="0"/>
+		<child widget="h3/campaign/mission_row" x="0" y="34"/>
+		<child widget="h3/campaign/difficulty_row" x="0" y="54"/>
+		<child widget="h3/campaign/start_row" x="0" y="74"/>
+		<child widget="h3/campaign/start_coop" x="0" y="74"/>
+		<child widget="h3/campaign/start_adhoc" x="0" y="74"/>
+	</widget>
+	<!-- (the connection's status under NETWORK, for co-op: port h3 network status) -->
+	<widget name="h3/campaign/network_status" type="text" left="24" top="71" width="226" height="14" font="h3/font_small" color="#FF9FB6CC">
+		<data input="port h3 network status"/>
+	</widget>
+	<widget name="h3/campaign/rule2" left="8" top="146" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/campaign/ready" type="text" left="16" top="151" width="240" height="18" font="h3/font_item" color="#FFE6ECF2" text_y="1" string_list="h3/campaign_text" string_index="3"/>
+	<widget name="h3/campaign/ready_sub" type="text" left="16" top="167" width="240" height="16" font="h3/font_small" color="#FF9FB6CC" text_y="1"/>
+	<widget name="h3/campaign/picture" left="16" top="190" width="140" height="114" bitmap="h3/sp_levels"/>
+	<widget name="h3/campaign/emblem" left="22" top="196" width="44" height="48" bitmap="h3/difficulty"/>
+	<widget name="h3/campaign/caption" type="text" left="16" top="310" width="240" height="40" font="h3/font_item" color="#FFEEF2F6" text_y="1"/>
+	<widget name="h3/campaign/warning" type="text" left="16" top="354" width="240" height="36" font="h3/font_small" color="#FFF0B070" text_y="1"/>
+	<widget name="h3/campaign/rule3" left="8" top="440" width="250" height="2" bitmap="h3/rule"/>
+	<widget name="h3/campaign/a_butn" left="16" top="447" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/campaign/select" type="text" left="36" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
+	<widget name="h3/campaign/b_butn" left="110" top="447" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/campaign/back" type="text" left="130" top="446" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+	<!-- (scene: its own camera, written into ui.map's unused load_campaign point - "x y z yaw
+	pitch ticks fov", world units and degrees -: the galaxy and a band of the ring; in front of it
+	(scene_object=, menu_scene_objects.c; the menu_campaign pack, app0:packs) the Master Chief at
+	the wheel of a Warthog caught mid-jump - its nose up, its wheels hanging, held still: no dust -,
+	a Marine on its gun and one beside him; seen from its left, banked to its left so that the
+	Chief at the wheel shows. With the live a30 backdrop (Online menus: backdrop=, menu_backdrop.c)
+	the camera is down in the ravine below the owner's spot E, looking up at its edge, and
+	backdrop_object= puts the same Warthog in front of it, closer to the ledge, just launched off it
+	and diving nose down 25 degrees into the ravine (level=1: upright in the world, the camera
+	looking up at it), rolled 28 degrees onto its left side so that its cabin opens to the camera -
+	the Chief at the wheel, the Marine beside him and the gunner -, on the right third's line with
+	the cabin on the upper third's (owner)) -->
+	<widget name="h3/campaign/screen" flags="pass_unhandled_to_focused_child" scene="load_campaign -15 5 0 -20 25 0 50"
+		backdrop="load_campaign -54.0 -47.0 47.2 102 18 0 70"
+		backdrop_object="menu_campaign:warthog 3.6 0.85 0.0 268 pitch=-25 roll=28 level=1;
+			menu_campaign:cyborg in=1 seat=driver;
+			menu_campaign:marine_armored in=1 seat=gunner;
+			menu_campaign:marine_armored in=1 seat=passenger weapon=assault_rifle"
+		scene_object="menu_campaign:warthog 4.2 0.82 -0.42 268 pitch=22 roll=14;
+			menu_campaign:cyborg in=1 seat=driver;
+			menu_campaign:marine_armored in=1 seat=gunner;
+			menu_campaign:marine_armored in=1 seat=passenger weapon=assault_rifle">
+		<on event="created" run="port h3 campaign init"/>
+		<on event="created" run="port h3 scene"/>
+		<on event="b back" back="true"/>
+		<data input="port h3 campaign"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/campaign/column"/>
+		<child widget="h3/campaign/title"/>
+		<child widget="h3/campaign/rule1"/>
+		<child widget="h3/campaign/rule2"/>
+		<child widget="h3/campaign/network_status"/>
+		<child widget="h3/campaign/ready"/>
+		<child widget="h3/campaign/ready_sub"/>
+		<child widget="h3/campaign/picture"/>
+		<child widget="h3/campaign/emblem"/>
+		<child widget="h3/campaign/caption"/>
+		<child widget="h3/campaign/warning"/>
+		<child widget="h3/campaign/rule3"/>
+		<child widget="h3/campaign/a_butn"/>
+		<child widget="h3/campaign/select"/>
+		<child widget="h3/campaign/b_butn"/>
+		<child widget="h3/campaign/back"/>
+		<child widget="h3/main/players"/>
+		<child widget="h3/main/nameplate"/>
+		<child widget="h3/main/party_plates"/>
+		<child widget="h3/friends/lobby_panel"/>
+		<child widget="h3/campaign/list" x="8" y="50"/>
+	</widget>
+
+	<!-- the pickers: Halo 3's Select Map (a panel, the list at the left, the picture and its
+	words at the right) -->
+	<widget name="h3/pick/panel" left="40" top="40" width="560" height="400" bitmap="h3/panel"/>
+	<widget name="h3/pick/rule" left="40" top="72" width="560" height="2" bitmap="h3/rule"/>
+	<widget name="h3/pick/strip" left="40" top="420" width="560" height="20" bitmap="h3/strip"/>
+	<widget name="h3/pick/a_butn" left="52" top="422" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/pick/select" type="text" left="72" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/campaign_text" string_index="5"/>
+	<widget name="h3/pick/b_butn" left="146" top="422" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/pick/back" type="text" left="166" top="421" width="70" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/main_items" string_index="10"/>
+
+	<widget name="h3/campnet/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/campaign_text" string_index="8"/>
+	<widget name="h3/campnet/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/campaign_networks" string_index="0">
+		<on event="a" run="port h3 campaign network set" back="true"/>
+	</widget>
+	<widget name="h3/campnet/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/campaign_networks" string_index="1">
+		<on event="a" run="port h3 campaign network set" back="true"/>
+	</widget>
+	<!-- (ONLINE CO-OP, SYSTEM LINK CO-OP and AD HOC CO-OP: the connection too, switched live) -->
+	<widget name="h3/campnet/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/campaign_networks" string_index="2">
+		<on event="a" run="port h3 campaign network set" back="true"/>
+	</widget>
+	<widget name="h3/campnet/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/campaign_networks" string_index="3">
+		<on event="a" run="port h3 campaign network set" back="true"/>
+	</widget>
+	<widget name="h3/campnet/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port h3 campaign network focus"/>
+		<data input="port h3 campaign networks"/>
+		<child widget="h3/campnet/item_0" y="0"/>
+		<child widget="h3/campnet/item_1" y="19"/>
+		<child widget="h3/campnet/item_2" y="38"/>
+		<child widget="h3/campnet/item_3" y="57"/>
+	</widget>
+	<widget name="h3/campnet/campnet_text" type="text" left="320" top="84" width="266" height="140" font="h3/font_small" color="#FFCFD9E3" string_list="h3/campaign_network_text"/>
+	<widget name="h3/campnet/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/campnet/title"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/campnet/campnet_text"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/campnet/list" x="52" y="84"/>
+	</widget>
+
+	<widget name="h3/mission/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/campaign_text" string_index="6"/>
+	<widget name="h3/mission/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/missions" string_index="0">
+		<on event="a" run="port h3 mission set" back="true"/>
+	</widget>
+	<widget name="h3/mission/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/missions" string_index="1">
+		<on event="a" run="port h3 mission set" back="true"/>
+	</widget>
+	<widget name="h3/mission/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/missions" string_index="2">
+		<on event="a" run="port h3 mission set" back="true"/>
+	</widget>
+	<widget name="h3/mission/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/missions" string_index="3">
+		<on event="a" run="port h3 mission set" back="true"/>
+	</widget>
+	<widget name="h3/mission/item_4" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/missions" string_index="4">
+		<on event="a" run="port h3 mission set" back="true"/>
+	</widget>
+	<widget name="h3/mission/item_5" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/missions" string_index="5">
+		<on event="a" run="port h3 mission set" back="true"/>
+	</widget>
+	<widget name="h3/mission/item_6" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/missions" string_index="6">
+		<on event="a" run="port h3 mission set" back="true"/>
+	</widget>
+	<widget name="h3/mission/item_7" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/missions" string_index="7">
+		<on event="a" run="port h3 mission set" back="true"/>
+	</widget>
+	<widget name="h3/mission/item_8" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/missions" string_index="8">
+		<on event="a" run="port h3 mission set" back="true"/>
+	</widget>
+	<widget name="h3/mission/item_9" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/missions" string_index="9">
+		<on event="a" run="port h3 mission set" back="true"/>
+	</widget>
+	<widget name="h3/mission/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port h3 mission focus"/>
+		<data input="port h3 missions"/>
+		<child widget="h3/mission/item_0" y="0"/>
+		<child widget="h3/mission/item_1" y="19"/>
+		<child widget="h3/mission/item_2" y="38"/>
+		<child widget="h3/mission/item_3" y="57"/>
+		<child widget="h3/mission/item_4" y="76"/>
+		<child widget="h3/mission/item_5" y="95"/>
+		<child widget="h3/mission/item_6" y="114"/>
+		<child widget="h3/mission/item_7" y="133"/>
+		<child widget="h3/mission/item_8" y="152"/>
+		<child widget="h3/mission/item_9" y="171"/>
+	</widget>
+	<widget name="h3/mission/mission_picture" left="320" top="84" width="140" height="114" bitmap="h3/sp_levels"/>
+	<widget name="h3/mission/mission_text" type="text" left="320" top="206" width="266" height="120" font="h3/font_small" color="#FFCFD9E3" string_list="ui\shell\main_menu\solo_level_select\map_data"/>
+	<!-- (a level whose file is missing or cannot be played: why, in its description's place, port h3 missions) -->
+	<widget name="h3/mission/mission_why" type="text" left="320" top="206" width="266" height="120" font="h3/font_small" color="#FFCFD9E3"/>
+	<widget name="h3/mission/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/mission/title"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/mission/mission_picture"/>
+		<child widget="h3/mission/mission_text"/>
+		<child widget="h3/mission/mission_why"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/mission/list" x="52" y="84"/>
+	</widget>
+
+	<widget name="h3/difficulty/title" type="text" left="52" top="46" width="400" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/campaign_text" string_index="7"/>
+	<widget name="h3/difficulty/item_0" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/difficulties" string_index="0">
+		<on event="a" run="port h3 difficulty set" back="true"/>
+	</widget>
+	<widget name="h3/difficulty/item_1" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/difficulties" string_index="1">
+		<on event="a" run="port h3 difficulty set" back="true"/>
+	</widget>
+	<widget name="h3/difficulty/item_2" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/difficulties" string_index="2">
+		<on event="a" run="port h3 difficulty set" back="true"/>
+	</widget>
+	<widget name="h3/difficulty/item_3" type="text" width="250" height="18" bitmap="h3/row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="2" string_list="h3/difficulties" string_index="3">
+		<on event="a" run="port h3 difficulty set" back="true"/>
+	</widget>
+	<widget name="h3/difficulty/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port h3 difficulty focus"/>
+		<data input="port h3 difficulties"/>
+		<child widget="h3/difficulty/item_0" y="0"/>
+		<child widget="h3/difficulty/item_1" y="19"/>
+		<child widget="h3/difficulty/item_2" y="38"/>
+		<child widget="h3/difficulty/item_3" y="57"/>
+	</widget>
+	<widget name="h3/difficulty/difficulty_emblem" left="320" top="84" width="44" height="48" bitmap="h3/difficulty"/>
+	<widget name="h3/difficulty/difficulty_text" type="text" left="320" top="140" width="266" height="80" font="h3/font_small" color="#FFCFD9E3" string_list="h3/difficulty_text"/>
+	<widget name="h3/difficulty/screen" flags="pass_unhandled_to_focused_child">
+		<on event="b back" back="true"/>
+		<child widget="h3/main/haze"/>
+		<child widget="h3/pick/panel"/>
+		<child widget="h3/difficulty/title"/>
+		<child widget="h3/pick/rule"/>
+		<child widget="h3/difficulty/difficulty_emblem"/>
+		<child widget="h3/difficulty/difficulty_text"/>
+		<child widget="h3/pick/strip"/>
+		<child widget="h3/pick/a_butn"/>
+		<child widget="h3/pick/select"/>
+		<child widget="h3/pick/b_butn"/>
+		<child widget="h3/pick/back"/>
+		<child widget="h3/difficulty/list" x="52" y="84"/>
+	</widget>
+</menus>

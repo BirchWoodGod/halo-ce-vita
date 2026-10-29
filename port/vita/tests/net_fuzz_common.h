@@ -94,30 +94,115 @@ const char *config_string(const char *name)
 	return "";
 }
 
-/* the network wire (port/linux/src/network_wire.c, network.crossplay read
-once): a target's choice per input, so that both wires are fuzzed */
+/* the network wire (port/linux/src/network_wire.c: the game's, chosen per
+game): a target's choice per input, so that both wires are fuzzed */
 static int net_fuzz_crossplay;
+static int net_fuzz_host_platform;
 
 int network_wire_crossplay(void)
 {
 	return net_fuzz_crossplay;
 }
 
+int network_wire_crossplay_available(void)
+{
+	return 1;
+}
+
+void network_wire_choose(int crossplay, int platform, const char *why)
+{
+	(void)why;
+	net_fuzz_crossplay = crossplay != 0;
+	net_fuzz_host_platform = crossplay ? platform : 0;
+}
+
+void network_wire_reset(void)
+{
+	net_fuzz_crossplay = 0;
+	net_fuzz_host_platform = 0;
+}
+
+int network_wire_host_platform(void)
+{
+	return net_fuzz_crossplay ? net_fuzz_host_platform : 0;
+}
+
+int network_wire_host_vita(void)
+{
+	return network_wire_host_platform() == 0;
+}
+
+unsigned int network_wire_version_of(int crossplay)
+{
+	return crossplay ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION;
+}
+
+unsigned int network_wire_announced_version(int crossplay)
+{
+	return network_wire_version_of(crossplay);
+}
+
 unsigned int network_wire_version(void)
 {
-	return net_fuzz_crossplay ? HALO_PORT_CROSSPLAY_NETWORK_VERSION : HALO_PORT_NETWORK_VERSION;
+	return network_wire_version_of(net_fuzz_crossplay);
+}
+
+int network_wire_version_accepted_on(int crossplay, unsigned int version)
+{
+	/* (the crossplay wire joins 29 and 32: network_wire.c) */
+	return crossplay ? version == HALO_PORT_CROSSPLAY_NETWORK_VERSION || version == HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION :
+		version == HALO_PORT_NETWORK_VERSION;
 }
 
 int network_wire_version_accepted(unsigned int version)
 {
-	return version == network_wire_version();
+	return network_wire_version_accepted_on(net_fuzz_crossplay, version);
 }
 
-int network_wire_hosting_refused(const char **why)
+int network_wire_of_version(unsigned int version)
 {
-	if (why)
-		*why = "crossplay";
+	return version == HALO_PORT_NETWORK_VERSION ? 0 : network_wire_version_accepted_on(1, version) ? 1 : -1;
+}
+
+int network_wire_v28_rules(void)
+{
 	return net_fuzz_crossplay;
+}
+
+int network_wire_v30_rules(void)
+{
+	return net_fuzz_crossplay;
+}
+
+int network_wire_v31_rules(void)
+{
+	return net_fuzz_crossplay;
+}
+
+int network_wire_v32_rules(void)
+{
+	return net_fuzz_crossplay;
+}
+
+int network_wire_host_crossplay(void)
+{
+	return net_fuzz_crossplay;
+}
+
+int network_wire_host_pc_stand_in(void)
+{
+	return 0;
+}
+
+int network_wire_browser_filter(void)
+{
+	return 0;
+}
+
+int network_wire_browser_shows(int vita_host)
+{
+	(void)vita_host;
+	return 1;
 }
 
 /* ---------- randomness: a counter, so every run is the same */

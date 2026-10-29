@@ -13,6 +13,10 @@ release builds).
   HALO_NET_FUZZ_CAPTURE=d  the first NET_FUZZ_CAPTURE_EACH of each kind of
                          what a client takes from its host, written to d
                          (which must be there) as fuzz targets' seeds
+  HALO_NET_FUZZ_HOST_ONLY=1  twins of what a host takes alone (its clients'
+                         messages and datagrams), none of what a client takes:
+                         a host's own client, in its process, then reads its
+                         game as sent (run_netns_online_test.sh hostfuzz)
   HALO_NET_FUZZ_KINDS=list  only the distributed netcode's messages of these
                          kinds get twins (a comma list of numbers and ranges,
                          "64-77" for the AI and co-op messages, 16 for the
@@ -54,12 +58,18 @@ static struct
 {
 	int ready;
 	int rate;
+	int host_only;
 	/* HALO_NET_FUZZ_KINDS: the distributed kinds twinned, a bit each (none
 	set: every message) */
 	int filtered;
 	unsigned char kinds[32];
 	unsigned long state;
 	unsigned long count;
+	/* the twins made of each direction, and of a client's messages on the
+	host each type (a game packet's) or kind (a distributed message's, 256
+	on): what a run reached, for the tests to check */
+	unsigned long direction_counts[3];
+	unsigned long client_types[512];
 	char dump_path[512];
 	struct
 	{
@@ -201,6 +211,7 @@ int net_fuzz_twin(
 
 		net_fuzz.ready = 1;
 		net_fuzz.rate = rate ? atoi(rate) : 0;
+		net_fuzz.host_only = getenv("HALO_NET_FUZZ_HOST_ONLY") && atoi(getenv("HALO_NET_FUZZ_HOST_ONLY"));
 		net_fuzz.state = seed ? strtoul(seed, NULL, 10) : 1;
 		net_fuzz_kinds_read(getenv("HALO_NET_FUZZ_KINDS"));
 		fprintf(stderr, "net fuzz twin: one message in %d twinned (direction %d), capture %s, kinds %s\n", net_fuzz.rate,
@@ -227,8 +238,11 @@ int net_fuzz_twin(
 		else if (((header >> 2) & 3) == 2)
 			net_fuzz_capture(_net_fuzz_capture_data, ((unsigned char const *)message)[2], NULL, 0, message, size);
 	}
-	if (net_fuzz.rate <= 0 || size < 3 || size > buffer_size || buffer_size > NET_FUZZ_TWIN_MAXIMUM)
+	if (net_fuzz.rate <= 0 || size < 3 || size > buffer_size || buffer_size > NET_FUZZ_TWIN_MAXIMUM ||
+		(net_fuzz.host_only && direction == _net_fuzz_twin_client_from_host))
+	{
 		return 0;
+	}
 	/* (HALO_NET_FUZZ_KINDS: a distributed message of a kind listed, its type
 	the byte after the message header) */
 	if (net_fuzz.filtered)
@@ -249,7 +263,7 @@ int net_fuzz_twin(
 		/* (after the message header, the first 2 bytes) */
 		int at = 2 + net_fuzz_random() % (length > 2 ? length - 2 : 1);
 
-		switch (net_fuzz_random() % 9)
+		switch (net_fuzz_random() % 11)
 		{
 		case 0: case 1:
 			bytes[at] ^= (unsigned char)(1 << (net_fuzz_random() % 8));
@@ -293,6 +307,47 @@ int net_fuzz_twin(
 			/* another packet type (a game message's last byte) */
 			bytes[length - 1] = (unsigned char)(net_fuzz_random() % 48);
 			break;
+		case 9:
+			/* (a distributed message, its type after the message header)
+			made OpenCE 32's aim assist policy, kind 90: mostly its 12 bytes,
+			its values at and past their edges (docs/opence-net32-spec.md 7) */
+			if (length >= 3 && ((bytes[0] >> 2) & 3) == 2)
+			{
+				static unsigned char const values[] = { 0, 1, 2, 0xFF };
+
+				bytes[2] = 90;
+				if (net_fuzz_random() % 4 && buffer_size >= 12)
+				{
+					int index;
+
+					for (index = length; index < 12; index++)
+						bytes[index] = 0;
+					length = 12;
+					bytes[3] = (unsigned char)(net_fuzz_random() % 3);
+					bytes[8] = values[net_fuzz_random() % sizeof(values)];
+					bytes[9] = net_fuzz_random() % 4 ? 0 : values[net_fuzz_random() % sizeof(values)];
+					bytes[10] = net_fuzz_random() % 4 ? 0 : 1;
+					bytes[11] = 0;
+				}
+			}
+			break;
+		case 10:
+			/* (a distributed message's tick) moved to about the tick window's
+			edges: 15 s for a game of 32, 20 s for the rest */
+			if (length >= 8 && ((bytes[0] >> 2) & 3) == 2)
+			{
+				static unsigned int const moves[] = { 449, 450, 451, 599, 600, 601, 100000, 0x7FFFFFFF };
+				unsigned int tick;
+
+				/* (unsigned: wrapping, never overflowing) */
+				memcpy(&tick, bytes + 4, 4);
+				if (net_fuzz_random() % 2)
+					tick += moves[net_fuzz_random() % (sizeof(moves) / sizeof(moves[0]))];
+				else
+					tick -= moves[net_fuzz_random() % (sizeof(moves) / sizeof(moves[0]))];
+				memcpy(bytes + 4, &tick, 4);
+			}
+			break;
 		}
 	}
 	/* (the header's size the twin's, mostly: else only the handlers' size
@@ -314,9 +369,39 @@ int net_fuzz_twin(
 	memcpy(net_fuzz.ring[slot].original, message, size);
 	memcpy(net_fuzz.ring[slot].bytes, bytes, (size_t)length);
 	net_fuzz.count++;
+	if (direction >= 0 && direction < 3)
+		net_fuzz.direction_counts[direction]++;
+	if (direction == _net_fuzz_twin_host_from_client)
+	{
+		unsigned short header;
+
+		memcpy(&header, message, 2);
+		if (((header >> 2) & 3) == 3)
+			net_fuzz.client_types[((unsigned char const *)message)[size - 1]]++;
+		else if (((header >> 2) & 3) == 2)
+			net_fuzz.client_types[256 + ((unsigned char const *)message)[2]]++;
+	}
 	if (!(net_fuzz.count % 1024) || net_fuzz.count == 16 || net_fuzz.count == 256)
 	{
+		char types[1024];
+		int index, at = 0;
+
 		fprintf(stderr, "net fuzz twin: %lu twins (direction %d)\n", net_fuzz.count, direction);
+		/* (what was reached: twins of the clients' messages and datagrams;
+		the messages' packet types, and distributed kinds as d<kind>) */
+		types[0] = 0;
+		for (index = 0; index < 512 && at < (int)sizeof(types) - 24; index++)
+		{
+			if (net_fuzz.client_types[index])
+			{
+				at += snprintf(types + at, sizeof(types) - at, index < 256 ? " %d:%lu" : " d%d:%lu", index & 255,
+					net_fuzz.client_types[index]);
+			}
+		}
+		fprintf(stderr, "net fuzz twin: client messages %lu, datagrams %lu, host messages %lu; client types%s\n",
+			net_fuzz.direction_counts[_net_fuzz_twin_host_from_client],
+			net_fuzz.direction_counts[_net_fuzz_twin_host_datagram],
+			net_fuzz.direction_counts[_net_fuzz_twin_client_from_host], types);
 		net_fuzz_dump();
 	}
 	return 1;

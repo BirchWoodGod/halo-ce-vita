@@ -1344,3 +1344,22 @@ long lruv_block_new(
 	lruv_release();
 	return result;
 }
+
+#ifdef HALO_LINUX
+long lruv_block_new_least_recent(
+	struct lruv_cache *cache,
+	long size)
+{
+	long result;
+	lruv_acquire();
+	/* (the tick a step on for the search: this tick's blocks are then one
+	tick old, the most recently used, and taken last; set back after, so
+	the cache's own frames are as they were - the new block, a tick ahead,
+	only looks used later) */
+	cache->tick++;
+	result = lruv_block_new_unlocked(cache, size);
+	cache->tick--;
+	lruv_release();
+	return result;
+}
+#endif

@@ -1,0 +1,61 @@
+# The campaign lobby's scene in the Halo 3 menus (menus/halo3/campaign.xml's
+# scene_object=, port/linux/game/menu_scene_objects.c): the Master Chief at
+# the wheel of a Warthog caught mid-jump, a Marine on its gun and one beside
+# him, from the player's own campaign maps (Halo, The Silent Cartographer,
+# Assault on the Control Room and The Pillar of Autumn have all three). What
+# a still scene does not need is left out: sounds, effects (no dust, no
+# exhaust), damage, the HUD, the weapons' first-person models and rounds.
+pack menu_campaign
+map a30 b30 b40 a10
+tag vehi vehicles\warthog\warthog
+tag bipd characters\cyborg\cyborg
+tag bipd characters\marine_armored\marine_armored
+tag weap weapons\assault rifle\assault rifle
+strip snd!
+strip lsnd
+strip effe
+strip part
+strip pctl
+strip cont
+strip deca
+strip jpt!
+strip ligh
+strip lens
+strip glw!
+strip udlg
+strip foot
+strip wphi
+strip unhi
+strip hud#
+strip trak
+strip mgs2
+strip spla
+strip proj
+strip eqip
+strip mode weapons\assault rifle\fp\fp
+strip antr weapons\assault rifle\fp\fp
+strip weap weapons\pistol\pistol
+strip actv
+# The poses of the Chief at the wheel and the Marines on the gun and beside
+# him (their other animations take these frames, none of their bytes in the
+# pack)
+keep characters\cyborg\cyborg|W-driver acc-front-back
+keep characters\cyborg\cyborg|W-driver acc-left-right
+keep characters\cyborg\cyborg|W-driver acc-up-down
+keep characters\cyborg\cyborg|W-driver enter
+keep characters\cyborg\cyborg|W-driver unarmed aim-still
+keep characters\cyborg\cyborg|W-driver unarmed idle
+keep characters\cyborg\cyborg|stand look
+keep characters\marine\marine|W-gunner acc-front-back
+keep characters\marine\marine|W-gunner acc-left-right
+keep characters\marine\marine|W-gunner acc-up-down
+keep characters\marine\marine|W-gunner enter
+keep characters\marine\marine|W-gunner fixed aim-still
+keep characters\marine\marine|W-gunner fixed idle
+keep characters\marine\marine|W-passenger acc-front-back
+keep characters\marine\marine|W-passenger acc-left-right
+keep characters\marine\marine|W-passenger acc-up-down
+keep characters\marine\marine|W-passenger enter
+keep characters\marine\marine|W-passenger rifle aim-still
+keep characters\marine\marine|W-passenger rifle idle
+keep characters\marine\marine|stand look

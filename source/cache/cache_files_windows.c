@@ -214,12 +214,19 @@ claimed under this, or both took the same slot, one read was lost and its
 texture or sound never finished loading */
 static volatile int cache_request_claim_lock;
 /* (port) a request for a Custom Edition map's bitmap (cache_file_read_bitmap):
-its tag (NONE: an Xbox map's read) and unrounded size, by request slot */
+its tag (NONE: an Xbox map's read; CACHE_REQUEST_SCENE_PACK: a scene pack's
+bitmap, port/linux/game/scene_packs.c) and unrounded size, by request slot */
+#define CACHE_REQUEST_SCENE_PACK (-2)
 static struct
 {
 	long tag_index;
 	long size;
 } cache_request_custom_edition[512];
+
+/* (port) each cache file's copies begun (a new map copied into it, or its
+copy forgotten), for the scene packs' builder: a copy it reads is the same
+copy until this changes */
+static unsigned long cached_map_file_generations[6 /* NUMBER_OF_CACHED_MAP_FILES */];
 
 static boolean custom_edition_reads_on_thread(
 	void)
@@ -457,6 +464,14 @@ static void cached_map_file_invalidate(
 	short map_file_index);
 static short cached_map_files_find_map(
 	const char *map_name);
+#ifdef HALO_LINUX
+static boolean cache_file_renamed_multiplayer_map(
+	const char *map_name,
+	struct cache_file_header const *header);
+static void cache_file_header_name_as_file(
+	const char *map_name,
+	struct cache_file_header *header);
+#endif
 
 /* ---------- globals */
 
@@ -539,6 +554,11 @@ static boolean shared_slot_attach(
 	shared_precache.slot_shared[map_file_index] = TRUE;
 	map_file->file = handle;
 	cached_map_file_read_header(map_file_index);
+	/* (a renamed copy's shared file says the name inside it: the slot is
+	known by the file's, as the DVD header read says it,
+	cache_file_read_header_from_dvd; the shared file is left as it is) */
+	if (map_file->header.name[0] && cache_file_renamed_multiplayer_map(dvd_header->name, &map_file->header))
+		cache_file_header_name_as_file(dvd_header->name, &map_file->header);
 	if (_stricmp(map_file->header.name, dvd_header->name) != 0 ||
 		map_file->header.checksum != dvd_header->checksum ||
 		map_file->header.file_length != dvd_header->file_length)
@@ -845,6 +865,20 @@ boolean cache_files_precache_in_progress(
 boolean cache_files_precache_is_copying_map(
 	const char *map_name)
 {
+#ifdef HALO_LINUX
+	/* port: a copy asked to stop copies no map, though the map it was is
+	asked for again: it never finishes (its slot's header is never written),
+	so it is ended and the map's copy begun anew. Another map's ask stops the
+	copy and waits for its end (cache_files_give_time_to_precache) since
+	the lobby freeze fix; the co-op host's level, asked again after the
+	network test's or the menus' other map, was taken for this copy and
+	waited for forever (a copy stopped before its header was read is never
+	over: cache_copy_get_status), and its game never started (Oct 2026) */
+	if (cache_copy_stop_queued())
+	{
+		return FALSE;
+	}
+#endif
 	if (cache_file_globals.copying_to_map_file_index != NONE &&
 		strcmp(
 			cache_file_globals.copying_to_map_file_name,
@@ -855,6 +889,32 @@ boolean cache_files_precache_is_copying_map(
 
 	return FALSE;
 }
+
+#ifdef HALO_LINUX
+/* port: the map the copy under way is making (its file name, "beavercreek")
+and how much of it is read, 0 to 1; FALSE with no copy under way (the
+Forge lobby's note while the scene packs' builds wait for it) */
+boolean cache_files_precache_copy_progress(
+	char *map_name,
+	long map_name_size,
+	real *progress)
+{
+	if (!cache_file_globals.copy_in_progress || cache_copy_stop_queued())
+	{
+		return FALSE;
+	}
+	if (map_name && map_name_size > 0)
+	{
+		csstrncpy(map_name, cache_file_globals.copying_to_map_file_name, map_name_size - 1);
+		map_name[map_name_size - 1] = 0;
+	}
+	if (progress)
+	{
+		*progress = cache_copy_progress();
+	}
+	return TRUE;
+}
+#endif
 
 boolean cache_files_precache_map_loaded(
 	const char *map_name)
@@ -894,6 +954,7 @@ boolean cache_files_forget_cached_map(
 	{
 		return FALSE;
 	}
+	__atomic_add_fetch(&cached_map_file_generations[map_file_index], 1, __ATOMIC_ACQ_REL);
 	memset(&cached_map_file_get(map_file_index)->header, 0, sizeof(struct cache_file_header));
 	error(_error_silent, "cache partition: the copy of '%s' (cache file %d) is forgotten", name, map_file_index);
 
@@ -906,20 +967,27 @@ static short cache_files_last_copy_failure = 0;
 /* (and the cache file it was copying to) */
 static short cache_files_last_copy_slot = NONE;
 
-boolean cache_files_xbox_map_problem(
+boolean cache_files_xbox_map_problem_read(
 	char const *map_name,
 	char *why,
-	long why_size)
+	long why_size,
+	boolean *unreadable)
 {
 	char const *name = tag_name_strip_path(map_name ? map_name : "");
 	struct cache_file_header header;
 	char path[256];
 	HANDLE file = INVALID_HANDLE_VALUE;
 	unsigned long bytes_read = 0;
+	unsigned long file_size;
+	unsigned long read_error;
 	boolean read = FALSE;
 	long largest;
 
 	why[0] = 0;
+	if (unreadable)
+	{
+		*unreadable = FALSE;
+	}
 	if (!name[0])
 	{
 		snprintf(why, (size_t)why_size, T("the host named no map"));
@@ -936,11 +1004,28 @@ boolean cache_files_xbox_map_problem(
 		return TRUE;
 	}
 	read = ReadFile(file, &header, sizeof(header), &bytes_read, NULL) && bytes_read == sizeof(header);
+	read_error = read ? 0 : GetLastError();
+	/* (port: the file's own size, to tell a file cut short from a read that
+	failed - Ben's insider.17 Vita said his whole beavercreek.map was "cut
+	short (0 bytes)" each time the read did not answer: not his file's
+	fault, and not a verdict to keep) */
+	file_size = GetFileSize(file, NULL);
 	CloseHandle(file);
 	if (!read)
 	{
+		if (file_size != INVALID_FILE_SIZE && file_size >= sizeof(header))
+		{
+			error(_error_silent, "cache: '%s.map' (%lu bytes) did not read (%lu bytes of its header, error %lu)", name,
+				(unsigned long)file_size, (unsigned long)bytes_read, (unsigned long)read_error);
+			snprintf(why, (size_t)why_size, T("your %s.map could not be read just now: try again"), name);
+			if (unreadable)
+			{
+				*unreadable = TRUE;
+			}
+			return TRUE;
+		}
 		snprintf(why, (size_t)why_size, T("your %s.map is cut short (%lu bytes): copy it to your maps folder again"),
-			name, bytes_read);
+			name, (unsigned long)(file_size != INVALID_FILE_SIZE ? file_size : bytes_read));
 		return TRUE;
 	}
 	/* (a Halo PC map named as an Xbox level: its loader is
@@ -993,17 +1078,40 @@ boolean cache_files_xbox_map_problem(
 	return FALSE;
 }
 
+boolean cache_files_xbox_map_problem(
+	char const *map_name,
+	char *why,
+	long why_size)
+{
+	return cache_files_xbox_map_problem_read(map_name, why, why_size, NULL);
+}
+
+/* (cache_files_precache_failure_describe) whether the failure it described
+was the map file's own: cut short, damaged, another map's - not a read
+that did not answer, the card full or the memory */
+static boolean cache_files_last_failure_the_file = FALSE;
+
+boolean cache_files_precache_failure_the_file(
+	void)
+{
+	return cache_files_last_failure_the_file;
+}
+
 void cache_files_precache_failure_describe(
 	char const *map_name,
 	char *why,
 	long why_size)
 {
 	char const *name = tag_name_strip_path(map_name ? map_name : "");
+	boolean unreadable = FALSE;
 
-	if (cache_files_xbox_map_problem(map_name, why, why_size))
+	cache_files_last_failure_the_file = FALSE;
+	if (cache_files_xbox_map_problem_read(map_name, why, why_size, &unreadable))
 	{
+		cache_files_last_failure_the_file = !unreadable;
 		return;
 	}
+	cache_files_last_failure_the_file = cache_files_last_copy_failure == _cache_copy_bad_file_failure;
 	switch (cache_files_last_copy_failure)
 	{
 	case _cache_copy_write_failure:
@@ -1098,6 +1206,11 @@ boolean cache_files_precache_map_begin(
 #endif
 			map_file = cached_map_file_get(map_file_index);
 
+#ifdef HALO_LINUX
+			/* (another copy into it: the scene packs' builder reading the
+			last one stops) */
+			__atomic_add_fetch(&cached_map_file_generations[map_file_index], 1, __ATOMIC_ACQ_REL);
+#endif
 			memset(
 				&map_file->header,
 				0,
@@ -1193,6 +1306,41 @@ void cache_files_precache_map_end(
 	texture_cache_return_memory();
 	cached_map_file_set_modification_date(cache_file_globals.copying_to_map_file_index);
 	cached_map_file_read_header(cache_file_globals.copying_to_map_file_index);
+#ifdef HALO_LINUX
+	/* port: a renamed copy of a multiplayer map (cache_file_read_header
+	_from_dvd): its slot's header named as its file, in memory and in the
+	cache file, so that the copy is found by that name in this run and the
+	next, and never as the map named inside it */
+	{
+		struct cached_map_file *map_file = cached_map_file_get(cache_file_globals.copying_to_map_file_index);
+
+		if (map_file->header.name[0] &&
+			cache_file_renamed_multiplayer_map(cache_file_globals.copying_to_map_file_name, &map_file->header))
+		{
+			OVERLAPPED overlapped;
+			volatile boolean completion_flag = FALSE;
+
+			cache_file_header_name_as_file(cache_file_globals.copying_to_map_file_name, &map_file->header);
+			cached_map_issue_async_write(
+				map_file->file,
+				&overlapped,
+				&map_file->header,
+				sizeof(struct cache_file_header),
+				0,
+				&completion_flag,
+				cache_file_blocking_io_completion_routine);
+			cached_map_block_on_async_request(&completion_flag);
+			if (!completion_flag)
+			{
+				/* (not written: the slot forgotten, copied again when asked
+				for, never found by the name inside) */
+				error(_error_silent, "map '%s': its cache file's header could not be named as its file",
+					cache_file_globals.copying_to_map_file_name);
+				memset(&map_file->header, 0, sizeof(struct cache_file_header));
+			}
+		}
+	}
+#endif
 	cache_file_globals.copy_in_progress = FALSE;
 	cache_file_globals.copying_to_map_file_index = NONE;
 
@@ -1257,6 +1405,81 @@ void cache_file_block_until_not_busy(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* (port) whether a read of the game's is waiting or under way (the scene
+packs' prebuild waits for them: port/linux/game/scene_packs.c) */
+int cache_files_reads_pending(
+	void)
+{
+	short request_index;
+
+	if (!cache_file_globals.requests)
+	{
+		return FALSE;
+	}
+	for (request_index = 0;
+		request_index < MAXIMUM_SIMULTANEOUS_CACHE_REQUESTS;
+		request_index++)
+	{
+		if (__atomic_load_n(&cache_file_globals.requests[request_index].pending, __ATOMIC_RELAXED))
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+/* (port) the scene packs' builder (port/linux/game/scene_pack.c, on its own
+thread): the cache file that holds the map's decompressed copy, opened to
+read (NULL if none holds it, or it is being copied to), and a token of that
+copy (the builder checks the copy's header itself) */
+FILE *cache_files_cached_copy_open(
+	char const *map,
+	unsigned long *token)
+{
+	char path[256];
+	short map_file_index;
+	unsigned long generation;
+
+	*token = 0;
+	if (!map || !map[0])
+	{
+		return NULL;
+	}
+	map_file_index = cached_map_files_find_map(map);
+	if (map_file_index == NONE ||
+		(__atomic_load_n(&cache_file_globals.copy_in_progress, __ATOMIC_ACQUIRE) &&
+			cache_file_globals.copying_to_map_file_index == map_file_index))
+	{
+		return NULL;
+	}
+#ifdef HALO_DEDICATED_SERVER
+	if (shared_precache.slot_shared[map_file_index])
+	{
+		return NULL;
+	}
+#endif
+	generation = __atomic_load_n(&cached_map_file_generations[map_file_index], __ATOMIC_ACQUIRE);
+	*token = ((unsigned long)map_file_index << 24) | (generation & 0xFFFFFF);
+	cached_map_file_get_path(map_file_index, path);
+
+	return fopen(path, "rb");
+}
+
+/* (port) whether the copy a token names is still the same copy */
+boolean cache_files_cached_copy_unchanged(
+	unsigned long token)
+{
+	short map_file_index = (short)(token >> 24);
+
+	return map_file_index >= 0 && map_file_index < NUMBER_OF_CACHED_MAP_FILES &&
+		(__atomic_load_n(&cached_map_file_generations[map_file_index], __ATOMIC_ACQUIRE) & 0xFFFFFF) == (token & 0xFFFFFF) &&
+		!(__atomic_load_n(&cache_file_globals.copy_in_progress, __ATOMIC_ACQUIRE) &&
+			cache_file_globals.copying_to_map_file_index == map_file_index);
+}
+#endif
 
 void cache_file_close(
 	void)
@@ -1399,6 +1622,28 @@ short cache_file_read(
 	release (port/linux/game/custom_edition_cache.c) */
 	boolean custom_edition = custom_edition_cache_tags_loaded();
 
+	/* (a scene pack's pixels or samples, at its file offsets: served from
+	its file, port/linux/game/scene_packs.c - a bitmap's not waited for by
+	the cache file thread, as a map's are, the others at once: a pack's
+	textures read on the render's thread held its frame for as long as the
+	memory card took. HALO_PACK_READ_THREAD=0: all at once, as before) */
+	boolean pack_read = FALSE;
+	{
+		boolean scene_packs_read(long offset, long size, void *buffer);
+		boolean scene_packs_offset(long offset);
+		static int pack_reads_on_thread = -1;
+
+		if (pack_reads_on_thread < 0)
+			pack_reads_on_thread = !getenv("HALO_PACK_READ_THREAD") || atoi(getenv("HALO_PACK_READ_THREAD")) != 0;
+		pack_read = !custom_edition && scene_packs_offset(offset);
+		if (pack_read && (!bitmap || blocking || !pack_reads_on_thread || size < 0) &&
+			scene_packs_read(offset, size, buffer))
+		{
+			*completion_flag_reference = TRUE;
+
+			return cache_request_next_free_index();
+		}
+	}
 	if (custom_edition && (!bitmap || !custom_edition_reads_on_thread()))
 	{
 		custom_edition_cache_read(tag_index, offset, size, buffer);
@@ -1468,9 +1713,10 @@ short cache_file_read(
 	request->buffer = buffer;
 #ifdef HALO_LINUX
 	/* (a Custom Edition map's bitmap: read by the cache file thread from
-	the map's own files, at its own size) */
-	cache_request_custom_edition[request_index].tag_index = custom_edition ? tag_index : NONE;
-	cache_request_custom_edition[request_index].size = custom_edition ? request_size : 0;
+	the map's own files, at its own size; a scene pack's, from its file) */
+	cache_request_custom_edition[request_index].tag_index = custom_edition ? tag_index :
+		pack_read ? CACHE_REQUEST_SCENE_PACK : NONE;
+	cache_request_custom_edition[request_index].size = custom_edition || pack_read ? request_size : 0;
 	/* (the request is filled in before the cache file thread can see it
 	pending: on the Vita's cores it could see the flag before the fields
 	and read with the slot's last offset, size and completion flag) */
@@ -1920,12 +2166,18 @@ static void cache_file_windows_thread_proc(
 
 				if (cache_request_custom_edition[index].tag_index != NONE)
 				{
+					boolean scene_packs_read(long offset, long size, void *buffer);
+
 					/* (a Custom Edition map's bitmap: read here, from its
-					files, and done) */
+					files, and done; a scene pack's, from its file) */
 					best_request->running = TRUE;
-					custom_edition_cache_read(cache_request_custom_edition[index].tag_index,
-						(long)best_request->overlapped.Offset, cache_request_custom_edition[index].size,
-						best_request->buffer);
+					if (cache_request_custom_edition[index].tag_index == CACHE_REQUEST_SCENE_PACK)
+						scene_packs_read((long)best_request->overlapped.Offset, cache_request_custom_edition[index].size,
+							best_request->buffer);
+					else
+						custom_edition_cache_read(cache_request_custom_edition[index].tag_index,
+							(long)best_request->overlapped.Offset, cache_request_custom_edition[index].size,
+							best_request->buffer);
 					cache_request_custom_edition[index].tag_index = NONE;
 					__atomic_store_n((volatile boolean *)best_request->overlapped.hEvent, TRUE, __ATOMIC_RELEASE);
 					best_request->running = FALSE;
@@ -2014,6 +2266,35 @@ static void cache_file_get_map_path(
 	return;
 }
 
+#ifdef HALO_LINUX
+/* (port) whether a multiplayer map's file named `map_name` and named
+`inside_name` inside is a copy a player renamed (cursed-bloodgulch.map,
+bloodgulch inside), which the cache partition knows by its file's name: not
+the menus' map, nor one named as an Xbox level, whose name must be the one
+inside (custom_edition_cache_xbox_multiplayer) */
+boolean custom_edition_maps_is_xbox_level(char const *name);
+
+static boolean cache_file_renamed_multiplayer_map(
+	const char *map_name,
+	struct cache_file_header const *header)
+{
+	return header->scenario_type == _scenario_type_multiplayer &&
+		_stricmp(header->name, map_name) != 0 &&
+		_stricmp(map_name, "ui") != 0 &&
+		strlen(map_name) < sizeof(header->name) &&
+		!custom_edition_maps_is_xbox_level(map_name);
+}
+
+/* (port) a renamed copy's header, named as its file */
+static void cache_file_header_name_as_file(
+	const char *map_name,
+	struct cache_file_header *header)
+{
+	memset(header->name, 0, sizeof(header->name));
+	strncpy(header->name, map_name, sizeof(header->name) - 1);
+}
+#endif
+
 static boolean cache_file_read_header_from_dvd(
 	const char *map_name,
 	struct cache_file_header *header)
@@ -2045,6 +2326,18 @@ static boolean cache_file_read_header_from_dvd(
 			cache_file_header_verify(header, path, TRUE))
 		{
 			result = TRUE;
+#ifdef HALO_LINUX
+			/* port: a renamed copy of a multiplayer map is known by its
+			file's name (its cache file slot's header says it too:
+			cache_files_precache_map_end), so that it neither stands for
+			the map named inside it nor is refused */
+			if (cache_file_renamed_multiplayer_map(map_name, header))
+			{
+				error(_error_silent, "map '%s' names itself '%s' in its header: a renamed copy, known as '%s'",
+					map_name, header->name, map_name);
+				cache_file_header_name_as_file(map_name, header);
+			}
+#endif
 		}
 		CloseHandle(file);
 	}

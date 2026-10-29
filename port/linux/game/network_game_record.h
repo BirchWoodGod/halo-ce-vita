@@ -62,6 +62,22 @@ boolean network_game_record_decode(
 	long size,
 	struct network_game *game,
 	char const **why);
+/* ... from a host of the network version (a crossplay one's from 35 is 16
+bytes longer: OpenCE's further gametype options, network_wire_v35_rules;
+from 33 its co-op byte's bit 1 is the host's switch, known and dropped): a
+record that plays one of OpenCE's own game types (SWAT, Infection, Gun
+Game, Hardcore), which this build does not, is refused, why naming it */
+boolean network_game_record_decode_version(
+	short format,
+	unsigned int version,
+	void const *buffer,
+	long size,
+	struct network_game *game,
+	char const **why);
+/* the record's size on the wire from a host of the network version */
+long network_game_record_wire_size(
+	short format,
+	unsigned int version);
 /* whether co-op's switches are ones this game knows */
 boolean network_game_cooperative_flags_valid(
 	byte flags);

@@ -16,6 +16,7 @@ reported as inserted, so the game runs with no input devices.
 
 #include "platform.h"
 #include "port_config.h"
+#include "lang.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +77,16 @@ DWORD WINAPI XGetLanguage(void)
 			found == XC_LANGUAGE_GERMAN ? "German" : found == XC_LANGUAGE_ITALIAN ? "Italian" : "Japanese",
 			config_string("game.language"));
 		language_at_start = found;
+#ifndef HALO_VITA
+		/* (tests: the port's own text in that language too, from the
+		folder named - port/vita/app0/lang -, as the Vita's host reads
+		app0:lang: its screens' looks checked in Spanish on Linux) */
+		if (getenv("HALO_TEST_LANG_DIR"))
+		{
+			lang_init(getenv("HALO_TEST_LANG_DIR"));
+			platform_log("lang: %s (HALO_TEST_LANG_DIR)", lang_select(language) ? language : "en, none for that code");
+		}
+#endif
 	}
 	return language_at_start;
 }
@@ -153,12 +164,27 @@ DWORD WINAPI XCreateSaveGame(LPCSTR root_path_name, LPCWSTR save_game_name, DWOR
 		CreateDirectoryA(data_directory, NULL);
 		if (!CreateDirectoryA(directory, NULL))
 			return GetLastError();
-		snprintf(meta_path, sizeof(meta_path), "%s" SAVE_META_FILE, directory);
+		/* (written beside it, flushed, then named: a crash in the write
+		never leaves a name cut short) */
+		snprintf(meta_path, sizeof(meta_path), "%s" SAVE_META_FILE ".tmp", directory);
 		file = CreateFileA(meta_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
 		if (file == INVALID_HANDLE_VALUE)
 			return GetLastError();
 		WriteFile(file, save_game_name, (DWORD)(wcslen(save_game_name) * sizeof(WCHAR)), &written, NULL);
+		FlushFileBuffers(file);
 		CloseHandle(file);
+		{
+			char final_path[MAX_PATH + 32];
+
+			snprintf(final_path, sizeof(final_path), "%s" SAVE_META_FILE, directory);
+			if (!MoveFileA(meta_path, final_path))
+			{
+				DWORD error = GetLastError();
+
+				DeleteFileA(meta_path);
+				return error ? error : ERROR_ACCESS_DENIED;
+			}
+		}
 	}
 	if (path_buffer && buffer_size)
 	{

@@ -236,6 +236,16 @@ int vita_host_fourth_core_join(const char *role, int level);
 
 #include <xtl.h>
 
+#ifdef HALO_LINUX
+/* (port/linux/src/xbox_files.c) */
+void platform_file_background_begin(int (*stop)(void));
+unsigned long long platform_file_background_written(void);
+static int cache_copy_stop_requested_for_files(void);
+/* (the background bytes written as the copy's writes began:
+cache_copy_progress) */
+static volatile unsigned long long cache_copy_written_base;
+#endif
+
 /* ---------- constants */
 
 enum
@@ -536,6 +546,14 @@ static boolean cache_copy_stop_requested(
 	return WaitForSingleObject(global_self->copy_stop_event, 0) == 0;
 }
 
+#ifdef HALO_LINUX
+static int cache_copy_stop_requested_for_files(
+	void)
+{
+	return cache_copy_stop_requested();
+}
+#endif
+
 long cache_copy_buffer_size(
 	boolean blocking)
 {
@@ -658,6 +676,38 @@ void cache_copy_queue_end(
 
 	return;
 }
+
+#ifdef HALO_LINUX
+/* port: whether the copy under way has been asked to stop
+(cache_copy_queue_end): it ends between its pieces and is never finished,
+whatever map asks for it next (cache_files_precache_is_copying_map) */
+boolean cache_copy_stop_queued(
+	void)
+{
+	return global_self && global_self->copy_stop_event && cache_copy_stop_requested();
+}
+
+/* port: how much of its map the copy under way has made, 0 to 1: the
+lesser of its read's and its writes' (the writes trail the read by their
+buffers of megabytes, the memory card writing far slower than it reads;
+counted as their 32 KB pieces go, xbox_files.c) - the Forge lobby's note
+while the scene packs' builds wait for it
+(cache_files_precache_copy_progress) */
+real cache_copy_progress(
+	void)
+{
+	real progress, written;
+
+	if (!global_self || !global_self->copy_thread || global_self->header.size <= 0)
+		return 0.0f;
+	progress = global_self->read_progress;
+	written = (real)(platform_file_background_written() - cache_copy_written_base + sizeof(global_self->header)) /
+		(real)global_self->header.size;
+	if (written < progress)
+		progress = written;
+	return progress < 0.0f ? 0.0f : progress > 1.0f ? 1.0f : progress;
+}
+#endif
 
 static void cache_copy_initialize_zlib(
 	struct simple_decompressor_definition *self)
@@ -1128,6 +1178,20 @@ static void CALLBACK cache_copy_FileIOCompletionRoutine(
 	long *completed_flags = global_self->overlapped_completed_flags;
 	long overlapped_index = overlapped - global_self->overlapped;
 
+#ifdef HALO_LINUX
+	/* (port) a read or write ended between its pieces because the copy is
+	being stopped (platform_file_background_begin): no failure, the copy
+	being let go of; its slot's header, written last, is never written */
+	if (error_code == ERROR_OPERATION_ABORTED && cache_copy_stop_requested())
+	{
+		if (overlapped_index >= 0 && overlapped_index < NUMBER_OF_OVERLAPPED_STRUCTURES)
+		{
+			BIT_VECTOR_SET_FLAG(in_use_flags, overlapped_index, FALSE);
+		}
+		(void)completed_flags;
+		return;
+	}
+#endif
 	if (!error_code)
 	{
 		if (overlapped_index >= 0 && overlapped_index < NUMBER_OF_OVERLAPPED_STRUCTURES)
@@ -1154,6 +1218,15 @@ static void CALLBACK cache_copy_FileIOCompletionRoutine(
 				(real)(global_self->header.size - global_self->async_read_bytes_left) /
 				global_self->header.size;
 			SetEvent(global_self->progress_update_event);
+#ifdef HALO_LINUX
+			{
+				/* (port: a map's copy moving is progress, not a hang: the
+				Vita's watchdog, frame_timing.c) */
+				void halo_progress_heartbeat(void);
+
+				halo_progress_heartbeat();
+			}
+#endif
 		}
 		else if (overlapped_index >= _write_buffer_base &&
 			overlapped_index <= _write_buffer_base + NUMBER_OF_WRITE_BUFFERS - 1)
@@ -1457,7 +1530,17 @@ static void cache_copy_initialize_read_data(
 	cache_copy_issue_read_raw(self, &self->header, sizeof(self->header), 0);
 	cache_copy_block_on_raw_read(self);
 
+#ifndef HALO_LINUX
 	cache_file_header_verify(&self->header, "blah", TRUE);
+#else
+	/* port: the header is checked by the copy thread's loop, after this
+	(simple_cache_copy_thread: a bad file fails the copy). A copy stopped
+	as it began - the lobby's map changed (the playlist's first, then the
+	host's), the stop ending the file's reads between pieces - leaves the
+	header unread, all zeros: this check, fatal, was then the copy
+	thread's "'blah' does not appear to be a cache file" (logged as a
+	render assertion skipped, insider.21) */
+#endif
 
 	self->read_bytes_left -= sizeof(self->header);
 	self->current_read_offset = sizeof(self->header);
@@ -1722,6 +1805,12 @@ static unsigned long __stdcall simple_cache_copy_thread(
 	Santana's modified build) */
 	vita_host_fourth_core_join("map decompression", 2);
 #endif
+#ifdef HALO_LINUX
+	/* (port) the copy's reads and writes give way on the memory card to
+	every other thread's, piece by piece, and a stop ends them between
+	pieces (port/linux/src/xbox_files.c) */
+	platform_file_background_begin(cache_copy_stop_requested_for_files);
+#endif
 	for (;;)
 	{
 		WaitForSingleObject(self->copy_start_event, INFINITE);
@@ -1743,8 +1832,13 @@ static unsigned long __stdcall simple_cache_copy_thread(
 			/* port: a header that is not a map's is a bad file, so the copy
 			fails (it ended as if it had worked, and the map was precached
 			again, or, of no size, seemed never to end) */
-			if (!cache_file_header_verify(&self->header, "cache decompressed", TRUE))
+			if (cache_copy_stop_requested())
 			{
+				/* (stopped while its header was read: nothing to check) */
+			}
+			else if (!cache_file_header_verify(&self->header, "cache decompressed", FALSE))
+			{
+				error(_error_silent, "cache copy: the file's header is not a map's: a bad file");
 				cache_copy_set_flag(_copy_bad_file_bit);
 			}
 			else
@@ -1753,6 +1847,9 @@ static unsigned long __stdcall simple_cache_copy_thread(
 
 				self->write_bytes_left = self->header.size - sizeof(self->header);
 				self->async_write_bytes_left = self->write_bytes_left;
+#ifdef HALO_LINUX
+				cache_copy_written_base = platform_file_background_written();
+#endif
 
 				cache_copy_issue_initial_reads(self);
 

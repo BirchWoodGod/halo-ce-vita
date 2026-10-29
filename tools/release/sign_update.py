@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Sign a release's halo.vpk for the Vita's in-game updater (the owner, on
+"""Sign a release's VPK for the Vita's in-game updater (the owner, on
 their own machine, after building the release; tools/release/README.md).
 
   python3 tools/release/sign_update.py --key ~/halo-update-key/halo-update.key \\
-      --vpk build/vita/halo.vpk --version 1.1.0-beta.4 --out release-files/
+      --vpk build/vita/halo.vpk --version 1.1.1-beta.1 --out release-files/ [--legacy-name]
 
-Writes halo-update.txt (the manifest: version, title, file, size, SHA-512)
-and halo-update.txt.sig (its Ed25519 signature, hexadecimal) into --out,
-then checks them as the game does. Upload both beside halo.vpk to the
-release tagged v<version>; the game refuses the update without them, or if
-halo.vpk is not the file they name.
+Copies the VPK into --out as halo-ce-vita-<version>-vita.vpk, the release's
+name for it, and writes halo-update.txt (the manifest: version, title, file,
+size, SHA-512) and halo-update.txt.sig (its Ed25519 signature, hexadecimal)
+beside it, then checks them as the game does. Upload everything in --out to
+the release tagged v<version>; the game refuses the update without them, or
+if the VPK is not the file they name.
+
+--legacy-name (the 1.1.1 releases, betas included): the manifest names
+halo.vpk, the name the builds before 1.1.1 download, and --out gets the VPK
+under that name too; builds from 1.1.1 take either name.
 
 Refuses a version that is not a release tag's (x.y.z, x.y.z-beta.n or x.y.z-rc.n), a VPK
 that is not one (no eboot.bin, no param.sfo) or is larger than 64 MB, a
@@ -18,6 +23,7 @@ source's (vita_version.h) or the key is not the one in vita_update_key.h.
 """
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -32,6 +38,9 @@ def main():
     parser.add_argument("--version", required=True, help="the release's version: its tag without the v")
     parser.add_argument("--out", required=True, help="the folder for halo-update.txt and halo-update.txt.sig")
     parser.add_argument("--title", help="the title ID (default: the VPK's param.sfo's)")
+    parser.add_argument("--legacy-name", action="store_true",
+                        help="the manifest names halo.vpk (what builds before 1.1.1 download), uploaded beside "
+                        "halo-ce-vita-<version>-vita.vpk")
     parser.add_argument("--test-build", action="store_true",
                         help="sign a TEST build (configure.py --vita-update-test-sources/--vita-update-key/--vita-version)")
     arguments = parser.parse_args()
@@ -68,7 +77,8 @@ def main():
     if source_version and source_version != version:
         print(f"warning: the source's version is {source_version}, not {version}: is the VPK this release's?",
               file=sys.stderr)
-    text = common.manifest_text(version, title, size, sha512).encode("ascii")
+    file = common.LEGACY_VPK if arguments.legacy_name else common.vpk_name(version)
+    text = common.manifest_text(version, title, size, sha512, file).encode("ascii")
     signature = common.ed25519.sign(seed, text)
     if not common.ed25519.verify(bytes.fromhex(public), text, signature):
         common.fail("the signature does not verify (this should not happen)")
@@ -76,9 +86,16 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     (out / common.MANIFEST).write_bytes(text)
     (out / common.SIGNATURE).write_text(signature.hex() + "\n", encoding="ascii")
+    # (the VPK under the release's names: its own, and halo.vpk too when the
+    # manifest names that)
+    uploads = [common.vpk_name(version)] + ([common.LEGACY_VPK] if arguments.legacy_name else [])
+    for name in uploads:
+        if (out / name).resolve() != vpk.resolve():
+            shutil.copyfile(vpk, out / name)
     print(text.decode("ascii"), end="")
     print(f"signed by {public}")
-    print(f"upload {out / common.MANIFEST}, {out / common.SIGNATURE} and {vpk} (as {common.VPK}) to the release v{version}")
+    print(f"upload {', '.join(uploads + [common.MANIFEST, common.SIGNATURE])} (all in {out}) to the release "
+          f"v{version}")
 
 
 if __name__ == "__main__":

@@ -501,6 +501,342 @@ static wchar_t saved_game_file_display_name[MAX_GAMENAME];
 
 struct saved_game_files_globals saved_game_files_globals = {0};
 
+#ifdef HALO_LINUX
+/* port: the hard drive's mapfile (z:\saved\hdmu.map) as last read or
+written by this game, which alone writes it: every look at the profiles and
+game types (the Halo 3 nameplate every few seconds, the lobby's game types,
+each profile's name) was an open, a read of each record and a close on the
+game thread, ~110 file calls each time the Halo 3 lobby opened (0.5 s of an
+insider.10 tester's Vita), and on the Vita each waited for the memory card
+behind a map copy. Read whole once, and read again after any write. */
+static struct
+{
+	boolean valid;
+	boolean exists;
+	unsigned long size;
+	unsigned long cursor;
+	struct enumerated_saved_game_file entries[MAXIMUM_ENUMERATED_SAVED_GAME_FILES_ANY_TYPE_PER_MEMORY_UNIT];
+} saved_game_files_mapfile_image;
+
+static void saved_game_files_mapfile_image_forget(
+	void)
+{
+	saved_game_files_mapfile_image.valid = FALSE;
+	/* (the profiles held by their indices into it: player_profile.c) */
+	player_profile_cache_forget();
+
+	return;
+}
+
+/* the image, read whole if it is not held (FALSE: it could not be read,
+and the file is looked at as before) */
+static boolean saved_game_files_mapfile_image_read(
+	word memory_unit_index)
+{
+	struct file_reference reference;
+	unsigned long size = 0;
+
+	if (saved_game_files_mapfile_image.valid)
+	{
+		return TRUE;
+	}
+	if (!file_reference_create_from_path(&reference, memory_unit_mapfile_path[memory_unit_index], FALSE))
+	{
+		return FALSE;
+	}
+	if (!file_get_size(&reference, &size))
+	{
+		/* (none: as the file's own calls find it) */
+		saved_game_files_mapfile_image.exists = FALSE;
+		saved_game_files_mapfile_image.size = 0;
+		saved_game_files_mapfile_image.valid = TRUE;
+		return TRUE;
+	}
+	if (size > sizeof(saved_game_files_mapfile_image.entries) ||
+		!file_open(&reference, FLAG(_permission_read_bit)))
+	{
+		return FALSE;
+	}
+	size = file_get_eof(&reference);
+	if (size > sizeof(saved_game_files_mapfile_image.entries) ||
+		(size && !file_read(&reference, size, saved_game_files_mapfile_image.entries)))
+	{
+		file_close(&reference);
+		return FALSE;
+	}
+	file_close(&reference);
+	saved_game_files_mapfile_image.exists = TRUE;
+	saved_game_files_mapfile_image.size = size;
+	saved_game_files_mapfile_image.valid = TRUE;
+
+	return TRUE;
+}
+
+/* port: a profile's file written whole or not at all. The Xbox wrote
+blam.sav in place, so a crash, a power cut or the Vita's card pulled in the
+write left it cut short or half old, half new: its checksum failed, and the
+profile came back as the defaults ("damaged", insider.15's testers, Oct 19
+2026); a write that failed deleted the profile outright. Now:
+
+1. the block is written to blam.sav.tmp, flushed to the card, and read back:
+   its checksum and its bytes must be the block's;
+2. blam.sav, when its own checksum holds, becomes blam.sav.bak (the last
+   good file before this write; a bad blam.sav is dropped, the .bak kept);
+3. blam.sav.tmp becomes blam.sav.
+
+The file layer's renames never replace (MoveFileA's, as the Vita's
+sceIoRename), hence the move aside. Whatever step a crash stops at, the next
+start finds a good file (saved_game_file_recover, as the memory units are
+looked at): blam.sav itself, else the complete .tmp (the write that was in
+progress), else the .bak. A failed write leaves the files as they were.
+
+(debug builds) HALO_TEST_PROFILE_WRITE_CRASH=tmp|bak|rename: the game stops
+dead (_exit) once that step is done, as a crash would (the profile safety
+tests, port/vita/tests/run_profile_safety_test.sh) */
+#include <stdlib.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+void platform_log(const char *format, ...);
+
+#define SAVED_GAME_FILE_TEMPORARY_EXTENSION ".tmp"
+#define SAVED_GAME_FILE_BACKUP_EXTENSION ".bak"
+
+static void saved_game_file_test_crash(
+	char const *step)
+{
+#ifndef HALO_RELEASE
+	char const *setting = getenv("HALO_TEST_PROFILE_WRITE_CRASH");
+
+	if (setting && !strcmp(setting, step))
+	{
+		error(_error_silent, "profile write: stopped dead after its %s step (HALO_TEST_PROFILE_WRITE_CRASH)", step);
+		platform_log("profile write: stopped dead after its %s step (HALO_TEST_PROFILE_WRITE_CRASH)", step);
+		_exit(86);
+	}
+#else
+	(void)step;
+#endif
+}
+
+/* the file's first block, whole (FALSE: none, or shorter) */
+static boolean saved_game_file_read_first_block(
+	char const *path,
+	byte *block)
+{
+	HANDLE handle = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	DWORD read = 0;
+	boolean success;
+
+	if (handle == INVALID_HANDLE_VALUE)
+	{
+		return FALSE;
+	}
+	success = ReadFile(handle, block, SAVED_GAME_FILE_BLOCK_SIZE, &read, NULL) && read == SAVED_GAME_FILE_BLOCK_SIZE;
+	CloseHandle(handle);
+
+	return success;
+}
+
+static boolean saved_game_file_block_good(
+	byte const *block,
+	word checksum_data_size)
+{
+	XCALCSIG_SIGNATURE checksum;
+
+	saved_game_file_generate_checksum(block, checksum_data_size, &checksum);
+
+	return !csmemcmp(&checksum, block+checksum_data_size, sizeof(checksum));
+}
+
+static boolean saved_game_file_good(
+	char const *path,
+	word checksum_data_size,
+	byte *block)
+{
+	return saved_game_file_read_first_block(path, block) && saved_game_file_block_good(block, checksum_data_size);
+}
+
+static boolean saved_game_file_exists(
+	char const *path)
+{
+	return GetFileAttributesA(path) != (DWORD)-1;
+}
+
+/* the block written to the path, flushed to the card (a new file, or one
+cut to it) */
+static boolean saved_game_file_write_new(
+	char const *path,
+	void const *block)
+{
+	HANDLE handle = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	DWORD written = 0;
+	boolean success;
+
+	if (handle == INVALID_HANDLE_VALUE)
+	{
+		return FALSE;
+	}
+	success = WriteFile(handle, block, SAVED_GAME_FILE_BLOCK_SIZE, &written, NULL) &&
+		written == SAVED_GAME_FILE_BLOCK_SIZE && FlushFileBuffers(handle);
+	success = CloseHandle(handle) && success;
+
+	return success;
+}
+
+static boolean saved_game_file_write_path(
+	char const *path,
+	void const *block,
+	word checksum_data_size)
+{
+	char temporary[MAXIMUM_FILENAME_LENGTH+8];
+	char backup[MAXIMUM_FILENAME_LENGTH+8];
+	byte check[SAVED_GAME_FILE_BLOCK_SIZE];
+	byte old[SAVED_GAME_FILE_BLOCK_SIZE];
+	boolean moved_aside = FALSE;
+
+	_snprintf(temporary, sizeof(temporary), "%s" SAVED_GAME_FILE_TEMPORARY_EXTENSION, path);
+	temporary[sizeof(temporary)-1] = 0;
+	_snprintf(backup, sizeof(backup), "%s" SAVED_GAME_FILE_BACKUP_EXTENSION, path);
+	backup[sizeof(backup)-1] = 0;
+
+	/* 1. the new file beside it, read back */
+	if (!saved_game_file_write_new(temporary, block) ||
+		!saved_game_file_good(temporary, checksum_data_size, check) ||
+		csmemcmp(check, block, SAVED_GAME_FILE_BLOCK_SIZE))
+	{
+		error(_error_silent, "profile write: '%s' could not be written and read back whole; '%s' kept as it was",
+			temporary, path);
+		DeleteFileA(temporary);
+		return FALSE;
+	}
+	saved_game_file_test_crash("tmp");
+
+	/* 2. the file in place, if good, the backup */
+	if (saved_game_file_exists(path))
+	{
+		if (saved_game_file_good(path, checksum_data_size, old))
+		{
+			if (saved_game_file_exists(backup))
+			{
+				DeleteFileA(backup);
+			}
+			moved_aside = (boolean)MoveFileA(path, backup);
+		}
+		else
+		{
+			/* (a bad one is no backup: the last good one stays) */
+			error(_error_silent, "profile write: '%s' failed its checksum: replaced, '%s' kept", path, backup);
+			moved_aside = (boolean)DeleteFileA(path);
+		}
+		if (!moved_aside)
+		{
+			error(_error_silent, "profile write: '%s' could not be moved aside; kept as it was", path);
+			DeleteFileA(temporary);
+			return FALSE;
+		}
+	}
+	saved_game_file_test_crash("bak");
+
+	/* 3. the new file in its place */
+	if (!MoveFileA(temporary, path))
+	{
+		error(_error_silent, "profile write: '%s' could not take the place of '%s'", temporary, path);
+		if (!saved_game_file_exists(path) && saved_game_file_exists(backup))
+		{
+			CopyFileA(backup, path, TRUE);
+		}
+		return FALSE;
+	}
+	saved_game_file_test_crash("rename");
+
+	return TRUE;
+}
+
+boolean saved_game_file_write_block(
+	long profile_index,
+	void const *block,
+	word checksum_data_size)
+{
+	struct enumerated_saved_game_file file;
+
+	if (!get_nth_entry_in_mapfile(SAVED_GAME_FILE_INDEX_MEMORY_UNIT(profile_index),
+			(word)SAVED_GAME_FILE_INDEX_FILE_INDEX(profile_index), &file))
+	{
+		return FALSE;
+	}
+	file.path[MAXIMUM_FILENAME_LENGTH] = 0;
+
+	return saved_game_file_write_path(file.path, block, checksum_data_size);
+}
+
+/* a save folder's file whose write a crash stopped, made good from what
+that write left (see saved_game_file_write_block) before the folder is
+looked at */
+static void saved_game_file_recover(
+	char const *directory,
+	char const *name,
+	word checksum_data_size)
+{
+	char path[MAXIMUM_FILENAME_LENGTH+1];
+	char temporary[MAXIMUM_FILENAME_LENGTH+8];
+	char backup[MAXIMUM_FILENAME_LENGTH+8];
+	byte block[SAVED_GAME_FILE_BLOCK_SIZE];
+	boolean has_temporary, has_backup;
+
+	_snprintf(path, sizeof(path), "%s%s", directory, name);
+	path[sizeof(path)-1] = 0;
+	_snprintf(temporary, sizeof(temporary), "%s" SAVED_GAME_FILE_TEMPORARY_EXTENSION, path);
+	temporary[sizeof(temporary)-1] = 0;
+	_snprintf(backup, sizeof(backup), "%s" SAVED_GAME_FILE_BACKUP_EXTENSION, path);
+	backup[sizeof(backup)-1] = 0;
+	has_temporary = saved_game_file_exists(temporary);
+	has_backup = saved_game_file_exists(backup);
+	if (!has_temporary && !has_backup)
+	{
+		return;
+	}
+	if (saved_game_file_good(path, checksum_data_size, block))
+	{
+		/* (a write stopped before its new file took the place of this one) */
+		if (has_temporary)
+		{
+			DeleteFileA(temporary);
+		}
+		return;
+	}
+	if (saved_game_file_exists(path))
+	{
+		error(_error_silent, "'%s' failed its checksum (%s)", path, has_temporary || has_backup ? "recovering" : "damaged");
+	}
+	/* the write in progress, whole: its new file */
+	if (has_temporary && saved_game_file_good(temporary, checksum_data_size, block))
+	{
+		if ((!saved_game_file_exists(path) || DeleteFileA(path)) && MoveFileA(temporary, path))
+		{
+			error(_error_silent, "profile restored from its unfinished save: '%s'", path);
+			platform_log("profile restored from its unfinished save: %s", path);
+			return;
+		}
+	}
+	/* else the last good file before it */
+	if (has_backup && saved_game_file_good(backup, checksum_data_size, block))
+	{
+		if ((!saved_game_file_exists(path) || DeleteFileA(path)) && saved_game_file_write_new(path, block))
+		{
+			if (has_temporary)
+			{
+				DeleteFileA(temporary);
+			}
+			error(_error_silent, "profile restored from backup: '%s'", path);
+			platform_log("profile restored from backup: %s", path);
+			return;
+		}
+	}
+	error(_error_silent, "'%s' could not be recovered (no good copy beside it)", path);
+}
+#endif
+
 /* ---------- public code */
 
 void saved_game_files_initialize(
@@ -724,6 +1060,95 @@ boolean saved_game_file_name_unique(
 	return unique;
 }
 
+#ifdef HALO_LINUX
+/* port: z:\lastprof.txt, z:\lastmpvr.txt and z:\lastmpmp.txt as last read or
+written by this game, which alone writes them: the multiplayer lobby and
+SELECT PROFILE asked for them as they opened, an open, a read and a close
+each on the game thread (on the Vita behind a map copy's writes) */
+static struct
+{
+	char const *path;
+	boolean held;
+	boolean success;
+	char text[MAXIMUM_FILENAME_LENGTH+1];
+} saved_game_files_last_used[] =
+{
+	{ "z:\\lastprof.txt" },
+	{ "z:\\lastmpvr.txt" },
+	{ "z:\\lastmpmp.txt" },
+};
+
+static long saved_game_files_last_used_find(
+	char const *path)
+{
+	long i;
+
+	for (i = 0; i < (long)NUMBEROF(saved_game_files_last_used); i++)
+	{
+		if (!strcmp(saved_game_files_last_used[i].path, path))
+		{
+			return i;
+		}
+	}
+
+	return NONE;
+}
+
+/* TRUE: held (text and success the file's) */
+static boolean saved_game_files_last_used_get(
+	char const *path,
+	char *text,
+	boolean *success)
+{
+	long i = saved_game_files_last_used_find(path);
+
+	if (i == NONE || !saved_game_files_last_used[i].held)
+	{
+		return FALSE;
+	}
+	csmemcpy(text, saved_game_files_last_used[i].text, MAXIMUM_FILENAME_LENGTH+1);
+	*success = saved_game_files_last_used[i].success;
+
+	return TRUE;
+}
+
+/* TRUE: the file holds text already, as read or written this run (the
+Halo 3 lobby remembered its map and game type each time it went live or
+hosted: four file calls and two writes to the memory card on the game
+thread, 20 ms each on the Vita, to write what was there) */
+static boolean saved_game_files_last_used_same(
+	char const *path,
+	char const *text)
+{
+	char held[MAXIMUM_FILENAME_LENGTH+1];
+	boolean success = FALSE;
+
+	return text && saved_game_files_last_used_get(path, held, &success) && success &&
+		!strncmp(held, text, MAXIMUM_FILENAME_LENGTH);
+}
+
+/* (text NULL: forgotten, read again next time) */
+static void saved_game_files_last_used_set(
+	char const *path,
+	char const *text,
+	boolean success)
+{
+	long i = saved_game_files_last_used_find(path);
+
+	if (i == NONE)
+	{
+		return;
+	}
+	saved_game_files_last_used[i].held = text != NULL;
+	if (text)
+	{
+		csmemcpy(saved_game_files_last_used[i].text, text, MAXIMUM_FILENAME_LENGTH+1);
+		saved_game_files_last_used[i].text[MAXIMUM_FILENAME_LENGTH] = 0;
+		saved_game_files_last_used[i].success = success;
+	}
+}
+#endif
+
 void saved_game_file_remember_player1_last_used_profile_directory(
 	char const *directory_path)
 {
@@ -738,16 +1163,24 @@ void saved_game_file_remember_player1_last_used_profile_directory(
 		file_create(&file) &&
 		file_open(&file, FLAG(_permission_write_bit)))
 	{
-		if (!file_write(&file, MAXIMUM_FILENAME_LENGTH+1, directory_path))
+		boolean written = file_write(&file, MAXIMUM_FILENAME_LENGTH+1, directory_path);
+
+		if (!written)
 		{
 			error(_error_silent, "failed to write to '%s'", "z:\\lastprof.txt");
 		}
 
 		file_close(&file);
+#ifdef HALO_LINUX
+		saved_game_files_last_used_set("z:\\lastprof.txt", written ? directory_path : NULL, TRUE);
+#endif
 	}
 	else
 	{
 		error(_error_silent, "failed to open '%s'", "z:\\lastprof.txt");
+#ifdef HALO_LINUX
+		saved_game_files_last_used_set("z:\\lastprof.txt", NULL, FALSE);
+#endif
 	}
 
 	return;
@@ -764,6 +1197,13 @@ boolean saved_game_file_retrieve_player1_last_used_profile_directory(
 		1076,
 		directory_path);
 
+#ifdef HALO_LINUX
+	/* port: held in memory (saved_game_files_last_used) */
+	if (saved_game_files_last_used_get("z:\\lastprof.txt", directory_path, &success))
+	{
+		return success;
+	}
+#endif
 	if (file_reference_create_from_path(&file, "z:\\lastprof.txt", FALSE) &&
 		file_open(&file, FLAG(_permission_read_bit)))
 	{
@@ -782,6 +1222,9 @@ boolean saved_game_file_retrieve_player1_last_used_profile_directory(
 	}
 
 	directory_path[MAXIMUM_FILENAME_LENGTH] = 0;
+#ifdef HALO_LINUX
+	saved_game_files_last_used_set("z:\\lastprof.txt", directory_path, success);
+#endif
 
 	return success;
 }
@@ -795,21 +1238,42 @@ void saved_game_file_remember_last_used_multiplayer_variant_directory(
 		"c:\\halo\\SOURCE\\saved games\\saved_game_files.c",
 		1102,
 		directory_path);
+#ifdef HALO_LINUX
+	{
+		/* (the file read once a run if it was not: a read is cheaper than
+		the write) */
+		char held[MAXIMUM_FILENAME_LENGTH+1];
+
+		saved_game_file_retrieve_last_used_multiplayer_variant_directory(held);
+		if (saved_game_files_last_used_same("z:\\lastmpvr.txt", directory_path))
+		{
+			return;
+		}
+	}
+#endif
 
 	if (file_reference_create_from_path(&file, "z:\\lastmpvr.txt", FALSE) &&
 		file_create(&file) &&
 		file_open(&file, FLAG(_permission_write_bit)))
 	{
-		if (!file_write(&file, MAXIMUM_FILENAME_LENGTH+1, directory_path))
+		boolean written = file_write(&file, MAXIMUM_FILENAME_LENGTH+1, directory_path);
+
+		if (!written)
 		{
 			error(_error_silent, "failed to write to '%s'", "z:\\lastmpvr.txt");
 		}
 
 		file_close(&file);
+#ifdef HALO_LINUX
+		saved_game_files_last_used_set("z:\\lastmpvr.txt", written ? directory_path : NULL, TRUE);
+#endif
 	}
 	else
 	{
 		error(_error_silent, "failed to open '%s'", "z:\\lastmpvr.txt");
+#ifdef HALO_LINUX
+		saved_game_files_last_used_set("z:\\lastmpvr.txt", NULL, FALSE);
+#endif
 	}
 
 	return;
@@ -826,6 +1290,13 @@ boolean saved_game_file_retrieve_last_used_multiplayer_variant_directory(
 		1128,
 		directory_path);
 
+#ifdef HALO_LINUX
+	/* port: held in memory (saved_game_files_last_used) */
+	if (saved_game_files_last_used_get("z:\\lastmpvr.txt", directory_path, &success))
+	{
+		return success;
+	}
+#endif
 	if (file_reference_create_from_path(&file, "z:\\lastmpvr.txt", FALSE) &&
 		file_open(&file, FLAG(_permission_read_bit)))
 	{
@@ -844,6 +1315,9 @@ boolean saved_game_file_retrieve_last_used_multiplayer_variant_directory(
 	}
 
 	directory_path[MAXIMUM_FILENAME_LENGTH] = 0;
+#ifdef HALO_LINUX
+	saved_game_files_last_used_set("z:\\lastmpvr.txt", directory_path, success);
+#endif
 
 	return success;
 }
@@ -862,21 +1336,40 @@ void saved_game_file_remember_last_used_multiplayer_map(
 		map_name);
 	csmemset(name, 0, sizeof(name));
 	csstrncpy(name, map_name, sizeof(name) - 1);
+#ifdef HALO_LINUX
+	{
+		char held[MAXIMUM_FILENAME_LENGTH+1];
+
+		saved_game_file_retrieve_last_used_multiplayer_map(held);
+		if (saved_game_files_last_used_same("z:\\lastmpmp.txt", name))
+		{
+			return;
+		}
+	}
+#endif
 
 	if (file_reference_create_from_path(&file, "z:\\lastmpmp.txt", FALSE) &&
 		file_create(&file) &&
 		file_open(&file, FLAG(_permission_write_bit)))
 	{
-		if (!file_write(&file, MAXIMUM_FILENAME_LENGTH+1, name))
+		boolean written = file_write(&file, MAXIMUM_FILENAME_LENGTH+1, name);
+
+		if (!written)
 		{
 			error(_error_silent, "failed to write to '%s'", "z:\\lastmpmp.txt");
 		}
 
 		file_close(&file);
+#ifdef HALO_LINUX
+		saved_game_files_last_used_set("z:\\lastmpmp.txt", written ? name : NULL, TRUE);
+#endif
 	}
 	else
 	{
 		error(_error_silent, "failed to open '%s'", "z:\\lastmpmp.txt");
+#ifdef HALO_LINUX
+		saved_game_files_last_used_set("z:\\lastmpmp.txt", NULL, FALSE);
+#endif
 	}
 
 	return;
@@ -893,6 +1386,13 @@ boolean saved_game_file_retrieve_last_used_multiplayer_map(
 		1233,
 		map_name);
 
+#ifdef HALO_LINUX
+	/* port: held in memory (saved_game_files_last_used) */
+	if (saved_game_files_last_used_get("z:\\lastmpmp.txt", map_name, &success))
+	{
+		return success;
+	}
+#endif
 	if (file_reference_create_from_path(&file, "z:\\lastmpmp.txt", FALSE) &&
 		file_open(&file, FLAG(_permission_read_bit)))
 	{
@@ -911,6 +1411,9 @@ boolean saved_game_file_retrieve_last_used_multiplayer_map(
 	}
 
 	map_name[MAXIMUM_FILENAME_LENGTH] = 0;
+#ifdef HALO_LINUX
+	saved_game_files_last_used_set("z:\\lastmpmp.txt", map_name, success);
+#endif
 
 	return success;
 }
@@ -1113,8 +1616,35 @@ boolean synchronize_metadata_display_name_with_profile_name(
 									old_persistent_storage_path[MAXIMUM_FILENAME_LENGTH] = 0;
 									_snprintf(new_persistent_storage_path, MAXIMUM_FILENAME_LENGTH, "%s%s",
 										save_game_directory, game_state_get_persistent_storage_filename());
+#ifdef HALO_LINUX
+									/* port: a profile with no campaign save yet
+									(savegame.bin is made the first time its level
+									list opens) has none to copy: renamed all the same.
+									Its copy failing kept the old folder, under the old
+									name, the profile's file saying the new one */
+									if (GetFileAttributesA(old_persistent_storage_path) == (unsigned long)-1)
+										success = TRUE;
+									else
+#endif
 									success = (boolean)CopyFileA(
 										old_persistent_storage_path, new_persistent_storage_path, TRUE);
+#ifdef HALO_LINUX
+									/* port: and the custom campaign maps' save beside it
+									(game_state_save_to_persistent_storage), when there is
+									one: the renamed profile keeps it (its copy failing
+									loses that save alone, not the rename) */
+									if (success && filename - old_persistent_storage_path +
+										sizeof("savegame_custom.bin") <= sizeof(old_persistent_storage_path))
+									{
+										strcpy(filename, "savegame_custom.bin");
+										_snprintf(new_persistent_storage_path, MAXIMUM_FILENAME_LENGTH, "%s%s",
+											save_game_directory, "savegame_custom.bin");
+										new_persistent_storage_path[MAXIMUM_FILENAME_LENGTH] = 0;
+										if (GetFileAttributesA(old_persistent_storage_path) != (unsigned long)-1 &&
+											!CopyFileA(old_persistent_storage_path, new_persistent_storage_path, TRUE))
+											error(_error_silent, "the custom campaign maps' save was not copied to the renamed profile");
+									}
+#endif
 								}
 								else
 								{
@@ -1284,6 +1814,10 @@ static boolean set_nth_entry_in_mapfile(
 
 	if (saved_game_files_take_mapfile_mutex())
 	{
+#ifdef HALO_LINUX
+		/* (written: read again next time) */
+		saved_game_files_mapfile_image_forget();
+#endif
 		if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 				memory_unit_mapfile_path[memory_unit_index], FALSE) &&
 			file_open(&saved_game_files_globals.memory_unit_mapfile, FLAG(_permission_write_bit)))
@@ -1881,6 +2415,11 @@ static void enumerate_memory_units(
 								struct enumerated_saved_game_file file = {0};
 								word checksum_data_size;
 
+#ifdef HALO_LINUX
+								/* port: a profile whose write a crash stopped */
+								saved_game_file_recover(find_data.szSaveGameDirectory, "blam.sav",
+									PLAYER_PROFILE_CHECKSUM_DATA_SIZE);
+#endif
 								if (_snprintf(
 										file.path,
 										MAXIMUM_FILENAME_LENGTH,
@@ -2040,6 +2579,10 @@ static boolean enumerate_saved_game_files_start(
 		"c:\\halo\\SOURCE\\saved games\\saved_game_files.c",
 		1647,
 		!saved_game_files_globals.enumeration_in_progress);
+#ifdef HALO_LINUX
+	/* (made again: read again next time) */
+	saved_game_files_mapfile_image_forget();
+#endif
 
 	if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 			memory_unit_mapfile_path[memory_unit], FALSE) &&
@@ -2075,6 +2618,9 @@ static boolean enumerate_saved_game_files_end(
 	{
 		error(_error_silent, "failed to close memory unit mapfile for memory unit #%d", memory_unit);
 	}
+#ifdef HALO_LINUX
+	saved_game_files_mapfile_image_forget();
+#endif
 
 	saved_game_files_globals.next_enumerated_profile_index = NONE;
 	saved_game_files_globals.enumeration_in_progress = FALSE;
@@ -2121,6 +2667,24 @@ static boolean enumerate_mapfile_start(
 		1887,
 		!saved_game_files_globals.enumeration_in_progress);
 
+#ifdef HALO_LINUX
+	saved_game_files_mapfile_image.cursor = 0;
+	if (saved_game_files_mapfile_image_read(memory_unit_index))
+	{
+		if (!saved_game_files_mapfile_image.exists)
+		{
+			error(_error_silent, "failed to open memory unit mapfile for memory unit #%d", memory_unit_index);
+			return FALSE;
+		}
+		if (saved_game_files_mapfile_image.size%sizeof(struct enumerated_saved_game_file))
+		{
+			error(_error_silent, "memory unit mapfile for memory unit #%d is possibly corrupt", memory_unit_index);
+		}
+		return TRUE;
+	}
+	/* (the image held nothing: the file read as before) */
+	saved_game_files_mapfile_image.cursor = (unsigned long)NONE;
+#endif
 	if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 			memory_unit_mapfile_path[memory_unit_index], FALSE) &&
 		file_open(&saved_game_files_globals.memory_unit_mapfile, FLAG(_permission_read_bit)))
@@ -2162,6 +2726,12 @@ static boolean enumerate_mapfile_end(
 		1919,
 		memory_unit_index < NUMBER_OF_MEMORY_UNITS);
 
+#ifdef HALO_LINUX
+	if (saved_game_files_mapfile_image.cursor != (unsigned long)NONE)
+	{
+		return TRUE;
+	}
+#endif
 	success = file_close(&saved_game_files_globals.memory_unit_mapfile);
 
 	if (!success)
@@ -2184,6 +2754,21 @@ static boolean enumerate_saved_game_file_from_mapfile(
 		1940,
 		file);
 
+#ifdef HALO_LINUX
+	if (saved_game_files_mapfile_image.cursor != (unsigned long)NONE)
+	{
+		unsigned long offset = saved_game_files_mapfile_image.cursor;
+
+		if (!saved_game_files_mapfile_image.valid ||
+			offset + sizeof(struct enumerated_saved_game_file) > saved_game_files_mapfile_image.size)
+		{
+			return FALSE;
+		}
+		csmemcpy(file, (char const *)saved_game_files_mapfile_image.entries + offset, sizeof(struct enumerated_saved_game_file));
+		saved_game_files_mapfile_image.cursor += sizeof(struct enumerated_saved_game_file);
+		return TRUE;
+	}
+#endif
 	return file_read(&saved_game_files_globals.memory_unit_mapfile, sizeof(struct enumerated_saved_game_file), file);
 }
 
@@ -2207,6 +2792,12 @@ static long count_enumerated_profiles_in_mapfile(
 		2147,
 		memory_unit_index < NUMBER_OF_MEMORY_UNITS);
 
+#ifdef HALO_LINUX
+	if (saved_game_files_mapfile_image_read(memory_unit_index))
+	{
+		return saved_game_files_mapfile_image.size/sizeof(struct enumerated_saved_game_file);
+	}
+#endif
 	if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 			memory_unit_mapfile_path[memory_unit_index], FALSE) &&
 		file_get_size(&saved_game_files_globals.memory_unit_mapfile, &mapfile_size))
@@ -2421,6 +3012,10 @@ static boolean append_entry_to_mapfile(
 
 	if (saved_game_files_take_mapfile_mutex())
 	{
+#ifdef HALO_LINUX
+		/* (written: read again next time) */
+		saved_game_files_mapfile_image_forget();
+#endif
 		if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 				memory_unit_mapfile_path[memory_unit_index], FALSE) &&
 			file_open(&saved_game_files_globals.memory_unit_mapfile, FLAG(_permission_write_bit)))
@@ -2500,6 +3095,10 @@ static boolean remove_nth_entry_in_mapfile(
 
 	if (saved_game_files_take_mapfile_mutex())
 	{
+#ifdef HALO_LINUX
+		/* (written: read again next time) */
+		saved_game_files_mapfile_image_forget();
+#endif
 		if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,
 				memory_unit_mapfile_path[memory_unit_index], FALSE) &&
 			file_get_size(&saved_game_files_globals.memory_unit_mapfile, &mapfile_size) &&
@@ -2573,6 +3172,36 @@ static boolean get_nth_entry_in_mapfile(
 		1962,
 		(memory_unit_index < NUMBER_OF_MEMORY_UNITS) && (file != NULL));
 
+#ifdef HALO_LINUX
+	if (saved_game_files_take_mapfile_mutex())
+	{
+		boolean held = saved_game_files_mapfile_image_read(memory_unit_index);
+		unsigned long entry_offset = n*sizeof(struct enumerated_saved_game_file);
+
+		if (held)
+		{
+			if (!saved_game_files_mapfile_image.exists)
+			{
+				error(_error_silent, "failed to open memory unit mapfile for memory unit #%d", memory_unit_index);
+			}
+			else if (entry_offset+sizeof(struct enumerated_saved_game_file) <= saved_game_files_mapfile_image.size)
+			{
+				csmemcpy(file, (char const *)saved_game_files_mapfile_image.entries + entry_offset,
+					sizeof(struct enumerated_saved_game_file));
+				success = TRUE;
+			}
+			else
+			{
+				error(_error_silent, "invalid profile index (#%d) into memory unit #%d specified", n, memory_unit_index);
+			}
+		}
+		saved_game_files_release_mapfile_mutex();
+		if (held)
+		{
+			return success;
+		}
+	}
+#endif
 	if (saved_game_files_take_mapfile_mutex())
 	{
 		if (file_reference_create_from_path(&saved_game_files_globals.memory_unit_mapfile,

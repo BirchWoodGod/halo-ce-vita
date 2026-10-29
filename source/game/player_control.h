@@ -129,6 +129,20 @@ short player_control_get_zoom_level(
 	short local_player_index);
 real player_control_get_autoaim_level(
 	short local_player_index);
+#ifdef HALO_LINUX
+/* port: this machine's local player asked for no aim assist at all (the
+Vita's gyro on, its Gyro aim assist off; player_control.c) */
+boolean player_control_aim_assist_off(
+	short local_player_index);
+void player_control_aim_assist_note_shot(
+	short local_player_index,
+	boolean autoaimed,
+	boolean skipped);
+void player_control_aim_assist_log(
+	void);
+void player_control_aim_test_command(
+	char const *arguments);
+#endif
 void players_unzoom_all(
 	void);
 void player_control_unzoom(

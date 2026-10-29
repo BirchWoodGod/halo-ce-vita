@@ -230,6 +230,17 @@ static short report_dynamic_structure_triangle_failure = TRUE;
 
 /* ---------- public code */
 
+#ifdef HALO_LINUX
+/* (port: render.c, a menu backdrop's frame kept without its 3D) the
+window's fog offset let go as structure_render_preprocess does at its end */
+void structure_render_fog_offset_reset(
+	void)
+{
+	structure_render_globals.fog_offset_valid = FALSE;
+	structure_render_globals.fog_offset_vector = *global_zero_vector3d;
+}
+#endif
+
 void structure_render_set_fog_offset(
 	real_vector3d *vector_offset)
 {

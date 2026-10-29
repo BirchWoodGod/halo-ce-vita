@@ -125,6 +125,34 @@ given) is how many fingers came down this frame */
 unsigned long vita_touch_update(struct vita_touch_tracker *tracker, const struct vita_touch_contact *contacts,
 	int count, unsigned long long now_us, int *started);
 
+/* ---------- the menus' pointer (the front screen, while the menus are up)
+
+The game's menus take a pointer as the desktop's mouse (halo_ui_pointer.h,
+ui_widget.c): the item under it takes the focus, a click presses A on it, a
+screen's button key presses that button. On the Vita the front screen is it
+(d3d8_gxm.c halo_ui_pointer_update): a finger highlights what it is on, and
+lifted where it came down (within VITA_TAP_SLOP pixels, before
+VITA_TAP_MICROSECONDS) is a tap, the click. */
+#define VITA_TAP_SLOP 24
+#define VITA_TAP_MICROSECONDS 600000ULL
+
+struct vita_touch_pointer
+{
+	int down, id;
+	int start_x, start_y;
+	short x, y;
+	unsigned long long since;
+};
+
+/* this frame's front fingers (the first one counts; the rear pad's never)
+in the screen's pixels: nonzero while there is a pointer (a finger down,
+or the frame it lifted), *x and *y where it is in the menus' 640x480 (the
+game screen_width wide, drawn as high as the screen and centred, the menus'
+640 in its middle: negative or past 640 in its margins), *moved when it
+moved or came down, *tap on the frame a tap ended */
+int vita_touch_pointer(struct vita_touch_pointer *pointer, const struct vita_touch_contact *contacts, int count,
+	unsigned long long now_us, int screen_width, short *x, short *y, int *tap, int *moved);
+
 /* ---------- the Xbox controller's buttons */
 
 /* what a touch zone presses, and what each remappable row is: the Xbox
@@ -149,10 +177,15 @@ enum
 };
 
 /* the Xbox buttons as settings.txt values and as the panel shows them (in
-the enum's order; macros, for the panel's row initialisers) */
+the enum's order; macros, for the panel's row initialisers): each with
+what it does in play where that fits the value column in every language
+(20 characters), so that a touch zone is set to zoom without knowing it
+is the right stick's click (testers looked for a zoom choice); the
+triggers' do not fit in Spanish and are plain */
 #define VITA_XBOX_VALUES "off", "a", "b", "x", "y", "black", "white", "lt", "rt", "ls", "rs", "back"
-#define VITA_XBOX_NAMES "Off", "A", "B", "X", "Y", "Black", "White", "Left trigger", "Right trigger", \
-	"Left stick", "Right stick", "Back"
+#define VITA_XBOX_NAMES "Off", "A (jump)", "B (melee)", "X (reload, action)", "Y (switch weapon)", \
+	"Black (grenade type)", "White (flashlight)", "Left trigger", "Right trigger", "Left stick (crouch)", \
+	"Right stick (zoom)", "Back (scoreboard)"
 
 /* (two letters each, for the panel's zone diagram) */
 #define VITA_XBOX_SHORT_NAMES "", "A", "B", "X", "Y", "Bl", "Wh", "LT", "RT", "LS", "RS", "Bk"
@@ -236,11 +269,12 @@ void vita_controls_map(const struct vita_controls_config *config, struct vita_co
 /* ---------- button icons
 
 The panel's Button icons (HALO_BUTTON_ICONS, Controls > Button layout):
-Xbox, the default, leaves the game's button icons as they are; PlayStation
-shows in their place the Vita button each Xbox button is on now, the
-mapping above's (in the menus the fixed layout, in play the Button layout
-and the touch zones), drawn by the game's HUD (source/interface/hud_draw.c)
-from these */
+Xbox (the default: VITA_BUTTON_ICONS_DEFAULT, below) leaves the game's
+button icons as they are; PlayStation shows in their place the Vita button
+each Xbox button is on now, the mapping above's (in the menus the fixed
+layout, in play the Button layout and the touch zones), drawn by the game's
+HUD (source/interface/hud_draw.c) from these in the Halo 3 menus' look
+(app0:menus/halo3/glyph_atlas.png) */
 enum
 {
 	/* on no Vita button (Black in the menus, a button set to None and no
@@ -271,7 +305,14 @@ enum
 #define VITA_BUTTON_ICONS_VALUES "xbox", "playstation"
 #define VITA_BUTTON_ICONS_NAMES "Xbox", "PlayStation"
 
-/* whether HALO_BUTTON_ICONS asks for PlayStation's (Xbox if unset) */
+/* THE default of the Button icons, the one place it is set: 0 Xbox, 1
+PlayStation (an index into VITA_BUTTON_ICONS_VALUES). The settings panel's
+row starts on it (vita_settings.c), and HALO_BUTTON_ICONS unset or not
+known is it (vita_button_icons_playstation; the Linux harness's too) */
+#define VITA_BUTTON_ICONS_DEFAULT 0
+
+/* whether HALO_BUTTON_ICONS asks for PlayStation's (the default,
+VITA_BUTTON_ICONS_DEFAULT, if unset or not known) */
 int vita_button_icons_playstation(void);
 
 /* the glyph of the Vita button an Xbox controller button is on: the
@@ -327,7 +368,12 @@ enum
 /* the settings (the panel's Controls tab and Gyro settings page): HALO_GYRO off/on/zoomed/hold,
 HALO_GYRO_BUTTON (a VITA_BUTTON_VALUES name; default l), HALO_GYRO_SENS
 (percent, 1:1 at 100; default 150), HALO_GYRO_INVERT_Y 0/1, HALO_GYRO_TURN
-yaw/roll */
+yaw/roll, HALO_GYRO_ASSIST 0/1 (default 1: the stick's aim assist, its friction
+and adhesion, also on the gyro's turns; 0: no aim assist at all while the
+gyro is on, in any mode but off (vita_gyro_unassisted): none on the gyro's
+turns, none on the stick's, no autoaim bending the player's shots towards a
+target: source/game/player_control.c, source/game/aim_assist.c. With the
+gyro off the switch is ignored: Halo's own aim assist) */
 #define VITA_GYRO_DEFAULT_SENS 150
 
 struct vita_gyro_config
@@ -338,9 +384,18 @@ struct vita_gyro_config
 	float sensitivity;
 	int invert_y;
 	int turn;
+	/* the stick's aim assist on the gyro's turns too (HALO_GYRO_ASSIST);
+	off, no aim assist at all while the gyro is on */
+	int assist;
 };
 
 void vita_gyro_config_load(struct vita_gyro_config *config);
+
+/* whether the player has no aim assist at all: the gyro on (any mode but
+off: in the zoomed and hold modes too while not zoomed or held, the
+setting's own choice) and its Gyro aim assist off. With the gyro off the
+switch is ignored and the stick keeps Halo's aim assist */
+int vita_gyro_unassisted(const struct vita_gyro_config *config);
 
 /* rates below this (radians a second, after the bias: 0.75 degrees) are
 taken as none, and above it reduced by it */

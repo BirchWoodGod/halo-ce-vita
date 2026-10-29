@@ -115,6 +115,7 @@ symbols in this file:
 #include "memory/data.h"
 #include "networking/network_game_globals.h"
 #include "units/units.h"
+#include "units/units.h"
 
 /* ---------- constants */
 
@@ -1082,6 +1083,12 @@ static boolean distributed_action_valid(
 		(action->desired_zoom_level == NONE || action->desired_zoom_level >= 0);
 }
 
+/* port: the buttons another machine's message may say, the unit's control
+flags (players.c hands a player's on to unit_control as they are, which
+holds them to these): any other bit (a modified or fuzzed peer's) is
+dropped, never passed on (crossfuzzhost found one halting a debug host) */
+#define DISTRIBUTED_CONTROL_FLAGS_MASK ((1UL << NUMBER_OF_UNIT_CONTROL_FLAGS) - 1)
+
 /* the buttons of the ticks after last up to tick (control_flags newest
 first), added to pending; FALSE for a tick already had */
 static boolean distributed_add_new_ticks(
@@ -1100,7 +1107,7 @@ static boolean distributed_add_new_ticks(
 	if (!*valid || tick - *last < count)
 		count = (short)(*valid ? tick - *last : 1);
 	for (index = 0; index < count; index++)
-		*pending |= control_flags[index];
+		*pending |= control_flags[index] & DISTRIBUTED_CONTROL_FLAGS_MASK;
 	*valid = TRUE;
 	*last = tick;
 	return TRUE;
@@ -1133,6 +1140,7 @@ void update_server_handle_distributed_input(
 	update_server_distributed_inputs[absolute_index].received_time =
 		game_time_initialized() ? game_time_get() : 0;
 	queue->current_action = *action;
+	queue->current_action.control_flags &= DISTRIBUTED_CONTROL_FLAGS_MASK;
 }
 
 long update_server_ticked_update_number(
@@ -1154,6 +1162,26 @@ struct player_action const *update_server_update_actions(
 	return update->update.actions;
 }
 
+/* port: (the dedicated server's bots, port/linux/game/bots.c) the action a
+bot played at the update its host's last tick ran, in place of its queue's
+idle one: what the host relays of that player (network_distributed.c) is
+what its tick ran */
+void update_server_set_ticked_action(
+	short player_index,
+	struct player_action const *action)
+{
+	long update_number = update_server_ticked_update_number();
+	struct update *update = update_server_globals.initialized && update_number != NONE ?
+		update_server_get_update(update_number) : NULL;
+
+	if (!update || update->update_number != update_number || player_index < 0 ||
+		player_index >= update->update.action_count || player_index >= MAXIMUM_NUMBER_OF_PLAYERS)
+	{
+		return;
+	}
+	update->update.actions[player_index] = *action;
+}
+
 void update_client_handle_relayed_action(
 	short player_index,
 	long update_number,
@@ -1168,6 +1196,7 @@ void update_client_handle_relayed_action(
 		&update_client_relayed_actions[player_index].pending_control_flags))
 	{
 		update_client_relayed_actions[player_index].action = *action;
+		update_client_relayed_actions[player_index].action.control_flags &= DISTRIBUTED_CONTROL_FLAGS_MASK;
 	}
 }
 

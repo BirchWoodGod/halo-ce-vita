@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Online (ElDewrito): KEYBOARD & MOUSE, the PC's keyboard and mouse bindings and the
+mouse's settings (port/linux/game/controls_menu.c, "port keys ...", the functions behind each style's
+page; port/linux/include/halo_key_bindings.h, config.toml's [controls.keyboard]). online/keys/screen
+stands for the Halo 3 page (h3/keys/screen, halo3/keys.xml: menu_tags.c menu_tags_online), opened from
+CUSTOMIZATION's CONTROLS tab (customize.xml's KEYBOARD & MOUSE row, a PC's alone). Laid out the online
+way, as CUSTOMIZATION: the header band with the title, the rows at the left with the orange bar - SHOW
+(left and right: the movement, weapon or other actions' keys, or the mouse's settings), each action
+with its first and second keys, the chosen one between > < -, the help under them, the buttons at
+the foot. A binds (the next key or mouse button: Escape cancels, Delete clears), X clears, Y the MCC
+defaults. The other widgets are named online/keyspage/..., so that only the screen stands for a
+Halo 3 one. The art is this folder's own and the Halo 3 set's. -->
+<menus>
+	<strings name="online/keys_text">
+		<string text="KEYBOARD &amp; MOUSE"/>
+		<string text="This PC's keys and mouse, for every profile. Changes are kept at once."/>
+		<string text="SHOW"/>
+		<string text="RESET TO MCC DEFAULTS"/>
+		<string text="Close"/>
+		<string text="Bind"/>
+		<string text="Clear"/>
+		<string text="Defaults"/>
+		<string text="FIRST"/>
+		<string text="SECOND"/>
+	</strings>
+	<widget name="online/keyspage/label" type="text" left="0" top="0" width="250" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2"/>
+	<widget name="online/keyspage/key1" type="text" left="250" top="0" width="155" height="18" align="center" font="online/font_item" color="#FFAFC4DE" text_y="2" text_flags="no_focus_test"/>
+	<widget name="online/keyspage/key2" type="text" left="405" top="0" width="155" height="18" align="center" font="online/font_item" color="#FFAFC4DE" text_y="2" text_flags="no_focus_test"/>
+	<widget name="online/keyspage/op_row1" width="560" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="online/keyspage/label"/>
+		<child widget="online/keyspage/key1"/>
+		<child widget="online/keyspage/key2"/>
+	</widget>
+	<widget name="online/keyspage/op_row2" width="560" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="online/keyspage/label"/>
+		<child widget="online/keyspage/key1"/>
+		<child widget="online/keyspage/key2"/>
+	</widget>
+	<widget name="online/keyspage/op_row3" width="560" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="online/keyspage/label"/>
+		<child widget="online/keyspage/key1"/>
+		<child widget="online/keyspage/key2"/>
+	</widget>
+	<widget name="online/keyspage/op_row4" width="560" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="online/keyspage/label"/>
+		<child widget="online/keyspage/key1"/>
+		<child widget="online/keyspage/key2"/>
+	</widget>
+	<widget name="online/keyspage/op_row5" width="560" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="online/keyspage/label"/>
+		<child widget="online/keyspage/key1"/>
+		<child widget="online/keyspage/key2"/>
+	</widget>
+	<widget name="online/keyspage/op_row6" width="560" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="online/keyspage/label"/>
+		<child widget="online/keyspage/key1"/>
+		<child widget="online/keyspage/key2"/>
+	</widget>
+	<widget name="online/keyspage/op_row7" width="560" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a" run="port keys accept"/>
+		<on event="left stick_left" run="port keys left"/>
+		<on event="right stick_right" run="port keys right"/>
+		<child widget="online/keyspage/label"/>
+		<child widget="online/keyspage/key1"/>
+		<child widget="online/keyspage/key2"/>
+	</widget>
+	<widget name="online/keyspage/group_label" type="text" left="0" top="0" width="250" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/keys_text" string_index="2"/>
+	<widget name="online/keyspage/value" type="text" left="250" top="0" width="310" height="18" align="center" font="online/font_item" color="#FFF2F6FA" text_y="2" text_flags="no_focus_test"/>
+	<widget name="online/keyspage/arrow_left" left="296" top="1" width="8" height="16" bitmap="h3/arrow_left"/>
+	<widget name="online/keyspage/arrow_right" left="506" top="1" width="8" height="16" bitmap="h3/arrow_right"/>
+	<widget name="online/keyspage/op_group" width="560" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a right stick_right" run="port keys right"/>
+		<on event="left stick_left" run="port keys left"/>
+		<child widget="online/keyspage/group_label"/>
+		<child widget="online/keyspage/value"/>
+		<child widget="online/keyspage/arrow_left"/>
+		<child widget="online/keyspage/arrow_right"/>
+	</widget>
+	<widget name="online/keyspage/reset_label" type="text" left="0" top="0" width="560" height="18" font="online/font_item" color="#FFF0F4F8" text_x="7" text_y="2" string_list="online/keys_text" string_index="3"/>
+	<widget name="online/keyspage/op_reset" width="560" height="18" flags="pass_unhandled_to_focused_child" bitmap="online/item">
+		<on event="a" run="port keys reset"/>
+		<child widget="online/keyspage/reset_label"/>
+	</widget>
+	<widget name="online/keyspage/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port keys"/>
+		<child widget="online/keyspage/op_group" x="0" y="0"/>
+		<child widget="online/keyspage/op_row1" x="0" y="36"/>
+		<child widget="online/keyspage/op_row2" x="0" y="55"/>
+		<child widget="online/keyspage/op_row3" x="0" y="74"/>
+		<child widget="online/keyspage/op_row4" x="0" y="93"/>
+		<child widget="online/keyspage/op_row5" x="0" y="112"/>
+		<child widget="online/keyspage/op_row6" x="0" y="131"/>
+		<child widget="online/keyspage/op_row7" x="0" y="150"/>
+		<child widget="online/keyspage/op_reset" x="0" y="176"/>
+	</widget>
+
+	<widget name="online/keyspage/title" type="text" left="-70" top="12" width="500" height="34" font="online/font_header" color="#FFF2F6FA" string_list="online/keys_text" string_index="0"/>
+	<widget name="online/keyspage/subtitle" type="text" left="-70" top="56" width="560" height="16" font="online/font_small" color="#FFC4D2E2" string_list="online/keys_text" string_index="1"/>
+	<widget name="online/keyspage/first" type="text" left="180" top="112" width="155" height="14" align="center" font="online/font_small" color="#FF9FB6CC" string_list="online/keys_text" string_index="8"/>
+	<widget name="online/keyspage/second" type="text" left="335" top="112" width="155" height="14" align="center" font="online/font_small" color="#FF9FB6CC" string_list="online/keys_text" string_index="9"/>
+	<widget name="online/keyspage/rule" left="-70" top="294" width="560" height="2" bitmap="online/rule"/>
+	<widget name="online/keyspage/keys_help" type="text" left="-70" top="302" width="560" height="34" font="online/font_small" color="#FFC4D2E2" text_x="7"/>
+	<widget name="online/keyspage/keys_status" type="text" left="-70" top="344" width="560" height="34" font="online/font_small" color="#FFF0B070" text_x="7"/>
+	<widget name="online/keyspage/close" type="text" left="-50" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/keys_text" string_index="4"/>
+	<widget name="online/keyspage/bind" type="text" left="34" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/keys_text" string_index="5"/>
+	<widget name="online/keyspage/x_butn" left="102" top="452" width="16" height="16" bitmap="h3/glyph_square"/>
+	<widget name="online/keyspage/clear" type="text" left="122" top="451" width="60" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/keys_text" string_index="6"/>
+	<widget name="online/keyspage/y_butn" left="190" top="452" width="16" height="16" bitmap="h3/glyph_triangle"/>
+	<widget name="online/keyspage/defaults" type="text" left="210" top="451" width="110" height="18" font="online/font_item" color="#FFF0F4F8" text_y="1" string_list="online/keys_text" string_index="7"/>
+	<widget name="online/keys/screen" flags="pass_unhandled_to_focused_child" scene="multiplayer -40 -1.8 15.5 25 0" backdrop="multiplayer 29.602 -104.323 59.258 -112.75 5.92 0 70">
+		<on event="created" run="port keys init"/>
+		<on event="created" run="port h3 scene"/>
+		<on event="deleted" run="port keys close"/>
+		<on event="b back" run="port keys back" back="true"/>
+		<on event="x" run="port keys clear"/>
+		<on event="y" run="port keys reset"/>
+		<child widget="online/custom/haze"/>
+		<child widget="online/custom/header"/>
+		<child widget="online/keyspage/title"/>
+		<child widget="online/keyspage/subtitle"/>
+		<child widget="online/keyspage/first"/>
+		<child widget="online/keyspage/second"/>
+		<child widget="online/keyspage/rule"/>
+		<child widget="online/keyspage/keys_help"/>
+		<child widget="online/keyspage/keys_status"/>
+		<child widget="online/custom/foot"/>
+		<child widget="online/custom/b_butn"/>
+		<child widget="online/keyspage/close"/>
+		<child widget="online/custom/a_butn"/>
+		<child widget="online/keyspage/bind"/>
+		<child widget="online/keyspage/x_butn"/>
+		<child widget="online/keyspage/clear"/>
+		<child widget="online/keyspage/y_butn"/>
+		<child widget="online/keyspage/defaults"/>
+		<child widget="online/keyspage/list" x="-70" y="92"/>
+	</widget>
+</menus>

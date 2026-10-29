@@ -42,6 +42,9 @@ pixels as they arrive, and samples them in this build's order
 
 #include <stdlib.h>
 
+/* (cache_files.c) */
+boolean tag_index_is_group(long tag_index, long group_tag);
+
 /* ---------- constants */
 
 enum
@@ -107,7 +110,10 @@ nothing. */
 struct shader_model_maps
 {
 	struct shader shader;
-	byte reserved28[0x7C];
+	/* (bit 6: MCC's "use xbox multipurpose channel order",
+	SHADER_MODEL_XBOX_MULTIPURPOSE_BIT) */
+	word model_flags;
+	byte reserved2A[0x7A];
 	struct tag_reference base_map;
 	byte reservedB4[0x8];
 	struct tag_reference multipurpose_map;
@@ -117,6 +123,8 @@ struct shader_model_maps
 	struct tag_reference reflection_cube_map;
 };
 
+typedef char verify_shader_model_maps_model_flags_offset[
+	offsetof(struct shader_model_maps, model_flags) == 0x28 ? 1 : -1];
 typedef char verify_shader_model_maps_base_map_index_offset[
 	offsetof(struct shader_model_maps, base_map.index) == 0xB0 ? 1 : -1];
 typedef char verify_shader_model_maps_multipurpose_map_index_offset[
@@ -168,6 +176,8 @@ struct reordered_bitmap
 	build's: the renderer has one order for each texture, so this one keeps
 	its channels as they are */
 	boolean drawn_otherwise;
+	/* first listed by a model shader (else a HUD meter): for the load log */
+	boolean multipurpose;
 };
 
 struct custom_edition_bitmaps_globals
@@ -301,6 +311,7 @@ static boolean reordered_bitmap_add(
 	bitmap->handle = handle;
 	bitmap->channel_order = channel_order;
 	bitmap->drawn_otherwise = FALSE;
+	bitmap->multipurpose = FALSE;
 
 	return TRUE;
 }
@@ -320,6 +331,42 @@ static void reordered_bitmap_drawn_otherwise(
 	return;
 }
 
+/* (port) MCC's meter flag "use xbox shading" (Invader's
+HUDInterfaceMeterFlags, after the five the Xbox has: hud_draw.c) */
+#define HUD_METER_USE_XBOX_SHADING_BIT 5
+/* (port) A model shader's flag of MCC's tools (Invader: shader_model flags
+bit 6, "use xbox multipurpose channel order"): its multipurpose map's masks
+are in the Xbox's channels, as MCC's own model shaders keep them (most of
+Halo: CE Anniversary's: 109 of a10's 128, and Ruby's Rebalanced Halo: CE's,
+natively and converted), so they are not Halo PC's to reorder (GulchCE's
+mcc_bitmaps.c, CC0, reads the flag so). Halo PC's tools leave it clear. */
+#define SHADER_MODEL_XBOX_MULTIPURPOSE_BIT 6
+
+/* (port) the bitmap of the HUD meter `meter`, listed in Halo PC's meter
+order - its shape in colour, the order it fills in alpha - unless the meter
+says it is shaded as the Xbox's: Halo: The Master Chief Collection's own
+meters (every meter of Ruby's Rebalanced Halo: CE, natively and converted:
+hud_unit_meters and hud_ammo_meters hold the order they fill in luminance,
+256 values, the shape in alpha, 40-50) are laid out as the Xbox's, and
+reordered as Halo PC's their fill order became their shape: a meter drawn
+full above three quarters and empty below, so the shield, health and
+ammunition seemed not to change (the owner's Vita, October 10 2026). Such a
+bitmap is listed in this build's order, so a Halo PC meter drawing it too
+leaves it as it is. */
+static boolean hud_meter_bitmap_add(
+	byte *tag_cache,
+	unsigned long loaded_bytes,
+	struct meter_hud_element_definition const *meter)
+{
+	return reordered_bitmap_add(
+		tag_cache,
+		loaded_bytes,
+		meter->meter_bitmap.index,
+		TEST_FLAG(meter->meter_flags, HUD_METER_USE_XBOX_SHADING_BIT) ?
+			_custom_edition_channels_xbox :
+			_custom_edition_channels_hud_meter);
+}
+
 /* the bitmaps of the HUD meters of a unit HUD interface */
 static boolean unit_hud_meters_add(
 	byte *tag_cache,
@@ -327,8 +374,8 @@ static boolean unit_hud_meters_add(
 	struct unit_hud_interface_definition *hud)
 {
 	boolean added =
-		reordered_bitmap_add(tag_cache, loaded_bytes, hud->shield_meter.meter.meter_bitmap.index, _custom_edition_channels_hud_meter) &&
-		reordered_bitmap_add(tag_cache, loaded_bytes, hud->health_meter.meter.meter_bitmap.index, _custom_edition_channels_hud_meter);
+		hud_meter_bitmap_add(tag_cache, loaded_bytes, &hud->shield_meter.meter) &&
+		hud_meter_bitmap_add(tag_cache, loaded_bytes, &hud->health_meter.meter);
 	long meter_index;
 
 	for (meter_index = 0; added && meter_index < hud->auxilary_meters.count; meter_index++)
@@ -345,7 +392,7 @@ static boolean unit_hud_meters_add(
 		{
 			break;
 		}
-		added = reordered_bitmap_add(tag_cache, loaded_bytes, meter->panel.meter.meter_bitmap.index, _custom_edition_channels_hud_meter);
+		added = hud_meter_bitmap_add(tag_cache, loaded_bytes, &meter->panel.meter);
 	}
 
 	return added;
@@ -420,7 +467,7 @@ static boolean weapon_hud_meters_add(
 		{
 			break;
 		}
-		added = reordered_bitmap_add(tag_cache, loaded_bytes, meter->meter_element.meter_bitmap.index, _custom_edition_channels_hud_meter);
+		added = hud_meter_bitmap_add(tag_cache, loaded_bytes, &meter->meter_element);
 	}
 
 	return added;
@@ -615,6 +662,8 @@ boolean custom_edition_reordered_bitmaps_find(
 	long multipurpose_count = 0;
 	long meter_count = 0;
 	long kept_count = 0;
+	long xbox_meter_count = 0;
+	long xbox_multipurpose_count = 0;
 	long bitmap_index;
 
 	/* the bitmaps drawn in Halo PC's orders: model shaders' multipurpose
@@ -622,9 +671,21 @@ boolean custom_edition_reordered_bitmaps_find(
 	tag_index = NONE;
 	while ((shader = custom_edition_cache_tag_next(tag_cache, loaded_bytes, SHADER_MODEL_GROUP_TAG, sizeof(*shader), &tag_index)) != NULL)
 	{
-		if (!reordered_bitmap_add(tag_cache, loaded_bytes, shader->multipurpose_map.index, _custom_edition_channels_multipurpose))
+		long count = globals->reordered_bitmap_count;
+
+		if (!reordered_bitmap_add(
+			tag_cache,
+			loaded_bytes,
+			shader->multipurpose_map.index,
+			TEST_FLAG(shader->model_flags, SHADER_MODEL_XBOX_MULTIPURPOSE_BIT) ?
+				_custom_edition_channels_xbox :
+				_custom_edition_channels_multipurpose))
 		{
 			return FALSE;
+		}
+		if (globals->reordered_bitmap_count > count)
+		{
+			globals->reordered_bitmaps[count].multipurpose = TRUE;
 		}
 	}
 	tag_index = NONE;
@@ -670,7 +731,21 @@ boolean custom_edition_reordered_bitmaps_find(
 	{
 		struct reordered_bitmap *bitmap = &globals->reordered_bitmaps[bitmap_index];
 
-		if (bitmap->drawn_otherwise)
+		if (bitmap->channel_order == _custom_edition_channels_xbox)
+		{
+			/* (an Xbox-shaded meter's, or the multipurpose map of a model
+			shader with MCC's flag: its channels are this build's) */
+			if (bitmap->multipurpose)
+			{
+				xbox_multipurpose_count++;
+			}
+			else
+			{
+				xbox_meter_count++;
+			}
+			*bitmap = globals->reordered_bitmaps[--globals->reordered_bitmap_count];
+		}
+		else if (bitmap->drawn_otherwise)
 		{
 			error(
 				_error_silent,
@@ -699,6 +774,20 @@ boolean custom_edition_reordered_bitmaps_find(
 		multipurpose_count,
 		meter_count,
 		kept_count);
+	if (xbox_meter_count)
+	{
+		error(
+			_error_silent,
+			"custom edition: %ld HUD meters are shaded as the Xbox's (MCC's flag) and keep their channels",
+			xbox_meter_count);
+	}
+	if (xbox_multipurpose_count)
+	{
+		error(
+			_error_silent,
+			"custom edition: %ld multipurpose maps are in the Xbox's channel order (MCC's model shader flag) and keep their channels",
+			xbox_multipurpose_count);
+	}
 
 	return TRUE;
 }
@@ -738,6 +827,15 @@ void custom_edition_bitmap_pixels_arrived(
 		sizeof(*group));
 	long bitmap_index;
 
+	/* (the map's tag table grown since it loaded - the in-game screens'
+	tags after the map's, menu_tags.c - is no longer in the tag cache: the
+	game's table, which has the map's tags and the copies of its bitmaps
+	after them. Without it no bitmap of the map was rebuilt: every texture
+	garbled, RC4 on snowcast) */
+	if (!group && tag_index_is_group(tag_index, BITMAP_GROUP_TAG))
+	{
+		group = (struct bitmap_group *)tag_get(BITMAP_GROUP_TAG, tag_index);
+	}
 	if (!group)
 	{
 		return;

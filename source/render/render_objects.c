@@ -419,6 +419,7 @@ struct render_lighting *object_get_cached_render_lighting(
 in the frames fine_profile.h picks (HALO_PROFILE_SAMPLE) */
 #include <stdlib.h>
 #include "fine_profile.h"
+#include "player_cosmetics.h"
 void platform_log(const char *format, ...);
 void halo_render_model_profile_report(unsigned long frames);
 enum
@@ -676,6 +677,21 @@ static void find_rendered_objects(
 		object_unmarked_function,
 		object_mark_function);
 
+#ifdef HALO_LINUX
+	/* port: the dead bodies' ragdolls, found in the clusters they lie in,
+	wherever the game has their bodies (port/linux/game/ragdolls.c,
+	render_interpolation.c) */
+	{
+		short render_ragdolls_find(long *result, short maximum, boolean (*unmarked)(long object_index),
+			long (*mark)(long object_index));
+
+		render_object_globals.rendered_object_count += render_ragdolls_find(
+			&render_object_globals.rendered_object_indices[render_object_globals.rendered_object_count],
+			MAXIMUM_RENDERED_OBJECTS - render_object_globals.rendered_object_count,
+			object_unmarked_function,
+			object_mark_function);
+	}
+#endif
 	object_marker_end();
 
 	if (render_object_globals.rendered_object_count == MAXIMUM_RENDERED_OBJECTS &&
@@ -1138,6 +1154,10 @@ static void render_object_list(
 					}
 					if (big_enough && OBJECTS_PROFILE_ON())
 						objects_profile_models++;
+#ifdef HALO_LINUX
+					/* (the platform's visor colour: player_cosmetics.h) */
+					player_cosmetics_render_object_begin(object_index);
+#endif
 					if (big_enough)
 					render_model(
 						definition->object.model.index,
@@ -1162,6 +1182,9 @@ static void render_object_list(
 						object_index,
 						object->object.forced_shader_permutation_index,
 						data->no_planar_fog ? FLAG(_render_model_no_planar_fog_bit) : 0);
+#ifdef HALO_LINUX
+					player_cosmetics_render_object_end();
+#endif
 					OBJECTS_PROFILE_ADD(_objects_profile_models, model_before);
 #ifdef HALO_LINUX
 					if (big_enough && legs)

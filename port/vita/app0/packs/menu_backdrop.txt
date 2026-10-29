@@ -1,0 +1,26 @@
+# The live backdrop behind the Online menus (port/linux/game/menu_backdrop.c):
+# the campaign mission "Halo" (a30) from the player's own a30.map - its first
+# structure bsp (the crash site, the Forerunner tower, the waterfall, the
+# lakeshore), its night skies, its scenery (the trees and rocks) and its
+# grass, and its ambience: the bsp's background sounds and sound environments (each cluster's night:
+# wind, insects, birds) and its sound scenery (the waterfall, the water) -
+# none of its AI, scripts, weapons or vehicles. Its scenery's own looping
+# effects come with it (their effects, particles and particle systems): the
+# crashed lifepods' lingering smoke, the debris' smoulder, the waterfalls'
+# spray, run where the menus' camera is (players.c's potentially visible
+# clusters: every one of the backdrop's bsp). Contrails, damage, decals,
+# projectiles and the rest are left out.
+pack menu_backdrop
+map a30
+backdrop
+tag scnr levels\a30\a30
+tag sbsp levels\a30\a30_a
+strip cont
+strip jpt!
+strip deca
+strip foot
+strip udlg
+strip mgs2
+strip spla
+strip proj
+strip actv

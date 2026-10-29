@@ -66,12 +66,17 @@ static void test_names(void)
 {
 	static char const *const good[] = { "mygulch", "My_Gulch-2", "a.b", "x", "beavercreek_halo3", "abcdefghijklmnopqrstuvwxy", "console", "com10", "uix",
 		/* (Custom Edition maps' names, as they go about) */
-		"Race-Track-#1", "[h3] coldsnap", "with space", "semi;colon", "it's (v2)", "a+b=c!", "{x}~@$&^`", };
+		"Race-Track-#1", "[h3] coldsnap", "with space", "semi;colon", "it's (v2)", "a+b=c!", "{x}~@$&^`",
+		/* (port: mcc_ and a name no stock map has, a Custom Edition map's) */
+		"mcc_mygulch", "mcc", "mcc_", "mccbloodgulch", };
 	static char const *const bad[] = {
 		"", ".", "..", "../x", "a/b", "a\\b", "c:x", "a..b", ".hidden", "trailing.", "abcdefghijklmnopqrstuvwxyz",
 		"bloodgulch", "BloodGulch", "a10", "D40", "bitmaps", "Sounds", "LOC", "ui", "caf\xc3\xa9",
 		"tab\there", "new\nline", "star*", "q?", "pipe|", "con", "CON.x", "nul", "com1", "lpt9.a",
 		"100%", "%s%n", "\"quoted\"", "<x>", " leading", "trailing ", "del\x7f", "a,b",
+		/* (port: MCC's own maps' names, the player's own files: never shared,
+		port/linux/game/mcc_content.h) */
+		"mcc_bloodgulch", "MCC_BloodGulch", "mcc_a10", "mcc_d40", "mcc_timberland", "mcc_icefields", "Mcc_Infinity",
 	};
 	char field[MAP_SHARE_NAME_BYTES];
 	char name[MAP_SHARE_NAME_BYTES];

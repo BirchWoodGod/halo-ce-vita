@@ -63,6 +63,11 @@ static struct
 	unsigned int pitch_frames;
 	/* frames copied */
 	unsigned int copies;
+	/* held (paused) from its first frame until the game draws it, and
+	its sound kept quiet until then (vita_movie_open, vita_movie_copy) */
+	int held;
+	volatile int shown;
+	unsigned long long opened_us;
 } movie;
 
 /* the decoder's frame memory (movie_allocate_frame): how much of it can be
@@ -271,7 +276,10 @@ static int audio_thread(SceSize arguments_size, void *arguments)
 					vita_host_log(message);
 				}
 			}
-			if (movie.audio_port >= 0)
+			/* (before the first picture is drawn, the sound the player
+			gave while it started is let go, not played: picture and sound
+			start together, vita_movie_copy) */
+			if (movie.audio_port >= 0 && movie.shown)
 				sceAudioOutOutput(movie.audio_port, frame.pData);
 		}
 		else
@@ -385,6 +393,20 @@ int vita_movie_open(const char *path, unsigned long *width, unsigned long *heigh
 		else
 			sceKernelDelayThread(1000);
 	}
+	/* Held at its first frame until the game draws it (vita_movie_copy).
+	The player runs on its own clock and its sound thread plays at once,
+	while the picture waits for the game's next frame: the first frames of
+	the game's start can take seconds (1.1.1-insider.21's first frame after
+	the intro opened took 6 s on the owner's Vita, the saved game files'
+	mutex held while the game's 27 game types were written), and the
+	intro's sound ran on over a black screen until the picture caught up
+	(xal, insider.21). Without a first frame (a player that gave none in
+	2 s) it plays at once, as before */
+	movie.opened_us = vita_host_time_us();
+	if (movie.frame_valid && sceAvPlayerPause(movie.player) >= 0)
+		movie.held = 1;
+	else
+		movie.shown = 1;
 	movie.width = movie.frame_valid ? movie.frame.details.video.width : 640;
 	movie.height = movie.frame_valid ? movie.frame.details.video.height : 480;
 	movie.pitch = ALIGN(movie.width, 16);
@@ -486,6 +508,18 @@ void vita_movie_copy(void *destination, long pitch, unsigned long width, unsigne
 	if (!movie.open || !movie.frame_valid)
 		return;
 	movie.frame_pending = 0;
+	if (movie.held)
+	{
+		/* the first picture drawn: the player and its sound go on from it */
+		char message[96];
+
+		movie.held = 0;
+		sceAvPlayerResume(movie.player);
+		movie.shown = 1;
+		snprintf(message, sizeof(message), "movie: started with its first picture, held %llu ms for the game's frame",
+			(copy_from - movie.opened_us) / 1000ull);
+		vita_host_log(message);
+	}
 	{
 		/* (debug) HALO_MOVIE_DUMP=n: the n-th frame's raw NV12 (all of the
 		decoder's memory from the frame on, up to 4 MB) and the converted

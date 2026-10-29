@@ -39,10 +39,11 @@ boolean network_game_server_game_is_open(
 /* joining a distributed game in progress (network_server_manager.c) */
 boolean network_game_server_accepts_late_joins(
 	struct network_game_server *server);
-#ifdef HALO_DEDICATED_SERVER
-/* (the dedicated server) a join asked while the game goes back to its lobby
-(over, or the scores): held, and answered once the lobby is up; FALSE if not
-held (answered now, as before) */
+#ifdef HALO_LINUX
+/* a join asked while the game goes back to the dedicated server's lobby
+(over, or the scores), or while a host from the menus is still choosing
+its map (network_game_server_port_map_pending): held, and answered once the
+lobby is up or the map chosen; FALSE if not held (answered now, as before) */
 boolean network_game_server_hold_join(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *machine,
@@ -92,6 +93,11 @@ boolean network_game_server_client_machine_is_joined_to_game(
 boolean network_game_server_accept_client_machine_into_game(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *client_machine);
+/* port: a player's icon_index as the host keeps it: the flaming helmet's
+claim (NETWORK_PLAYER_FLAME_CLAIM, players.h) or NONE, nothing else
+(port/linux/src/p2p_flame.inc) */
+void network_game_server_flame_claim(
+	struct network_player *player);
 boolean network_game_server_add_player_to_game(
 	struct network_game_server *server,
 	struct network_game_server_client_machine *client_machine,
@@ -141,6 +147,19 @@ struct network_game_server_client_machine *network_game_server_get_client_machin
 struct network_game_server_client_machine *network_game_server_get_client_machine_at_address(
 	struct network_game_server *server,
 	unsigned long address);
+/* port: a joined client machine's latest distributed datagram came from
+this address and port (network_server_message_handler.c); and where the
+host's datagrams to that machine go: there in a game of OpenCE's network
+version 31 and after, while it is the machine's connection's address,
+else the connection's address at the standard client port (docs/opence-net32-spec.md 6.3) */
+void network_game_server_note_datagram_source(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *client_machine,
+	struct transport_address const *source_address);
+void network_game_server_datagram_destination(
+	struct network_game_server *server,
+	struct network_game_server_client_machine *client_machine,
+	struct transport_address *address);
 struct network_game *network_game_server_get_game(
 	struct network_game_server *server);
 boolean network_game_server_remove_machine_from_game(

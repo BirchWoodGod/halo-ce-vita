@@ -1,0 +1,383 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Forge's screens over the game (port/linux/game/forge.c), built into each level's map with the
+pause screen (ingame.txt; its fonts and pictures are halo3/pause.xml's, the same set):
+- the object browser (Square, as the monitor: forge.c opens it), Halo Online's and the mockup's
+  window at the right over the running game, which it does not pause, as Halo 3's does not: the
+  title strip with the budget, the crumb (OBJECTS > VEHICLES), the list with the orange bar and the
+  count placed, the pane on the one chosen, the button strip. The categories first, A opens one, L
+  and R step through them, A on an object places it in the monitor's hand, B goes back one level
+  (closing it from the categories), Square closes it;
+- the Forge menu, Start in a Forge game (menu_tags.c opens it for the level's pause screen): resume,
+  the monitor or the Spartan, save the map variant (its name typed on the system's keyboard: port
+  forge save), undo and redo (forge.c's history), snapping on or off, every placed character's AI
+  on or off, the dead characters cleared out of the layout (they hold their places in the AI
+  budget until then), every character cleared (asked first), a new round (Halo 3's Restart Round: the map reset, the layout placed again), leave
+  (asked first), the controls at the right; what the last of them came to said under the menu;
+- the object's properties (Square while holding an object you placed): its team, respawn time and
+  whether it is placed at the start, its exact angles (yaw, pitch, roll: left and right step them,
+  by rotate mode's snapping or 15 degrees) and their reset, and a character's AI team and AI on or
+  off (those two rows hidden for any other object), A or left and right to change one, B to close;
+  kept in the map variant. A character's RESPAWN is NEVER or 10, 30, 60, 120 S: dead, it is placed
+  again that long after (map variant version 3); opened from its spawn marker too (R takes the
+  marker, Square its character's properties: forge_markers.inc);
+- the question before leaving.
+The art is this folder's own (tools/halo3_menu_art.py). -->
+<menus>
+	<bitmap name="h3/glyph_square">
+		<frame png="halo3/glyph_square.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="h3/glyph_l">
+		<frame png="halo3/glyph_l.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="h3/glyph_r">
+		<frame png="halo3/glyph_r.png" width="16" height="16"/>
+	</bitmap>
+	<bitmap name="h3/browser_row">
+		<frame png="halo3/item_off.png" width="128" height="16"/>
+		<frame png="halo3/row_on.png" width="128" height="16"/>
+	</bitmap>
+	<strings name="h3/forge_menu">
+		<string text="OBJECT BROWSER"/>
+		<string text="Place"/>
+		<string text="Back"/>
+		<string text="Category"/>
+		<string text="RESUME"/>
+		<string text="LEAVE FORGE"/>
+		<string text="CONTROLS"/>
+		<string text="LEAVE FORGE?"/>
+		<string text="Anything not saved is lost when you leave.\nSAVE MAP VARIANT keeps what you placed."/>
+		<string text="Leave"/>
+		<string text="SAVE MAP VARIANT"/>
+		<string text="OBJECT PROPERTIES"/>
+		<string text="Change"/>
+		<string text="Done"/>
+		<string text="NEW ROUND"/>
+		<string text="CLEAR ALL AI?"/>
+		<string text="Every character you placed is removed, alive or dead.\nThey don't come back next round."/>
+		<string text="Clear"/>
+	</strings>
+
+	<!-- the object browser: its rows (a name, a count), written by port forge browser -->
+	<widget name="h3/forge/browser/row_name" type="text" left="8" top="1" width="172" height="17" font="h3/font_item" color="#FFC5D0DD"/>
+	<widget name="h3/forge/browser/row_count" type="text" left="176" top="2" width="70" height="15" align="right" font="h3/font_small" color="#FF77879A"/>
+	<widget name="h3/forge/browser/row_0" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/row_1" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/row_2" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/row_3" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/row_4" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/row_5" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/row_6" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/row_7" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/row_8" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/row_9" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/row_10" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/row_11" width="252" height="18" bitmap="h3/browser_row">
+		<on event="a" run="port forge browser choose"/>
+		<child widget="h3/forge/browser/row_name"/>
+		<child widget="h3/forge/browser/row_count"/>
+	</widget>
+	<widget name="h3/forge/browser/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port forge browser"/>
+		<on event="left_trigger left" run="port forge browser previous"/>
+		<on event="right_trigger right" run="port forge browser next"/>
+		<child widget="h3/forge/browser/row_0" x="0" y="0"/>
+		<child widget="h3/forge/browser/row_1" x="0" y="19"/>
+		<child widget="h3/forge/browser/row_2" x="0" y="38"/>
+		<child widget="h3/forge/browser/row_3" x="0" y="57"/>
+		<child widget="h3/forge/browser/row_4" x="0" y="76"/>
+		<child widget="h3/forge/browser/row_5" x="0" y="95"/>
+		<child widget="h3/forge/browser/row_6" x="0" y="114"/>
+		<child widget="h3/forge/browser/row_7" x="0" y="133"/>
+		<child widget="h3/forge/browser/row_8" x="0" y="152"/>
+		<child widget="h3/forge/browser/row_9" x="0" y="171"/>
+		<child widget="h3/forge/browser/row_10" x="0" y="190"/>
+		<child widget="h3/forge/browser/row_11" x="0" y="209"/>
+	</widget>
+	<widget name="h3/forge/browser/panel" left="356" top="24" width="268" height="432" bitmap="h3/panel"/>
+	<widget name="h3/forge/browser/strip" left="356" top="24" width="268" height="30" bitmap="h3/strip"/>
+	<widget name="h3/forge/browser/title" type="text" left="366" top="27" width="190" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/forge_menu" string_index="0"/>
+	<widget name="h3/forge/browser/budget" type="text" left="540" top="31" width="76" height="16" align="right" font="h3/font_small" color="#FF9FB6CC"/>
+	<widget name="h3/forge/browser/rule" left="356" top="54" width="268" height="2" bitmap="h3/rule"/>
+	<widget name="h3/forge/browser/crumb" type="text" left="368" top="60" width="244" height="16" font="h3/font_small" color="#FF77879A"/>
+	<widget name="h3/forge/browser/info_rule" left="356" top="320" width="268" height="2" bitmap="h3/rule"/>
+	<widget name="h3/forge/browser/info_name" type="text" left="368" top="326" width="244" height="18" font="h3/font_item" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/forge/browser/info_text" type="text" left="368" top="346" width="244" height="80" font="h3/font_small" color="#FFC3CBD3"/>
+	<widget name="h3/forge/browser/buttons" left="356" top="430" width="268" height="26" bitmap="h3/strip"/>
+	<widget name="h3/forge/browser/a_butn" left="366" top="435" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/forge/browser/place" type="text" left="385" top="434" width="56" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/forge_menu" string_index="1"/>
+	<widget name="h3/forge/browser/b_butn" left="436" top="435" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/forge/browser/back" type="text" left="455" top="434" width="50" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/forge_menu" string_index="2"/>
+	<widget name="h3/forge/browser/l_butn" left="510" top="435" width="16" height="16" bitmap="h3/glyph_l"/>
+	<widget name="h3/forge/browser/r_butn" left="527" top="435" width="16" height="16" bitmap="h3/glyph_r"/>
+	<widget name="h3/forge/browser/category" type="text" left="546" top="434" width="76" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/forge_menu" string_index="3"/>
+	<widget name="h3/forge/browser/screen" flags="pass_unhandled_to_focused_child">
+		<on event="created" run="port forge browser init"/>
+		<!-- (B on the screen itself: a screen with no B of its own is closed by B,
+		before its list sees it. B one level back - a category to the categories,
+		them closed -; Square, which opens the browser, closes it) -->
+		<on event="b" run="port forge browser back"/>
+		<on event="x" run="port forge close"/>
+		<child widget="h3/forge/browser/panel"/>
+		<child widget="h3/forge/browser/strip"/>
+		<child widget="h3/forge/browser/title"/>
+		<child widget="h3/forge/browser/budget"/>
+		<child widget="h3/forge/browser/rule"/>
+		<child widget="h3/forge/browser/crumb"/>
+		<child widget="h3/forge/browser/info_rule"/>
+		<child widget="h3/forge/browser/info_name"/>
+		<child widget="h3/forge/browser/info_text"/>
+		<child widget="h3/forge/browser/buttons"/>
+		<child widget="h3/forge/browser/a_butn"/>
+		<child widget="h3/forge/browser/place"/>
+		<child widget="h3/forge/browser/b_butn"/>
+		<child widget="h3/forge/browser/back"/>
+		<child widget="h3/forge/browser/l_butn"/>
+		<child widget="h3/forge/browser/r_butn"/>
+		<child widget="h3/forge/browser/category"/>
+		<child widget="h3/forge/browser/list" x="362" y="82"/>
+	</widget>
+
+	<!-- the Forge menu: the pause screen's look (halo3/pause.xml), its choices Forge's -->
+	<widget name="h3/forge/pause/resume" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFE6ECF2" text_x="8" text_y="3" string_list="h3/forge_menu" string_index="4">
+		<on event="a" close="all"/>
+	</widget>
+	<widget name="h3/forge/pause/toggle" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" run="port forge toggle" close="all"/>
+	</widget>
+	<widget name="h3/forge/pause/save" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/forge_menu" string_index="10">
+		<on event="a" run="port forge save"/>
+	</widget>
+	<widget name="h3/forge/pause/undo" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" run="port forge undo"/>
+	</widget>
+	<widget name="h3/forge/pause/redo" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" run="port forge redo"/>
+	</widget>
+	<widget name="h3/forge/pause/snap" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a left right" run="port forge snap"/>
+	</widget>
+	<widget name="h3/forge/pause/allai" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a left right" run="port forge all ai"/>
+	</widget>
+	<widget name="h3/forge/pause/cleardead" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" run="port forge clear dead ai"/>
+	</widget>
+	<widget name="h3/forge/pause/clearall" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a" open="h3/forge/clearai/screen"/>
+	</widget>
+	<widget name="h3/forge/pause/newround" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/forge_menu" string_index="14">
+		<on event="a" run="port forge new round" close="all"/>
+	</widget>
+	<widget name="h3/forge/pause/leave" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3" string_list="h3/forge_menu" string_index="5">
+		<on event="a start" open="h3/forge/leave/screen"/>
+	</widget>
+	<widget name="h3/forge/pause/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<child widget="h3/forge/pause/resume" x="0" y="0"/>
+		<child widget="h3/forge/pause/toggle" x="0" y="22"/>
+		<child widget="h3/forge/pause/save" x="0" y="44"/>
+		<child widget="h3/forge/pause/undo" x="0" y="66"/>
+		<child widget="h3/forge/pause/redo" x="0" y="88"/>
+		<child widget="h3/forge/pause/snap" x="0" y="110"/>
+		<child widget="h3/forge/pause/allai" x="0" y="132"/>
+		<child widget="h3/forge/pause/cleardead" x="0" y="154"/>
+		<child widget="h3/forge/pause/clearall" x="0" y="176"/>
+		<child widget="h3/forge/pause/newround" x="0" y="198"/>
+		<child widget="h3/forge/pause/leave" x="0" y="220"/>
+	</widget>
+	<widget name="h3/forge/pause/title" type="text" left="56" top="49" width="540" height="26" font="h3/font_title" color="#FFF4F4F4">
+		<data input="port forge title"/>
+	</widget>
+	<widget name="h3/forge/pause/column" left="48" top="112" width="236" height="256" bitmap="h3/column"/>
+	<!-- (what the last thing asked came to, and the map variant played: port forge title writes it) -->
+	<widget name="h3/forge/pause/status" type="text" left="56" top="372" width="236" height="64" font="h3/font_small" color="#FF9FD8FF"/>
+	<widget name="h3/forge/pause/controls_panel" left="300" top="140" width="320" height="194" bitmap="h3/panel"/>
+	<widget name="h3/forge/pause/controls_caption" type="text" left="312" top="146" width="296" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/forge_menu" string_index="6"/>
+	<widget name="h3/forge/pause/controls_rule" left="312" top="164" width="296" height="2" bitmap="h3/rule"/>
+	<widget name="h3/forge/pause/controls" type="text" left="312" top="170" width="304" height="160" font="h3/font_small" color="#FFD3CBC3">
+		<data input="port forge controls"/>
+	</widget>
+	<widget name="h3/forge/pause/screen" flags="pass_unhandled_to_focused_child pause_game">
+		<on event="b back" close="all"/>
+		<child widget="h3/pause/haze"/>
+		<child widget="h3/pause/strip"/>
+		<child widget="h3/pause/rule"/>
+		<child widget="h3/forge/pause/title"/>
+		<child widget="h3/pause/players"/>
+		<child widget="h3/pause/nameplate"/>
+		<child widget="h3/forge/pause/column"/>
+		<child widget="h3/forge/pause/status"/>
+		<child widget="h3/forge/pause/controls_panel"/>
+		<child widget="h3/forge/pause/controls_caption"/>
+		<child widget="h3/forge/pause/controls_rule"/>
+		<child widget="h3/forge/pause/controls"/>
+		<child widget="h3/pause/buttons"/>
+		<child widget="h3/pause/a_butn"/>
+		<child widget="h3/pause/select"/>
+		<child widget="h3/pause/b_butn"/>
+		<child widget="h3/pause/back"/>
+		<child widget="h3/forge/pause/list" x="56" y="120"/>
+	</widget>
+
+	<!-- leaving, asked first (Halo 3's dialog over the haze) -->
+	<widget name="h3/forge/leave/panel" left="120" top="150" width="400" height="160" bitmap="h3/panel"/>
+	<widget name="h3/forge/leave/rule" left="120" top="180" width="400" height="2" bitmap="h3/rule"/>
+	<widget name="h3/forge/leave/strip" left="120" top="290" width="400" height="20" bitmap="h3/strip"/>
+	<widget name="h3/forge/leave/title" type="text" left="132" top="156" width="376" height="22" font="h3/font_title" color="#FFF2F6FA" string_list="h3/forge_menu" string_index="7"/>
+	<widget name="h3/forge/leave/text" type="text" left="132" top="194" width="376" height="80" font="h3/font_small" color="#FFCFD9E3" string_list="h3/forge_menu" string_index="8"/>
+	<widget name="h3/forge/leave/a_butn" left="132" top="292" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/forge/leave/leave" type="text" left="152" top="291" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/forge_menu" string_index="9"/>
+	<widget name="h3/forge/leave/b_butn" left="236" top="292" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/forge/leave/back" type="text" left="256" top="291" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/forge_menu" string_index="2"/>
+	<widget name="h3/forge/leave/screen" flags="pass_unhandled_to_focused_child pause_game">
+		<on event="a start" run="port forge quit"/>
+		<on event="b back" back="true"/>
+		<child widget="h3/pause/haze"/>
+		<child widget="h3/forge/leave/panel"/>
+		<child widget="h3/forge/leave/rule"/>
+		<child widget="h3/forge/leave/strip"/>
+		<child widget="h3/forge/leave/title"/>
+		<child widget="h3/forge/leave/text"/>
+		<child widget="h3/forge/leave/a_butn"/>
+		<child widget="h3/forge/leave/leave"/>
+		<child widget="h3/forge/leave/b_butn"/>
+		<child widget="h3/forge/leave/back"/>
+	</widget>
+
+	<!-- CLEAR ALL AI, asked first (the same dialog) -->
+	<widget name="h3/forge/clearai/title" type="text" left="132" top="156" width="376" height="22" font="h3/font_title" color="#FFF2F6FA" string_list="h3/forge_menu" string_index="15"/>
+	<widget name="h3/forge/clearai/text" type="text" left="132" top="194" width="376" height="80" font="h3/font_small" color="#FFCFD9E3" string_list="h3/forge_menu" string_index="16"/>
+	<widget name="h3/forge/clearai/clear" type="text" left="152" top="291" width="80" height="18" font="h3/font_item" color="#FFEEF2F6" text_y="1" string_list="h3/forge_menu" string_index="17"/>
+	<widget name="h3/forge/clearai/screen" flags="pass_unhandled_to_focused_child pause_game">
+		<on event="a start" run="port forge clear all ai" back="true"/>
+		<on event="b back" back="true"/>
+		<child widget="h3/pause/haze"/>
+		<child widget="h3/forge/leave/panel"/>
+		<child widget="h3/forge/leave/rule"/>
+		<child widget="h3/forge/leave/strip"/>
+		<child widget="h3/forge/clearai/title"/>
+		<child widget="h3/forge/clearai/text"/>
+		<child widget="h3/forge/leave/a_butn"/>
+		<child widget="h3/forge/clearai/clear"/>
+		<child widget="h3/forge/leave/b_butn"/>
+		<child widget="h3/forge/leave/back"/>
+	</widget>
+
+	<!-- the object's properties: a window at the right over the running game, as the browser's;
+	its rows' values written by port forge properties -->
+	<widget name="h3/forge/properties/row_0" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/row_1" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/row_2" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/row_3" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/row_4" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/row_5" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/row_6" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/row_7" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/row_8" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
+	<widget name="h3/forge/properties/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port forge properties"/>
+		<on event="b x" run="port forge close"/>
+		<child widget="h3/forge/properties/row_0" x="0" y="0"/>
+		<child widget="h3/forge/properties/row_1" x="0" y="19"/>
+		<child widget="h3/forge/properties/row_2" x="0" y="38"/>
+		<child widget="h3/forge/properties/row_3" x="0" y="57"/>
+		<child widget="h3/forge/properties/row_4" x="0" y="76"/>
+		<child widget="h3/forge/properties/row_5" x="0" y="95"/>
+		<child widget="h3/forge/properties/row_6" x="0" y="114"/>
+		<child widget="h3/forge/properties/row_7" x="0" y="133"/>
+		<child widget="h3/forge/properties/row_8" x="0" y="152"/>
+	</widget>
+	<widget name="h3/forge/properties/panel" left="356" top="90" width="268" height="290" bitmap="h3/panel"/>
+	<widget name="h3/forge/properties/strip" left="356" top="90" width="268" height="30" bitmap="h3/strip"/>
+	<widget name="h3/forge/properties/title" type="text" left="366" top="93" width="250" height="24" font="h3/font_title" color="#FFF2F6FA" text_y="1" string_list="h3/forge_menu" string_index="11"/>
+	<widget name="h3/forge/properties/rule" left="356" top="120" width="268" height="2" bitmap="h3/rule"/>
+	<widget name="h3/forge/properties/name" type="text" left="368" top="126" width="244" height="18" font="h3/font_item" color="#FFF2F6FA" text_y="1"/>
+	<widget name="h3/forge/properties/buttons" left="356" top="354" width="268" height="26" bitmap="h3/strip"/>
+	<widget name="h3/forge/properties/a_butn" left="366" top="359" width="16" height="16" bitmap="h3/glyph_cross"/>
+	<widget name="h3/forge/properties/change" type="text" left="385" top="358" width="70" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/forge_menu" string_index="12"/>
+	<widget name="h3/forge/properties/b_butn" left="458" top="359" width="16" height="16" bitmap="h3/glyph_circle"/>
+	<widget name="h3/forge/properties/done" type="text" left="477" top="358" width="70" height="18" font="h3/font_item" color="#FFECECEC" text_y="1" string_list="h3/forge_menu" string_index="13"/>
+	<widget name="h3/forge/properties/screen" flags="pass_unhandled_to_focused_child">
+		<child widget="h3/forge/properties/panel"/>
+		<child widget="h3/forge/properties/strip"/>
+		<child widget="h3/forge/properties/title"/>
+		<child widget="h3/forge/properties/rule"/>
+		<child widget="h3/forge/properties/name"/>
+		<child widget="h3/forge/properties/buttons"/>
+		<child widget="h3/forge/properties/a_butn"/>
+		<child widget="h3/forge/properties/change"/>
+		<child widget="h3/forge/properties/b_butn"/>
+		<child widget="h3/forge/properties/done"/>
+		<child widget="h3/forge/properties/list" x="362" y="154"/>
+	</widget>
+</menus>

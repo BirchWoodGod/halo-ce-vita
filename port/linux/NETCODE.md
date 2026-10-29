@@ -217,6 +217,24 @@ a PC game of more than 16 players are joined after asking once
 (Experimental: `port/linux/src/crossplay_guard.c`). The switch is read
 once, at the network's start.
 
+**Game rules a joiner must play** (`port/linux/game/infection_net.c`).
+A game type only newer builds play - Infection, since 1.1.1
+(`port/linux/game/infection.c`): an older build would take it for Team
+Slayer - changes no network version. Its host asks each machine that joins
+(in the lobby or the game in progress) which rules it plays
+(`_message_server_game_rules`, a message type past network Forge's, which
+an older build drops unread) and refuses one that does not answer in six
+seconds, or answers without the game's rule, from that game alone (the
+"version too old" an older build shows); every other game type plays with
+every build as before. Infection's state - each player's side (human or
+zombie), the round and its settings - follows Slayer's in the game type's
+state the host sends (`infection_write_network_state`), each value checked
+by the client before it is taken; the host alone chooses the first
+zombies, turns a human killed and ends the round. Tested by
+`run_netns_online_test.sh infection` (two joiners agree with the host on
+every player's team each second and on the winner) and `infectionold` (an
+older build refused).
+
 A client plays by its host's rules: in another's game (searching for it,
 in its lobby, or playing it) the developer console, the telnet console
 and the cheat buttons run only commands that change nothing of the game
@@ -266,6 +284,127 @@ and keeps no address out: the player may join again at once.
 A speed hack of less than a tenth is let be: the host's bounds on how far
 and how fast a client's player moves and fires hold it to the host's time
 anyway.
+
+## The in-game chat
+
+The chat (`port/linux/game/game_chat.c`, its rules `game_chat_protocol.c`)
+is OpenCE's text chat on the wire, on either wire (the Vitas' and the
+crossplay one), as kinds of the distributed messages past this build's own
+(`NUMBER_OF_DISTRIBUTED_MESSAGES`): a build without it drops them as kinds
+it does not know, so the network version is unchanged (18; 29 and 32 on the
+crossplay wire).
+
+- **87, a line up**: a client's player's line to the host, over its stream,
+  count 1, one 68-byte entry: the sender's absolute player index, its flags
+  (bit 0 the team only, bit 1 the vehicle only), 2 pad bytes, 64 bytes of
+  text ended by a NUL (63 characters at most).
+- **88, a line down**: the host's line, the same entry, the sender as the
+  host found it; or a notice (bit 2), its text alone.
+- **89, the host's settings**: a 4-byte entry, its first byte's bit 0 the
+  chat allowed, bit 1 links allowed; to every client as they change and each
+  3 s. A client without them has a host without the chat and sends nothing.
+
+The host takes a line only over a client's stream (never a datagram nor a
+batch), from one of that machine's players, five at once and one each 1.5 s
+after (a notice to a machine that floods, once each 5 s), cleaned (printable
+ASCII, the game's `|` codes and markup out), without a link, never a notice;
+it sends it on only to the machines with a player who hears it (a team's
+line to the team's, a vehicle's to those riding with the sender) and shows
+it if one of its own players does. It never changes a line: what each
+player sees, their machine decides (the slur filter, its mutes, Chat off).
+A client takes the host's lines and settings only over the host's stream.
+Each machine's own lines go out at three at once, one each 2 s, so no host
+drops them.
+
+## A modified client
+
+With the PC build public, a client is anyone's program: memory edits, or a
+client of their own. The host decides everything that matters (damage,
+deaths, health and shields, scores, the game type's flags, balls and hills,
+pickups, spawns, teams, the game's objects; a client's word on any of them
+is not read), and checks what it does take of a client (its hits, its own
+player's and vehicle's moves, its input's numbers, its Forge requests), so
+what a modified client sends is refused and changes nothing. Since 1.1.1
+the host also counts what it refuses, and drops the machine that keeps
+sending it (`port/linux/game/network_anticheat.c`):
+
+- **What is refused.** A hit report (stage 5) of another machine's player,
+  of numbers that are not numbers, harder than its weapon deals, of a
+  shape the game never gives that damage, of a part its target does not
+  have, made at a host tick still to come (a *forged* hit); of a weapon the
+  player has not held in ten seconds; and, new in 1.1.1: of a shot (what
+  hits at a point, not an explosion, a melee blow or a collision) whose
+  point none of five ticks spread from now back to the report's sees from
+  where the host had the shooter's eyes (as they stand now; at the
+  report's tick 0.3 world units higher too: one crouched now who stood to
+  fire), through the map's
+  structure as a shot meets it (front faces; not two-sided, invisible or
+  breakable ones), up to half a world unit before the point (*through a
+  wall*; one ray, `collision_test_vector_obstructed`, when the first sees
+  it, as an honest shot's does; six rays a host tick at most, one such
+  shot looked at whole a tick, past which a shot is taken; the first such
+  shot in five seconds is dealt all the same, and counted: a lagging
+  honest shooter the host's view misses now and then loses nothing, a wall
+  hack's stream of them is refused); of a weapon the host's copy
+  has had empty (no rounds loaded or not, no battery) for two seconds, the
+  shooter's round trip and its projectile's flight (*infinite ammunition,
+  no reload*); naming a part of a biped more than 0.75 world units from
+  where it hit, with the host's node moved to where the shooter saw the
+  target (*a headshot claimed of a shot at the legs*). A player's own move
+  through the map's walls or floor (the segment from where the host has
+  them to where the client says, at the bounding sphere's centre) is not
+  taken (*noclip*), as moves past the speed, height and fall bounds above
+  never were; but after three seconds of nothing else it is (an honest
+  client the host's copy parted from across a wall, thrown by a blast it
+  hears of a round trip late, is never held there: a walk through a wall
+  stalls three seconds each time).
+- **What is counted.** Each refusal has a weight
+  (`network.anticheat_weights`, in network_anticheat.h's order): a forged
+  hit 25, a weapon not held 10, through a wall 6, a part far from the shot
+  6, an empty weapon 4, hits past the weapon's rate 0.25, moves through a
+  wall 1 (once a second at most), Forge requests malformed or replayed 2 (once a tick);
+  what a client on a poor
+  link sends too (a hit out of reach of where the host had the shooter, the
+  target far from where the host had it, too old, a grenade's throw the
+  host did not see) 0. A player's (or their vehicle's) moves count only
+  when refused for five seconds on end, 10 for each second it goes on: an
+  honest client's are taken again within a round trip (the host puts its
+  player back where it has it), a teleport, flight or speed hack's never.
+  A machine's score falls by `network.anticheat_decay` (4) a second.
+- **What is done.** A machine past `network.anticheat_kick_score` (100) is
+  dropped, every machine told (in red on its console, "dropped by the host:
+  forged hit"), a line added to `cheaters.txt`, and kept out of the host's
+  games for `network.anticheat_ban_minutes` (10): by its real address (an
+  internet play peer's endpoint, not its stand-in, which a new run of its
+  game changes), its stand-in and its hardware id, so neither the game's
+  code nor its invite joins it meanwhile. `network.anticheat` false counts
+  and logs, and drops no one.
+- **Whose word.** Only what came over the machine's own connection, or in a
+  datagram internet play's tunnel sealed to it, drops it. A LAN's datagram
+  is known by its source address alone, which any machine on the LAN can
+  send as another's: counted and logged, never acted on (as the speed
+  hack's check).
+- **Logged.** The violations of each kind, once a second at most per
+  machine, and the game's totals at its end (`anticheat:` in `debug.txt`);
+  every drop, kick and ban (`cheaters.txt`). `cheaters.txt` keeps its last
+  2000 lines and `bans.txt` its last 512.
+- **The host's own.** KICK (dropped, may join again) and BAN (dropped and
+  kept out while the host runs: its real address, stand-in and hardware
+  id; and the player's friend identity blocked, when their machine gives
+  its friend card, so their friend requests, invites and party messages
+  are dropped too) on the Halo 3 PLAYERS screen (Triangle in the lobby, Back held in a
+  game: a player's options, the host's alone), and on the settings panel's
+  Players page (Multiplayer, Vita and PC, Players: Cross kicks, Triangle
+  bans, Square bans for good, in `bans.txt`; Anti-cheat on or off; Clear
+  bans); the console's `kick` and `ban` as before.
+
+Not caught: an aimbot or a wall hack that only shows the player more
+(their input and their shots are a player's); a headshot whose made-up
+point is about the head (the host has the target's pose a round trip late,
+not the shooter's). Tested by `run_netns_online_test.sh anticheat` (a
+modified client dropped within seconds and kept out, a new run of its game
+too) and `anticheatlag` (honest players fighting over a 300 ms, jittery,
+lossy link: no one dropped).
 
 ## Joining a game in progress
 
@@ -363,7 +502,14 @@ a pregame keep-alive every five seconds from the host
      players' ammunition and grenade counts from the host only once a
      round trip has passed since it last fired, reloaded or threw (what
      the host says before then is from before). How old what a unit
-     carries is travels in 16 bits.
+     carries is travels in 16 bits. A change of weapons or grenades goes
+     the tick it happens (not at the next tenth of a second) and once more
+     a fifth of a second later, and a client keeps what the host says a
+     unit carries when the unit or a weapon in it has not come yet (the
+     objects come over the host's stream, what they carry in a datagram,
+     read first when both come at once: a spawned player's gun came a
+     second after it, at the host's next refresh) and applies it as soon
+     as they come.
    - Players take the units the host spawns them with, seats are the
      host's (a client's own player's once it has ridden otherwise for
      longer than a round trip), and the CTF flags and oddballs are the same
@@ -440,7 +586,7 @@ a pregame keep-alive every five seconds from the host
      the client's round trip and a second before the report came; not checked for what the tags do
      not bound: a projectile that sticks, which what it sticks to carries,
      one whose timer starts once it bounces or rests, a weapon's own
-     detonation; no line of sight); the target within a few world units of
+     detonation; a shot's line of sight: "A modified client" above); the target within a few world units of
      where the host had it at the tick the report was made at (a player's
      unit or vehicle: the host keeps a second of where they were) or of
      where it is (more for a fast one; also for one that is no longer a
@@ -608,6 +754,30 @@ Unity's Netcode for Entities, lightyear, netfox and the Ares source):
   stale and its pings shown as "-". A LAN's system link has no tunnel: there
   a client shows the others as "-".
 
+- **Friends** (`port/linux/src/p2p_friends.c`, docs/superpowers/specs/2026-10-18-friends-design.md):
+  friend requests, presence, invites and removals go through the signalling
+  brokers on topics of their own (`hcev/f1/i/<hash>`, a friend code's inbox;
+  `hcev/f1/m/<hash>`, a key's mailbox), each message an envelope of its own
+  ("F", version 1) sealed for its recipient and signed by the sender's friend
+  identity, nothing retained. The game's messages, JOIN/ACCEPT, codes and
+  listings do not change: builds before it never subscribe to those topics.
+  The one thing the game machines send each other is the players' friend
+  cards (the PLAYERS screen's ADD FRIEND and BLOCK): a tunnel packet of
+  internet play's own (type 7: a version, ask or answer, the sender's and
+  the receiver's machine, a 16-byte nonce; an answer adds the friend key, a
+  name of at most 16 bytes and an Ed25519 signature over the nonce, key and
+  name). An ask carries nothing of the asker's; a machine answers only with
+  friends on and not appearing offline, at most once in 3 s per asker. A
+  joiner sends to its host alone, which relays between joiners with the
+  sender's machine as it read it (one a second per machine, 8 at once and 4
+  a second in all); a joiner takes cards only from the peer the game says
+  is its host. Never on the crossplay wire or ad hoc. As the host's ping
+  table, a build before it drops the packet type unread: no network
+  change, and network version 18 stands. A friend's game is joined by its
+  invite, through the host's JOIN/ACCEPT as any; a presence carries the
+  sender's network version and wire, and Join is offered only for a game of
+  this build's.
+
 ## Testing
 
 `debug.network_test` (`port/linux/game/network_test.c`) hosts or joins a
@@ -625,7 +795,11 @@ swap the bots' wandering does not reach (`debug.network_test_pickup_weapon`
 picks the weapon: the first whose tag name has it in it, as "sniper"), and `debug.network_test_score`
 shortens the game, to test the next (`host:<map>:<variant>,<variant>...`
 plays the variants in turn, the next once a game is over, as the host's
-button on the scores does). `debug.network_latency` and
+button on the scores does). `HALO_NETWORK_TEST_SPAWN_TRACE=1` logs, each
+frame they change, every player's unit, first weapon and weapon in hand (and
+this machine's first player's first-person weapon), with how many ticks and
+milliseconds since the unit came: how long a spawned player waits for its
+gun. `debug.network_latency` and
 `debug.network_loss` hold back what a machine receives and drop some of its
 datagrams, to test as over the internet.
 
