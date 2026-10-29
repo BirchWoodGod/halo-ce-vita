@@ -12509,11 +12509,11 @@ static boolean h3_friends_options_ask(void)
 		}
 		else if (p2p_party_invitable(entry->id))
 			h3_friends.options[h3_friends.option_count++] = H3_FRIENDS_PARTY_INVITE;
-		/* (a friend online: their File Share) */
-		if (entry->online)
-			h3_friends.options[h3_friends.option_count++] = H3_FRIENDS_FILESHARE;
 		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_REMOVE;
 		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_BLOCK;
+		/* (a friend online: their File Share, after the rows that were there) */
+		if (entry->online)
+			h3_friends.options[h3_friends.option_count++] = H3_FRIENDS_FILESHARE;
 		break;
 	case P2P_FRIEND_KIND_REQUEST:
 		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_ACCEPT;

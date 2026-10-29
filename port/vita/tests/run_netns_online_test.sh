@@ -5623,14 +5623,14 @@ fsbrowse|fsbrowseui|fssend|fsrefuse|fsbad)
 	fsbrowse) join_files="browse-at=35,download=all" ;;
 	fsbrowseui)
 		# (FRIENDS: the main menu's seventh row; the host the first entry after the screen's
-		# five rows of its own; Triangle's options: INVITE TO PARTY, FILE SHARE, ...)
+		# five rows of its own; Triangle's options: INVITE TO PARTY, REMOVE FRIEND, BLOCK, FILE SHARE)
 		d="down:150:500"
 		# (the Halo 3 menus with the Halo PC files, as the other h3 modes play them)
 		export HALO_TEST_DATA_JOINER=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 		join_more="$join_more HALO_MENU_STYLE=halo3 HALO_UI_LOG=1 HALO_SCREENSHOT_DIR=$out/joiner/shots"
 		mkdir -p "$out/joiner/shots"
 		join_pad="wait:150:45000 @pre:0:300 $d $d $d $d $d $d a:150:4000 $d $d $d $d $d @00-friends:0:300 y:150:2500 @01-options:0:300"
-		join_pad="$join_pad $d $d a:150:6000 @02-fileshare:0:300 a:150:2500 @03-download:0:300 a:150:9000 @04-after:0:300"
+		join_pad="$join_pad $d $d $d $d a:150:6000 @02-fileshare:0:300 a:150:2500 @03-download:0:300 a:150:9000 @04-after:0:300"
 		join_pad="$join_pad wait:150:$((seconds * 1000))" ;;
 	fssend) host_files="$host_files,send-at=35,send-at=60:game" ;;
 	fsrefuse)
