@@ -232,6 +232,8 @@ short forge_pack_count(
 	void);
 char const *forge_pack_label(
 	short pack);
+char const *forge_pack_row_label(
+	short pack);
 char const *forge_pack_description(
 	short pack);
 boolean forge_pack_enabled(

@@ -25,8 +25,8 @@
 
 	<!-- the rows: twelve (VARIANT_ROWS), each the name and its map, the focused one's frame of
 	     list_item_bkd lit (port fileshare) -->
-	<widget name="ce/fileshare/row_name" type="text" left="10" top="0" width="122" height="25" font="ui\large_ui" color="#FF2896FF" text_y="2" text_flags="no_focus_test"/>
-	<widget name="ce/fileshare/row_map" type="text" left="134" top="0" width="92" height="25" align="right" font="ui\small_ui" color="#FF1F6FBF" text_y="5" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/row_name" type="text" left="10" top="0" width="130" height="25" font="ui\large_ui" color="#FF2896FF" text_y="2" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/row_map" type="text" left="140" top="0" width="86" height="25" align="right" font="ui\small_ui" color="#FF1F6FBF" text_y="5" text_flags="no_focus_test"/>
 	<widget name="ce/fileshare/row_0" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd_top">
 		<on event="a" run="port fileshare open" open="h3/forge/lobby"/>
 		<child widget="ce/fileshare/row_name"/>
@@ -112,8 +112,8 @@
 
 	<!-- the heading, the kind and the count under it -->
 	<widget name="ce/fileshare/header" left="35" top="11" width="512" height="64" bitmap="ce/fileshare/header_art"/>
-	<widget name="ce/fileshare/kind" type="text" left="51" top="70" width="232" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="ce/fileshare/count" type="text" left="380" top="54" width="210" height="18" align="right" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/kind" type="text" left="51" top="70" width="320" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/count" type="text" left="400" top="70" width="190" height="18" align="right" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<!-- the description: its map's picture, its name, its details, what the last action came to -->
 	<widget name="ce/fileshare/picture" left="290" top="92" width="140" height="114" bitmap="h3/mp_maps"/>
 	<widget name="ce/fileshare/info_name" type="text" left="290" top="214" width="300" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
@@ -128,13 +128,13 @@
 	<widget name="ce/fileshare/blueline" left="51" top="88" width="232" height="2" bitmap="ui\shell\bitmaps\blue"/>
 	<!-- the button key (the map variants' actions hidden with game variants: open, rename,
 	     delete) -->
-	<widget name="ce/fileshare/open" type="text" left="40" top="414" width="170" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="0" text_flags="no_focus_test"/>
-	<widget name="ce/fileshare/rename" type="text" left="214" top="414" width="104" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="1" text_flags="no_focus_test"/>
-	<widget name="ce/fileshare/delete" type="text" left="320" top="414" width="104" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="2" text_flags="no_focus_test"/>
-	<widget name="ce/fileshare/back" type="text" left="426" top="414" width="86" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="3" text_flags="no_focus_test"/>
-	<widget name="ce/fileshare/kind_left" left="514" top="418" width="12" height="16" bitmap="ui\shell\bitmaps\arrow_sm_left"/>
-	<widget name="ce/fileshare/kind_right" left="528" top="418" width="12" height="16" bitmap="ui\shell\bitmaps\arrow_sm_right"/>
-	<widget name="ce/fileshare/kind_label" type="text" left="544" top="414" width="66" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="4" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/open" type="text" left="28" top="414" width="186" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="0" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/rename" type="text" left="216" top="414" width="138" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="1" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/delete" type="text" left="356" top="414" width="100" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="2" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/back" type="text" left="458" top="414" width="100" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="3" text_flags="no_focus_test"/>
+	<widget name="ce/fileshare/kind_left" left="562" top="418" width="12" height="16" bitmap="ui\shell\bitmaps\arrow_sm_left"/>
+	<widget name="ce/fileshare/kind_right" left="576" top="418" width="12" height="16" bitmap="ui\shell\bitmaps\arrow_sm_right"/>
+	<widget name="ce/fileshare/kind_label" type="text" left="592" top="414" width="48" height="24" font="ui\large_ui" color="#FF2896FF" string_list="ce/fileshare_text" string_index="4" text_flags="no_focus_test"/>
 	<widget name="ce/fileshare/screen" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\gradient">
 		<on event="created" run="port fileshare init"/>
 		<on event="b back" back="true"/>

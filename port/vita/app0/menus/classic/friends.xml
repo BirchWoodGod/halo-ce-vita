@@ -115,7 +115,7 @@
 	<widget name="ce/friends/field" left="304" top="78" width="292" height="320" bitmap="ui\shell\main_menu\multiplayer_type_select\connected\pregame\pregame_list_field"/>
 	<widget name="ce/friends/code_label" type="text" left="320" top="88" width="262" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="0"/>
 	<widget name="ce/friends/code_value" type="text" left="320" top="104" width="262" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/friends/friends_status" type="text" left="320" top="132" width="262" height="34" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/friends/friends_status" type="text" left="320" top="132" width="262" height="54" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/friends/detail_name" type="text" left="320" top="172" width="262" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
 	<widget name="ce/friends/detail_state" type="text" left="320" top="198" width="262" height="36" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/friends/detail_help" type="text" left="320" top="238" width="262" height="80" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
@@ -202,7 +202,7 @@
 	<widget name="ce/add/field" left="304" top="78" width="292" height="320" bitmap="ui\shell\main_menu\multiplayer_type_select\connected\pregame\pregame_list_field"/>
 	<widget name="ce/add/code_label" type="text" left="320" top="88" width="262" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="0"/>
 	<widget name="ce/add/code_value" type="text" left="320" top="106" width="262" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/add/friends_status" type="text" left="320" top="136" width="262" height="34" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/add/friends_status" type="text" left="320" top="136" width="262" height="54" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/add/detail_help" type="text" left="320" top="180" width="262" height="100" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/add/friends_message" type="text" left="320" top="300" width="262" height="80" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
 	<widget name="ce/add/a_butn" left="471" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>
@@ -296,7 +296,7 @@
 		<child widget="ce/party/row_10" x="40" y="366"/>
 	</widget>
 	<widget name="ce/party/field" left="304" top="78" width="292" height="320" bitmap="ui\shell\main_menu\multiplayer_type_select\connected\pregame\pregame_list_field"/>
-	<widget name="ce/party/party_status" type="text" left="320" top="88" width="262" height="36" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/party/party_status" type="text" left="320" top="88" width="262" height="54" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
 	<widget name="ce/party/detail" type="text" left="320" top="128" width="262" height="52" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/party/party_message" type="text" left="320" top="182" width="262" height="34" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
 	<strings name="ce/party_text">
@@ -497,7 +497,7 @@
 		<child widget="ce/invite/row_10" x="40" y="366"/>
 	</widget>
 	<widget name="ce/invite/field" left="304" top="78" width="292" height="320" bitmap="ui\shell\main_menu\multiplayer_type_select\connected\pregame\pregame_list_field"/>
-	<widget name="ce/invite/invite_status" type="text" left="320" top="88" width="262" height="36" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/invite/invite_status" type="text" left="320" top="88" width="262" height="54" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
 	<widget name="ce/invite/invite_help" type="text" left="320" top="130" width="262" height="120" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/invite/invite_message" type="text" left="320" top="300" width="262" height="80" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
 	<widget name="ce/invite/a_butn" left="471" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>

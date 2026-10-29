@@ -135,7 +135,7 @@
 	<widget name="ce/mods/detail_needs" type="text" left="124" top="358" width="480" height="16" font="ui\small_ui" color="#FFCCCCCC" text_flags="no_focus_test"/>
 	<widget name="ce/mods/label_source" type="text" left="36" top="373" width="84" height="16" font="ui\small_ui" color="#FF2896FF" string_list="ce/mods_text" string_index="3" text_flags="no_focus_test"/>
 	<widget name="ce/mods/detail_source" type="text" left="124" top="373" width="480" height="16" font="ui\small_ui" color="#FFCCCCCC" text_flags="no_focus_test"/>
-	<widget name="ce/mods/note" type="text" left="36" top="390" width="568" height="16" font="ui\small_ui" color="#FF1F6FBF" string_list="ce/mods_text" string_index="9" text_flags="no_focus_test"/>
+	<widget name="ce/mods/note" type="text" left="36" top="390" width="596" height="16" font="ui\small_ui" color="#FF1F6FBF" string_list="ce/mods_text" string_index="9" text_flags="no_focus_test"/>
 	<!-- the button key: the toggle's words written by port h3 mods (Turn on / Turn off), the A
 	     button's picture beside them; Cross, Triangle and Square hidden with none chosen -->
 	<widget name="ce/mods/a_butn" left="40" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>

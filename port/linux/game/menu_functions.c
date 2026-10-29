@@ -782,6 +782,7 @@ static struct
 	next frame (pc_menu_functions_local_lobby_after_game) */
 	boolean dispose_pending;
 } h3_local;
+static boolean row_column(struct widget_instance *row, char const *name, char const *text);
 static boolean h3_mp_local_start(void);
 static void h3_mp_local_update(boolean main_menu_loaded);
 /* (the live lobby, Menu style Halo 3: h3_live) */
@@ -2796,12 +2797,18 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 	if (!h3_forge.initialized)
 		h3_forge_lobby_initialize();
 	/* ("MAP: BLOOD GULCH - MY FORT", Halo 3's: the map and its variant) */
-	if (h3_forge.variant_file[0])
+	if (h3_forge.variant_file[0] && halo_menu_style_classic_plus())
+		/* (Menu style Halo CE: its bars are narrower than Halo 3's: the variant's name; its map is in the description) */
+		snprintf(text, sizeof(text), "%s: %s", T("MAP"), h3_forge.variant_title);
+	else if (h3_forge.variant_file[0])
 		snprintf(text, sizeof(text), "%s: %s - %s", T("MAP"), T(forge_map_name(h3_forge.map)), h3_forge.variant_title);
 	else
 		snprintf(text, sizeof(text), "%s: %s", T("MAP"), T(forge_map_name(h3_forge.map)));
 	h3_capitals(text);
-	text_show(named(screen, "map_row"), text);
+	if (halo_menu_style_classic_plus())
+		row_column(screen, "map_row", text); /* (Menu style Halo CE: a long variant's name ends in "...", short of the description) */
+	else
+		text_show(named(screen, "map_row"), text);
 	/* (EXTRA OBJECTS: how many of the packs it brings; those built in the
 	background meanwhile) */
 	{
@@ -2809,7 +2816,10 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 
 		for (pack = 0; pack < forge_pack_count(); pack++)
 			on += forge_pack_enabled(pack) ? 1 : 0;
-		snprintf(text, sizeof(text), T("%s: %d OF %d"), T("EXTRA OBJECTS"), on, forge_pack_count());
+		if (halo_menu_style_classic_plus())
+			snprintf(text, sizeof(text), "%s: %d/%d", T("EXTRA OBJECTS"), on, forge_pack_count());
+		else
+			snprintf(text, sizeof(text), T("%s: %d OF %d"), T("EXTRA OBJECTS"), on, forge_pack_count());
 		h3_capitals(text);
 		text_show(named(screen, "packs_row"), text);
 		/* (the player waits for them here: a map's copy shares the memory
@@ -10931,7 +10941,8 @@ static void h3_forge_packs_update(struct widget_instance *list)
 		child->disabled = !shown;
 		if (!shown)
 			continue;
-		snprintf(text, sizeof(text), "%s: %s", forge_pack_label(pack), forge_pack_enabled(pack) ? T("ON") : T("OFF"));
+		snprintf(text, sizeof(text), "%s: %s", halo_menu_style_classic_plus() ? forge_pack_row_label(pack) : forge_pack_label(pack),
+			forge_pack_enabled(pack) ? T("ON") : T("OFF"));
 		h3_capitals(text);
 		text_show(child, text);
 		if (child == list->focused_child)
@@ -11063,8 +11074,17 @@ static void h3_fileshare_update(struct widget_instance *list)
 			line[0] = 0;
 		}
 		h3_capitals(text);
-		text_show(named(child, "row_name"), text);
-		text_show(named(child, "row_map"), line);
+		if (halo_menu_style_classic_plus())
+		{
+			/* (Menu style Halo CE: a name or map wider than its column ends in "...", not cut mid-letter) */
+			row_column(child, "row_name", text);
+			row_column(child, "row_map", line[0] ? line : " ");
+		}
+		else
+		{
+			text_show(named(child, "row_name"), text);
+			text_show(named(child, "row_map"), line);
+		}
 		if (index == h3_fileshare.view.row)
 			focus = child;
 		index++;
@@ -11864,6 +11884,14 @@ static void h3_backup_question(char const *title, char const *text, int first, i
 	memset(&h3_friends.options_entry, 0, sizeof(h3_friends.options_entry));
 	snprintf(h3_friends.options_title, sizeof(h3_friends.options_title), "%s", title);
 	snprintf(h3_friends.options_text, sizeof(h3_friends.options_text), "%s", text);
+	if (halo_menu_style_classic_plus())
+	{
+		/* (Menu style Halo CE: the box wraps the words itself; Halo 3's line breaks left it ragged) */
+		char *newline;
+
+		for (newline = h3_friends.options_text; (newline = strchr(newline, '\n')) != NULL; newline++)
+			*newline = ' ';
+	}
 	h3_friends.options[0] = first;
 	h3_friends.options[1] = second;
 	h3_friends.option_count = 2;
@@ -12142,7 +12170,8 @@ static void h3_friends_update(struct widget_instance *list)
 				row_column(child, "row_tag", config_boolean_live("friends.join", "HALO_FRIENDS_JOIN") ? T("YES") : T("NO"));
 				break;
 			case _h3_friends_row_backup:
-				row_column(child, "row_name", T("FRIEND CODE BACKUP"));
+				/* (Menu style Halo CE: its list's rows are narrower than Halo 3's: the row says CODE BACKUP) */
+				row_column(child, "row_name", halo_menu_style_classic_plus() ? T("CODE BACKUP") : T("FRIEND CODE BACKUP"));
 				row_column(child, "row_state", T("Save your code to a file, or restore it"));
 				row_column(child, "row_tag", h3_backup.step == _h3_backup_working ? T("WORKING") : " ");
 				break;
@@ -13657,7 +13686,7 @@ static void h3_players_update(struct widget_instance *list)
 		text_show(named(screen, "detail"), text);
 	}
 	else
-		text_show(named(screen, "detail"), h3_players.count ? "" : T("No network game: players show here in one"));
+		text_show(named(screen, "detail"), h3_players.count ? "" : T("No network game yet: its players show here"));
 	text_show(named(screen, "players_message"), h3_players.message[0] &&
 		system_milliseconds() - h3_players.message_time < H3_PLAYERS_MESSAGE_MILLISECONDS ? h3_players.message : "");
 	p2p_friends_status(status, sizeof(status));

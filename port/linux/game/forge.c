@@ -4938,6 +4938,16 @@ char const *forge_pack_label(
 	return pack >= 0 && pack < FORGE_PACK_COUNT ? T(forge_packs[pack].label) : "";
 }
 
+/* (Menu style Halo CE's EXTRA OBJECTS rows: its bars are narrower than Halo 3's, which a long
+name and ": ON" overran - COVENANT VEHICLES: ON; the screen's description keeps the full name) */
+char const *forge_pack_row_label(
+	short pack)
+{
+	if (pack >= 0 && pack < FORGE_PACK_COUNT && !strcmp(forge_packs[pack].name, "covenant_vehicles"))
+		return T("Covenant craft");
+	return forge_pack_label(pack);
+}
+
 char const *forge_pack_description(
 	short pack)
 {
