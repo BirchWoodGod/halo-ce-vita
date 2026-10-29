@@ -138,7 +138,7 @@ answers), the sender's for an offer sent unasked.
   it. A build before this one decodes none of the new types (they are
   dropped as malformed, after its signature and replay checks); only an
   offer sent unasked ever reaches one (it never asks, so it is never
-  answered), and an offer is 140 bytes, inside its room.
+  answered), and an offer is at most 282 bytes, inside its room.
 
 No network version changes: nothing here is a game message, and the
 friends' envelope and topics are as they were.
@@ -182,7 +182,8 @@ queue has room to spare. Either side may END a transfer at any time.
 - One download at a time on a machine; two uploads at once, one per friend.
 - A friend's file-share messages: 48 at once, one more each 40 ms (checked
   before the signature's work); past that, dropped.
-- Asks: one each 5 s sent per friend; one answered each 10 s per friend.
+- Asks: one each 5 s sent per friend; one answered each 5 s per friend
+  (another dropped unanswered).
   Downloads asked: one each 5 s per friend. Offers sent unasked: one each
   15 s per friend; heard: one each 15 s per friend, four waiting at most
   (a fifth dropped), each waiting 2 minutes at most.
@@ -247,29 +248,54 @@ the file is validated whatever its title).
 
 ## UI
 
-- **Halo 3 / Online menus** (`menus/halo3/fileshare.xml`): Start on a file
-  opens SHARING: SHARE WITH FRIENDS (or STOP SHARING) and SEND TO A FRIEND
-  (the friends online, A sends). The details say whether a file is shared;
-  the status line says what a send came to. On the FRIENDS screen,
-  Triangle on a friend online adds FILE SHARE: their shared files, with
-  their kind, map and size; A asks DOWNLOAD? first.
-- **Classic+** (`menus/classic/fileshare.xml`): the same functions in the
-  Xbox look (the same widget names), Start on a file.
-- **The settings panel** (the original menus): Multiplayer > Friends > a
-  friend online: Square... (see vita_settings.c), File Share's rows on the
-  Forge and File Share page: Share with friends (the setting), each map
-  variant's shared mark (left and right), Send to a friend, and a friend's
-  File Share from the Friends page. The offer question is the overlay's own
-  in every menu style.
+- **Halo 3 and Online menus** (`menus/halo3/fileshare.xml`,
+  `fileshare_friends.xml`): Start on a file of FILE SHARE (a map variant,
+  or a game variant of the player's own; the key strip says Start: Share)
+  opens SHARING: SHARE WITH FRIENDS or STOP SHARING, SEND TO A FRIEND (the
+  friends online: Cross sends, the friend is asked first) and ALL SHARING
+  ON or OFF (`friends.fileshare`). File Share's details say whether a file
+  is shared. On the FRIENDS screen, Triangle on a friend online lists FILE
+  SHARE among the options: their shared files (name and map at the left,
+  the chosen one's kind, map and size at the right, what the ask and the
+  downloads came to under them); Cross asks DOWNLOAD? first, Triangle asks
+  the friend again.
+- **Classic+** (`menus/classic/fileshare_friends.xml`): the same screens in
+  the Xbox's look (cp/<name> stands for h3/<name>, the rows named alike),
+  Start on a file of the classic FILE SHARE.
+- **The settings panel** (the original menus, Menu style Halo CE): Game >
+  Forge and File Share > Share with friends: Sharing On/Off, what the
+  transfers came to, this Vita's files (map variants, and the player's own
+  game variants as the game last listed them) each Shared or Not shared
+  (left and right), Cross on one sends it (Send to a friend: the friends
+  online), then the friends online: Cross opens their File Share, whose
+  files Cross asks DOWNLOAD about first.
+- **A friend's offer** is the overlay's question in every menu style, at
+  the menus (FILE FROM A FRIEND: who, the file, its kind, map and size;
+  Accept or Decline), held while in a level or a lobby as an invite is, and
+  declined if left unanswered for two minutes.
 
 ## Tests
 
-- `port/vita/tests/p2p_friends_test.c` (three machines and a broker in one
-  process): browse, download, send, decline, every refusal (non-friend,
-  blocked, appearing offline, sharing off, oversized, wrong kind, a chunk
-  of the wrong size, a wrong SHA-256, a forged sender, a replayed chunk),
-  rate limits.
-- `port/vita/tests/p2p_friends_fuzz.c`: the new message types in every
-  fuzzed pair message, and the marks file.
-- `run_netns_online_test.sh` modes `fsbrowse`, `fssend`, `fsrefuse`,
-  `fsbad`: Vitas-as-PC in network namespaces (two or three copies).
+- `port/vita/tests/p2p_friends_test.c` (four fresh machines and a broker
+  in one process, the game's side played by the test): the marks (names
+  checked, the file read back, a damaged one not used), a browse (the
+  shared files only), a map variant and a game variant downloaded whole, a
+  file changed since it was listed not sent, the validator's refusal told
+  to the sender, send to friend (nothing pulled before the answer; declined,
+  too soon, accepted), a stranger's and a blocked player's messages dropped
+  unopened, sharing off and appearing offline, an oversized offer, a forged
+  one and another sender's never asked, a file whose SHA-256 is not the
+  offer's and a chunk of another size not saved, replays and a flood
+  dropped, a friend removed mid-transfer. With ASan and UBSan too.
+- `port/vita/tests/p2p_friends_fuzz.c` (`run_p2p_friends_test.sh fuzz`):
+  every file-share message's body from a friend, every handler reachable
+  (an ask, a browse, a download and an upload under way), and the marks
+  file.
+- `run_netns_online_test.sh` (Vitas-as-PC in network namespaces): `fsbrowse`
+  (browse, download everything, saved as `r<hash>.hmv` and as a game type,
+  nothing of a file's name at the broker), `fsbrowseui` (the same through
+  the Halo 3 menus' FRIENDS, FILE SHARE and DOWNLOAD?), `fssend` (send to
+  friend, asked first), `fsrefuse` (sharing off, appearing offline, a
+  blocked player's sealed ask), `fsbad` (an oversized offer, a damaged file
+  the validator refuses, a forged signature, another sender).
+- `run_vita_settings_test.sh`: the panel's Share with friends pages.
