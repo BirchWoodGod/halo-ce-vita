@@ -174,7 +174,7 @@ def version_defines(sln: Any) -> List[str]:
     (HALO_VITA_VERSION, port/vita/include/vita_version.h: halo.log's first
     line, the main menu, the window's title, the settings panel, the update
     check): the Vita's, Linux's and Windows'. None without it: the header's"""
-    defines = testers_test_defines(sln)
+    defines = testers_test_defines(sln) + netversions_test_defines(sln)
     version = getattr(sln, "vita_version", None)
     if not version:
         return defines
@@ -196,6 +196,21 @@ def testers_test_defines(sln: Any) -> List[str]:
     if not re.fullmatch(r"[0-9a-fA-F]{64}", key) or not key.strip("0"):
         raise RuntimeError("--testers-test-key: 64 hexadecimal digits, not all zero")
     return [f'-DHALO_TESTERS_TEST_KEY=\\"{key.lower()}\\"']
+
+
+def netversions_test_defines(sln: Any) -> List[str]:
+    """configure.py's --netversions-test-key: a TEST build (never a release:
+    refused with --release) that trusts a throwaway key's signed crossplay
+    version table (port/linux/src/netversion_table.h) in place of the owner's
+    release key"""
+    key = getattr(sln, "netversions_test_key", None)
+    if not key:
+        return []
+    if getattr(sln, "port_release", False):
+        raise RuntimeError("--netversions-test-key is for test builds only, never with --release")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", key) or not key.strip("0"):
+        raise RuntimeError("--netversions-test-key: 64 hexadecimal digits, not all zero")
+    return [f'-DHALO_NETVERSIONS_TEST_KEY=\\"{key.lower()}\\"']
 
 
 def miniupnpc_sources() -> List[Path]:
