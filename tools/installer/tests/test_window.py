@@ -534,7 +534,7 @@ def test_a_short_window_scrolls(root, tmp_path):
     window = hcv.InstallerWindow(root, str(tmp_path / "out"))
     window.show(3)
     root.minsize(1, 1)
-    tall, short = "%dx%d" % (window.px(1000), window.px(900)), "%dx%d" % (window.px(900), window.px(420))
+    tall, short = "%dx%d" % (window.px(1000), window.px(1400)), "%dx%d" % (window.px(900), window.px(420))
     root.geometry(tall)
     pump(root, lambda: not window.scrollbar.winfo_ismapped(), 3)
     assert not window.scrollbar.winfo_ismapped()
