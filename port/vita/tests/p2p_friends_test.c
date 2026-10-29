@@ -40,7 +40,19 @@ of internet play. Checked:
   kept, the code alone restored, the same identity restored on its own
   machine (a newer run), a save of the old list waiting not written; each
   job's thread made as the Vita sizes it (4 KiB for attributes with no
-  size) and the most of its stack it used measured: four times that fits.
+  size) and the most of its stack it used measured: four times that fits;
+- File Share with friends (p2p_fileshare.inc), four fresh machines and the
+  game's side played here: the marks (names checked, the file read back, a
+  damaged one not used), a friend's File Share browsed (the shared files
+  only), a map variant and a game variant downloaded whole and handed to
+  the game, a file changed since it was listed not sent, the validator's
+  refusal told to the sender, send to friend (asked first, nothing pulled
+  before the answer; declined; too soon; accepted and saved), a stranger's
+  and a blocked player's messages dropped unopened, sharing off and
+  appearing offline (nothing sent or answered), an oversized offer, a
+  forged one and another sender's never asked, a file whose SHA-256 is not
+  the offer's and a chunk of another size not saved, replays and a flood
+  dropped, a friend removed mid-transfer.
 
 Prints PASS or the failures. run_p2p_friends_test.sh builds it (with ASan
 and UBSan too).
@@ -121,10 +133,14 @@ const char *platform_save_root(void)
 {
 	return save_root;
 }
+/* (each machine's Share with friends: p2p_fileshare.inc; set by test_fileshare) */
+static int fileshare_setting[8];
 int config_boolean(const char *name)
 {
 	if (!strcmp(name, "friends.enabled"))
 		return 1;
+	if (!strcmp(name, "friends.fileshare"))
+		return fileshare_setting[current];
 	if (!strcmp(name, "friends.appear_offline"))
 		return appear_offline_setting;
 	if (!strcmp(name, "friends.join"))
@@ -231,7 +247,8 @@ enum
 	/* (two more for the backup's checks, apart from the broker's passes:
 	test_backup) */
 	ALL_MACHINES = MACHINES + 2,
-	LOGGED = 256,
+	/* (file share's transfers: a few hundred messages each) */
+	LOGGED = 4096,
 };
 
 static struct friends_state machines[ALL_MACHINES];
@@ -3744,6 +3761,702 @@ static void test_backup(void)
 	free(plain);
 }
 
+/* ---------- File Share with friends (p2p_fileshare.inc) */
+
+/* each machine's game side, as fileshare_friends.c plays it: its files (a
+map variant's bytes are anything here: the p2p side never reads them), what
+it saved */
+struct fs_file
+{
+	int kind;
+	char map[P2P_FILESHARE_MAP_SIZE];
+	char file[P2P_FILESHARE_FILE_SIZE];
+	char title[P2P_FILESHARE_TITLE_SIZE];
+	int size;
+	unsigned char bytes[8192];
+};
+static struct
+{
+	struct fs_file files[4];
+	int count;
+	/* (a load's bytes changed after they were listed: their digest no
+	longer the list's) */
+	int changed;
+	unsigned char saved[P2P_FILESHARE_MAXIMUM_BYTES];
+	int saved_size, saved_count, saved_kind;
+	char saved_title[P2P_FILESHARE_TITLE_SIZE];
+	int save_refuses;
+	int lists;
+} fs_games[MACHINES];
+static unsigned char fs_buffer[P2P_FILESHARE_MAXIMUM_BYTES];
+
+static void fs_game_pass(int machine)
+{
+	struct p2p_fileshare_job job;
+
+	use(machine);
+	if (p2p_fileshare_local_wanted())
+	{
+		struct p2p_fileshare_local local[4];
+		int index;
+
+		memset(local, 0, sizeof(local));
+		for (index = 0; index < fs_games[machine].count; index++)
+		{
+			struct fs_file *file = &fs_games[machine].files[index];
+
+			local[index].kind = file->kind;
+			snprintf(local[index].map, sizeof(local[index].map), "%s", file->map);
+			snprintf(local[index].file, sizeof(local[index].file), "%s", file->file);
+			snprintf(local[index].title, sizeof(local[index].title), "%s", file->title);
+			local[index].size = file->size;
+			if (p2p_fileshare_marked(file->kind, file->map, file->file))
+			{
+				p2p_fileshare_digest(file->bytes, file->size, local[index].digest);
+				local[index].hashed = 1;
+			}
+		}
+		use(machine);
+		p2p_fileshare_set_local(local, fs_games[machine].count);
+		fs_games[machine].lists++;
+	}
+	while (1)
+	{
+		int type, index;
+
+		use(machine);
+		type = p2p_fileshare_take_job(&job, fs_buffer, sizeof(fs_buffer));
+		if (type == P2P_FILESHARE_JOB_LOAD)
+		{
+			for (index = 0; index < fs_games[machine].count; index++)
+				if (fs_games[machine].files[index].kind == job.kind && !strcmp(fs_games[machine].files[index].map, job.map) &&
+					!strcmp(fs_games[machine].files[index].file, job.file))
+				{
+					break;
+				}
+			if (index < fs_games[machine].count)
+			{
+				struct fs_file *file = &fs_games[machine].files[index];
+
+				memcpy(fs_buffer, file->bytes, (size_t)file->size);
+				if (fs_games[machine].changed)
+					fs_buffer[10] ^= 1;
+				p2p_fileshare_job_loaded(job.serial, fs_buffer, file->size, file->title, NULL);
+			}
+			else
+				p2p_fileshare_job_loaded(job.serial, NULL, 0, NULL, "it isn't there any more");
+		}
+		else if (type == P2P_FILESHARE_JOB_SAVE)
+		{
+			memcpy(fs_games[machine].saved, fs_buffer, (size_t)job.size);
+			fs_games[machine].saved_size = job.size;
+			fs_games[machine].saved_kind = job.kind;
+			snprintf(fs_games[machine].saved_title, sizeof(fs_games[machine].saved_title), "%s", job.title);
+			if (!fs_games[machine].save_refuses)
+				fs_games[machine].saved_count++;
+			p2p_fileshare_job_saved(job.serial, !fs_games[machine].save_refuses, fs_games[machine].save_refuses ?
+				"it isn't a valid map variant" : job.title);
+		}
+		else
+			break;
+	}
+}
+
+static void fs_pass(int count)
+{
+	int index, machine;
+
+	for (index = 0; index < count; index++)
+	{
+		pass(1);
+		for (machine = 0; machine < MACHINES; machine++)
+			fs_game_pass(machine);
+	}
+}
+
+/* two fresh machines made friends (codes typed, accepted, presence) */
+static void fs_befriend(int a, int b)
+{
+	char code_b[P2P_FRIEND_CODE_SIZE];
+	struct p2p_friend_entry entry;
+
+	code_of(b, code_b);
+	use(a);
+	p2p_friends_add(code_b);
+	fs_pass(2);
+	if (entry_of(b, P2P_FRIEND_KIND_REQUEST, 0, &entry))
+	{
+		use(b);
+		p2p_friends_act(entry.id, P2P_FRIEND_KIND_REQUEST, P2P_FRIENDS_ACCEPT);
+	}
+	fs_pass(8);
+}
+
+/* a machine's entry id for another machine (its friend) */
+static int fs_friend_id(int machine, int other, char *id)
+{
+	struct p2p_friend_entry entries[P2P_FRIEND_ENTRIES_MAXIMUM];
+	char other_id[P2P_FRIEND_ID_SIZE];
+	int count, index;
+
+	key_id(machines[other].key, other_id);
+	use(machine);
+	count = p2p_friends_list(entries, P2P_FRIEND_ENTRIES_MAXIMUM);
+	for (index = 0; index < count; index++)
+		if (entries[index].kind == P2P_FRIEND_KIND_FRIEND && !strcmp(entries[index].id, other_id))
+		{
+			snprintf(id, P2P_FRIEND_ID_SIZE, "%s", entries[index].id);
+			return entries[index].online;
+		}
+	id[0] = 0;
+	return 0;
+}
+
+/* a pair message sealed with a key's pair keys as if this machine were its
+friend, handed to its mailbox (a stranger's, a blocked player's) */
+static void fs_send_as_stranger(int from, int to, int type)
+{
+	struct friend_record record;
+	struct message message;
+	unsigned char plain[MAXIMUM_PLAIN_SIZE], payload[MAXIMUM_PAYLOAD_SIZE];
+	char topic[TOPIC_LENGTH];
+	int size;
+
+	use(from);
+	memset(&record, 0, sizeof(record));
+	memcpy(record.key, machines[to].key, P2P_KEY_SIZE);
+	check(friend_keys(&record), "file share: a stranger works out a pair key with any public key");
+	message_start(&message, type, record.key);
+	posix_random_bytes(message.files_id, FILES_ID_LENGTH);
+	size = plain_encode(&message, plain);
+	size = envelope_seal(KIND_PAIR, record.send_key, plain, size, payload);
+	mailbox_topic(record.key, topic);
+	hand(to, topic, payload, size);
+}
+
+static int fs_outbound_from(int machine, int since)
+{
+	int index, count = 0;
+
+	for (index = since; index < carried_count; index++)
+		count += carried[index].from == machine;
+	return count;
+}
+
+static void test_fileshare(void)
+{
+	enum { ALPHA = 0, BRAVO = 1, CHARLIE = 2, DELTA = 3 };
+	char root[512], id[P2P_FRIEND_ID_SIZE], name[P2P_FRIEND_NAME_SIZE], text[P2P_FILESHARE_TEXT_SIZE];
+	struct p2p_fileshare_remote remote[P2P_FILESHARE_SHARED_MAXIMUM];
+	struct p2p_fileshare_local local[8];
+	struct p2p_fileshare_offer offer;
+	int index, count, state;
+
+	/* (fresh machines: their own folders, identities, nothing heard) */
+	for (index = 0; index < MACHINES; index++)
+	{
+		snprintf(root, sizeof(root), "%s-fs", roots[index]);
+		snprintf(roots[index], sizeof(roots[index]), "%s", root);
+		mkdir(roots[index], 0755);
+		memset(&machines[index], 0, sizeof(machines[index]));
+		memset(&hosts[index], 0, sizeof(hosts[index]));
+		hosts[index].online = 1;
+		fileshare_setting[index] = 1;
+		machine_platform[index] = NETWORK_PLATFORM_VITA;
+	}
+	broker_copies = 2;
+	quiet = getenv("FS_VERBOSE") ? 0 : 1;
+	use(ALPHA);
+	p2p_friends_set_name("Alpha");
+	use(BRAVO);
+	p2p_friends_set_name("Bravo");
+	use(CHARLIE);
+	p2p_friends_set_name("Charlie");
+	use(DELTA);
+	p2p_friends_set_name("Delta");
+	fs_pass(2);
+	fs_befriend(ALPHA, BRAVO);
+	fs_befriend(ALPHA, CHARLIE);
+	check(fs_friend_id(BRAVO, ALPHA, id) && id[0], "file share: Alpha and Bravo friends, online");
+	/* Alpha's files: a map variant of 5000 bytes, a game variant, one more not
+	shared */
+	memset(fs_games, 0, sizeof(fs_games));
+	{
+		struct fs_file *file = &fs_games[ALPHA].files[0];
+
+		file->kind = P2P_FILESHARE_KIND_MAP_VARIANT;
+		snprintf(file->map, sizeof(file->map), "bloodgulch");
+		snprintf(file->file, sizeof(file->file), "tower_wars.hmv");
+		snprintf(file->title, sizeof(file->title), "Tower Wars");
+		file->size = 5000;
+		for (index = 0; index < file->size; index++)
+			file->bytes[index] = (unsigned char)(index * 7 + 3);
+		file = &fs_games[ALPHA].files[1];
+		file->kind = P2P_FILESHARE_KIND_GAME_VARIANT;
+		snprintf(file->file, sizeof(file->file), "4F2A00C1");
+		snprintf(file->title, sizeof(file->title), "Swords");
+		file->size = P2P_FILESHARE_GAME_VARIANT_BYTES;
+		memset(file->bytes, 0x21, (size_t)file->size);
+		file = &fs_games[ALPHA].files[2];
+		file->kind = P2P_FILESHARE_KIND_MAP_VARIANT;
+		snprintf(file->map, sizeof(file->map), "prisoner");
+		snprintf(file->file, sizeof(file->file), "secret.hmv");
+		snprintf(file->title, sizeof(file->title), "Secret");
+		file->size = 900;
+		memset(file->bytes, 0x33, (size_t)file->size);
+		fs_games[ALPHA].count = 3;
+	}
+	/* the marks: names checked, kept in a file, read back */
+	use(ALPHA);
+	check(p2p_fileshare_mark(P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "../identity.dat", 1) ==
+		P2P_FILESHARE_NOT_ALLOWED && p2p_fileshare_mark(P2P_FILESHARE_KIND_MAP_VARIANT, "../..", "a.hmv", 1) ==
+		P2P_FILESHARE_NOT_ALLOWED && p2p_fileshare_mark(3, "", "map", 1) == P2P_FILESHARE_NOT_ALLOWED &&
+		p2p_fileshare_mark(P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "bloodgulch.map", 1) == P2P_FILESHARE_NOT_ALLOWED,
+		"file share: a path, a map, another kind can't be marked");
+	check(p2p_fileshare_mark(P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "tower_wars.hmv", 1) == P2P_FILESHARE_DONE &&
+		p2p_fileshare_mark(P2P_FILESHARE_KIND_GAME_VARIANT, "", "4F2A00C1", 1) == P2P_FILESHARE_DONE,
+		"file share: two files marked shared");
+	machines[ALPHA].files.marks_loaded = 0;
+	machines[ALPHA].files.mark_count = 0;
+	check(p2p_fileshare_marked(P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "tower_wars.hmv") &&
+		p2p_fileshare_marked(P2P_FILESHARE_KIND_GAME_VARIANT, "", "4F2A00C1") &&
+		!p2p_fileshare_marked(P2P_FILESHARE_KIND_MAP_VARIANT, "prisoner", "secret.hmv"),
+		"file share: the marks read back from fileshare.dat");
+	{
+		/* (a damaged marks file: none used) */
+		char path[700];
+		FILE *file;
+		unsigned char bytes[64];
+		int size;
+
+		snprintf(path, sizeof(path), "%s/friends/fileshare.dat", roots[ALPHA]);
+		file = fopen(path, "r+b");
+		size = file ? (int)fread(bytes, 1, sizeof(bytes), file) : 0;
+		if (file && size > 10)
+		{
+			fseek(file, 8, SEEK_SET);
+			fputc(bytes[8] ^ 0x20, file);
+		}
+		if (file)
+			fclose(file);
+		machines[ALPHA].files.marks_loaded = 0;
+		use(ALPHA);
+		check(!p2p_fileshare_marked(P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "tower_wars.hmv"),
+			"file share: a damaged marks file: nothing shared");
+		if (file)
+		{
+			file = fopen(path, "r+b");
+			fseek(file, 8, SEEK_SET);
+			fputc(bytes[8], file);
+			fclose(file);
+		}
+		machines[ALPHA].files.marks_loaded = 0;
+		check(p2p_fileshare_marked(P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "tower_wars.hmv"),
+			"file share: the marks file mended, read again");
+	}
+	fs_pass(2);
+
+	/* browse: Bravo sees the two shared files, not the third */
+	fs_friend_id(BRAVO, ALPHA, id);
+	use(BRAVO);
+	check(p2p_fileshare_browse(id) == P2P_FILESHARE_DONE, "file share: Bravo asks for Alpha's File Share");
+	check(p2p_fileshare_browse(id) == P2P_FILESHARE_TOO_SOON, "file share: asked again at once: too soon");
+	fs_pass(4);
+	use(BRAVO);
+	state = p2p_fileshare_browse_state(name, NULL, remote, P2P_FILESHARE_SHARED_MAXIMUM, &count);
+	check(state == P2P_FILESHARE_BROWSE_LISTED && count == 2 && !strcmp(name, "Alpha"),
+		"file share: Alpha's File Share listed to Bravo: two files");
+	{
+		int map_found = 0, game_found = 0, secret = 0;
+
+		for (index = 0; index < count; index++)
+		{
+			map_found |= remote[index].kind == P2P_FILESHARE_KIND_MAP_VARIANT && !strcmp(remote[index].title, "Tower Wars") &&
+				!strcmp(remote[index].map, "bloodgulch") && remote[index].size == 5000;
+			game_found |= remote[index].kind == P2P_FILESHARE_KIND_GAME_VARIANT && !strcmp(remote[index].title, "Swords") &&
+				remote[index].size == P2P_FILESHARE_GAME_VARIANT_BYTES;
+			secret |= !strcmp(remote[index].title, "Secret");
+		}
+		check(map_found && game_found && !secret, "file share: the list's entries: title, map, kind, size; nothing unshared");
+	}
+	check(machines[CHARLIE].files.browse.state == 0 && machines[DELTA].files.browse.state == 0 &&
+		machines[CHARLIE].dropped_forged + machines[CHARLIE].total_forged + machines[DELTA].dropped_forged +
+		machines[DELTA].total_forged == 0, "file share: nobody else hears the list (nor tries to open it)");
+
+	/* download the map variant: whole, the same bytes, saved; Alpha told */
+	for (index = 0; index < count && remote[index].kind != P2P_FILESHARE_KIND_MAP_VARIANT; index++)
+		;
+	use(BRAVO);
+	check(p2p_fileshare_download(remote[index].id) == P2P_FILESHARE_DONE, "file share: Bravo downloads Tower Wars");
+	check(p2p_fileshare_download(remote[index].id) == P2P_FILESHARE_BUSY, "file share: one download at a time");
+	fs_pass(30);
+	check(fs_games[BRAVO].saved_count == 1 && fs_games[BRAVO].saved_size == 5000 &&
+		!memcmp(fs_games[BRAVO].saved, fs_games[ALPHA].files[0].bytes, 5000) &&
+		fs_games[BRAVO].saved_kind == P2P_FILESHARE_KIND_MAP_VARIANT,
+		"file share: the map variant arrived whole, the same bytes, handed to the game to check and save");
+	use(ALPHA);
+	p2p_fileshare_status(text, sizeof(text));
+	check(strstr(text, "Bravo saved \"Tower Wars\"") != NULL, "file share: Alpha told Bravo saved it");
+	check(!machines[ALPHA].files.uploads[0].state && !machines[ALPHA].files.uploads[1].state &&
+		!machines[BRAVO].files.download.state && !machines[BRAVO].files.download.bytes,
+		"file share: the transfer's memory let go on both sides");
+	/* the game variant: 104 bytes */
+	for (index = 0; index < count && remote[index].kind != P2P_FILESHARE_KIND_GAME_VARIANT; index++)
+		;
+	fs_pass(12);
+	use(BRAVO);
+	check(p2p_fileshare_download(remote[index].id) == P2P_FILESHARE_DONE, "file share: Bravo downloads Swords");
+	fs_pass(10);
+	check(fs_games[BRAVO].saved_count == 2 && fs_games[BRAVO].saved_size == P2P_FILESHARE_GAME_VARIANT_BYTES &&
+		fs_games[BRAVO].saved_kind == P2P_FILESHARE_KIND_GAME_VARIANT, "file share: the game variant saved");
+	/* a file changed since it was listed: not sent */
+	fs_games[ALPHA].changed = 1;
+	fs_pass(12);
+	use(BRAVO);
+	for (index = 0; index < count && remote[index].kind != P2P_FILESHARE_KIND_MAP_VARIANT; index++)
+		;
+	p2p_fileshare_download(remote[index].id);
+	fs_pass(40);
+	check(fs_games[BRAVO].saved_count == 2, "file share: a file changed since it was listed is not sent");
+	fs_games[ALPHA].changed = 0;
+
+	/* the validator refuses: nothing saved, the sender told */
+	fs_pass(12);
+	fs_games[BRAVO].save_refuses = 1;
+	use(BRAVO);
+	p2p_fileshare_browse(id);
+	fs_pass(4);
+	use(BRAVO);
+	p2p_fileshare_browse_state(NULL, NULL, remote, P2P_FILESHARE_SHARED_MAXIMUM, &count);
+	for (index = 0; index < count && remote[index].kind != P2P_FILESHARE_KIND_MAP_VARIANT; index++)
+		;
+	check(index < count && p2p_fileshare_download(remote[index].id) == P2P_FILESHARE_DONE, "file share: downloaded again");
+	fs_pass(30);
+	use(ALPHA);
+	p2p_fileshare_status(text, sizeof(text));
+	check(fs_games[BRAVO].saved_count == 2 && strstr(text, "Bravo's game refused") != NULL,
+		"file share: a file the validator refuses is not saved, and its sender is told");
+	fs_games[BRAVO].save_refuses = 0;
+
+	/* send to friend: asked first; declined; accepted */
+	fs_pass(40);
+	fs_friend_id(ALPHA, BRAVO, id);
+	use(ALPHA);
+	check(p2p_fileshare_send(id, P2P_FILESHARE_KIND_MAP_VARIANT, "prisoner", "../x.hmv") == P2P_FILESHARE_NOT_ALLOWED,
+		"file share: a path is never sent");
+	check(p2p_fileshare_send(id, P2P_FILESHARE_KIND_MAP_VARIANT, "prisoner", "secret.hmv") == P2P_FILESHARE_DONE,
+		"file share: Alpha sends Secret to Bravo");
+	{
+		int carried_before = carried_count;
+
+		fs_pass(3);
+		check(fs_games[BRAVO].saved_count == 2, "file share: nothing saved before the answer");
+		use(BRAVO);
+		check(p2p_fileshare_take_offer(&offer) && !strcmp(offer.friend_name, "Alpha") && !strcmp(offer.title, "Secret") &&
+			offer.size == 900 && offer.kind == P2P_FILESHARE_KIND_MAP_VARIANT && !strcmp(offer.map, "prisoner"),
+			"file share: Bravo is asked: Alpha's Secret, a map variant of 900 bytes on prisoner");
+		check(!p2p_fileshare_take_offer(&offer) || strcmp(offer.title, "Secret"), "file share: an offer asked once");
+		fs_pass(4);
+		{
+			int pulls = 0;
+
+			for (index = carried_before; index < carried_count; index++)
+				pulls += carried[index].from == BRAVO;
+			check(pulls == 0, "file share: no byte asked for before the answer");
+		}
+	}
+	use(BRAVO);
+	check(p2p_fileshare_answer(offer.id, 0) == P2P_FILESHARE_DONE, "file share: Bravo declines");
+	fs_pass(3);
+	use(ALPHA);
+	p2p_fileshare_status(text, sizeof(text));
+	check(strstr(text, "Bravo declined \"Secret\"") != NULL && !machines[ALPHA].files.uploads[0].state &&
+		!machines[ALPHA].files.uploads[1].state, "file share: Alpha told Bravo declined");
+	use(ALPHA);
+	check(p2p_fileshare_send(id, P2P_FILESHARE_KIND_MAP_VARIANT, "prisoner", "secret.hmv") == P2P_FILESHARE_TOO_SOON,
+		"file share: a send to the same friend at once: too soon");
+	fs_pass(32);
+	use(ALPHA);
+	check(p2p_fileshare_send(id, P2P_FILESHARE_KIND_MAP_VARIANT, "prisoner", "secret.hmv") == P2P_FILESHARE_DONE,
+		"file share: sent again");
+	fs_pass(3);
+	use(BRAVO);
+	check(p2p_fileshare_take_offer(&offer) && p2p_fileshare_answer(offer.id, 1) == P2P_FILESHARE_DONE,
+		"file share: Bravo accepts");
+	fs_pass(10);
+	check(fs_games[BRAVO].saved_count == 3 && fs_games[BRAVO].saved_size == 900 &&
+		!memcmp(fs_games[BRAVO].saved, fs_games[ALPHA].files[2].bytes, 900), "file share: the file sent is saved");
+
+	/* refusals: a stranger and a blocked player are never answered */
+	{
+		struct p2p_friend_entry entry;
+		int before = carried_count, drops_before;
+
+		reset_drops(ALPHA);
+		fs_send_as_stranger(DELTA, ALPHA, TYPE_FILES_ASK);
+		fs_send_as_stranger(DELTA, ALPHA, TYPE_FILES_GET);
+		fs_pass(4);
+		{
+			char topic[TOPIC_LENGTH];
+			int to_delta = 0;
+
+			mailbox_topic(machines[DELTA].key, topic);
+			for (index = before; index < carried_count; index++)
+				to_delta += carried[index].from == ALPHA && !strcmp(carried[index].topic, topic);
+			check(to_delta == 0 && machines[ALPHA].total_forged + machines[ALPHA].dropped_forged >= 2,
+				"file share: a stranger's ask and download dropped unopened, nothing sent back");
+		}
+		/* (Charlie, a friend, then blocked) */
+		fs_friend_id(ALPHA, CHARLIE, id);
+		use(ALPHA);
+		entry_of(ALPHA, P2P_FRIEND_KIND_FRIEND, 0, &entry);
+		check(p2p_friends_act(id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_BLOCK) == P2P_FRIENDS_DONE,
+			"file share: Alpha blocks Charlie");
+		fs_pass(4);
+		fs_friend_id(CHARLIE, ALPHA, id);
+		use(CHARLIE);
+		check(p2p_fileshare_browse(id) == P2P_FILESHARE_GONE, "file share: a blocked player has no friend to browse");
+		drops_before = machines[ALPHA].total_forged + machines[ALPHA].dropped_forged;
+		before = carried_count;
+		fs_send_as_stranger(CHARLIE, ALPHA, TYPE_FILES_ASK);
+		fs_pass(4);
+		{
+			int from_alpha_to_charlie = 0;
+
+			for (index = before; index < carried_count; index++)
+				if (carried[index].from == ALPHA)
+				{
+					char topic[TOPIC_LENGTH];
+
+					mailbox_topic(machines[CHARLIE].key, topic);
+					from_alpha_to_charlie += !strcmp(carried[index].topic, topic);
+				}
+			check(from_alpha_to_charlie == 0 && machines[ALPHA].total_forged + machines[ALPHA].dropped_forged > drops_before,
+				"file share: a blocked player's ask dropped, nothing sent back");
+		}
+		use(DELTA);
+		check(p2p_fileshare_browse("0123456789abcdef") == P2P_FILESHARE_GONE &&
+			p2p_fileshare_send("0123456789abcdef", P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "a.hmv") ==
+			P2P_FILESHARE_GONE, "file share: no browse or send to a stranger");
+	}
+
+	/* sharing off: asked, not shared; nothing sent or taken by its machine */
+	fs_friend_id(BRAVO, ALPHA, id);
+	fileshare_setting[ALPHA] = 0;
+	fs_pass(12);
+	use(BRAVO);
+	check(p2p_fileshare_browse(id) == P2P_FILESHARE_DONE, "file share: Bravo asks Alpha, whose sharing is off");
+	fs_pass(4);
+	use(BRAVO);
+	check(p2p_fileshare_browse_state(NULL, NULL, NULL, 0, NULL) == P2P_FILESHARE_BROWSE_NOT_SHARING,
+		"file share: Alpha's sharing off: not sharing");
+	use(ALPHA);
+	fs_friend_id(ALPHA, BRAVO, id);
+	use(ALPHA);
+	check(p2p_fileshare_send(id, P2P_FILESHARE_KIND_MAP_VARIANT, "prisoner", "secret.hmv") == P2P_FILESHARE_SHARING_OFF &&
+		p2p_fileshare_browse(id) == P2P_FILESHARE_SHARING_OFF, "file share: sharing off: nothing sent or asked");
+	fileshare_setting[ALPHA] = 1;
+	fs_pass(12);
+
+	/* appearing offline: nothing answered, nothing sent */
+	{
+		int before;
+
+		machines[ALPHA].test_appeared_offline = 1;
+		fs_pass(6);
+		fs_friend_id(BRAVO, ALPHA, id);
+		check(!fs_friend_id(BRAVO, ALPHA, id), "file share: Alpha appears offline to Bravo");
+		use(BRAVO);
+		check(p2p_fileshare_browse(id) == P2P_FILESHARE_FRIEND_OFFLINE, "file share: a friend offline isn't asked");
+		fs_friend_id(ALPHA, BRAVO, id);
+		use(ALPHA);
+		check(p2p_fileshare_send(id, P2P_FILESHARE_KIND_MAP_VARIANT, "prisoner", "secret.hmv") ==
+			P2P_FILESHARE_APPEARING_OFFLINE, "file share: appearing offline: nothing sent");
+		/* (an ask that comes anyway: unanswered) */
+		before = carried_count;
+		use(BRAVO);
+		{
+			struct message message;
+			struct friend_record *record = find_friend(machines[ALPHA].key);
+
+			message_start(&message, TYPE_FILES_ASK, machines[ALPHA].key);
+			posix_random_bytes(message.files_id, FILES_ID_LENGTH);
+			check(record && send_pair(record, &message), "file share: an ask sent anyway");
+		}
+		fs_pass(12);
+		check(fs_outbound_from(ALPHA, before) == 0, "file share: appearing offline: the ask unanswered, nothing sent");
+		machines[ALPHA].test_appeared_offline = 0;
+		fs_pass(12);
+	}
+
+	/* an oversized offer, a forged one, another sender: refused before anything
+	is pulled, none shown */
+	{
+		char saved_test[16];
+
+		fs_pass(32);
+		reset_drops(BRAVO);
+		use(ALPHA);
+		for (index = 0; index < 3; index++)
+		{
+			static const char *const kinds[] = { "oversize", "forged", "sender" };
+			int before = carried_count;
+
+			use(ALPHA);
+			snprintf(saved_test, sizeof(saved_test), "%s", kinds[index]);
+			snprintf(machines[ALPHA].files.test_bad, sizeof(machines[ALPHA].files.test_bad), "%s", kinds[index]);
+			machines[ALPHA].files.test_parsed = 1;
+			machines[ALPHA].files.test_bad_at = 0;
+			machines[ALPHA].files.test_bad_done = 0;
+			machines[ALPHA].started_time = clock_now - 1000;
+			fs_pass(3);
+			use(BRAVO);
+			check(!p2p_fileshare_take_offer(&offer), index == 0 ? "file share: an oversized offer never asked" :
+				index == 1 ? "file share: an offer signed by another key never asked" :
+				"file share: an offer from another sender never asked");
+			if (index == 0)
+			{
+				int ends = 0;
+
+				for (count = before; count < carried_count; count++)
+					ends += carried[count].from == BRAVO;
+				check(ends >= 1 && !machines[BRAVO].files.download.state,
+					"file share: the oversized offer refused (told), nothing pulled");
+			}
+			machines[ALPHA].files.test_bad_at = -1;
+			fs_pass(32);
+		}
+		check(machines[BRAVO].dropped_forged + machines[BRAVO].total_forged >= 2,
+			"file share: the forged offers dropped as forged");
+	}
+
+	/* a chunk of the wrong size, a file whose SHA-256 is not the offer's: not
+	saved */
+	{
+		int saved = fs_games[BRAVO].saved_count;
+
+		fs_friend_id(ALPHA, BRAVO, id);
+		use(ALPHA);
+		check(p2p_fileshare_send(id, P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "tower_wars.hmv") == P2P_FILESHARE_DONE,
+			"file share: Tower Wars sent");
+		fs_pass(3);
+		use(BRAVO);
+		check(p2p_fileshare_take_offer(&offer) && p2p_fileshare_answer(offer.id, 1) == P2P_FILESHARE_DONE,
+			"file share: accepted");
+		/* (Alpha's bytes changed under the transfer: the whole file's SHA-256
+		is not the offer's) */
+		use(ALPHA);
+		for (index = 0; index < FILES_UPLOADS; index++)
+			if (machines[ALPHA].files.uploads[index].bytes)
+				machines[ALPHA].files.uploads[index].bytes[4000] ^= 0x80;
+		fs_pass(30);
+		use(BRAVO);
+		p2p_fileshare_status(text, sizeof(text));
+		check(fs_games[BRAVO].saved_count == saved && strstr(text, "arrived damaged") != NULL,
+			"file share: a file whose SHA-256 is not the offer's is not saved");
+		/* a chunk of another size */
+		fs_pass(32);
+		fs_friend_id(ALPHA, BRAVO, id);
+		use(ALPHA);
+		p2p_fileshare_send(id, P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "tower_wars.hmv");
+		fs_pass(3);
+		use(BRAVO);
+		check(p2p_fileshare_take_offer(&offer) && p2p_fileshare_answer(offer.id, 1) == P2P_FILESHARE_DONE,
+			"file share: accepted again");
+		{
+			struct friend_record *record;
+			struct message message;
+
+			use(ALPHA);
+			record = find_friend(machines[BRAVO].key);
+			for (index = 0; index < FILES_UPLOADS && !machines[ALPHA].files.uploads[index].bytes; index++)
+				;
+			if (record && index < FILES_UPLOADS)
+			{
+				message_start(&message, TYPE_FILES_CHUNK, record->key);
+				message.files_first = 0;
+				message.files_data_size = 100;
+				memset(message.files_data, 0, 100);
+				fileshare_send(record, &message, machines[ALPHA].files.uploads[index].id);
+			}
+		}
+		fs_pass(30);
+		use(BRAVO);
+		p2p_fileshare_status(text, sizeof(text));
+		check(fs_games[BRAVO].saved_count == saved && strstr(text, "was not what was offered") != NULL,
+			"file share: a chunk of another size: the transfer dropped, nothing saved");
+	}
+
+	/* replays: a captured message sent again changes nothing */
+	{
+		int before = machines[BRAVO].files.offers[0].active + machines[BRAVO].files.offers[1].active;
+		int replayed = 0;
+
+		reset_drops(BRAVO);
+		for (index = 0; index < carried_count; index++)
+		{
+			char topic[TOPIC_LENGTH];
+
+			mailbox_topic(machines[BRAVO].key, topic);
+			if (carried[index].from == ALPHA && !strcmp(carried[index].topic, topic))
+			{
+				hand(BRAVO, carried[index].topic, carried[index].payload, carried[index].size);
+				replayed++;
+			}
+		}
+		fs_pass(4);
+		use(BRAVO);
+		check(replayed > 0 && machines[BRAVO].dropped_replays + machines[BRAVO].total_replays >= 1 &&
+			machines[BRAVO].files.offers[0].active + machines[BRAVO].files.offers[1].active == before &&
+			!machines[BRAVO].files.download.state, "file share: replayed messages dropped, nothing shown or pulled");
+	}
+
+	/* a flood of asks from a friend: past the budget, dropped */
+	{
+		struct friend_record *record;
+
+		fs_pass(20);
+		reset_drops(ALPHA);
+		use(BRAVO);
+		record = find_friend(machines[ALPHA].key);
+		for (index = 0; index < 60 && record; index++)
+		{
+			struct message message;
+
+			message_start(&message, TYPE_FILES_ASK, record->key);
+			posix_random_bytes(message.files_id, FILES_ID_LENGTH);
+			send_pair(record, &message);
+			use(BRAVO);
+		}
+		broker();
+		use(ALPHA);
+		p2p_friends_update(&hosts[ALPHA]);
+		p2p_friends_update(&hosts[ALPHA]);
+		p2p_friends_update(&hosts[ALPHA]);
+		p2p_friends_update(&hosts[ALPHA]);
+		check(machines[ALPHA].dropped_rate + machines[ALPHA].total_rate > 0,
+			"file share: a friend's flood of asks dropped past the limits");
+		fs_pass(30);
+	}
+
+	/* this machine's list as the menus read it: the marks */
+	use(ALPHA);
+	count = p2p_fileshare_local(local, 8);
+	check(count == 3 && local[0].shared && local[1].shared && !local[2].shared, "file share: the list read with its marks");
+	/* a friend removed: their transfers dropped */
+	fs_friend_id(ALPHA, BRAVO, id);
+	use(ALPHA);
+	p2p_fileshare_send(id, P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "tower_wars.hmv");
+	fs_pass(2);
+	use(ALPHA);
+	p2p_friends_act(id, P2P_FRIEND_KIND_FRIEND, P2P_FRIENDS_REMOVE);
+	check(!machines[ALPHA].files.uploads[0].state && !machines[ALPHA].files.uploads[1].state,
+		"file share: a friend removed: their transfers dropped");
+	fs_pass(6);
+	broker_copies = 1;
+	quiet = 0;
+}
+
 int main(void)
 {
 	char root[512];
@@ -3780,6 +4493,7 @@ int main(void)
 	test_party();
 	test_party_restart();
 	test_backup();
+	test_fileshare();
 	if (failures)
 	{
 		printf("%d failures\n", failures);
