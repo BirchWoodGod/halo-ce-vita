@@ -7774,6 +7774,48 @@ static void h3_gametype_copy_typed(char const *typed)
 	}
 }
 
+/* (fileshare_friends.c) a game variant a friend sent, checked there, saved
+as a new game type of the player's as COPY saves one (playlist_profile_new,
+then its rules over the new file's): its own name, else with a number after
+it, no other game type's or saved file's; TRUE with the name saved */
+boolean menu_functions_gametype_save_received(struct game_variant const *received, char *saved, int saved_size,
+	char *why, int why_size)
+{
+	struct game_variant variant = *received;
+	wchar_t name[H3_GAMETYPE_NAME_LENGTH + 1];
+	char base[H3_GAMETYPE_NAME_LENGTH + 1], unique[48];
+	long profile_index;
+	int index;
+
+	/* (its name as ASCII: a name typed here is; the list's names read) */
+	for (index = 0; index < H3_GAMETYPE_NAME_LENGTH && variant.human_readable_game_description[index]; index++)
+		base[index] = player_name_character_ascii(variant.human_readable_game_description[index]);
+	base[index] = 0;
+	h3_gametypes_read();
+	h3_gametype_unique_name(base, unique, sizeof(unique));
+	if (!h3_gametype_name_check(unique, name, NULL, why, why_size))
+	{
+		h3_gametype_unique_name("Shared", unique, sizeof(unique));
+		if (!h3_gametype_name_check(unique, name, NULL, why, why_size))
+			return FALSE;
+	}
+	profile_index = playlist_profile_new(0, name);
+	if (profile_index == NONE)
+	{
+		snprintf(why, (size_t)why_size, "%s", T("a new game type couldn't be made"));
+		return FALSE;
+	}
+	variant.flags &= ~H3_GAMETYPE_SYSTEM_DEFAULT_FLAG;
+	memcpy(variant.human_readable_game_description, name, sizeof(variant.human_readable_game_description));
+	playlist_profile_save(profile_index, &variant);
+	h3_gametype_write_wait(profile_index);
+	h3_gametypes.changed = TRUE;
+	h3_gametypes_read();
+	snprintf(saved, (size_t)saved_size, "%s", unique);
+	platform_log("menus: h3 gametypes: \"%s\" saved, a friend's", unique);
+	return TRUE;
+}
+
 /* the chosen game type renamed as typed, as the Xbox's name edit and SAVE
 CHANGES rename it (its variant's name saved: the file and SaveMeta.xbx) */
 static void h3_gametype_rename_typed(char const *typed)
