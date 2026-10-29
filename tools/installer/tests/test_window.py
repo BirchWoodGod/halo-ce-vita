@@ -535,6 +535,10 @@ def test_a_short_window_scrolls(root, tmp_path):
     window.show(3)
     root.minsize(1, 1)
     tall, short = "%dx%d" % (window.px(1000), window.px(1400)), "%dx%d" % (window.px(900), window.px(420))
+    if root.winfo_screenheight() < window.px(1400):
+        # (a screen too short for page 3 whole - CI's runners: the window is
+        # held to the screen, so the scroll bar stays; nothing to test there)
+        pytest.skip("the screen is shorter than page 3")
     root.geometry(tall)
     pump(root, lambda: not window.scrollbar.winfo_ismapped(), 3)
     assert not window.scrollbar.winfo_ismapped()
