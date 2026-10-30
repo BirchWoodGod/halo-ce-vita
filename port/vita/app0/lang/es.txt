@@ -2695,6 +2695,21 @@
 "SENDER" = "EMISOR"
 "RECEIVER" = "RECEPTOR"
 
+# ---------- Forge's game type objects (forge_netgame.inc, forge_spawns.inc, menu_functions.c; 1.1.2)
+"CTF Flag" = "Bandera de CTF"
+"Hill Point" = "Punto de colina"
+"Oddball Spawn" = "Aparición de Oddball"
+"Race Checkpoint" = "Control de carrera"
+"The host's game has no game type objects" = "La partida del anfitrión no tiene objetos de tipo de juego"
+"%s, Hill %d" = "%s, colina %d"
+"%s, Ball %d" = "%s, bola %d"
+"Game type objects full: %d. Delete one to place another." = "Objetos de tipo de juego llenos: %d. Borra uno para colocar otro."
+"Hill %d has %d points: the most." = "La colina %d tiene %d puntos: el máximo."
+"HILL: %d" = "COLINA: %d"
+"BALL: %d" = "BOLA: %d"
+"ORDER: %d" = "ORDEN: %d"
+"COMPLETE" = "COMPLETO"
+
 # ---------- Menu style Halo CE's additions (menus/classic: the Xbox screens with the port's rows)
 "No network: wait for it, or choose\nNETWORK: LOCAL." = "Sin red: espérala, o elige\nRED: LOCAL."
 "GAMETYPES PLUS" = "TIPOS DE JUEGO+"

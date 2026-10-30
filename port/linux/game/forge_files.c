@@ -26,7 +26,11 @@ taken whole or not at all). The checks, in order:
   within the world, angles within +-pi; reserved bytes zero; a teleporter
   (version 5 only) no path, its channel below FORGE_FILE_MAXIMUM_TELEPORTER_
   CHANNELS, its yaw alone, nothing else; at most FORGE_FILE_MAXIMUM_
-  TELEPORTERS, every sender's channel with a receiver;
+  TELEPORTERS, every sender's channel with a receiver; a game type object
+  (version 6 only) no path, a netgame flag type of the list, its index
+  below that type's limit, its yaw alone, nothing else; at most
+  FORGE_FILE_MAXIMUM_GAME_OBJECTS, a hill's points at most
+  FORGE_FILE_MAXIMUM_HILL_POINTS;
 - the meta: four texts, each valid UTF-8 within its room with no control
   character, the title not empty, the date "YYYY-MM-DD HH:MM" or empty,
   and nothing after them.
@@ -521,10 +525,25 @@ static int forge_file_record_check(
 
 	if (record->kind >= NUMBER_OF_FORGE_RECORD_KINDS)
 		return 0;
-	/* (the kinds no build has written: a game type's flag, a hill, a kill
-	zone - refused in any version, as unknown kinds are) */
-	if (record->kind == _forge_record_flag || record->kind == _forge_record_hill || record->kind == _forge_record_kill_zone)
+	/* (the kinds no build has written: a hill, a kill zone - refused in any
+	version, as unknown kinds are) */
+	if (record->kind == _forge_record_hill || record->kind == _forge_record_kill_zone)
 		return 0;
+	/* (version 6's game type object: no path, a netgame flag type of the
+	list, its index below that type's limit, its yaw alone, nothing else;
+	none before version 6) */
+	if (record->kind == _forge_record_flag)
+	{
+		if (version < 6 || record->path_index != FORGE_FILE_NO_PATH || record->team < 0 ||
+			record->team >= forge_file_flag_type_indices(record->variant) || record->respawn_seconds || record->count ||
+			record->game_types || record->flags || record->ai_team)
+		{
+			return 0;
+		}
+		if (!forge_file_record_floats_check(record) || record->angles[1] != 0.f || record->angles[2] != 0.f)
+			return 0;
+		return 1;
+	}
 	/* (version 5's teleporter: no path, its channel in the team byte, its
 	yaw alone, nothing else of an object's; none before version 5) */
 	if (forge_file_kind_teleporter(record->kind))
@@ -590,6 +609,19 @@ static int forge_file_record_check(
 	return forge_file_record_floats_check(record);
 }
 
+int forge_file_flag_type_indices(
+	int flag_type)
+{
+	switch (flag_type)
+	{
+	case FORGE_FILE_FLAG_TYPE_CTF: return FORGE_FILE_MAXIMUM_CTF_TEAMS;
+	case FORGE_FILE_FLAG_TYPE_ODDBALL: return FORGE_FILE_MAXIMUM_ODDBALLS;
+	case FORGE_FILE_FLAG_TYPE_RACE: return FORGE_FILE_MAXIMUM_RACE_CHECKPOINTS;
+	case FORGE_FILE_FLAG_TYPE_HILL: return FORGE_FILE_MAXIMUM_HILLS;
+	}
+	return 0;
+}
+
 /* the meta's texts each within its room, terminated (the struct's own
 arrays: a layout to be written may hold anything) */
 static int forge_file_meta_terminated(
@@ -615,7 +647,9 @@ int forge_file_layout_version(
 		struct forge_file_record const *record = &layout->records[index];
 		int needs = FORGE_FILE_FIRST_VERSION;
 
-		if (forge_file_kind_teleporter(record->kind))
+		if (record->kind == _forge_record_flag)
+			needs = 6;
+		else if (forge_file_kind_teleporter(record->kind))
 			needs = 5;
 		else if (record->kind == _forge_record_player_spawn)
 			needs = 4;
@@ -639,6 +673,8 @@ int forge_file_layout_check(
 	int respawning = 0;
 	int player_spawns = 0;
 	int teleporters = 0;
+	int game_objects = 0;
+	unsigned char hill_points[FORGE_FILE_MAXIMUM_HILLS];
 	unsigned int sender_channels = 0;
 	unsigned int receiver_channels = 0;
 	int version;
@@ -693,6 +729,19 @@ int forge_file_layout_check(
 			respawning = 1;
 		if (layout->records[index].kind == _forge_record_player_spawn)
 			player_spawns = 1;
+		/* (version 6's game type objects: a hill's points counted, its
+		number checked in range with the record) */
+		if (layout->records[index].kind == _forge_record_flag)
+		{
+			if (game_objects == 0)
+				memset(hill_points, 0, sizeof(hill_points));
+			game_objects++;
+			if (layout->records[index].variant == FORGE_FILE_FLAG_TYPE_HILL &&
+				++hill_points[layout->records[index].team] > FORGE_FILE_MAXIMUM_HILL_POINTS)
+			{
+				return _forge_file_too_many;
+			}
+		}
 		/* (version 5's teleporters: their channels, checked in range with
 		the record) */
 		if (forge_file_kind_teleporter(layout->records[index].kind))
@@ -707,8 +756,13 @@ int forge_file_layout_check(
 	/* (version 3 is written only for a respawning character, version 4 only
 	for a player spawn, version 5 only for a teleporter: a file of one
 	without it is not one this writer made) */
-	if ((version == 3 && !respawning) || (version == 4 && !player_spawns) || (version == 5 && !teleporters))
+	if ((version == 3 && !respawning) || (version == 4 && !player_spawns) || (version == 5 && !teleporters) ||
+		(version == 6 && !game_objects))
+	{
 		return _forge_file_bad_version;
+	}
+	if (game_objects > FORGE_FILE_MAXIMUM_GAME_OBJECTS)
+		return _forge_file_too_many;
 	/* (the teleporters within their most, each sender's channel with a
 	receiver: a sender leads somewhere) */
 	if (teleporters > FORGE_FILE_MAXIMUM_TELEPORTERS)

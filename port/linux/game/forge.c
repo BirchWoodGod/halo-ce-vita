@@ -384,35 +384,40 @@ enum
 /* the browser's categories' names (forge.h's order) */
 static char const *const forge_category_names[NUMBER_OF_FORGE_CATEGORIES] =
 {
-	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("AI"), N_("BLOCKS"), N_("TELEPORTERS"), N_("SPAWNING"),
+	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("AI"), N_("BLOCKS"), N_("TELEPORTERS"), N_("OBJECTIVES"),
+	N_("SPAWNING"),
 };
 /* (the log's) */
 static char const *const forge_category_log_names[NUMBER_OF_FORGE_CATEGORIES] =
 {
-	"vehicles", "weapons", "equipment", "scenery", "characters", "blocks", "teleporters", "spawning",
+	"vehicles", "weapons", "equipment", "scenery", "characters", "blocks", "teleporters", "objectives", "spawning",
 };
 /* (forge_spawns.inc) the markers' categories' items (SPAWNING's,
 TELEPORTERS'), its kinds' names */
 static char const *const forge_spawn_kind_names[NUMBER_OF_FORGE_MARKER_KINDS] =
 {
 	N_("Respawn Point"), N_("Initial Spawn"), N_("Teleporter Sender"), N_("Teleporter Receiver"),
+	N_("CTF Flag"), N_("Hill Point"), N_("Oddball Spawn"), N_("Race Checkpoint"),
 };
 static char const *const forge_spawn_kind_log_names[NUMBER_OF_FORGE_MARKER_KINDS] =
 {
 	"respawn point", "initial spawn", "teleporter sender", "teleporter receiver",
+	"ctf flag", "hill point", "oddball spawn", "race checkpoint",
 };
 /* a markers' category's first kind and its kinds (NONE: not one) */
 static short forge_marker_category_first(
 	short category)
 {
 	return category == _forge_category_spawning ? _forge_spawn_respawn :
-		category == _forge_category_teleporters ? _forge_spawn_teleporter_sender : NONE;
+		category == _forge_category_teleporters ? _forge_spawn_teleporter_sender :
+		category == _forge_category_objectives ? _forge_spawn_flag : NONE;
 }
 static short forge_marker_category_count(
 	short category)
 {
 	return category == _forge_category_spawning ? NUMBER_OF_FORGE_SPAWN_KINDS :
-		category == _forge_category_teleporters ? FORGE_TELEPORTER_KINDS : 0;
+		category == _forge_category_teleporters ? FORGE_TELEPORTER_KINDS :
+		category == _forge_category_objectives ? FORGE_OBJECTIVE_KINDS : 0;
 }
 
 /* the lobby's maps: the Xbox's multiplayer maps, in the order of ui.map's
@@ -968,9 +973,15 @@ static struct forge_spawn *forge_spawn_add(long id, short kind, signed char team
 	short channel, struct forge_transform const *home);
 static void forge_netgame_changed(void);
 static boolean forge_spawn_is_teleporter(struct forge_spawn const *spawn);
+static boolean forge_spawn_is_objective(struct forge_spawn const *spawn);
+static short forge_objective_indices(short kind);
+static short forge_objectives_count(short kind, short index);
+static boolean forge_marker_kind_room(short kind, short index, boolean notice);
+static short forge_marker_new_index(short kind);
 static short forge_teleporters_count(short kind, short channel);
 static short forge_teleporter_new_channel(short kind);
 static void forge_netgame_update(void);
+static void forge_netgame_log(void);
 static void forge_spawn_remove(struct forge_spawn *spawn);
 static void forge_net_update(void);
 static void forge_net_monitor_pack_want(void);
@@ -4193,12 +4204,15 @@ static void forge_variant_apply(
 		/* (a player spawn: taken as the map loaded, forge_spawns_from_layout) */
 		if (record->kind == _forge_record_player_spawn && forge_file_layout_version(layout) >= 4)
 			continue;
-		/* (a teleporter: as the map loaded too, forge_spawns_from_layout) */
+		/* (a teleporter, a game type object: as the map loaded too,
+		forge_spawns_from_layout) */
 		if ((record->kind == _forge_record_teleporter_in || record->kind == _forge_record_teleporter_out) &&
 			forge_file_layout_version(layout) >= 5)
 		{
 			continue;
 		}
+		if (record->kind == _forge_record_flag && forge_file_layout_version(layout) >= 6)
+			continue;
 		if (record->kind != _forge_record_object)
 		{
 			other_kinds++;
@@ -6544,6 +6558,13 @@ boolean forge_command(
 	/* (tests, the monitor's or the Spartan's: forge_blocks.c) */
 	if (!strcmp(word, "blocks"))
 		return forge_blocks_command(rest);
+	/* (tests, any game: forge_netgame.inc) the netgame flags of the game
+	types and their objects where they stand */
+	if (!strcmp(word, "netflags"))
+	{
+		forge_netgame_log();
+		return TRUE;
+	}
 	if (!forge_globals.active && strcmp(word, "where") && strcmp(word, "markers") && strcmp(word, "spawns"))
 	{
 		platform_log("forge: %s: not in monitor mode (\"forge on\")", word);
@@ -6728,8 +6749,9 @@ boolean forge_command(
 			property = _forge_property_respawn;
 		else if (!strcmp(rest, "kind"))
 			property = _forge_property_place_at_start;
-		/* (a teleporter's: "channel" - the team's row) */
-		else if (!strncmp(rest, "channel", 7))
+		/* (a teleporter's: "channel"; a game type object's: "index" - the
+		team's row) */
+		else if (!strncmp(rest, "channel", 7) || !strncmp(rest, "index", 5))
 			property = _forge_property_team;
 		if (strchr(rest, '-'))
 			step = -1;
@@ -6880,7 +6902,9 @@ boolean forge_command(
 		if (object_try_and_get(forge_globals.held_object_index))
 			forge_drop();
 		forge_spawn_choose(!strcmp(rest, "initial") ? _forge_spawn_initial : !strcmp(rest, "sender") ?
-			_forge_spawn_teleporter_sender : !strcmp(rest, "receiver") ? _forge_spawn_teleporter_receiver : _forge_spawn_respawn);
+			_forge_spawn_teleporter_sender : !strcmp(rest, "receiver") ? _forge_spawn_teleporter_receiver :
+			!strcmp(rest, "flag") ? _forge_spawn_flag : !strcmp(rest, "hill") ? _forge_spawn_hill :
+			!strcmp(rest, "oddball") ? _forge_spawn_oddball : !strcmp(rest, "race") ? _forge_spawn_race : _forge_spawn_respawn);
 		return TRUE;
 	}
 	/* (tests) "closemenus": the menus over the game closed, as B in them */
@@ -6912,6 +6936,9 @@ boolean forge_command(
 			forge_globals.map_markers_drawn, forge_objects_counted(), FORGE_MAXIMUM_OBJECTS);
 		for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
 			forge_spawn_log("spawns:", &forge_globals.spawns[index]);
+		platform_log("forge: %d game type objects (%d CTF flags, %d hill points, %d oddball spawns, %d race checkpoints)",
+			forge_objectives_count(NONE, NONE), forge_spawns_of_kind(_forge_spawn_flag), forge_spawns_of_kind(_forge_spawn_hill),
+			forge_spawns_of_kind(_forge_spawn_oddball), forge_spawns_of_kind(_forge_spawn_race));
 		return TRUE;
 	}
 	if (!strcmp(word, "turn"))

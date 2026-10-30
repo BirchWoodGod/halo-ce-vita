@@ -142,7 +142,7 @@ static void fuzz_update(
 	{
 		if (record->flags != (FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER) || record->tag != FORGE_NET_NO_TAG ||
 			record->object != FORGE_NET_NO_OBJECT || record->team != -1 || record->aux < FORGE_NET_SPAWN_KINDS ||
-			record->aux >= FORGE_NET_MARKER_KINDS || record->value >= FORGE_NET_TELEPORTER_CHANNELS || record->record_flags ||
+			record->aux >= FORGE_NET_MARKER_KINDS || record->value >= forge_net_marker_indices(record->aux) || record->record_flags ||
 			record->respawn_seconds || record->ai_team || record->value2 || record->id == 0)
 		{
 			abort();
@@ -434,6 +434,12 @@ static void seed_write(
 		record.value = 5;
 		memcpy(with_count + 1, &record, sizeof(record));
 		SEED_ADD(1, with_count, (int)sizeof(with_count));
+		/* (a game type object's entry: a hill point, host version 6) */
+		record.id = 11;
+		record.aux = 5;
+		record.value = 3;
+		memcpy(with_count + 1, &record, sizeof(record));
+		SEED_ADD(1, with_count, (int)sizeof(with_count));
 	}
 	memset(&entry, 0, sizeof(entry));
 	entry.total = 4;
@@ -706,6 +712,48 @@ int net_fuzz_checks(void)
 	good_transform(&record.transform);
 	record.transform.position[1] = 5001.f;
 	CHECK(!forge_net_update_valid(&record, 0), "a teleporter past the world's bounds refused");
+	/* (a game type object: a marker entry of kinds 4 to 7, host version 6,
+	its index within its kind's) */
+	{
+		static struct
+		{
+			int kind;
+			int index;
+			int taken;
+			char const *what;
+		} const cases[] =
+		{
+			{ 4, 0, 1, "a red CTF flag's entry taken" },
+			{ 4, 1, 1, "a blue CTF flag's entry taken" },
+			{ 4, 2, 0, "a CTF flag of team 2 refused" },
+			{ 5, 15, 1, "hill 15's point taken" },
+			{ 5, 16, 0, "hill 16's point refused" },
+			{ 6, 15, 1, "ball 15's spawn taken" },
+			{ 6, 16, 0, "ball 16's spawn refused" },
+			{ 7, 31, 1, "checkpoint 31 taken" },
+			{ 7, 32, 0, "checkpoint 32 refused" },
+			{ 7, 0xFFFF, 0, "checkpoint 65535 refused" },
+			{ 8, 0, 0, "a marker of kind 8 refused" },
+		};
+		int index;
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			record_init(&record, _forge_net_update_entry);
+			record.id = 15;
+			record.flags = FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER;
+			record.aux = (uint8_t)cases[index].kind;
+			record.team = -1;
+			record.value = (uint16_t)cases[index].index;
+			CHECK(forge_net_update_valid(&record, 0) == cases[index].taken, cases[index].what);
+		}
+		record_init(&record, _forge_net_request_spawn);
+		record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+		record.aux = 7;
+		CHECK(forge_net_request_valid(&record, 0), "a race checkpoint's spawn taken (kind 7)");
+		record.aux = 8;
+		CHECK(!forge_net_request_valid(&record, 0), "a spawn of kind 8 refused");
+	}
 
 	/* palette entries */
 	memset(&entry, 0, sizeof(entry));

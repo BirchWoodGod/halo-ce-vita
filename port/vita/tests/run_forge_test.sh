@@ -161,6 +161,17 @@
 #               sender left out); the variant started again: read back, and the
 #               Spartan sent again; a multiplayer game of Blood Gulch with no Forge:
 #               the map's own netgame flags, no teleporter of ours
+#   objectives  game type objects (forge_netgame.inc, 1.1.2): in a Forge game of Blood Gulch a
+#               CTF FLAG placed twice by the console (the first red, the second blue: the
+#               team with none yet), three HILL POINTs (one hill), an ODDBALL SPAWN and two
+#               RACE CHECKPOINTs (ordered 1 and 2); the flag's properties window (TEAM, GAME
+#               TYPE, COMPLETE, YAW; screenshot); saved as
+#               version 6 (forge_files_test --dump: the eight as written); then played offline
+#               (the network test's local game, HALO_NETWORK_TEST_MAP_VARIANT, one bot) in
+#               CTF - the game's red and blue flags stand at the layout's spots, the map's own
+#               flags replaced -, in Oddball - the ball at the layout's spawn - and in King of
+#               the Hill (the layout's hill the engine's hill 0); and a CTF game of Blood Gulch
+#               with no map variant: the map's own netgame flags, its flags where they are
 #   spawnplay   the spawn points played (players.c player_spawn, forge_spawns.inc
 #               forge_spawn_location): spawns' variant (made by the console) played offline
 #               with 5 bots (network test local:, HALO_NETWORK_TEST_MAP_VARIANT, a kill every
@@ -294,7 +305,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -951,6 +962,52 @@ teleport_runs() {
 		HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9:teleport_test.hmv HALO_TEST_FORGE_PACKS=none HALO_SAVE_ROOT="$store"
 }
 
+objectives_make_commands() {
+	local c="L300:forge camera 60 -100 6 0 -89;L312:forge spawnpoint flag;L316:forge drop"
+	c="$c;L320:forge camera 76 -112 6 0 -89;L332:forge spawnpoint flag;L336:forge drop"
+	c="$c;L340:forge camera 64 -106 6 0 -89;L352:forge spawnpoint hill;L356:forge drop"
+	c="$c;L360:forge camera 68 -106 6 0 -89;L372:forge spawnpoint hill;L376:forge drop"
+	c="$c;L380:forge camera 66 -102 6 0 -89;L392:forge spawnpoint hill;L396:forge drop"
+	c="$c;L400:forge camera 70 -98 6 0 -89;L412:forge spawnpoint oddball;L416:forge drop"
+	c="$c;L420:forge camera 56 -96 6 0 -89;L432:forge spawnpoint race;L436:forge drop"
+	c="$c;L440:forge camera 52 -92 6 0 -89;L452:forge spawnpoint race;L456:forge drop"
+	echo "$c"
+}
+
+# objectives_play NAME GAME [VARIANT]: a game of Blood Gulch played offline (the network test's
+# local game, one bot), its map variant VARIANT; "forge netflags" a few seconds in
+objectives_play() {
+	local name=$1 game=$2 variant=${3:-} dir="$out/$1"
+	rm -rf "$dir"
+	mkdir -p "$dir/data" "$dir/shots"
+	ln -sfn "$(cd "$data" && pwd)/maps" "$dir/data/maps"
+	(cd "$dir" && exec unshare -rn sh -c 'ip link set lo up 2> /dev/null; exec "$@"' sh \
+		env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$dir/data" HALO_SAVE_ROOT="$out/objectives-store" \
+		HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER=35 HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 \
+		HALO_TICK_THREAD=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false HALO_NETWORK_TEST="local:bloodgulch:$game" \
+		HALO_NETWORK_TEST_START=5 HALO_NETWORK_TEST_SCORE=500 HALO_TEST_INPUT=bot:1 HALO_BOTS=1 \
+		${variant:+HALO_NETWORK_TEST_MAP_VARIANT=$variant} "HALO_TEST_COMMANDS=L450:forge netflags;L800:forge netflags" \
+		timeout -k 5 150 "$binary" > "$dir/run.log" 2>&1)
+	echo $? > "$dir/exit"
+}
+
+objectives_runs() {
+	local store="$out/objectives-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c
+	c="$(objectives_make_commands);L460:forge marker #1;L462:forge press x;L480:@shot 00-flag-properties;L484:forge closemenus"
+	c="$c;L486:forge drop;L490:forge spawns;L495:forge camera 58 -118 9 60 -28;L515:@shot 01-objective-markers"
+	c="$c;L520:forge save Objectives Test"
+	run objectives 30 "" "$c" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none \
+		HALO_SAVE_ROOT="$store" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/objectives_test.hmv" > "$out/objectives/dump.txt" 2>&1
+	objectives_play objectives-ctf ctf objectives_test.hmv
+	objectives_play objectives-oddball oddball objectives_test.hmv
+	objectives_play objectives-king king objectives_test.hmv
+	objectives_play objectives-mapctf ctf
+}
+
 spawnplay_runs() {
 	local store="$out/spawnplay-store"
 	rm -rf "$store"
@@ -1277,6 +1334,8 @@ for c in $cases; do
 		spawnplay_runs & ;;
 	teleport)
 		teleport_runs & ;;
+	objectives)
+		objectives_runs & ;;
 	mpvariant)
 		if [ "$menus_files" = 0 ] || [ ! -r "$packcopy_profile" ]; then
 			echo "SKIP: mpvariant: no Halo PC bitmaps.map and loc.map in $data/maps, or no profile ($packcopy_profile)"
@@ -1574,6 +1633,52 @@ for c in $cases; do
 			echo "  ok: aicap: the fifth's body gone" || fail "aicap: the fifth's body not taken away"
 		budget_at 2200 | grep -aq "(4 alive, 1 dead)" && echo "  ok: aicap: its character still the layout's (dead, no body)" ||
 			fail "aicap: the fifth left the layout: $(budget_at 2200)"
+		continue
+	fi
+	if [ "$c" = objectives ]; then
+		checked objectives || continue
+		expect objectives "a CTF flag placed: red" "forge: placed the ctf flag #1 \\(index 0\\)"
+		expect objectives "a second: blue" "forge: placed the ctf flag #2 \\(index 1\\)"
+		count objectives "three hill points of one hill" "forge: placed the hill point #[3-5] \\(index 0\\)" 3
+		expect objectives "an oddball spawn" "forge: placed the oddball spawn #6 \\(index 0\\)"
+		expect objectives "race checkpoints in order" "forge: placed the race checkpoint #8 \\(index 1\\)"
+		expect objectives "the flag's properties window" "menus: forge properties: CTF Flag, Red: game type object 4, index 0, complete, yaw"
+		expect objectives "saved" "forge: map variant \"Objectives Test\" saved as bloodgulch/objectives_test.hmv"
+		grep -q "^version 6 " "$out/objectives/dump.txt" && [ "$(grep -c ": a game type object: " "$out/objectives/dump.txt")" = 8 ] &&
+			grep -q ": a game type object: flag type 0, index 0$" "$out/objectives/dump.txt" &&
+			grep -q ": a game type object: flag type 0, index 1$" "$out/objectives/dump.txt" &&
+			[ "$(grep -c ": a game type object: flag type 8, index 0$" "$out/objectives/dump.txt")" = 3 ] &&
+			grep -q ": a game type object: flag type 2, index 0$" "$out/objectives/dump.txt" &&
+			grep -q ": a game type object: flag type 3, index 1$" "$out/objectives/dump.txt" &&
+			echo "  ok: objectives: the file: version 6, the eight as written" || fail "objectives: the file: $(cat "$out/objectives/dump.txt")"
+		for r in objectives-ctf objectives-oddball objectives-king objectives-mapctf; do
+			checked "$r" || continue
+		done
+		expect objectives-ctf "read as the map loads" "forge: map variant \"Objectives Test\": 8 game type objects"
+		expect objectives-ctf "the map's own flags of those types replaced" "forge: netgame flags: 8 game type objects of the layout, [0-9]+ of the map's replaced"
+		# (the flags' spots: where the markers stood, on the ground)
+		red=$(grep -a "forge: \(placed\|moved\) the ctf flag #1 " "$out/objectives/run.log" | tail -1 | sed 's/.* at \([-0-9.]*\) \([-0-9.]*\) .*/\1 \2/' | head -1)
+		blue=$(grep -a "forge: \(placed\|moved\) the ctf flag #2 " "$out/objectives/run.log" | tail -1 | sed 's/.* at \([-0-9.]*\) \([-0-9.]*\) .*/\1 \2/' | head -1)
+		flags=$(sed -n '/test command at tick 450: forge netflags$/,/test command at tick/p' "$out/objectives-ctf/run.log" | grep -a "forge: the game type's flag at")
+		echo "  (CTF: the layout's red flag at $red, blue at $blue; the game's: $(echo "$flags" | sed 's/.*flag at //' | tr '\n' ';'))"
+		near() { # X Y LINES: a line's flag within 1.5 world units of X Y
+			echo "$3" | sed 's/.*flag at //' | awk -v x="$1" -v y="$2" '{ dx = $1 - x; dy = $2 - y; if (dx * dx + dy * dy < 2.25) found = 1 } END { exit !found }'
+		}
+		[ -n "$red" ] && [ -n "$blue" ] && near $red "$flags" && near $blue "$flags" &&
+			echo "  ok: objectives-ctf: the game's flags at the layout's spots" || fail "objectives-ctf: the flags not at the layout's spots"
+		ball=$(grep -a "forge: placed the oddball spawn #6 " "$out/objectives/run.log" | sed 's/.* at \([-0-9.]*\) \([-0-9.]*\) .*/\1 \2/' | head -1)
+		balls=$(sed -n '/test command at tick 450: forge netflags$/,/test command at tick/p' "$out/objectives-oddball/run.log" | grep -a "forge: the game type's ball at" | sed 's/ball at/flag at/')
+		[ -n "$ball" ] && near $ball "$balls" && echo "  ok: objectives-oddball: the ball at the layout's spawn" ||
+			fail "objectives-oddball: the ball not at the layout's spawn ($balls)"
+		sed -n '/test command at tick 450: forge netflags$/,/test command at tick/p' "$out/objectives-king/run.log" |
+			grep -ac "forge: netgame flag [0-9]*: type 8 index 0 " | grep -q "^3$" &&
+			echo "  ok: objectives-king: the layout's hill the engine's hill 0, its three points; the map's gone" ||
+			fail "objectives-king: the hill not the layout's"
+		expect objectives-mapctf "no map variant: the map's own netgame flags" "forge: netgame flags: [0-9]+ \\(the map's own\\)"
+		grep -aq "forge: netgame flags: the map's\|forge: netgame flag: " "$out/objectives-mapctf/run.log" &&
+			fail "objectives-mapctf: Forge's flags in a game with no map variant"
+		[ "$(sed -n '/test command at tick 450: forge netflags$/,/test command at tick/p' "$out/objectives-mapctf/run.log" | grep -ac "forge: the game type's flag at")" = 2 ] &&
+			echo "  ok: objectives-mapctf: the map's two flags" || fail "objectives-mapctf: the map's flags"
 		continue
 	fi
 	if [ "$c" = teleport ]; then

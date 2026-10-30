@@ -112,6 +112,22 @@ static int forge_net_player_valid(
 
 /* ---------- public code */
 
+int forge_net_marker_indices(
+	int kind)
+{
+	if (kind < FORGE_NET_SPAWN_KINDS || kind >= FORGE_NET_MARKER_KINDS)
+		return 0;
+	if (kind < FORGE_NET_FIRST_OBJECTIVE_KIND)
+		return FORGE_NET_TELEPORTER_CHANNELS;
+	switch (kind - FORGE_NET_FIRST_OBJECTIVE_KIND)
+	{
+	case 0: return FORGE_FILE_MAXIMUM_CTF_TEAMS;
+	case 1: return FORGE_FILE_MAXIMUM_HILLS;
+	case 2: return FORGE_FILE_MAXIMUM_ODDBALLS;
+	}
+	return FORGE_FILE_MAXIMUM_RACE_CHECKPOINTS;
+}
+
 int forge_net_finite(
 	float value)
 {
@@ -272,7 +288,7 @@ int forge_net_update_valid(
 				record->tag != FORGE_NET_NO_TAG || record->object != FORGE_NET_NO_OBJECT ||
 				record->aux < FORGE_NET_SPAWN_KINDS || record->aux >= FORGE_NET_MARKER_KINDS || record->team != -1 ||
 				record->record_flags || record->respawn_seconds || record->ai_team || record->step || record->value2 ||
-				record->value >= FORGE_NET_TELEPORTER_CHANNELS)
+				record->value >= forge_net_marker_indices(record->aux))
 			{
 				return 0;
 			}

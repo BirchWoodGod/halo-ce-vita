@@ -315,6 +315,30 @@ static void forge_marker_spawn_color(
 	struct forge_spawn const *spawn,
 	struct forge_marker *marker)
 {
+	/* (a game type object's: a CTF flag its team's, a hill point yellow, an
+	oddball spawn white, a race checkpoint orange) */
+	if (forge_spawn_is_objective(spawn))
+	{
+		static real const objective_colors[4][3] =
+		{
+			{ 1.00f, 1.00f, 1.00f }, /* (a flag: its team's, below) */
+			{ 1.00f, 0.92f, 0.25f },
+			{ 0.95f, 0.95f, 0.95f },
+			{ 1.00f, 0.55f, 0.15f },
+		};
+		short kind = (short)(spawn->kind - _forge_spawn_flag);
+
+		marker->red = objective_colors[kind][0];
+		marker->green = objective_colors[kind][1];
+		marker->blue = objective_colors[kind][2];
+		if (spawn->kind == _forge_spawn_flag)
+		{
+			marker->red = spawn->channel == 0 ? 1.f : 0.28f;
+			marker->green = spawn->channel == 0 ? 0.28f : 0.55f;
+			marker->blue = spawn->channel == 0 ? 0.22f : 1.f;
+		}
+		return;
+	}
 	if (forge_spawn_is_teleporter(spawn))
 	{
 		static real const channel_colors[8][3] =
@@ -559,7 +583,8 @@ static void forge_markers_render(
 		marker.kind = _forge_marker_player_spawn;
 		/* (an initial spawn's, a teleporter sender's: a second ring and a
 		filled centre) */
-		marker.initial = spawn->kind == _forge_spawn_initial || spawn->kind == _forge_spawn_teleporter_sender;
+		marker.initial = spawn->kind == _forge_spawn_initial || spawn->kind == _forge_spawn_teleporter_sender ||
+			spawn->kind == _forge_spawn_flag || spawn->kind == _forge_spawn_oddball;
 		forge_marker_of_spawn(spawn, &marker.position, &marker.forward);
 		to_marker.i = marker.position.x - render.camera.position.x;
 		to_marker.j = marker.position.y - render.camera.position.y;

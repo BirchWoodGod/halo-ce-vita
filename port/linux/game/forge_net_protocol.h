@@ -63,7 +63,7 @@ which every host takes: a joiner reads any hello of version 1 or more):
 CLEAR DEAD AI, CLEAR ALL AI, ALL AI, NEW ROUND); a client sends them only
 to a host of 2 or more - one of 1 (insider.21 and before) would count the
 record as malformed - and says "Only the host can do that" to an older one */
-#define FORGE_NET_HOST_VERSION 5
+#define FORGE_NET_HOST_VERSION 6
 #define FORGE_NET_HOST_VERSION_COMMANDS 2
 /* 3: it takes a spawn marker's move and its character's properties
 (_forge_net_request_set and _forge_net_request_property with
@@ -85,6 +85,11 @@ with FORGE_NET_FLAG_PLAYER_SPAWN, its aux the kind, below FORGE_NET_MARKER_
 KINDS); a client asks for one only of a host of 5 or more. Its move, its
 properties and its delete are a spawn point's (version 4's) */
 #define FORGE_NET_HOST_VERSION_MARKERS 5
+/* 6: game type objects (forge.h _forge_spawn_flag to _forge_spawn_race:
+the CTF flags' spots, hill points, oddball spawns, race checkpoints), markers
+as version 5's are, each its index in value (below its kind's: forge_net_
+marker_indices); a client asks for one only of a host of 6 or more */
+#define FORGE_NET_HOST_VERSION_OBJECTIVES 6
 /* a joiner's capabilities (its answer's bits) */
 #define FORGE_NET_CAPABILITY_FORGE 0x00000001u
 #define FORGE_NET_CAPABILITIES_KNOWN FORGE_NET_CAPABILITY_FORGE
@@ -277,8 +282,11 @@ FORGE_FILE_SPAWN_GAME_TYPES_MASK) */
 /* every marker's kinds (forge.h NUMBER_OF_FORGE_MARKER_KINDS: the two
 teleporter ends after the spawn points) and a teleporter's channels
 (forge_files.h FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS) */
-#define FORGE_NET_MARKER_KINDS 4
+#define FORGE_NET_MARKER_KINDS 8
 #define FORGE_NET_TELEPORTER_CHANNELS 16
+/* (version 6's) the first game type object's kind, and each one's indices
+(forge_files.h's: CTF teams, hills, balls, checkpoints) */
+#define FORGE_NET_FIRST_OBJECTIVE_KIND 4
 
 /* how a grant came */
 enum
@@ -575,6 +583,12 @@ int forge_net_layout_piece(
 	uint16_t serial,
 	int index,
 	struct forge_net_layout_entry *entry);
+
+/* a later marker kind's indices (its entry's value below it): a
+teleporter's channels, a game type object's (a CTF flag's teams, a hill's
+numbers, a ball's, a checkpoint's); 0 for a kind that is none */
+int forge_net_marker_indices(
+	int kind);
 
 /* a refusal's and an op's words (English, for the log) */
 char const *forge_net_refusal_name(

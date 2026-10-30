@@ -47,6 +47,9 @@ enum
 	/* (teleporters: SENDER and RECEIVER, linked by their channel, no tag of
 	the map's: forge_netgame.inc) */
 	_forge_category_teleporters,
+	/* (game type objects: CTF FLAG, HILL POINT, ODDBALL SPAWN, RACE
+	CHECKPOINT, the engine's netgame flags: forge_netgame.inc) */
+	_forge_category_objectives,
 	/* (the player spawn points, Halo 3's: RESPAWN POINT and INITIAL SPAWN,
 	no tag of the map's: forge_spawns.inc; last, as the browser's L from
 	the first category reaches it) */
@@ -64,10 +67,18 @@ enum
 	NUMBER_OF_FORGE_SPAWN_KINDS,
 	_forge_spawn_teleporter_sender = NUMBER_OF_FORGE_SPAWN_KINDS,
 	_forge_spawn_teleporter_receiver,
+	/* (the OBJECTIVES category's: game type objects, each its index in
+	channel - a CTF flag's team, a hill's number, a ball's, a checkpoint's
+	order) */
+	_forge_spawn_flag,
+	_forge_spawn_hill,
+	_forge_spawn_oddball,
+	_forge_spawn_race,
 	NUMBER_OF_FORGE_MARKER_KINDS
 };
 /* each category of markers: its first kind and how many */
 #define FORGE_TELEPORTER_KINDS 2
+#define FORGE_OBJECTIVE_KINDS 4
 /* (forge_netgame.inc) a teleporter's channels (forge_files.h's) */
 #define FORGE_TELEPORTER_CHANNELS 16
 
@@ -119,7 +130,9 @@ struct forge_properties
 	short spawn_kind;
 	char game_type_name[32];
 	/* (a teleporter's: its kind is spawn_kind) its channel, and whether the
-	channel has the other end (a sender's receiver, a receiver's sender) */
+	channel has the other end (a sender's receiver, a receiver's sender); a
+	game type object's index (a CTF flag's team, a hill's number, a ball's,
+	a checkpoint's order) */
 	short channel;
 	boolean linked;
 };

@@ -1108,6 +1108,210 @@ static void test_version_5(void)
 	}
 }
 
+/* a variant with game type objects (version 6): the sample's objects, a red
+and a blue CTF flag, a hill of three points (hill 2), a ball spawn, two race
+checkpoints, a teleporter pair */
+static unsigned char good6[FORGE_FILE_MAXIMUM_SIZE];
+static int good6_size;
+
+static void add_game_object(struct forge_file_layout *layout, int flag_type, int index, float x, float y, float yaw)
+{
+	struct forge_file_record *record = &layout->records[layout->record_count++];
+
+	memset(record, 0, sizeof(*record));
+	record->path_index = FORGE_FILE_NO_PATH;
+	record->kind = _forge_record_flag;
+	record->variant = (unsigned char)flag_type;
+	record->team = (signed char)index;
+	record->position[0] = x;
+	record->position[1] = y;
+	record->position[2] = 0.5f;
+	record->angles[0] = yaw;
+	layout->flags |= FORGE_FILE_FLAG_NETGAME_SPAWNS;
+}
+
+static void sample_layout_6(struct forge_file_layout *layout)
+{
+	sample_layout(layout);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_CTF, 0, 70.f, -110.f, 0.5f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_CTF, 1, 40.f, -80.f, -2.5f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_HILL, 2, 60.f, -100.f, 0.f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_HILL, 2, 62.f, -100.f, 0.f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_HILL, 2, 61.f, -98.f, 0.f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_ODDBALL, 0, 55.f, -95.f, 0.f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_RACE, 0, 50.f, -90.f, 0.f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_RACE, 31, 45.f, -85.f, 0.f);
+}
+
+static void test_version_6(void)
+{
+	struct forge_file_layout layout;
+	int result = -1;
+	int records;
+	int index;
+
+	sample_layout_6(&layout);
+	CHECK(forge_file_layout_version(&layout) == 6, "game type objects need version 6");
+	good6_size = forge_file_encode(&layout, good6, sizeof(good6), &result);
+	CHECK(good6_size > 0 && result == _forge_file_ok && good6[4] == 6 && good6[5] == 0, "written as version 6");
+	CHECK(decode(good6, good6_size, "bloodgulch") == _forge_file_ok && decoded.version == 6, "read back as version 6");
+	layout.version = 6;
+	CHECK(layouts_equal(&layout, &decoded), "the game type objects read back the same");
+	CHECK(decoded.records[5].kind == _forge_record_flag && decoded.records[5].variant == FORGE_FILE_FLAG_TYPE_CTF &&
+		decoded.records[5].team == 0 && decoded.records[6].team == 1 && decoded.records[7].variant == FORGE_FILE_FLAG_TYPE_HILL &&
+		decoded.records[7].team == 2 && decoded.records[12].variant == FORGE_FILE_FLAG_TYPE_RACE && decoded.records[12].team == 31,
+		"the flags, the hill, the ball, the checkpoints as written");
+	CHECK(decode(good6, good6_size, NULL) == _forge_file_ok && forge_file_encode(&decoded, work, sizeof(work), &result) ==
+		good6_size && !memcmp(work, good6, (size_t)good6_size), "a version 6 file writes back as itself");
+	/* (with teleporters and player spawns too: version 6) */
+	sample_layout_6(&layout);
+	add_teleporter(&layout, 1, 0, 30.f, -70.f, 0.f);
+	add_teleporter(&layout, 0, 0, 31.f, -71.f, 0.f);
+	add_spawn(&layout, 90.f, -150.f, 0.5f, 0, 0, 0);
+	{
+		int written = forge_file_encode(&layout, work, sizeof(work), &result);
+
+		CHECK(forge_file_layout_version(&layout) == 6 && written > 0 && work[4] == 6 &&
+			decode(work, written, "bloodgulch") == _forge_file_ok, "game type objects, teleporters and a spawn: version 6");
+	}
+	/* (the most of them: 64; a hill's points: 12) */
+	sample_layout(&layout);
+	for (index = 0; index < FORGE_FILE_MAXIMUM_GAME_OBJECTS; index++)
+		add_game_object(&layout, FORGE_FILE_FLAG_TYPE_RACE, index % FORGE_FILE_MAXIMUM_RACE_CHECKPOINTS, 10.f + index, 10.f, 0.f);
+	CHECK(forge_file_encode(&layout, work, sizeof(work), &result) > 0, "64 game type objects: written");
+	add_game_object(&layout, FORGE_FILE_FLAG_TYPE_ODDBALL, 0, 5.f, 5.f, 0.f);
+	CHECK(encode_refused(&layout), "65 game type objects: not written");
+	sample_layout(&layout);
+	for (index = 0; index < FORGE_FILE_MAXIMUM_HILL_POINTS; index++)
+		add_game_object(&layout, FORGE_FILE_FLAG_TYPE_HILL, 3, 10.f + index, 10.f, 0.f);
+	CHECK(forge_file_encode(&layout, work, sizeof(work), &result) > 0, "a hill of 12 points: written");
+	add_game_object(&layout, FORGE_FILE_FLAG_TYPE_HILL, 3, 5.f, 5.f, 0.f);
+	CHECK(encode_refused(&layout), "a hill of 13 points: not written");
+	add_game_object(&layout, FORGE_FILE_FLAG_TYPE_HILL, 4, 6.f, 5.f, 0.f);
+	layout.record_count -= 2;
+	add_game_object(&layout, FORGE_FILE_FLAG_TYPE_HILL, 4, 6.f, 5.f, 0.f);
+	CHECK(forge_file_encode(&layout, work, sizeof(work), &result) > 0, "and a 13th point on another hill: written");
+	/* (the writer's refusals: each field of a game type object's) */
+	{
+		static struct
+		{
+			int field;
+			int value;
+			char const *what;
+		} const cases[] =
+		{
+			{ 0, 2, "CTF team 2" },
+			{ 0, -1, "index -1" },
+			{ 1, 1, "a flag type off the list (a CTF vehicle)" },
+			{ 1, 6, "a flag type off the list (a teleporter's)" },
+			{ 1, 9, "a flag type past the engine's" },
+			{ 2, 0, "a path" },
+			{ 3, 30, "a respawn time" },
+			{ 4, 1, "a count" },
+			{ 5, FORGE_FILE_GAME_TYPE_CTF, "a game type" },
+			{ 6, FORGE_RECORD_PLACE_AT_START, "a flag" },
+			{ 7, 1, "an AI team" },
+			{ 8, 0, "a pitch" },
+			{ 9, 0, "a place outside the world" },
+			{ 10, 16, "hill 16" },
+			{ 11, 16, "ball 16" },
+			{ 12, 32, "checkpoint 32" },
+		};
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			struct forge_file_record *record;
+			char what[96];
+
+			sample_layout_6(&layout);
+			record = &layout.records[5];
+			switch (cases[index].field)
+			{
+			case 0: record->team = (signed char)cases[index].value; break;
+			case 1: record->variant = (unsigned char)cases[index].value; break;
+			case 2: record->path_index = 0; break;
+			case 3: record->respawn_seconds = (unsigned short)cases[index].value; break;
+			case 4: record->count = (unsigned char)cases[index].value; break;
+			case 5: record->game_types = (unsigned short)cases[index].value; break;
+			case 6: record->flags = (unsigned char)cases[index].value; break;
+			case 7: record->ai_team = (unsigned char)cases[index].value; break;
+			case 8: record->angles[1] = 0.5f; break;
+			case 9: record->position[0] = -6000.f; break;
+			case 10: record->variant = FORGE_FILE_FLAG_TYPE_HILL; record->team = (signed char)cases[index].value; break;
+			case 11: record->variant = FORGE_FILE_FLAG_TYPE_ODDBALL; record->team = (signed char)cases[index].value; break;
+			case 12: record->variant = FORGE_FILE_FLAG_TYPE_RACE; record->team = (signed char)cases[index].value; break;
+			}
+			snprintf(what, sizeof(what), "a game type object's %s is not written", cases[index].what);
+			CHECK(encode_refused(&layout), what);
+		}
+	}
+	sample_layout_6(&layout);
+	layout.version = 5;
+	CHECK(encode_refused(&layout), "game type objects in a version 5 layout are not written");
+	/* (the reader's: each field of a game type object's record) */
+	records = good6_size - (FORGE_FILE_RECORD_SIZE * 13) -
+		(int)(strlen(layout.title) + strlen(layout.author) + strlen(layout.description) + strlen(layout.date) + 4);
+	{
+		static struct
+		{
+			int record;
+			int offset;
+			unsigned char value;
+			char const *what;
+		} const cases[] =
+		{
+			{ 5, 3, 2, "CTF team 2" },
+			{ 5, 3, 0xFF, "index -1" },
+			{ 7, 3, 16, "hill 16" },
+			{ 10, 3, 16, "ball 16" },
+			{ 11, 3, 32, "checkpoint 32" },
+			{ 5, 33, 1, "a CTF vehicle's flag type" },
+			{ 5, 33, 5, "a bank's flag type" },
+			{ 5, 33, 6, "a teleporter's flag type" },
+			{ 5, 33, 7, "a teleporter target's flag type" },
+			{ 5, 33, 9, "a flag type past the engine's" },
+			{ 5, 33, 0xFF, "flag type 255" },
+			{ 5, 23, 0x3F, "a pitch" },
+			{ 5, 28, 1, "a respawn time" },
+			{ 5, 30, 1, "a count" },
+			{ 5, 31, 1, "a game type" },
+			{ 5, 34, 0x01, "a flag" },
+			{ 5, 35, 1, "an AI team" },
+			{ 5, 36, 1, "the first reserved byte" },
+			{ 5, 0, 0, "a path" },
+			{ 5, 2, _forge_record_hill, "the kind no build writes (a hill)" },
+		};
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			char what[96];
+
+			memcpy(work, good6, (size_t)good6_size);
+			work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + cases[index].offset] = cases[index].value;
+			if (cases[index].offset == 0)
+				work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + 1] = 0;
+			fix_checksum(work, good6_size);
+			snprintf(what, sizeof(what), "version 6: a game type object's %s: refused", cases[index].what);
+			CHECK(decode(work, good6_size, "bloodgulch") == _forge_file_bad_record, what);
+		}
+		/* (taken: another good index - the blue flag made red too, two red
+		flags; the race checkpoint made 5) */
+		memcpy(work, good6, (size_t)good6_size);
+		work[records + FORGE_FILE_RECORD_SIZE * 6 + 3] = 0;
+		work[records + FORGE_FILE_RECORD_SIZE * 12 + 3] = 5;
+		fix_checksum(work, good6_size);
+		CHECK(decode(work, good6_size, "bloodgulch") == _forge_file_ok, "version 6: other good indices: taken");
+	}
+	/* (called version 5: its game type objects refused) */
+	memcpy(work, good6, (size_t)good6_size);
+	put_u16(work, 4, 5);
+	CHECK(decode(work, good6_size, "bloodgulch") == _forge_file_bad_record, "version 6's game type objects in a file called version 5: refused");
+	/* (a file of version 6 with none: refused) */
+	memcpy(work, good5, (size_t)good5_size);
+	put_u16(work, 4, 6);
+	CHECK(decode(work, good5_size, "bloodgulch") == _forge_file_bad_version, "version 6 without a game type object: refused");
+}
+
 static void test_names(void)
 {
 	char name[FORGE_FILE_NAME_SIZE];
@@ -1177,8 +1381,12 @@ static void fuzz(long iterations)
 		{
 			/* (the version 1 sample, the version 2 one, or the version 4
 			one with player spawns) */
-			switch (next_random() % 4)
+			switch (next_random() % 5)
 			{
+			case 4:
+				size = good6_size;
+				memcpy(work, good6, (size_t)size);
+				break;
 			case 3:
 				size = good5_size;
 				memcpy(work, good5, (size_t)size);
@@ -1327,6 +1535,8 @@ static int dump(char const *path)
 		if (record->kind == _forge_record_player_spawn)
 			printf("record %d: a player spawn: %s, team %d, game types %d\n", index,
 				(record->flags & FORGE_RECORD_SPAWN_INITIAL) ? "initial" : "respawn", record->team, record->game_types);
+		if (record->kind == _forge_record_flag)
+			printf("record %d: a game type object: flag type %d, index %d\n", index, record->variant, record->team);
 		if (record->kind == _forge_record_teleporter_in || record->kind == _forge_record_teleporter_out)
 			printf("record %d: a teleporter %s, channel %d\n", index,
 				record->kind == _forge_record_teleporter_in ? "sender" : "receiver", record->team);
@@ -1350,6 +1560,7 @@ int main(int argc, char **argv)
 	test_version_2();
 	test_version_4();
 	test_version_5();
+	test_version_6();
 	test_names();
 	fuzz(iterations);
 	printf("%d checks, %d failed\n", checks, failures);

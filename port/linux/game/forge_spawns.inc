@@ -133,6 +133,15 @@ static void forge_spawn_name(
 
 	if (forge_spawn_is_teleporter(spawn))
 		snprintf(name, (size_t)size, T("%s, Channel %d"), kind, spawn->channel + 1);
+	/* (a game type object's: its team, hill, ball or order) */
+	else if (spawn->kind == _forge_spawn_flag)
+		snprintf(name, (size_t)size, spawn->channel == 0 ? T("%s, Red") : T("%s, Blue"), kind);
+	else if (spawn->kind == _forge_spawn_hill)
+		snprintf(name, (size_t)size, T("%s, Hill %d"), kind, spawn->channel + 1);
+	else if (spawn->kind == _forge_spawn_oddball)
+		snprintf(name, (size_t)size, T("%s, Ball %d"), kind, spawn->channel + 1);
+	else if (spawn->kind == _forge_spawn_race)
+		snprintf(name, (size_t)size, "%s %d", kind, spawn->channel + 1);
 	else if (spawn->team == 0)
 		snprintf(name, (size_t)size, T("%s, Red"), kind);
 	else if (spawn->team == 1)
@@ -145,6 +154,13 @@ static void forge_spawn_log(
 	char const *what,
 	struct forge_spawn const *spawn)
 {
+	if (forge_spawn_is_objective(spawn))
+	{
+		platform_log("forge: %s the %s #%ld (index %d) at %.2f %.2f %.2f facing %.2f %.2f", what,
+			forge_spawn_kind_log_names[spawn->kind % NUMBER_OF_FORGE_MARKER_KINDS], spawn->id, spawn->channel,
+			spawn->home.position.x, spawn->home.position.y, spawn->home.position.z, spawn->home.forward.i, spawn->home.forward.j);
+		return;
+	}
 	if (forge_spawn_is_teleporter(spawn))
 	{
 		platform_log("forge: %s the %s #%ld (channel %d) at %.2f %.2f %.2f facing %.2f %.2f", what,
@@ -158,9 +174,80 @@ static void forge_spawn_log(
 		spawn->home.position.y, spawn->home.position.z, spawn->home.forward.i, spawn->home.forward.j);
 }
 
-/* a spawn point (a marker of any kind: a teleporter too) added to the
-layout (id 0: a new id; a network game's client takes the host's): NULL when
-there are the most (a teleporter past FORGE_FILE_MAXIMUM_TELEPORTERS too) */
+/* whether a marker of the kind can be added: FALSE when its kind's are the
+most (a teleporter past FORGE_FILE_MAXIMUM_TELEPORTERS, a game type object
+past FORGE_FILE_MAXIMUM_GAME_OBJECTS or its hill's points full), with the
+notice's words when notice */
+static boolean forge_marker_kind_room(
+	short kind,
+	short index,
+	boolean notice)
+{
+	if ((kind == _forge_spawn_teleporter_sender || kind == _forge_spawn_teleporter_receiver) &&
+		forge_teleporters_count(NONE, NONE) >= FORGE_FILE_MAXIMUM_TELEPORTERS)
+	{
+		if (notice)
+			forge_notice(T("Teleporters full: %d. Delete one to place another."), FORGE_FILE_MAXIMUM_TELEPORTERS);
+		return FALSE;
+	}
+	if (kind >= _forge_spawn_flag && kind < NUMBER_OF_FORGE_MARKER_KINDS &&
+		forge_objectives_count(NONE, NONE) >= FORGE_FILE_MAXIMUM_GAME_OBJECTS)
+	{
+		if (notice)
+			forge_notice(T("Game type objects full: %d. Delete one to place another."), FORGE_FILE_MAXIMUM_GAME_OBJECTS);
+		return FALSE;
+	}
+	if (kind == _forge_spawn_hill && index != NONE && forge_objectives_count(_forge_spawn_hill, index) >= FORGE_FILE_MAXIMUM_HILL_POINTS)
+	{
+		if (notice)
+			forge_notice(T("Hill %d has %d points: the most."), index + 1, FORGE_FILE_MAXIMUM_HILL_POINTS);
+		return FALSE;
+	}
+	return TRUE;
+}
+
+/* a new marker's channel or index: a teleporter's (forge_teleporter_new_
+channel), a CTF flag's the team with none yet (red first), a hill point's
+the last hill's (a hill of several points), a ball's the first, a race
+checkpoint's the next in order */
+static short forge_marker_new_index(
+	short kind)
+{
+	short index;
+
+	switch (kind)
+	{
+	case _forge_spawn_teleporter_sender:
+	case _forge_spawn_teleporter_receiver:
+		return forge_teleporter_new_channel(kind);
+	case _forge_spawn_flag:
+		return (short)(forge_objectives_count(_forge_spawn_flag, 0) && !forge_objectives_count(_forge_spawn_flag, 1) ? 1 : 0);
+	case _forge_spawn_hill:
+		for (index = (short)(forge_globals.spawn_count - 1); index >= 0; index--)
+		{
+			if (forge_globals.spawns[index].kind == _forge_spawn_hill)
+			{
+				short hill = forge_globals.spawns[index].channel;
+
+				/* (that hill full: the next) */
+				while (hill < FORGE_FILE_MAXIMUM_HILLS - 1 &&
+					forge_objectives_count(_forge_spawn_hill, hill) >= FORGE_FILE_MAXIMUM_HILL_POINTS)
+				{
+					hill++;
+				}
+				return hill;
+			}
+		}
+		return 0;
+	case _forge_spawn_race:
+		return (short)MIN(forge_objectives_count(_forge_spawn_race, NONE), FORGE_FILE_MAXIMUM_RACE_CHECKPOINTS - 1);
+	}
+	return 0;
+}
+
+/* a spawn point (a marker of any kind: a teleporter, a game type object
+too) added to the layout (id 0: a new id; a network game's client takes the
+host's): NULL when there are the most (forge_marker_kind_room) */
 static struct forge_spawn *forge_spawn_add(
 	long id,
 	short kind,
@@ -171,19 +258,23 @@ static struct forge_spawn *forge_spawn_add(
 {
 	struct forge_spawn *spawn;
 	boolean teleporter = kind == _forge_spawn_teleporter_sender || kind == _forge_spawn_teleporter_receiver;
+	boolean objective = kind >= _forge_spawn_flag && kind < NUMBER_OF_FORGE_MARKER_KINDS;
 
 	if (forge_globals.spawn_count < 0 || forge_globals.spawn_count >= FORGE_MAXIMUM_SPAWNS)
 		return NULL;
-	if (teleporter && forge_teleporters_count(NONE, NONE) >= FORGE_FILE_MAXIMUM_TELEPORTERS)
+	if (objective)
+		channel = (short)PIN(channel, 0, forge_objective_indices(kind) - 1);
+	if (!forge_marker_kind_room(kind, objective ? channel : NONE, FALSE))
 		return NULL;
 	spawn = &forge_globals.spawns[forge_globals.spawn_count++];
 	csmemset(spawn, 0, sizeof(*spawn));
 	spawn->id = id ? id : ++forge_globals.next_id;
 	spawn->kind = (short)(kind >= 0 && kind < NUMBER_OF_FORGE_MARKER_KINDS ? kind : _forge_spawn_respawn);
-	/* (a teleporter: no team nor game type, its channel) */
-	spawn->team = (signed char)(!teleporter && (team == 0 || team == 1) ? team : NONE);
-	spawn->game_types = (unsigned short)(teleporter ? 0 : game_types & FORGE_FILE_SPAWN_GAME_TYPES_MASK);
-	spawn->channel = (short)(teleporter ? PIN(channel, 0, FORGE_TELEPORTER_CHANNELS - 1) : 0);
+	/* (a teleporter, a game type object: no team nor game type, its channel
+	or index) */
+	spawn->team = (signed char)(!teleporter && !objective && (team == 0 || team == 1) ? team : NONE);
+	spawn->game_types = (unsigned short)(teleporter || objective ? 0 : game_types & FORGE_FILE_SPAWN_GAME_TYPES_MASK);
+	spawn->channel = (short)(teleporter ? PIN(channel, 0, FORGE_TELEPORTER_CHANNELS - 1) : objective ? channel : 0);
 	spawn->home = *home;
 	/* (upright, facing along the ground) */
 	spawn->home.forward.k = 0.f;
@@ -218,13 +309,15 @@ static void forge_spawns_clear(
 /* (the map loaded for a Forge game or a map variant played, before anyone
 spawns) the layout's player spawns: a version 4 file's only (an older one's
 records of that kind were never written, and are skipped as ever); and its
-teleporters, a version 5 file's */
+teleporters, a version 5 file's; its game type objects, a version 6
+file's */
 static void forge_spawns_from_layout(
 	struct forge_file_layout const *layout)
 {
 	short index;
 	short taken = 0;
 	short teleporters = 0;
+	short objectives = 0;
 
 	if (forge_file_layout_version(layout) < 4)
 		return;
@@ -234,6 +327,27 @@ static void forge_spawns_from_layout(
 		struct forge_transform home;
 		float angles[3];
 
+		/* (a game type object: its type one of the list and its index in
+		range, checked by the validator) */
+		if (record->kind == _forge_record_flag && forge_file_layout_version(layout) >= 6)
+		{
+			short kind = record->variant == FORGE_FILE_FLAG_TYPE_CTF ? _forge_spawn_flag :
+				record->variant == FORGE_FILE_FLAG_TYPE_HILL ? _forge_spawn_hill :
+				record->variant == FORGE_FILE_FLAG_TYPE_ODDBALL ? _forge_spawn_oddball :
+				record->variant == FORGE_FILE_FLAG_TYPE_RACE ? _forge_spawn_race : NONE;
+
+			if (kind == NONE)
+				continue;
+			home.position.x = record->position[0];
+			home.position.y = record->position[1];
+			home.position.z = record->position[2];
+			angles[0] = record->angles[0];
+			angles[1] = angles[2] = 0.f;
+			forge_facing_from_angles(angles, &home.forward, &home.up);
+			if (forge_spawn_add(0, kind, NONE, 0, record->team, &home))
+				objectives++;
+			continue;
+		}
 		/* (a teleporter: its channel, checked in range by the validator) */
 		if ((record->kind == _forge_record_teleporter_in || record->kind == _forge_record_teleporter_out) &&
 			forge_file_layout_version(layout) >= 5)
@@ -269,6 +383,12 @@ static void forge_spawns_from_layout(
 	{
 		platform_log("forge: map variant \"%s\": %d player spawn points (%d initial, %d respawn)", layout->title, taken,
 			forge_spawns_of_kind(_forge_spawn_initial), forge_spawns_of_kind(_forge_spawn_respawn));
+	}
+	if (objectives)
+	{
+		platform_log("forge: map variant \"%s\": %d game type objects (%d CTF flags, %d hill points, %d oddball spawns, %d race "
+			"checkpoints)", layout->title, objectives, forge_spawns_of_kind(_forge_spawn_flag), forge_spawns_of_kind(_forge_spawn_hill),
+			forge_spawns_of_kind(_forge_spawn_oddball), forge_spawns_of_kind(_forge_spawn_race));
 	}
 	if (teleporters)
 	{
@@ -318,6 +438,23 @@ static short forge_spawns_capture(
 		record = &layout->records[layout->record_count];
 		csmemset(record, 0, sizeof(*record));
 		record->path_index = FORGE_FILE_NO_PATH;
+		/* (a game type object: version 6's netgame flag record) */
+		if (forge_spawn_is_objective(spawn))
+		{
+			record->kind = _forge_record_flag;
+			record->variant = (unsigned char)(spawn->kind == _forge_spawn_flag ? FORGE_FILE_FLAG_TYPE_CTF :
+				spawn->kind == _forge_spawn_hill ? FORGE_FILE_FLAG_TYPE_HILL : spawn->kind == _forge_spawn_oddball ?
+				FORGE_FILE_FLAG_TYPE_ODDBALL : FORGE_FILE_FLAG_TYPE_RACE);
+			record->team = (signed char)PIN(spawn->channel, 0, forge_file_flag_type_indices(record->variant) - 1);
+			record->position[0] = spawn->home.position.x;
+			record->position[1] = spawn->home.position.y;
+			record->position[2] = spawn->home.position.z;
+			forge_angles_from_facing(&spawn->home.forward, global_up3d, angles);
+			record->angles[0] = angles[0];
+			layout->record_count++;
+			layout->flags |= FORGE_FILE_FLAG_NETGAME_SPAWNS;
+			continue;
+		}
 		if (forge_spawn_is_teleporter(spawn))
 		{
 			record->kind = spawn->kind == _forge_spawn_teleporter_sender ? _forge_record_teleporter_in :
@@ -378,6 +515,27 @@ static void forge_spawn_property_apply(
 		return;
 	}
 	if (forge_spawn_is_teleporter(spawn) && property == _forge_property_respawn)
+		return;
+	/* (a game type object's: its index in the team's row - a CTF flag's
+	team, a hill's number (one of the most points skipped), a ball's, a
+	checkpoint's order -, its yaw; the rest read only) */
+	if (forge_spawn_is_objective(spawn) && property == _forge_property_team)
+	{
+		short indices = forge_objective_indices(spawn->kind);
+		short index = spawn->channel;
+		short tries;
+
+		for (tries = 0; tries < indices; tries++)
+		{
+			index = (short)((index + step + indices) % indices);
+			if (spawn->kind != _forge_spawn_hill || forge_objectives_count(_forge_spawn_hill, index) < FORGE_FILE_MAXIMUM_HILL_POINTS)
+				break;
+		}
+		spawn->channel = index;
+		forge_spawn_log("properties of", spawn);
+		return;
+	}
+	if (forge_spawn_is_objective(spawn) && (property == _forge_property_respawn || property == _forge_property_place_at_start))
 		return;
 	switch (property)
 	{
@@ -442,6 +600,19 @@ static void forge_spawn_properties_get(
 	properties->spawn_kind = spawn->kind;
 	properties->team = spawn->team;
 	properties->channel = spawn->channel;
+	properties->yaw = (short)forge_round(RADIANS_TO_DEGREES(arctangent(forward->j, forward->i)));
+	/* (a game type object's: whether the game type has it whole - CTF a
+	flag of each team, King a hill of three points or more, Race two
+	checkpoints or more; a ball's one) */
+	if (forge_spawn_is_objective(spawn))
+	{
+		properties->linked = spawn->kind == _forge_spawn_flag ? forge_objectives_count(_forge_spawn_flag, 0) &&
+			forge_objectives_count(_forge_spawn_flag, 1) : spawn->kind == _forge_spawn_hill ?
+			forge_objectives_count(_forge_spawn_hill, spawn->channel) >= 3 : spawn->kind == _forge_spawn_race ?
+			forge_objectives_count(_forge_spawn_race, NONE) >= 2 : TRUE;
+		properties->game_type_name[0] = 0;
+		return;
+	}
 	properties->linked = forge_spawn_is_teleporter(spawn) && forge_teleporters_count((short)(spawn->kind ==
 		_forge_spawn_teleporter_sender ? _forge_spawn_teleporter_receiver : _forge_spawn_teleporter_sender), spawn->channel) > 0;
 	properties->yaw = (short)forge_round(RADIANS_TO_DEGREES(arctangent(forward->j, forward->i)));
@@ -482,14 +653,10 @@ static void forge_spawn_choose(
 	if (!forge_camera_get(&position, &forward))
 		return;
 	if (forge_objects_counted() >= FORGE_MAXIMUM_OBJECTS || forge_globals.spawn_count >= FORGE_MAXIMUM_SPAWNS ||
-		((kind == _forge_spawn_teleporter_sender || kind == _forge_spawn_teleporter_receiver) &&
-			forge_teleporters_count(NONE, NONE) >= FORGE_FILE_MAXIMUM_TELEPORTERS))
+		!forge_marker_kind_room(kind, NONE, FALSE))
 	{
-		if ((kind == _forge_spawn_teleporter_sender || kind == _forge_spawn_teleporter_receiver) &&
-			forge_teleporters_count(NONE, NONE) >= FORGE_FILE_MAXIMUM_TELEPORTERS)
-		{
-			forge_notice(T("Teleporters full: %d. Delete one to place another."), FORGE_FILE_MAXIMUM_TELEPORTERS);
-		}
+		if (!forge_marker_kind_room(kind, NONE, TRUE))
+			;
 		else if (forge_globals.spawn_count >= FORGE_MAXIMUM_SPAWNS)
 			forge_notice(T("Spawn points full: %d. Delete one to place another."), FORGE_MAXIMUM_SPAWNS);
 		else
@@ -512,7 +679,7 @@ static void forge_spawn_choose(
 		forge_net_client_spawn_point(kind, &home);
 		return;
 	}
-	spawn = forge_spawn_add(0, kind, NONE, 0, forge_teleporter_new_channel(kind), &home);
+	spawn = forge_spawn_add(0, kind, NONE, 0, forge_marker_new_index(kind), &home);
 	if (!spawn)
 		return;
 	forge_spawn_log("placed", spawn);

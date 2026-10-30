@@ -68,6 +68,21 @@ receiver (a sender that leads nowhere is not one a writer makes). A file of
 version 4 or before holds none (the kinds were never written: refused there);
 a layout with a teleporter is written as version 5, and a version 5 file has
 one at least.
+
+Version 6 (Oct 30 2026) adds game type objects: a record of kind
+_forge_record_flag, no path, is one of the engine's netgame flags
+(scenario_definitions.h), its type in the variant byte from a fixed list
+(FORGE_FILE_FLAG_TYPE_*: a CTF flag's spot, a King of the Hill hill's point,
+an oddball's spawn, a race checkpoint) and its index in the team byte (a CTF
+flag's team, 0 red or 1 blue; a hill's number, below FORGE_FILE_MAXIMUM_HILLS;
+an oddball's ball, below FORGE_FILE_MAXIMUM_ODDBALLS; a checkpoint's order,
+below FORGE_FILE_MAXIMUM_RACE_CHECKPOINTS), its yaw and nothing else; at most
+FORGE_FILE_MAXIMUM_GAME_OBJECTS of them, a hill's points at most
+FORGE_FILE_MAXIMUM_HILL_POINTS. Played, a type the variant has replaces the
+map's own flags of that type for the game (a CTF flag a team's), one it has
+none of keeps the map's. A file of version 5 or before holds none (the kind
+was never written: refused there); a layout with one is written as version
+6, and a version 6 file has one at least.
 */
 
 #ifndef __FORGE_FILES_H
@@ -77,7 +92,7 @@ one at least.
 
 #define FORGE_FILE_EXTENSION ".hmv"
 /* the version written when a layout needs it, and the oldest read */
-#define FORGE_FILE_VERSION 5
+#define FORGE_FILE_VERSION 6
 #define FORGE_FILE_FIRST_VERSION 1
 #define FORGE_FILE_HEADER_SIZE 64
 #define FORGE_FILE_MAXIMUM_SIZE 65536
@@ -124,6 +139,20 @@ player spawns: infection too), a bit each in the engine's order */
 them in a layout */
 #define FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS 16
 #define FORGE_FILE_MAXIMUM_TELEPORTERS 32
+/* (version 6) game type objects: the netgame flag types a record may be
+(the engine's _netgame_flag_*, scenario_definitions.h), each one's indices,
+the most of them in a layout and of one hill's points (the engine's
+MAXIMUM_HILL_POINTS) */
+#define FORGE_FILE_FLAG_TYPE_CTF 0
+#define FORGE_FILE_FLAG_TYPE_ODDBALL 2
+#define FORGE_FILE_FLAG_TYPE_RACE 3
+#define FORGE_FILE_FLAG_TYPE_HILL 8
+#define FORGE_FILE_MAXIMUM_CTF_TEAMS 2
+#define FORGE_FILE_MAXIMUM_HILLS 16
+#define FORGE_FILE_MAXIMUM_ODDBALLS 16
+#define FORGE_FILE_MAXIMUM_RACE_CHECKPOINTS 32
+#define FORGE_FILE_MAXIMUM_GAME_OBJECTS 64
+#define FORGE_FILE_MAXIMUM_HILL_POINTS 12
 /* a record's path index when its kind names no object */
 #define FORGE_FILE_NO_PATH 0xFFFF
 
@@ -180,7 +209,10 @@ enum
 	_forge_record_player_spawn,
 	_forge_record_weapon_spawn,
 	_forge_record_vehicle_spawn,
+	/* (version 6) a game type object: variant its FORGE_FILE_FLAG_TYPE_*,
+	team its index */
 	_forge_record_flag,
+	/* (never written: refused) */
 	_forge_record_hill,
 	/* (version 5) a teleporter's sender and its receiver: team its channel */
 	_forge_record_teleporter_in,
@@ -303,7 +335,7 @@ int forge_file_layout_check(
 	char const *expected_map);
 
 /* the version a layout is written as: its own when set, else the lowest
-that holds it (5 with a teleporter, 4 with a player spawn, 3 with a
+that holds it (6 with a game type object, 5 with a teleporter, 4 with a player spawn, 3 with a
 respawning character, 2 when a record has an AI setting) */
 int forge_file_layout_version(
 	struct forge_file_layout const *layout);
@@ -352,6 +384,12 @@ void forge_file_name_received(
 	unsigned int hash,
 	char *file_name,
 	int size);
+
+/* (version 6) a game type object's index limit for its flag type
+(FORGE_FILE_FLAG_TYPE_*): the indices below it; 0 for a type not in the
+list */
+int forge_file_flag_type_indices(
+	int flag_type);
 
 /* an angle in radians brought within +-pi (the writer's) */
 float forge_file_angle_reduce(

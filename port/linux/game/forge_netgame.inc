@@ -33,6 +33,19 @@ A teleporter is drawn as its marker (forge_markers.inc) for everyone in a
 Forge game or a map variant played, the monitor and the Spartan alike, in
 its channel's colour: the sender with a second ring and a filled centre, the
 receiver a plain ring, its chevron where a player sent there faces.
+
+The layout's game type objects (the browser's OBJECTIVES: a CTF flag's spot,
+a King of the Hill hill's point, an oddball's spawn, a race checkpoint) are
+netgame flags of the engine's own types the same way (a CTF flag's team
+index its team, a hill point's its hill, a ball spawn's its ball, a
+checkpoint's its order), so that the game types place and score by them as
+by the map's: a type the layout has replaces the map's own flags of that
+type - a CTF flag a team's, so that a layout with a red flag alone keeps the
+map's blue one -, a type it has none of keeps the map's. Its hills are
+numbered from 0 as the engine counts them (King starts at hill 0), and its
+checkpoints in their order. The game type reads them as its game starts (a
+map variant played in CTF: its flags' spots); in a Forge game, itself a
+Slayer game, they are only drawn, for the monitor, and saved.
 */
 
 /* ---------- constants */
@@ -85,6 +98,94 @@ static boolean forge_spawn_is_teleporter(
 	struct forge_spawn const *spawn)
 {
 	return spawn->kind == _forge_spawn_teleporter_sender || spawn->kind == _forge_spawn_teleporter_receiver;
+}
+
+static boolean forge_spawn_is_objective(
+	struct forge_spawn const *spawn)
+{
+	return spawn->kind >= _forge_spawn_flag && spawn->kind < NUMBER_OF_FORGE_MARKER_KINDS;
+}
+
+/* a game type object kind's indices (forge_files.h's limits: a CTF flag's
+teams, the hills, the balls, the checkpoints) */
+static short forge_objective_indices(
+	short kind)
+{
+	switch (kind)
+	{
+	case _forge_spawn_flag: return FORGE_FILE_MAXIMUM_CTF_TEAMS;
+	case _forge_spawn_hill: return FORGE_FILE_MAXIMUM_HILLS;
+	case _forge_spawn_oddball: return FORGE_FILE_MAXIMUM_ODDBALLS;
+	case _forge_spawn_race: return FORGE_FILE_MAXIMUM_RACE_CHECKPOINTS;
+	}
+	return 1;
+}
+
+/* how many game type objects the layout has (of a kind, NONE any), of an
+index (NONE any) */
+static short forge_objectives_count(
+	short kind,
+	short index)
+{
+	short at;
+	short count = 0;
+
+	for (at = 0; at < forge_globals.spawn_count && at < FORGE_MAXIMUM_SPAWNS; at++)
+	{
+		struct forge_spawn const *spawn = &forge_globals.spawns[at];
+
+		if (forge_spawn_is_objective(spawn) && (kind == NONE || spawn->kind == kind) && (index == NONE || spawn->channel == index))
+			count++;
+	}
+	return count;
+}
+
+/* a game type object's netgame flag type */
+static short forge_objective_flag_type(
+	short kind)
+{
+	switch (kind)
+	{
+	case _forge_spawn_flag: return _netgame_flag_ctf_flag;
+	case _forge_spawn_hill: return _netgame_flag_hill;
+	case _forge_spawn_oddball: return _netgame_flag_oddball_ball_spawn;
+	}
+	return _netgame_flag_race_track;
+}
+
+/* whether the layout's game type objects replace a map flag: one of a type
+the layout has (a CTF flag of the team it has) */
+static boolean forge_netgame_replaced(
+	struct scenario_netgame_flag const *flag)
+{
+	switch (flag->type)
+	{
+	case _netgame_flag_ctf_flag:
+		return (flag->team_index == 0 || flag->team_index == 1) && forge_objectives_count(_forge_spawn_flag, flag->team_index) > 0;
+	case _netgame_flag_hill:
+		return forge_objectives_count(_forge_spawn_hill, NONE) > 0;
+	case _netgame_flag_oddball_ball_spawn:
+		return forge_objectives_count(_forge_spawn_oddball, NONE) > 0;
+	case _netgame_flag_race_track:
+		return forge_objectives_count(_forge_spawn_race, NONE) > 0;
+	}
+	return FALSE;
+}
+
+/* a layout's hill's or checkpoint's index as the engine counts them: its
+place among the indices the layout has, in order (hills 1, 4 and 9 are the
+engine's 0, 1 and 2) */
+static short forge_objective_engine_index(
+	struct forge_spawn const *spawn)
+{
+	short index;
+	short below = 0;
+
+	if (spawn->kind != _forge_spawn_hill && spawn->kind != _forge_spawn_race)
+		return spawn->channel;
+	for (index = 0; index < spawn->channel; index++)
+		below += forge_objectives_count(spawn->kind, index) > 0 ? 1 : 0;
+	return below;
 }
 
 /* how many teleporters the layout has (of a kind, NONE any), on a channel
@@ -191,6 +292,8 @@ static void forge_netgame_flags_build(
 	struct tag_block const *own;
 	long index;
 	short added = 0;
+	short objectives = 0;
+	short replaced = 0;
 
 	forge_netgame.dirty = FALSE;
 	if (global_scenario_index == NONE || (scenario = global_scenario_get()) == NULL)
@@ -199,15 +302,44 @@ static void forge_netgame_flags_build(
 	if (scenario->netgame_flags.address != (void *)forge_netgame.flags)
 		forge_netgame.original = scenario->netgame_flags;
 	own = &forge_netgame.original;
-	if (!forge_netgame_wanted() || !forge_teleporters_count(NONE, NONE))
+	if (!forge_netgame_wanted() || (!forge_teleporters_count(NONE, NONE) && !forge_objectives_count(NONE, NONE)))
 	{
 		forge_netgame_restore(scenario);
 		return;
 	}
 	forge_netgame.count = 0;
+	/* (the map's own, in order, but for those of a type the layout has) */
 	for (index = 0; index < own->count && forge_netgame.count < FORGE_NETGAME_MAXIMUM_FLAGS; index++)
-		forge_netgame.flags[forge_netgame.count++] = *TAG_BLOCK_GET_ELEMENT(own, index, struct scenario_netgame_flag);
+	{
+		struct scenario_netgame_flag const *flag = TAG_BLOCK_GET_ELEMENT(own, index, struct scenario_netgame_flag);
+
+		if (forge_netgame_replaced(flag))
+		{
+			replaced++;
+			continue;
+		}
+		forge_netgame.flags[forge_netgame.count++] = *flag;
+	}
 	forge_netgame.own_count = forge_netgame.count;
+	/* (the layout's game type objects) */
+	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+	{
+		struct forge_spawn const *spawn = &forge_globals.spawns[index];
+		struct scenario_netgame_flag *flag;
+
+		if (!forge_spawn_is_objective(spawn) || forge_netgame.count >= FORGE_NETGAME_MAXIMUM_FLAGS)
+			continue;
+		flag = &forge_netgame.flags[forge_netgame.count++];
+		csmemset(flag, 0, sizeof(*flag));
+		flag->position = spawn->home.position;
+		flag->position.z -= FORGE_MARKER_CLEARANCE;
+		flag->facing = arctangent(spawn->home.forward.j, spawn->home.forward.i);
+		flag->type = forge_objective_flag_type(spawn->kind);
+		flag->team_index = forge_objective_engine_index(spawn);
+		objectives++;
+		platform_log("forge: netgame flag: the %s #%ld as type %d, index %d, at %.2f %.2f %.2f", forge_spawn_kind_log_names[spawn->kind],
+			spawn->id, (int)flag->type, (int)flag->team_index, flag->position.x, flag->position.y, flag->position.z);
+	}
 	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
 	{
 		struct forge_spawn const *spawn = &forge_globals.spawns[index];
@@ -234,6 +366,10 @@ static void forge_netgame_flags_build(
 	platform_log("forge: netgame flags: the map's %ld and %d teleporters (%d senders, %d receivers)", forge_netgame.own_count,
 		added, forge_teleporters_count(_forge_spawn_teleporter_sender, NONE),
 		forge_teleporters_count(_forge_spawn_teleporter_receiver, NONE));
+	if (objectives || replaced)
+	{
+		platform_log("forge: netgame flags: %d game type objects of the layout, %d of the map's replaced", objectives, replaced);
+	}
 }
 
 /* (each update) the log's teleports: a player's unit that jumped onto one
@@ -301,7 +437,7 @@ static unsigned long forge_netgame_hash(
 		unsigned char const *bytes = (unsigned char const *)values;
 		unsigned int at;
 
-		if (!forge_spawn_is_teleporter(spawn))
+		if (!forge_spawn_is_teleporter(spawn) && !forge_spawn_is_objective(spawn))
 			continue;
 		values[0] = (real)(spawn->kind * 100 + spawn->channel);
 		values[1] = spawn->home.position.x;
@@ -327,6 +463,48 @@ static void forge_netgame_update(
 		forge_netgame_flags_build();
 	}
 	forge_netgame_teleports_watch();
+}
+
+/* (the console's "forge netflags") the block's game type flags, and the game
+type's objects where they stand (a flag, a ball: a weapon), in the log */
+static void forge_netgame_log(
+	void)
+{
+	struct scenario *scenario;
+	struct data_iterator iterator;
+	struct object_header_datum const *header;
+	long index;
+
+	if (global_scenario_index == NONE || (scenario = global_scenario_get()) == NULL)
+		return;
+	platform_log("forge: netgame flags: %ld (%s)", (long)scenario->netgame_flags.count,
+		scenario->netgame_flags.address == (void *)forge_netgame.flags ? "Forge's" : "the map's own");
+	for (index = 0; index < scenario->netgame_flags.count; index++)
+	{
+		struct scenario_netgame_flag const *flag = TAG_BLOCK_GET_ELEMENT(&scenario->netgame_flags, index,
+			struct scenario_netgame_flag);
+
+		if (flag->type == _netgame_flag_ctf_flag || flag->type == _netgame_flag_hill ||
+			flag->type == _netgame_flag_oddball_ball_spawn || flag->type == _netgame_flag_race_track)
+		{
+			platform_log("forge: netgame flag %ld: type %d index %d at %.2f %.2f %.2f", index, (int)flag->type,
+				(int)flag->team_index, flag->position.x, flag->position.y, flag->position.z);
+		}
+	}
+	data_iterator_new(&iterator, object_header_data);
+	while ((header = (struct object_header_datum const *)data_iterator_next(&iterator)) != NULL)
+	{
+		struct object_datum const *object = object_get(iterator.datum_index);
+		char const *name = tag_get_name(object->definition_index);
+		char const *leaf = name ? strrchr(name, '\\') : NULL;
+
+		leaf = leaf ? leaf + 1 : name;
+		if (object->object.type == _object_type_weapon && leaf && (!strcmp(leaf, "flag") || !strcmp(leaf, "ball")))
+		{
+			platform_log("forge: the game type's %s at %.2f %.2f %.2f", leaf, object->object.position.x,
+				object->object.position.y, object->object.position.z);
+		}
+	}
 }
 
 /* ---------- public code */

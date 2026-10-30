@@ -10816,10 +10816,35 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		{
 			boolean teleporter = properties.spawn_kind == _forge_spawn_teleporter_sender ||
 				properties.spawn_kind == _forge_spawn_teleporter_receiver;
+			boolean objective = properties.spawn_kind >= _forge_spawn_flag;
 			boolean shown = row <= _forge_property_yaw;
 
-			switch (teleporter ? row + 100 : row)
+			switch (objective ? row + 200 : teleporter ? row + 100 : row)
 			{
+			/* (a game type object's four: its index - a CTF flag's team, a
+			hill's number, a ball's, a checkpoint's order -, its game type,
+			whether the game type has it whole, its yaw - forge_netgame.inc) */
+			case _forge_property_team + 200:
+				if (properties.spawn_kind == _forge_spawn_flag)
+					snprintf(text, sizeof(text), "%s: %s", T("TEAM"), properties.channel == 0 ? T("RED") : T("BLUE"));
+				else if (properties.spawn_kind == _forge_spawn_hill)
+					snprintf(text, sizeof(text), T("HILL: %d"), properties.channel + 1);
+				else if (properties.spawn_kind == _forge_spawn_oddball)
+					snprintf(text, sizeof(text), T("BALL: %d"), properties.channel + 1);
+				else
+					snprintf(text, sizeof(text), T("ORDER: %d"), properties.channel + 1);
+				break;
+			case _forge_property_respawn + 200:
+				snprintf(text, sizeof(text), "%s: %s", T("GAME TYPE"), properties.spawn_kind == _forge_spawn_flag ? T("CTF") :
+					properties.spawn_kind == _forge_spawn_hill ? T("KING OF THE HILL") :
+					properties.spawn_kind == _forge_spawn_oddball ? T("ODDBALL") : T("RACE"));
+				break;
+			case _forge_property_place_at_start + 200:
+				snprintf(text, sizeof(text), "%s: %s", T("COMPLETE"), properties.linked ? T("YES") : T("NO"));
+				break;
+			case _forge_property_yaw + 200:
+				snprintf(text, sizeof(text), "%s: %d\xc2\xb0", T("YAW"), properties.yaw);
+				break;
 			/* (a teleporter's four: its channel, whether its channel has the
 			other end, sender or receiver, its yaw - forge_netgame.inc) */
 			case _forge_property_team + 100:
@@ -10908,7 +10933,10 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		text_show(child, text);
 		child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
 	}
-	if (properties.spawn && (properties.spawn_kind == _forge_spawn_teleporter_sender ||
+	if (properties.spawn && properties.spawn_kind >= _forge_spawn_flag)
+		snprintf(text, sizeof(text), "%s: game type object %d, index %d, %s, yaw %d", properties.name, properties.spawn_kind,
+			properties.channel, properties.linked ? "complete" : "not complete", properties.yaw);
+	else if (properties.spawn && (properties.spawn_kind == _forge_spawn_teleporter_sender ||
 		properties.spawn_kind == _forge_spawn_teleporter_receiver))
 		snprintf(text, sizeof(text), "%s: teleporter %s, channel %d, yaw %d", properties.name,
 			properties.spawn_kind == _forge_spawn_teleporter_sender ? "sender" : "receiver", properties.channel, properties.yaw);

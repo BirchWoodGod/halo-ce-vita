@@ -1878,13 +1878,13 @@ static void forge_net_host_request(
 			/* (a teleporter's end: within the teleporters' most too, its channel
 			the host's choice, as its own browser makes one) */
 			if (forge_objects_counted() >= FORGE_MAXIMUM_OBJECTS || forge_globals.spawn_count >= FORGE_MAXIMUM_SPAWNS ||
-				(request.aux >= NUMBER_OF_FORGE_SPAWN_KINDS && forge_teleporters_count(NONE, NONE) >= FORGE_FILE_MAXIMUM_TELEPORTERS))
+				!forge_marker_kind_room(request.aux, NONE, FALSE))
 			{
 				forge_net_refuse(actor, &request, _forge_net_refuse_budget, FORGE_MAXIMUM_OBJECTS, 0);
 				return;
 			}
 			forge_net_transform_to(&request.transform, &home.position, &home.forward, &home.up);
-			spawn = forge_spawn_add(0, request.aux, NONE, 0, forge_teleporter_new_channel(request.aux), &home);
+			spawn = forge_spawn_add(0, request.aux, NONE, 0, forge_marker_new_index(request.aux), &home);
 			if (!spawn)
 			{
 				forge_net_refuse(actor, &request, _forge_net_refuse_cannot_place, 0, 0);
@@ -2509,8 +2509,11 @@ static void forge_net_host_broadcast(
 	{
 		struct forge_net_record entry;
 
-		if (forge_net.host_play && !forge_spawn_is_teleporter(&forge_globals.spawns[index]))
+		if (forge_net.host_play && !forge_spawn_is_teleporter(&forge_globals.spawns[index]) &&
+			!forge_spawn_is_objective(&forge_globals.spawns[index]))
+		{
 			continue;
+		}
 		forge_net_spawn_entry_fill(&forge_globals.spawns[index], &entry);
 		if (forge_net_update_valid(&entry, forge_net.net_count))
 			forge_net_shadow_entry(forge_globals.spawns[index].id, &entry, now);
@@ -2664,8 +2667,11 @@ static void forge_net_host_sync(
 	the teleporters in a map variant played too) */
 	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
 	{
-		if (forge_net.host_play && !forge_spawn_is_teleporter(&forge_globals.spawns[index]))
+		if (forge_net.host_play && !forge_spawn_is_teleporter(&forge_globals.spawns[index]) &&
+			!forge_spawn_is_objective(&forge_globals.spawns[index]))
+		{
 			continue;
+		}
 		forge_net_spawn_entry_fill(&forge_globals.spawns[index], &record);
 		if (forge_net_update_valid(&record, forge_net.net_count))
 		{
@@ -3136,10 +3142,16 @@ static void forge_net_client_spawn_point(
 		forge_notice("%s", T("The host's game has no spawn points"));
 		return;
 	}
-	/* (a later marker - a teleporter's end: of a host of version 5) */
+	/* (a later marker - a teleporter's end: of a host of version 5; a game
+	type object: of 6) */
 	if (kind >= NUMBER_OF_FORGE_SPAWN_KINDS && forge_net.host_version < FORGE_NET_HOST_VERSION_MARKERS)
 	{
 		forge_notice("%s", T("The host's game has no teleporters"));
+		return;
+	}
+	if (kind >= _forge_spawn_flag && forge_net.host_version < FORGE_NET_HOST_VERSION_OBJECTIVES)
+	{
+		forge_notice("%s", T("The host's game has no game type objects"));
 		return;
 	}
 	forge_net_request_init(&record, _forge_net_request_spawn);
@@ -3445,7 +3457,10 @@ static void forge_net_client_update_take(
 			short channel = marker ? (short)PIN(record->value, 0, FORGE_TELEPORTER_CHANNELS - 1) : 0;
 
 			if (marker)
+			{
 				kind = (short)PIN(record->aux, NUMBER_OF_FORGE_SPAWN_KINDS, NUMBER_OF_FORGE_MARKER_KINDS - 1);
+				channel = (short)PIN(record->value, 0, forge_net_marker_indices(kind) - 1);
+			}
 			forge_net_transform_to(&record->transform, &home.position, &home.forward, &home.up);
 			if (!spawn)
 				spawn = forge_spawn_add((long)record->id, kind, record->team, marker ? 0 : record->value, channel, &home);
