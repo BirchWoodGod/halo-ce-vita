@@ -69,14 +69,14 @@ def test_pages_and_a_step(root, tmp_path, monkeypatch):
     monkeypatch.setattr(messagebox, "showerror", lambda title, text, **options: errors.append(text))
     out = tmp_path / "out"
     window = hcv.InstallerWindow(root, str(out))
-    for page in range(len(window.STEPS)):
+    for page in window.PAGES:
         window.show(page)
         root.update()
         assert window.body.winfo_children()
         assert window.title_label.cget("text") == window.PAGES[page][2]
     image = tmp_path / "halo.iso"
     fakes.make_xiso(str(image), fakes.xbox_tree())
-    window.show(1)
+    window.show("game_files")
     window.xbox_source.set(str(image))
     window.start(window.do_xbox)
     assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
@@ -85,11 +85,11 @@ def test_pages_and_a_step(root, tmp_path, monkeypatch):
     assert (out / "maps" / "a10.map").exists() and (out / "default.xbe").exists()
     assert window.movie_source.get() == str(image)
     # done: the sidebar's tick, the step's line, Next back as the main button
-    assert window.step_state(1) == "current" and 1 in window.done_steps
+    assert window.step_state("game_files") == "current" and "game_files" in window.done_steps
     assert "Xbox files ready" in window.notice_text()
     assert window.next_button.cget("text") == "Next"
     # a step without its file: told on the page, nothing started, no dialog
-    window.show(3)
+    window.show("pc_files")
     window.pc_mode.set("installer")
     window.installer.set("")
     window.start(window.do_pc_files)
@@ -115,29 +115,31 @@ def test_mcc_through_the_window(root, tmp_path, monkeypatch):
     out = tmp_path / "out"
     window = hcv.InstallerWindow(root, str(out))
     assert window.mcc_root.get() == str(mcc) and window.game_mode.get() == "xbox"
-    window.show(1)
+    assert window.mode.get() == "automatic"  # MCC there: Automatic picked already
+    window.mode.set("manual")
+    window.show("game_files")
     root.update()
     texts = [widget.cget("text") for widget in all_widgets(window.body)
              if widget.winfo_class() in ("TRadiobutton", "TCheckbutton")]
     assert any("Master Chief Collection" in text for text in texts)
     window.game_mode.set("mcc")
-    window.start(window.do_game)
+    window.start(window.do_game_files)
     assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
     pump(root, lambda: False, 0.3)
     assert not errors
     assert hcv.mcc_staged(str(out)) and not (out / "maps").exists()
-    assert window.step_state(1) == "current" and window.step_state_done(1)
+    assert window.step_state("game_files") == "current" and window.step_state_done("game_files")
     assert "MCC files ready" in window.notice_text()
     rows = {what: (done, how) for done, what, how in window.done_summary()}
     assert rows["MCC files"][0] is True and "29 Halo CE maps" in rows["MCC files"][1]
-    for page in range(len(window.STEPS)):
+    for page in window.PAGES:
         window.show(page)
         root.update()
     # no folder chosen: told on the page
-    window.show(1)
+    window.show("game_files")
     window.game_mode.set("mcc")
     window.mcc_root.set("")
-    window.start(window.do_game)
+    window.start(window.do_game_files)
     assert "Choose MCC's folder" in window.notice_text() and not window.busy()
 
 
@@ -156,14 +158,14 @@ def test_required_pc_files_check(root, tmp_path, monkeypatch):
     out = tmp_path / "out"
     stage(str(out), xbox=True)
     window = hcv.InstallerWindow(root, str(out))
-    assert window.PAGES[3][1] == "Required"
-    assert window.step_rows[3][2].cget("text") == "Required"
-    window.show(3)
+    assert window.PAGES["pc_files"][1] == "Required"
+    assert window.step_rows["pc_files"][2].cget("text") == "Required"
+    window.show("pc_files")
     root.update()
     labels = [widget.cget("text") for widget in all_widgets(window.body) if widget.winfo_class() == "TLabel"]
     assert any(text.startswith("⚠ Required Halo Custom Edition files missing: bitmaps.map, sounds.map, loc.map")
                for text in labels)
-    window.show(4)
+    window.show("copy_vita")
     window.host.set("192.168.1.20")
     window.start(window.do_upload)
     assert asked and "Copy the other files" in asked[0]
@@ -173,19 +175,19 @@ def test_required_pc_files_check(root, tmp_path, monkeypatch):
     assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
     assert len(calls) == 1
     rows = {what: (done, how) for done, what, how in window.done_summary()}
-    assert rows["Halo PC files"] == (False, "MISSING bitmaps.map, sounds.map, loc.map: required (step 3)")
+    assert rows["Halo PC files"] == (False, "MISSING bitmaps.map, sounds.map, loc.map: required")
     # from MCC's custom_edition: done, nothing asked
     for name, kind in hcv.PC_RESOURCE_MAPS:
         folder = out / "mcc" / "halo1" / "maps" / "custom_edition"
         folder.mkdir(parents=True, exist_ok=True)
         (folder / name).write_bytes(fakes.fake_resource_map(kind))
     asked.clear()
-    window.show(3)
+    window.show("pc_files")
     root.update()
-    assert window.step_state_done(3)
+    assert window.step_state_done("pc_files")
     labels = [widget.cget("text") for widget in all_widgets(window.body) if widget.winfo_class() == "TLabel"]
     assert any(text.startswith("✓ bitmaps.map, sounds.map and loc.map") for text in labels)
-    window.show(4)
+    window.show("copy_vita")
     window.start(window.do_upload)
     assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
     assert not asked and len(calls) == 2
@@ -196,12 +198,12 @@ def test_a_failed_step_is_shown(root, tmp_path, monkeypatch):
     errors = []
     monkeypatch.setattr(messagebox, "showerror", lambda title, text, **options: errors.append(text))
     window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    window.show(1)
+    window.show("game_files")
     window.xbox_source.set(str(tmp_path / "missing.iso"))
     window.start(window.do_xbox)
     assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
     pump(root, lambda: False, 0.3)
-    assert errors and 1 not in window.done_steps
+    assert errors and "game_files" not in window.done_steps
     assert window.notice_text().startswith("⚠")
     assert window.details_shown  # the log opened to show what happened
 
@@ -209,25 +211,26 @@ def test_a_failed_step_is_shown(root, tmp_path, monkeypatch):
 def test_sidebar_states(root, tmp_path):
     out = tmp_path / "out"
     window = hcv.InstallerWindow(root, str(out))
-    assert window.step_state(0) == "current" and window.step_state(1) == "todo"
-    assert window.next_button.cget("text") == "Get started"
-    window.go(1)
+    assert window.step_state("platform") == "current" and window.step_state("game_files") == "todo"
+    assert window.next_button.cget("text") == "Next"
+    assert not window.back_button.instate(["!disabled"])
+    window.go("game_files")
     assert window.next_button.cget("text") == "Skip this step"
-    window.go(2)  # moving on past a step not done: skipped
-    assert window.step_state(1) == "skipped"
-    assert window.step_rows[1][2].cget("text") == "Skipped"
-    window.go(1)  # going back skips nothing
-    assert window.step_state(2) == "todo"
+    window.go("movies")  # moving on past a step not done: skipped
+    assert window.step_state("game_files") == "skipped"
+    assert window.step_rows["game_files"][2].cget("text") == "Skipped"
+    window.go("game_files")  # going back skips nothing
+    assert window.step_state("movies") == "todo"
     # files already in the output folder count as done (an earlier run)
     stage(str(out), xbox=True, pc=True)
-    window.show(4)
-    assert window.step_state(1) == "done" and window.step_state(3) == "done"
-    assert window.step_state(2) == "todo"
-    assert window.step_rows[3][2].cget("text") == "Done"
+    window.show("copy_vita")
+    assert window.step_state("game_files") == "done" and window.step_state("pc_files") == "done"
+    assert window.step_state("movies") == "todo"
+    assert window.step_rows["pc_files"][2].cget("text") == "Done"
     # the sidebar moves too
-    window.step_rows[5][1].event_generate("<Button-1>")
+    window.step_rows["vpk"][1].event_generate("<Button-1>")
     root.update()
-    assert window.page == 5 and window.step_state(4) == "skipped"
+    assert window.page == "vpk" and window.step_state("copy_vita") == "skipped"
 
 
 def test_details_collapsed_by_default(root, tmp_path):
@@ -248,9 +251,9 @@ def test_done_page_summary(root, tmp_path):
     out = tmp_path / "out"
     stage(str(out), xbox=True, pc=False, movies=3)
     window = hcv.InstallerWindow(root, str(out))
-    window.results[4] = "On the Vita: 17 copied, 2 were already there"
-    window.done_steps.add(4)
-    window.show(6)
+    window.results["copy_vita"] = "On the Vita: 17 copied, 2 were already there"
+    window.done_steps.add("copy_vita")
+    window.show("done")
     rows = {what: (done, how) for done, what, how in window.done_summary()}
     assert rows["Xbox game files"] == (True, "default.xbe and %d maps" % len(hcv.XBOX_REQUIRED_MAPS))
     assert rows["Movies"] == (True, "3 movies")
@@ -285,9 +288,9 @@ def test_light_and_dark(root, tmp_path):
     root.update()
     assert style.theme_use() == "sun-valley-light" and window.theme == "light"
     assert not window.follow_system
-    assert str(window.step_rows[1][1].cget("background")) == ""
+    assert str(window.step_rows["game_files"][1].cget("background")) == ""
     assert window.log_text.cget("background") == hcv.PALETTES["light"]["log"]
-    for page in range(len(window.STEPS)):
+    for page in window.PAGES:
         window.show(page)
         root.update()
 
@@ -301,7 +304,7 @@ def test_classic_is_the_default(root, tmp_path, own_settings):
     assert ttk.Style(root).lookup("Header.TFrame", "background") == hcv.PALETTES["classic"]["header"]
     assert str(window.next_button.cget("default")) == "active"  # the default button's ring
     assert not own_settings.exists()  # nothing written until the look is changed
-    for page in range(len(window.STEPS)):
+    for page in window.PAGES:
         window.show(page)
         root.update()
         assert window.body.winfo_children()
@@ -315,7 +318,7 @@ def test_modern_look_is_remembered(root, tmp_path, own_settings):
     out = str(tmp_path / "out")
     stage(out, xbox=True)
     window = hcv.InstallerWindow(root, out)
-    window.show(2)
+    window.show("movies")
     window.movie_source.set("/some/halo.iso")
     window.append_log("a line of the log")
     window.modern.set(True)
@@ -324,10 +327,10 @@ def test_modern_look_is_remembered(root, tmp_path, own_settings):
     assert window.modern_look and ttk.Style(root).theme_use().startswith("sun-valley-")
     assert json.loads(own_settings.read_text())["look"] == "modern"
     # drawn again: same page, fields, log and sidebar states
-    assert window.page == 2 and window.movie_source.get() == "/some/halo.iso"
+    assert window.page == "movies" and window.movie_source.get() == "/some/halo.iso"
     assert "a line of the log" in window.log_text.get("1.0", "end")
-    assert window.step_state(1) == "done" and window.step_rows[1][2].cget("text") == "Done"
-    for page in range(len(window.STEPS)):
+    assert window.step_state("game_files") == "done" and window.step_rows["game_files"][2].cget("text") == "Done"
+    for page in window.PAGES:
         window.show(page)
         root.update()
     # Dark mode is kept too
@@ -411,7 +414,7 @@ def test_pictures(root, tmp_path):
     window = hcv.InstallerWindow(root, str(tmp_path / "out"))
     zoom = max(1, int(hcv.PICTURE_ZOOM * window.scale + 1e-6))
     names = set()
-    for page in range(len(window.STEPS)):
+    for page in window.PAGES:
         window.show(page)
         root.update()
         image = window.picture(page)
@@ -420,7 +423,7 @@ def test_pictures(root, tmp_path):
         assert str(image) in str(window.picture_label.cget("image"))
         assert window.picture_caption.cget("text") == hcv.PAGE_PICTURES[page][1]
         names.add(hcv.PAGE_PICTURES[page][0])
-    assert len(names) == len(window.STEPS)  # a picture of its own for each page
+    assert len(names) == len(window.PAGES)  # a picture of its own for each page
     # small: they go inside the Windows program
     assert sum(os.path.getsize(hcv.picture_path(name)) for name in names) < 64 * 1024
 
@@ -433,7 +436,7 @@ def test_the_window_works_without_its_pictures(root, tmp_path, monkeypatch):
     damaged = tmp_path / "damaged.png"
     damaged.write_bytes(b"\x89PNG\r\n\x1a\nnot really")
     window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    for page in range(len(window.STEPS)):
+    for page in window.PAGES:
         window.show(page)
         root.update()
         assert window.picture(page) is None and not window.picture_label.winfo_ismapped()
@@ -441,7 +444,7 @@ def test_the_window_works_without_its_pictures(root, tmp_path, monkeypatch):
     monkeypatch.setattr(hcv, "picture_path", lambda name: str(damaged))
     window = hcv.InstallerWindow(root, str(tmp_path / "out"))
     root.update()
-    assert window.picture(0) is None and not window.picture_label.winfo_ismapped()
+    assert window.picture("platform") is None and not window.picture_label.winfo_ismapped()
     assert not errors
 
 
@@ -454,7 +457,7 @@ def test_without_the_modern_theme(root, tmp_path, own_settings, monkeypatch):
     texts = [widget.cget("text") for widget in all_widgets(window.sidebar)
              if widget.winfo_class() == "TCheckbutton"]
     assert "Modern look" not in texts
-    for page in range(len(window.STEPS)):
+    for page in window.PAGES:
         window.show(page)
         root.update()
         assert window.body.winfo_children()
@@ -512,7 +515,7 @@ def test_classic_indicators_at_a_large_scale(root, tmp_path):
         window._classic_indicators(style)
     assert "Hcv.Radiobutton.indicator" in style.element_names()
     assert "Hcv.Checkbutton.indicator" in str(style.layout("TCheckbutton"))
-    for page in range(len(window.STEPS)):
+    for page in window.PAGES:
         window.show(page)
         root.update()
 
@@ -532,7 +535,7 @@ def test_icon_file(tmp_path):
 
 def test_a_short_window_scrolls(root, tmp_path):
     window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    window.show(3)
+    window.show("pc_files")
     root.minsize(1, 1)
     tall, short = "%dx%d" % (window.px(1000), window.px(900)), "%dx%d" % (window.px(900), window.px(420))
     root.geometry(tall)

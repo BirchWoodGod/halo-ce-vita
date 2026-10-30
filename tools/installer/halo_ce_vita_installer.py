@@ -3,31 +3,43 @@
 """
 HALO_CE_VITA_INSTALLER.PY
 
-The install helper for Halo: Combat Evolved for the PS Vita: it gathers the
-player's own game files, in the layout README.md's Install section gives,
-and copies them to the Vita over VitaShell's FTP mode.
+The install helper for Halo: Combat Evolved: it gathers the player's own game
+files, in the layout README.md's Install section gives, and copies them to a
+PS Vita over VitaShell's FTP mode or into a PC build's data folder.
 
     python3 halo_ce_vita_installer.py            the window (tkinter)
     python3 halo_ce_vita_installer.py --help     the command-line steps
 
-The steps, each one optional:
+The window: choose the platform (PLATFORMS; those not ready yet are listed
+greyed), then the way (Automatic: everything from the player's own Halo: The
+Master Chief Collection, found as the game finds it; Manual: each source
+chosen by hand), then the copy. install_flow() gives the pages of each choice;
+a game choice (GAMES) shows up as a page of its own once there are two games.
 
-1. Game files: the maps folder and default.xbe out of the player's Xbox
-   disc image (an XISO or a full disc image: read here, by a small XDVDFS
-   reader, nothing to install) or an already unpacked folder; or, the other
-   way, the Halo CE content of the player's own Halo: The Master Chief
-   Collection (Steam), copied as the game reads it into mcc/.
-2. Movies (optional: the game runs without them): the disc's Bink movies
-   converted by ffmpeg to the H.264 MP4s the Vita plays (movies/<name>.mp4).
-3. Halo PC files: bitmaps.map, sounds.map and loc.map, which online play and
-   the Custom Edition maps need, from Halo MCC on Steam
-   (halo1/maps/custom_edition), the Halo Custom Edition installer (any file
-   name: it is recognised by what is in it, and its cabinet is unpacked here,
-   LZX included) or a folder that has them.
-4. Copy to the Vita: everything gathered, over VitaShell's FTP (port 1337),
-   into ux0:data/haloce-vita/. A copy that stops (the Vita slept) goes on
-   from the files already there.
-5. The VPK copied to ux0:data/, to install with VitaShell.
+The sources, each one optional:
+
+- Game files: the maps folder and default.xbe out of the player's Xbox disc
+  image (an XISO or a full disc image: read here, by a small XDVDFS reader,
+  nothing to install) or an already unpacked folder; or, the other way, the
+  Halo CE content of the player's own MCC (Steam), copied as the game reads
+  it into mcc/.
+- Movies (Vita only, optional: the game runs without them): the disc's Bink
+  movies converted by ffmpeg to the H.264 MP4s the Vita plays
+  (movies/<name>.mp4).
+- Halo PC files: bitmaps.map, sounds.map and loc.map, which online play and
+  the Custom Edition maps need, from Halo MCC on Steam
+  (halo1/maps/custom_edition), the Halo Custom Edition installer (any file
+  name: it is recognised by what is in it, and its cabinet is unpacked here,
+  LZX included) or a folder that has them.
+
+The copy:
+
+- To the Vita: everything gathered, over VitaShell's FTP (port 1337), into
+  ux0:data/haloce-vita/. A copy that stops (the Vita slept) goes on from the
+  files already there. Then the VPK to ux0:data/, to install with VitaShell.
+- To a PC build: everything gathered but the movies, into the folder of its
+  executable (build/linux or build/windows of the unpacked release), where
+  the game looks for maps/ and mcc/.
 
 No game data comes with this tool: everything is read from the player's own
 files. Every name read from a disc image or a cabinet is checked before a
@@ -65,7 +77,7 @@ from array import array
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
-VERSION = "1.0"
+VERSION = "1.1.2"
 RELEASES_URL = "https://github.com/BirchWoodGod/halo-ce-vita/releases/latest"
 CE_INSTALLER_URL = "https://www.halomaps.org/hce/detail.cfm?fid=410"
 
@@ -121,6 +133,62 @@ FFMPEG_MOVIE_ARGS = {
 MOVIE_QUALITY_ALIASES = {"high": "better", "standard": "baseline"}
 
 Progress = Callable[[str, int, int], None]
+
+
+@dataclass(frozen=True)
+class Choice:
+    """An entry of a choice page: its key, its name, one line about it, and
+    whether it can be picked yet (one that cannot is listed greyed)."""
+    key: str
+    name: str
+    note: str = ""
+    available: bool = True
+
+
+# One entry each until there are more: Halo 2 joins GAMES in 1.2.0 (with its
+# sources: install_flow is where a game's pages differ), and a console in
+# PLATFORMS is greyed until there is a build of it.
+GAMES = (Choice("halo-ce", "Halo: Combat Evolved"),)
+PLATFORMS = (
+    Choice("vita", "PS Vita", "The files go over VitaShell's FTP. Needs HENkaku/Enso, VitaShell and the shader "
+                              "compiler ur0:data/libshacccg.suprx (ShaRKF00D extracts it). See README.md."),
+    Choice("pc", "PC", "Windows or Linux: the files go into the PC build you unpacked."),
+    Choice("android", "Android", available=False),
+    Choice("switch", "Nintendo Switch", available=False),
+    Choice("other", "Other consoles", available=False),
+)
+MODES = (
+    Choice("automatic", "Automatic", "Everything comes from your own Halo: The Master Chief Collection."),
+    Choice("manual", "Manual", "Pick each source yourself: your Xbox disc image, the Halo Custom Edition files, "
+                               "the movies."),
+)
+
+
+def pick(choices: Sequence[Choice], key: str) -> Choice:
+    """The entry `key` of a choice list; one that is greyed cannot be picked."""
+    for choice in choices:
+        if choice.key == key:
+            if not choice.available:
+                raise InstallerError("%s is not ready yet." % choice.name)
+            return choice
+    raise InstallerError("Unknown choice: %s" % key)
+
+
+def install_flow(platform: str, mode: str, games: Optional[Sequence[Choice]] = None) -> Tuple[str, ...]:
+    """The window's pages, in order, for these choices. The PC build plays no
+    movies (its Bink is a stand-in, the MP4s are the Vita's): no page for
+    them there; MCC has none either."""
+    pick(PLATFORMS, platform)
+    pick(MODES, mode)
+    pages = ["platform", "mode"]
+    if len(GAMES if games is None else games) > 1:
+        pages.insert(0, "game")
+    if mode == "automatic":
+        pages.append("automatic")
+    else:
+        pages += ["game_files", "pc_files"] if platform == "pc" else ["game_files", "movies", "pc_files"]
+    pages += ["copy_pc"] if platform == "pc" else ["copy_vita", "vpk"]
+    return tuple(pages + ["done"])
 
 
 def _no_progress(message: str, done: int, total: int) -> None:
@@ -349,7 +417,7 @@ class XisoImage:
 
 
 # ---------------------------------------------------------------------------
-# step 1: the Xbox game files
+# the Xbox game files
 
 
 def _is_xbe(path: str) -> bool:
@@ -441,7 +509,7 @@ def _find_child(folder: Optional[str], name: str) -> Optional[str]:
 
 def extract_xbox_files(source_path: str, staging: str, progress: Progress = _no_progress,
                        log: Callable[[str], None] = print) -> Dict[str, int]:
-    """Step 1: `staging`/maps/*.map and `staging`/default.xbe from the
+    """`staging`/maps/*.map and `staging`/default.xbe from the
     player's disc image or folder. Returns {name: size} written."""
     source = XboxSource.open(source_path)
     try:
@@ -486,7 +554,7 @@ def extract_xbox_files(source_path: str, staging: str, progress: Progress = _no_
 
 
 # ---------------------------------------------------------------------------
-# step 3: Halo PC's resource maps
+# Halo PC's resource maps
 
 
 def resource_map_ok(path: str, name: str) -> bool:
@@ -688,7 +756,7 @@ def find_ce_installers() -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# step 1 (the other way): the player's own Halo: The Master Chief Collection
+# the player's own Halo: The Master Chief Collection
 #
 # What the game reads from the Halo content folder (docs/mcc_cea_maps.md,
 # port/linux/game/mcc_content.c, mcc_sound.c), the Vita's
@@ -869,7 +937,7 @@ def mcc_plan(path: str) -> MccPlan:
          "the menus need the Xbox ui.map then")
     for name, _ in PC_RESOURCE_MAPS:
         take(MCC_CE_PARTS, name, (STAGING_MCC,) + MCC_CE_PARTS + (name,), "resource", False,
-             "the Halo Custom Edition files come from step 3 then")
+             "the Halo Custom Edition files come from the Halo PC files step then")
     sound = (STAGING_MCC,) + MCC_SOUND_PARTS
     take(MCC_SOUND_PARTS, MCC_SOUND_BANK, sound + (MCC_SOUND_BANK,), "bank", False,
          "MCC's maps play without sound effects")
@@ -881,7 +949,7 @@ def mcc_plan(path: str) -> MccPlan:
 
 def install_mcc_files(path: str, staging: str, progress: Progress = _no_progress,
                       log: Callable[[str], None] = print) -> MccPlan:
-    """Step 1, the other way: the Halo CE content of the player's own MCC
+    """The Halo CE content of the player's own MCC
     copied into `staging`/mcc/ as the Vita has it (ux0:data/haloce-vita/mcc).
     Nothing is copied unless every required file is there; each file is
     checked (its header) before and after."""
@@ -968,8 +1036,8 @@ def pc_files_help(missing: Sequence[str]) -> str:
     """What is missing and where to get it, for the player."""
     return ("Required Halo Custom Edition files missing: %s. Get them from one of: your Halo: The Master Chief "
             "Collection on Steam (its halo1/maps/custom_edition folder), the free Halo Custom Edition installer "
-            "(halocesetup_en_1.00.exe, %s), or a Halo Custom Edition install's maps folder. Step 3 takes them "
-            "from any of these." % (", ".join(missing), CE_INSTALLER_URL))
+            "(halocesetup_en_1.00.exe, %s), or a Halo Custom Edition install's maps folder. The Halo PC files "
+            "step takes them from any of these." % (", ".join(missing), CE_INSTALLER_URL))
 
 
 # ---------------------------------------------------------------------------
@@ -1376,7 +1444,7 @@ def check_ce_installer(path: str, progress: Progress = _no_progress) -> Installe
 
 def extract_pc_maps_from_installer(path: str, staging: str, progress: Progress = _no_progress,
                                    log: Callable[[str], None] = print) -> List[str]:
-    """Step 3b: the three resource maps out of the installer's cabinet into
+    """The three resource maps out of the installer's cabinet into
     `staging`/maps/, each checked (size, header)."""
     check = check_ce_installer(path, progress)
     if check.problem:
@@ -1772,7 +1840,7 @@ def _lzx_frames(data: bytes, window_bits: int, output_size: int) -> Iterator[byt
 
 
 # ---------------------------------------------------------------------------
-# step 2: the movies
+# the movies
 
 
 class Cancelled(InstallerError):
@@ -1823,7 +1891,7 @@ _DURATION = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 def convert_movies(source_path: str, staging: str, ffmpeg: Optional[str] = None, quality: str = "baseline",
                    progress: Progress = _no_progress, log: Callable[[str], None] = print,
                    cancel: Optional[threading.Event] = None) -> List[str]:
-    """Step 2: every bink/*.bik converted to `staging`/movies/<name>.mp4 as
+    """Every bink/*.bik converted to `staging`/movies/<name>.mp4 as
     README.md's Movies section does (H.264 Constrained Baseline, no B-frames,
     640 wide, AAC). `quality` is "baseline" or "better" (both Vita-safe)."""
     ffmpeg_path = find_ffmpeg(ffmpeg)
@@ -1910,7 +1978,7 @@ def _run_ffmpeg(ffmpeg: str, source: str, destination: str, arguments: List[str]
 
 
 # ---------------------------------------------------------------------------
-# step 4 and 5: VitaShell's FTP
+# VitaShell's FTP
 
 
 class FtpError(InstallerError):
@@ -2321,7 +2389,7 @@ def find_local_vpks() -> List[str]:
 
 def upload_vpk(host: str, vpk: str, port: int = FTP_PORT, progress: Progress = _no_progress,
                log: Callable[[str], None] = print, cancel: Optional[threading.Event] = None) -> str:
-    """Step 5: the VPK to ux0:data/ (VitaShell installs it: the Vita cannot
+    """The VPK to ux0:data/ (VitaShell installs it: the Vita cannot
     be told to from here). Returns its name there."""
     check_vpk(vpk)
     name = os.path.basename(vpk)
@@ -2338,6 +2406,125 @@ VPK_INSTRUCTIONS = (
     "On the Vita, in VitaShell: leave FTP mode (Circle), open ux0:, then the data folder, "
     "press Cross on {name} and confirm the install. The bubble is called Halo CE. "
     "This tool cannot install it for you: only VitaShell on the Vita can.")
+
+
+# ---------------------------------------------------------------------------
+# the PC build's data folder
+#
+# The game's data root (port/linux/src/xbox_files.c): the folder of its
+# executable when that has a maps folder, the same layout as the Vita's
+# ux0:data/haloce-vita. An unpacked release keeps the executable in
+# build/linux or build/windows (tools/package_pc.py).
+
+
+PC_BUILDS = (("windows", "halo.exe"), ("linux", "halo"))
+
+
+def _pc_builds_here_first() -> Sequence[Tuple[str, str]]:
+    return PC_BUILDS if sys.platform == "win32" else PC_BUILDS[::-1]
+
+
+def pc_data_folder(path: str) -> Optional[str]:
+    """The PC build's data folder from what the player chose: the unpacked
+    release (the build for this system first) or the executable's folder."""
+    if not path or not os.path.isdir(path):
+        return None
+    builds = _pc_builds_here_first()
+    for name, program in builds:
+        folder = os.path.join(path, "build", name)
+        if os.path.isfile(os.path.join(folder, program)):
+            return folder
+    if any(os.path.isfile(os.path.join(path, program)) for _, program in builds):
+        return path
+    return None
+
+
+def find_pc_builds() -> List[str]:
+    """Unpacked PC builds next to this tool, in the current folder and in the
+    user's usual folders (halo-ce-vita-<version>-pc-...)."""
+    home = os.path.expanduser("~")
+    places = [os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__)),
+              os.getcwd()] + [os.path.join(home, name) for name in ("Downloads", "Desktop", "Documents")]
+    found: List[str] = []
+    for place in places:
+        candidates = [place]
+        try:
+            candidates += [os.path.join(place, name) for name in sorted(os.listdir(place))
+                           if name.lower().startswith("halo-ce-vita") and "-pc-" in name.lower()]
+        except OSError:
+            continue
+        for candidate in candidates:
+            folder = pc_data_folder(candidate)
+            if folder and folder not in found:
+                found.append(folder)
+    return found
+
+
+def pc_uploads(staging: str) -> List[UploadItem]:
+    """What goes to a PC build: what was gathered, without the movies."""
+    return [item for item in staged_uploads(staging)
+            if item.folder != VITA_GAME_FOLDER + "/" + STAGING_MOVIES]
+
+
+def copy_to_pc_build(staging: str, build: str, replace: bool = False, progress: Progress = _no_progress,
+                     log: Callable[[str], None] = print) -> Dict[str, int]:
+    """The gathered files into the PC build's data folder, laid out as in the
+    output folder. Each is written beside its place, checked by its size and
+    then moved in; files there at the right size are kept unless `replace`.
+    The maps folder is made even when empty: the game takes the folder for
+    its data root by it, and only then reads mcc/ there."""
+    folder = pc_data_folder(build)
+    if folder is None:
+        raise InstallerError("No PC build in %s: choose the folder you unpacked "
+                             "halo-ce-vita-<version>-pc-... into, or the one with the game's program." % build)
+    items = pc_uploads(staging)
+    if not items:
+        raise InstallerError("Nothing to copy in %s: gather the files first." % staging)
+    if os.path.realpath(staging) == os.path.realpath(folder):
+        log("The output folder is the PC build's data folder: the files are already there")
+        return {"copied": 0, "skipped": len(items)}
+
+    def target(item: UploadItem) -> Tuple[Sequence[str], str]:
+        parts = [part for part in item.folder[len(VITA_GAME_FOLDER):].split("/") if part]
+        directory = folder
+        for part in parts:
+            directory = safe_join(directory, part)
+        return parts, safe_join(directory, item.name)
+
+    def kept(item: UploadItem, path: str) -> bool:
+        return not replace and os.path.isfile(path) and os.path.getsize(path) == item.size
+
+    places = [(item,) + target(item) for item in items]
+    _check_space(folder, sum(item.size for item, _, path in places if not kept(item, path)))
+    os.makedirs(safe_join(folder, STAGING_MAPS), exist_ok=True)
+    total = sum(item.size for item in items)
+    done = copied = skipped = 0
+    for item, parts, path in places:
+        label = "/".join(parts + [item.name])
+        if kept(item, path):
+            log("%s already there" % label)
+            skipped += 1
+        else:
+            directory = folder
+            for part in parts:
+                directory = safe_join(directory, part)
+                os.makedirs(directory, exist_ok=True)
+            partial = path + ".part"
+            try:
+                with open(item.local, "rb") as reader, open(partial, "wb") as writer:
+                    _copy_range(reader, writer, 0, item.size, progress, item.name, done, total)
+                if os.path.getsize(partial) != item.size:
+                    raise InstallerError("%s came out damaged" % label)
+                os.replace(partial, path)
+            except BaseException:
+                if os.path.exists(partial):
+                    os.remove(partial)
+                raise
+            log("%s (%s)" % (label, human_size(item.size)))
+            copied += 1
+        done += item.size
+        progress(item.name, done, total)
+    return {"copied": copied, "skipped": skipped}
 
 
 # ---------------------------------------------------------------------------
@@ -2409,7 +2596,7 @@ def self_test(report: Optional[str] = None) -> int:
     else:
         lines.append("theme: sv-ttk missing (the window has its classic look only)")
         good = good and not getattr(sys, "frozen", False)
-    pictures = [name for name, _ in PAGE_PICTURES if os.path.isfile(picture_path(name))]
+    pictures = [name for name, _ in PAGE_PICTURES.values() if os.path.isfile(picture_path(name))]
     lines.append("pictures: %d of %d in %s" % (len(pictures), len(PAGE_PICTURES), picture_path("")))
     good = good and (len(pictures) == len(PAGE_PICTURES) or not getattr(sys, "frozen", False))
     ffmpeg = find_ffmpeg()
@@ -2439,25 +2626,25 @@ def self_test(report: Optional[str] = None) -> int:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="halo_ce_vita_installer",
-        description="Install helper for Halo: Combat Evolved for the PS Vita. With no command, the window "
+        description="Install helper for Halo: Combat Evolved, for the PS Vita and PC. With no command, the window "
                     "opens. Every step reads your own files; no game data comes with this tool.")
     parser.add_argument("--version", action="version", version=VERSION)
     parser.add_argument("--out", default=default_output_folder(),
                         help="the folder the files are gathered in (default: %(default)s)")
     commands = parser.add_subparsers(dest="command")
-    step = commands.add_parser("xbox", help="step 1: maps and default.xbe from your Xbox disc image or folder")
+    step = commands.add_parser("xbox", help="manual: maps and default.xbe from your Xbox disc image or folder")
     step.add_argument("source", help="the Xbox disc image (.iso / .xiso) or the unpacked game folder")
-    step = commands.add_parser("mcc", help="step 1, the other way: MCC's Halo CE content from your own Halo: "
-                                           "The Master Chief Collection (Steam)")
+    step = commands.add_parser("mcc", help="automatic: MCC's Halo CE content from your own Halo: The Master Chief "
+                                           "Collection (Steam)")
     step.add_argument("source", nargs="?", help="MCC's folder (default: found in your Steam libraries)")
-    step = commands.add_parser("movies", help="step 2: the disc's movies converted to MP4 with ffmpeg")
+    step = commands.add_parser("movies", help="manual, Vita only: the disc's movies converted to MP4 with ffmpeg")
     step.add_argument("source", help="the Xbox disc image or the unpacked game folder")
     step.add_argument("--ffmpeg", help="ffmpeg's program (default: the bundled one, or on the PATH)")
     step.add_argument("--quality", choices=sorted(FFMPEG_MOVIE_ARGS) + sorted(MOVIE_QUALITY_ALIASES),
                       default="baseline", help="baseline (as README.md) or better (the same Vita-safe profile at "
                                                "a higher quality: larger, slower); high is better's old name")
-    step = commands.add_parser("pc-files", help="step 3 (required): Halo Custom Edition's bitmaps.map, sounds.map, "
-                                                "loc.map")
+    step = commands.add_parser("pc-files", help="manual: Halo Custom Edition's bitmaps.map, sounds.map, loc.map "
+                                                "(required on the Vita)")
     which = step.add_mutually_exclusive_group(required=True)
     which.add_argument("--mcc", nargs="?", const="", metavar="FOLDER",
                        help="from Halo MCC on Steam (found by itself, or give its custom_edition folder)")
@@ -2467,14 +2654,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                       "(bitmaps.map, sounds.map, loc.map)")
     step = commands.add_parser("check-installer", help="tell whether a file is the Halo Custom Edition installer")
     step.add_argument("exe")
-    step = commands.add_parser("upload", help="step 4: copy the gathered files to the Vita (VitaShell FTP)")
+    step = commands.add_parser("upload", help="copy the gathered files to the Vita (VitaShell FTP)")
     step.add_argument("host", help="the Vita's address, as VitaShell's FTP screen shows it")
     step.add_argument("--port", type=int, default=FTP_PORT)
     step.add_argument("--replace", action="store_true", help="copy files already on the Vita again")
-    step = commands.add_parser("vpk", help="step 5: copy the VPK to ux0:data/ (install it with VitaShell)")
+    step = commands.add_parser("vpk", help="copy the VPK to ux0:data/ (install it with VitaShell)")
     step.add_argument("host")
     step.add_argument("vpk", nargs="?", help="the VPK (default: one next to this tool)")
     step.add_argument("--port", type=int, default=FTP_PORT)
+    step = commands.add_parser("pc-copy", help="copy the gathered files into a PC build's data folder")
+    step.add_argument("build", nargs="?", help="the unpacked PC build (default: one found next to this tool or in "
+                                               "your Downloads, Desktop or Documents)")
+    step.add_argument("--replace", action="store_true", help="copy files already there again")
     step = commands.add_parser("selftest", help="check this copy of the tool (the window, ffmpeg)")
     step.add_argument("--report", help="write the results to this file too")
     arguments = parser.parse_args(argv)
@@ -2548,6 +2739,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                      RELEASES_URL)
             name = upload_vpk(arguments.host, vpk, arguments.port, progress, _console_log)
             _console_log(VPK_INSTRUCTIONS.format(name=name))
+        elif arguments.command == "pc-copy":
+            build = arguments.build or (find_pc_builds() or [None])[0]
+            if not build:
+                raise InstallerError("No PC build found: give its folder (pc-copy FOLDER)")
+            result = copy_to_pc_build(out, build, arguments.replace, progress, _console_log)
+            _console_log("Done: %(copied)d copied, %(skipped)d already there" % result)
     except InstallerError as error:
         _console_log("Error: %s" % error)
         return 1
@@ -2697,15 +2894,19 @@ def save_settings(settings: dict) -> bool:
 
 # Each page's picture (pictures/, from docs/screenshots by make_pictures.py)
 # and its caption. The window works without them.
-PAGE_PICTURES = (
-    ("welcome.png", "Two Pelicans over the sea in The Silent Cartographer's opening"),
-    ("xbox.png", "Landing on The Silent Cartographer's beach"),
-    ("movies.png", "A Pelican in The Silent Cartographer's opening"),
-    ("pc.png", "Covenant at a Blood Gulch base"),
-    ("copy.png", "The Silent Cartographer's beach"),
-    ("vpk.png", "Blood Gulch"),
-    ("done.png", "A Warthog on The Silent Cartographer's beach"),
-)
+PAGE_PICTURES = {
+    "game": ("game.png", "The beach below the cliffs of The Silent Cartographer"),
+    "platform": ("welcome.png", "Two Pelicans over the sea in The Silent Cartographer's opening"),
+    "mode": ("mode.png", "A Pelican up close"),
+    "automatic": ("auto.png", "A Warthog and its gunner on the beach"),
+    "game_files": ("xbox.png", "Landing on The Silent Cartographer's beach"),
+    "movies": ("movies.png", "A Pelican in The Silent Cartographer's opening"),
+    "pc_files": ("pc.png", "A Covenant camp on The Silent Cartographer's island"),
+    "copy_vita": ("copy.png", "The Silent Cartographer's beach"),
+    "vpk": ("vpk.png", "The camp, closer"),
+    "copy_pc": ("pccopy.png", "The Covenant at their camp"),
+    "done": ("done.png", "A Warthog on The Silent Cartographer's beach"),
+}
 PICTURE_ZOOM = 3  # each picture pixel as 3x3 screen pixels at 100%
 
 
@@ -2898,31 +3099,34 @@ def _palette(theme: str) -> dict:
 
 
 class InstallerWindow:
-    STEPS = ("Welcome", "1. Game files", "2. Movies", "3. Halo PC files", "4. Copy to the Vita",
-             "5. Install the VPK", "Done")
     # each page: the sidebar's name, what it needs, the header's title and its short description
-    PAGES = (
-        ("Welcome", "", "Welcome",
-         "Gather your own Halo CE files in the layout the Vita needs, then copy them to the Vita over "
-         "VitaShell's FTP. Five steps; each can be skipped and run again."),
-        ("Game files", "Required", "Game files",
-         "Choose your Xbox disc image (.iso) or the unpacked game folder, or your own Halo: The Master Chief "
-         "Collection on Steam: the files the Vita needs are taken out."),
-        ("Movies", "Optional", "Movies",
-         "The disc's intro, attract and credits movies, converted for the Vita with ffmpeg. The game runs "
-         "without them."),
-        ("Halo PC files", "Required", "Halo PC files",
-         "bitmaps.map, sounds.map and loc.map from Halo Custom Edition: required. From your own Halo MCC, "
-         "the free Halo Custom Edition installer, or a Custom Edition install."),
-        ("Copy to the Vita", "Required", "Copy to the Vita",
-         "Everything gathered goes to %s over VitaShell's FTP." % VITA_GAME_FOLDER),
-        ("Install the VPK", "Required for a first install", "Install the VPK",
-         "Copy the VPK to the Vita's ux0:data/, then install it with VitaShell."),
-        ("Done", "", "All done",
-         "What was gathered and copied, and what to do next on the Vita."),
-    )
-    LAST_STEP = 5
-    SIDEBAR_NEEDS = {5: "For a first install"}  # (shorter, for the sidebar)
+    PAGES = {
+        "game": ("Game", "", "Choose the game", "The game to set up."),
+        "platform": ("Platform", "", "Choose the platform",
+                     "Where you will play. The next pages follow from this."),
+        "mode": ("Automatic or Manual", "", "Automatic or Manual",
+                 "Take everything from your own Halo: The Master Chief Collection, or pick each source yourself."),
+        "automatic": ("From your MCC", "Required", "From your MCC",
+                      "Everything the game needs, taken from your own Halo: The Master Chief Collection."),
+        "game_files": ("Game files", "Required", "Game files",
+                       "Choose your Xbox disc image (.iso) or the unpacked game folder, or your own Halo: The "
+                       "Master Chief Collection on Steam: the files the game needs are taken out."),
+        "movies": ("Movies", "Optional", "Movies",
+                   "The disc's intro, attract and credits movies, converted for the Vita with ffmpeg. The game "
+                   "runs without them."),
+        "pc_files": ("Halo PC files", "Required", "Halo PC files",
+                     "bitmaps.map, sounds.map and loc.map from Halo Custom Edition. From your own Halo MCC, the "
+                     "free Halo Custom Edition installer, or a Custom Edition install."),
+        "copy_vita": ("Copy to the Vita", "Required", "Copy to the Vita",
+                      "Everything gathered goes to %s over VitaShell's FTP." % VITA_GAME_FOLDER),
+        "vpk": ("Install the VPK", "Required for a first install", "Install the VPK",
+                "Copy the VPK to the Vita's ux0:data/, then install it with VitaShell."),
+        "copy_pc": ("Copy to the PC build", "Required", "Copy to the PC build",
+                    "Everything gathered goes into your PC build's data folder."),
+        "done": ("Done", "", "All done", "What was gathered and copied, and what to do next."),
+    }
+    CHOICE_PAGES = ("game", "platform", "mode")  # (what they show instead of what they need)
+    SIDEBAR_NEEDS = {"vpk": "For a first install"}  # (shorter, for the sidebar)
 
     def __init__(self, root, out: str, theme: Optional[str] = None):
         import tkinter
@@ -2934,14 +3138,14 @@ class InstallerWindow:
         self.messages: "queue.Queue" = queue.Queue()
         self.worker: Optional[threading.Thread] = None
         self.cancel = threading.Event()
-        self.page = 0
-        self.running_page: Optional[int] = None
-        self.done_steps: set = set()  # steps finished in this session
+        self.page = "game" if len(GAMES) > 1 else "platform"
+        self.running_page: Optional[str] = None
+        self.done_steps: set = set()  # pages finished in this session, by key
         self.skipped: set = set()
-        self.results: Dict[int, str] = {}
+        self.results: Dict[str, str] = {}
         self.notice = None
         self.details_shown = False
-        self._pictures: Dict[int, object] = {}
+        self._pictures: Dict[str, object] = {}
         self._listening = False
 
         # the look: HCV_THEME (or the caller's), else the one saved, else classic
@@ -2959,9 +3163,12 @@ class InstallerWindow:
         self.scale = max(1.0, root.winfo_fpixels("1i") / 96.0)
 
         self.out = tkinter.StringVar(value=out)
+        self.game = tkinter.StringVar(value=GAMES[0].key)
+        self.platform = tkinter.StringVar(value=PLATFORMS[0].key)
         self.xbox_source = tkinter.StringVar()
         self.game_mode = tkinter.StringVar(value="xbox")
         self.mcc_root = tkinter.StringVar(value=(find_mcc_folders() or [""])[0])
+        self.mode = tkinter.StringVar(value="automatic" if self.mcc_root.get() else "manual")
         self.movie_source = tkinter.StringVar()
         self.ffmpeg = tkinter.StringVar(value=find_ffmpeg() or "")
         self.quality = tkinter.StringVar(value="baseline")
@@ -2976,6 +3183,7 @@ class InstallerWindow:
         self.port = tkinter.StringVar(value=str(FTP_PORT))
         self.replace = tkinter.BooleanVar(value=False)
         self.vpk = tkinter.StringVar(value=(find_local_vpks() or [""])[0])
+        self.pc_build = tkinter.StringVar(value=(find_pc_builds() or [""])[0])
         self.status = tkinter.StringVar(value="Ready")
         self.percent = tkinter.StringVar(value="")
         self.dark = tkinter.BooleanVar(value=self.theme == "dark")
@@ -2995,9 +3203,23 @@ class InstallerWindow:
         height = min(height, max(root.winfo_screenheight() - 90, 520))
         root.geometry("%dx%d" % (width, height))
         root.minsize(min(self.px(860), width), min(self.px(620), height))
-        self.show(0)
+        self.platform.trace_add("write", lambda *ignored: self._choices_changed())
+        self.mode.trace_add("write", lambda *ignored: self._choices_changed())
+        self.show(self.page)
         self._listen_for_system_theme()
         root.after(100, self.poll)
+
+    def flow(self) -> Tuple[str, ...]:
+        """The pages of the choices made so far."""
+        return install_flow(self.platform.get(), self.mode.get())
+
+    @property
+    def on_pc(self) -> bool:
+        return self.platform.get() == "pc"
+
+    def need(self, page: str) -> str:
+        """What the page needs: the Halo PC files are the Vita's to need."""
+        return "Optional" if page == "pc_files" and self.on_pc else self.PAGES[page][1]
 
     @property
     def classic(self) -> bool:
@@ -3246,6 +3468,8 @@ class InstallerWindow:
             style.configure("TButton", font="HcvBody", padding=(px(10), px(2)))
             style.configure("Accent.TButton", padding=(px(10), px(2)))
             style.configure("TEntry", fieldbackground="#ffffff", foreground=p["fg"])
+            # (Tk's theme lights up what is greyed)
+            style.map("Option.TRadiobutton", background=[("disabled", p["bg"]), ("active", p["bg"])])
             style.configure("Horizontal.TProgressbar", background=p["accent"], troughcolor=p["bg"])
 
     # -- the layout
@@ -3277,30 +3501,8 @@ class InstallerWindow:
         self.step_list = tk.Frame(self.sidebar, relief="sunken" if classic else "flat",
                                   borderwidth=2 if classic else 0, highlightthickness=0)
         self.step_list.pack(fill="x")
-        self.step_rows = []
-        self._row_frames = []
-        for index, (name, need, _, _) in enumerate(self.PAGES):
-            need = self.SIDEBAR_NEEDS.get(index, need)
-            row = ttk.Frame(self.step_list, style="Row.TFrame",
-                            padding=(px(4), px(3), 0, px(3)) if classic else (0, px(5)))
-            row.pack(fill="x")
-            size = px(18) if classic else px(26)
-            marker = tk.Canvas(row, width=size, height=size, highlightthickness=0, borderwidth=0)
-            marker.pack(side="left", padx=(0, px(6 if classic else 10)), anchor="n" if classic else "center")
-            words = ttk.Frame(row, style="Row.TFrame")
-            words.pack(side="left", fill="x", expand=True)
-            # (a little room to the right: Windows' text can be drawn wider than Tk measured it)
-            title = ttk.Label(words, text=self.STEPS[index] if classic else name, style="Row.TLabel",
-                              padding=(0, 0, px(6), 0))
-            title.pack(anchor="w")
-            state = ttk.Label(words, text=need, style="RowMuted.TLabel", padding=(0, 0, px(6), 0))
-            if 1 <= index <= self.LAST_STEP:
-                state.pack(anchor="w")
-            for widget in (row, marker, words, title, state):
-                widget.bind("<Button-1>", lambda event, page=index: self.go(page))
-                widget.configure(cursor="hand2")
-            self.step_rows.append((marker, title, state))
-            self._row_frames.append((row, words))
+        self._rows_shown = None
+        self.build_rows()
 
         # the bottom of the sidebar: the looks, then above them the page's picture
         if self.sv_ttk:
@@ -3346,12 +3548,12 @@ class InstallerWindow:
         buttons = ttk.Frame(content)
         buttons.pack(side="bottom", fill="x", pady=(px(12), 0))
         self.back_button = ttk.Button(buttons, text="Back", width=10,
-                                      command=lambda: self.go(self.page - 1))
+                                      command=lambda: self.go_step(-1))
         self.back_button.pack(side="left")
         self.stop_button = ttk.Button(buttons, text="Stop", width=10, command=self.cancel.set, state="disabled")
         self.stop_button.pack(side="left", padx=(px(8), 0))
         self.next_button = ttk.Button(buttons, text="Next", width=14, style="Accent.TButton",
-                                      command=lambda: self.go(self.page + 1))
+                                      command=lambda: self.go_step(1))
         self.next_button.pack(side="right")
         ttk.Separator(content).pack(side="bottom", fill="x", pady=(px(12), 0))
 
@@ -3393,6 +3595,46 @@ class InstallerWindow:
         self.canvas.bind("<Enter>", lambda event: self._wheel(True))
         self.canvas.bind("<Leave>", lambda event: self._wheel(False))
 
+    def build_rows(self):
+        """The sidebar's list: the pages of the choices made so far."""
+        tk, ttk, px = self.tk, self.ttk, self.px
+        classic = self.classic
+        flow = self.flow()
+        if flow == self._rows_shown:
+            return
+        self._rows_shown = flow
+        for child in self.step_list.winfo_children():
+            child.destroy()
+        self.step_rows = {}
+        self._row_frames = {}
+        for number, page in enumerate(flow, 1):
+            name = self.PAGES[page][0]
+            row = ttk.Frame(self.step_list, style="Row.TFrame",
+                            padding=(px(4), px(3), 0, px(3)) if classic else (0, px(5)))
+            row.pack(fill="x")
+            size = px(18) if classic else px(26)
+            marker = tk.Canvas(row, width=size, height=size, highlightthickness=0, borderwidth=0)
+            marker.pack(side="left", padx=(0, px(6 if classic else 10)), anchor="n" if classic else "center")
+            words = ttk.Frame(row, style="Row.TFrame")
+            words.pack(side="left", fill="x", expand=True)
+            # (a little room to the right: Windows' text can be drawn wider than Tk measured it)
+            title = ttk.Label(words, text="%d. %s" % (number, name) if classic and page != "done" else name,
+                              style="Row.TLabel", padding=(0, 0, px(6), 0))
+            title.pack(anchor="w")
+            state = ttk.Label(words, style="RowMuted.TLabel", padding=(0, 0, px(6), 0))
+            if page != "done":
+                state.pack(anchor="w")
+            for widget in (row, marker, words, title, state):
+                widget.bind("<Button-1>", lambda event, key=page: self.go(key))
+                widget.configure(cursor="hand2")
+            self.step_rows[page] = (marker, title, state, number)
+            self._row_frames[page] = (row, words)
+
+    def _choices_changed(self):
+        """A platform or a way picked: the sidebar shows its pages."""
+        self.build_rows()
+        self.refresh_sidebar()
+
     def _fit_body(self):
         """The page as wide as the card and at least as tall (so what is
         packed at its bottom sits there), with the scroll bar only when the
@@ -3425,13 +3667,13 @@ class InstallerWindow:
         self.canvas.bind_all("<Button-5>", lambda event: scroll(1))
 
     # -- the pictures
-    def picture(self, page: int):
+    def picture(self, page: str):
         """The page's picture, zoomed by whole pixels (so it shows as big
         square pixels), or None when its file is missing or unreadable."""
         if page in self._pictures:
             return self._pictures[page]
         image = None
-        name = PAGE_PICTURES[page][0] if 0 <= page < len(PAGE_PICTURES) else ""
+        name = PAGE_PICTURES[page][0] if page in PAGE_PICTURES else ""
         path = picture_path(name) if name else ""
         if path and os.path.isfile(path):
             try:
@@ -3445,7 +3687,7 @@ class InstallerWindow:
         self._pictures[page] = image
         return image
 
-    def show_picture(self, page: int):
+    def show_picture(self, page: str):
         image = self.picture(page)
         if image is None:
             self.picture_label.pack_forget()
@@ -3462,34 +3704,32 @@ class InstallerWindow:
             return
         p = self.palette
         staged = self._staged_done()
-        for index, (marker, title, state) in enumerate(self.step_rows):
-            need = self.SIDEBAR_NEEDS.get(index, self.PAGES[index][1])
-            current = index == self.page
-            done = index in self.done_steps or index in staged
-            skipped = index in self.skipped and not done
-            row, words = self._row_frames[index]
+        for page, (marker, title, state, number) in self.step_rows.items():
+            current = page == self.page
+            done = self.step_state_done(page)
+            skipped = page in self.skipped and not done
+            row, words = self._row_frames[page]
             row.configure(style="RowCurrent.TFrame" if current else "Row.TFrame")
             words.configure(style="RowCurrent.TFrame" if current else "Row.TFrame")
             title.configure(style="RowCurrent.TLabel" if current else "Row.TLabel")
             state.configure(style="RowCurrentMuted.TLabel" if current else "RowMuted.TLabel")
-            if 1 <= index <= self.LAST_STEP:
-                state.configure(text="Done" if done else "Skipped" if skipped else need)
+            state.configure(text=self.row_state(page, done, skipped))
             marker.configure(background=p["row_current"] if current else p["row"])
             marker.delete("all")
             size = int(marker.cget("width"))
             if self.classic:
-                self._classic_marker(marker, size, index, done, skipped)
+                self._classic_marker(marker, size, page, done, skipped)
                 continue
             inset = max(1, self.px(1.5))
             box = (inset, inset, size - inset, size - inset)
-            if not 1 <= index <= self.LAST_STEP:  # Welcome and Done: a dot
+            if page == "done":  # a dot
                 radius = self.px(5 if current else 4)
                 colour = p["accent"] if current else p["ring"]
                 marker.create_oval(size / 2 - radius, size / 2 - radius, size / 2 + radius, size / 2 + radius,
                                    fill=colour, outline=colour)
             elif current:
                 marker.create_oval(*box, fill=p["accent"], outline=p["accent"])
-                marker.create_text(size / 2, size / 2, text=str(index), fill=p["on_accent"], font="HcvCaption")
+                marker.create_text(size / 2, size / 2, text=str(number), fill=p["on_accent"], font="HcvCaption")
             elif done:
                 marker.create_oval(*box, fill=p["ok"], outline=p["ok"])
                 marker.create_line(size * 0.30, size * 0.52, size * 0.44, size * 0.66, size * 0.71, size * 0.36,
@@ -3501,18 +3741,26 @@ class InstallerWindow:
                                    width=max(2, self.px(2)), capstyle="round")
             else:
                 marker.create_oval(*box, outline=p["ring"], width=max(1, self.px(1.5)))
-                marker.create_text(size / 2, size / 2, text=str(index), fill=p["muted"], font="HcvCaption")
+                marker.create_text(size / 2, size / 2, text=str(number), fill=p["muted"], font="HcvCaption")
 
-    def _classic_marker(self, marker, size: int, index: int, done: bool, skipped: bool):
+    def row_state(self, page: str, done: bool, skipped: bool) -> str:
+        """The line under a page's name in the sidebar."""
+        if page in self.CHOICE_PAGES:
+            choices = {"game": (GAMES, self.game), "platform": (PLATFORMS, self.platform),
+                       "mode": (MODES, self.mode)}[page]
+            return pick(*(choices[0], choices[1].get())).name
+        return "Done" if done else "Skipped" if skipped else self.SIDEBAR_NEEDS.get(page, self.need(page))
+
+    def _classic_marker(self, marker, size: int, page: str, done: bool, skipped: bool):
         """A Windows 95/98 check box: sunken, ticked when the step is done,
-        greyed with a dash when it was skipped. Welcome and Done: an arrow."""
+        greyed with a dash when it was skipped. The Done page: an arrow."""
         px = self.px
         box = px(13)
         x0 = (size - box) // 2
         y0 = max(0, (size - box) // 2)
         x1, y1 = x0 + box - 1, y0 + box - 1
-        if not 1 <= index <= self.LAST_STEP:
-            colour = "#ffffff" if index == self.page else "#000000"
+        if page == "done":
+            colour = "#ffffff" if page == self.page else "#000000"
             marker.create_polygon(x0 + px(3), y0 + px(2), x1 - px(2), (y0 + y1) / 2, x0 + px(3), y1 - px(2),
                                   fill=colour, outline=colour)
             return
@@ -3530,13 +3778,13 @@ class InstallerWindow:
             marker.create_line(x0 + box * 0.28, y0 + box / 2, x0 + box * 0.72, y0 + box / 2, fill="#808080",
                                width=max(2, px(2)))
 
-    def step_state(self, index: int) -> str:
+    def step_state(self, page: str) -> str:
         """'current', 'done', 'skipped' or 'todo', as the sidebar shows it."""
-        if index == self.page:
+        if page == self.page:
             return "current"
-        if index in self.done_steps or index in self._staged_done():
+        if self.step_state_done(page):
             return "done"
-        if index in self.skipped:
+        if page in self.skipped:
             return "skipped"
         return "todo"
 
@@ -3562,11 +3810,13 @@ class InstallerWindow:
             return set()
         done = set()
         if summary["xbe"] and summary["xbox_maps"] or summary["mcc"]:
-            done.add(1)
+            done.add("game_files")
+        if summary["mcc"]:
+            done.add("automatic")
         if summary["movies"]:
-            done.add(2)
+            done.add("movies")
         if summary["pc_status"].complete:
-            done.add(3)
+            done.add("pc_files")
         return done
 
     # -- helpers
@@ -3868,31 +4118,46 @@ class InstallerWindow:
         self.log_text.configure(state="disabled")
 
     # -- the pages
-    def go(self, page: int):
-        """Back, Next and the sidebar: moving on past a step not done marks
-        it skipped."""
+    def go_step(self, by: int):
+        """Back and Next: the page before or after this one (Next on the last
+        page closes the window)."""
         if self.busy():
             return
-        if page >= len(self.STEPS):
+        flow = self.flow()
+        position = flow.index(self.page) + by if self.page in flow else 0
+        if position >= len(flow):
             self.root.destroy()
             return
-        if page > self.page and 1 <= self.page <= self.LAST_STEP and not self.step_state_done(self.page):
-            self.skipped.add(self.page)
+        self.go(flow[max(position, 0)])
+
+    def go(self, page: str):
+        """Back, Next and the sidebar: moving on past a step not done marks
+        it skipped, past a choice marks it made."""
+        if self.busy():
+            return
+        flow = self.flow()
+        if self.page in flow and page in flow and flow.index(page) > flow.index(self.page):
+            if self.page in self.CHOICE_PAGES:
+                self.done_steps.add(self.page)
+            elif not self.step_state_done(self.page):
+                self.skipped.add(self.page)
         if page != self.page:
             self.status.set("Ready")
             self.percent.set("")
             self.progress["value"] = 0
         self.show(page)
 
-    def step_state_done(self, index: int) -> bool:
-        return index in self.done_steps or index in self._staged_done()
+    def step_state_done(self, page: str) -> bool:
+        return page in self.done_steps or page in self._staged_done()
 
-    def show(self, page: int):
-        page = max(0, min(page, len(self.STEPS) - 1))
+    def show(self, page: str):
         self.page = page
-        name, need, title, description = self.PAGES[page]
-        self.step_caption.configure(text="STEP %d OF %d" % (page, self.LAST_STEP) if 1 <= page <= self.LAST_STEP
-                                    else "INSTALL HELPER" if page == 0 else "FINISHED")
+        self.build_rows()
+        flow = self.flow()
+        _, _, title, description = self.PAGES[page]
+        need = self.need(page)
+        number = flow.index(page) + 1 if page in flow else 0
+        self.step_caption.configure(text="FINISHED" if page == "done" else "STEP %d OF %d" % (number, len(flow) - 1))
         self.title_label.configure(text=title)
         if need:
             self.tag_label.configure(text=need)
@@ -3901,54 +4166,120 @@ class InstallerWindow:
             self.tag_label.pack_forget()
         self.description.configure(text=description)
         self.clear()
-        self.back_button.configure(state="normal" if page else "disabled")
-        if page == len(self.STEPS) - 1:
+        self.back_button.configure(state="normal" if number > 1 else "disabled")
+        ready = page in self.CHOICE_PAGES or page == "done" or self.step_state_done(page)
+        if page == "done":
             self.next_button.configure(text="Close", state="normal")
-        elif page == 0:
-            self.next_button.configure(text="Get started", state="normal")
-        elif self.step_state_done(page):
+        elif ready:
             self.next_button.configure(text="Next", state="normal")
         else:
             # the step's own button is the page's main one; this skips it
             self.next_button.configure(text="Skip this step", state="normal")
-        self.set_main_button(self.next_button, page == 0 or page == len(self.STEPS) - 1
-                             or self.step_state_done(page))
-        getattr(self, "page_%d" % page)()
+        self.set_main_button(self.next_button, ready)
+        getattr(self, "page_" + page)()
         self.show_picture(page)
         self.refresh_sidebar()
 
-    def page_0(self):
-        ttk, px = self.ttk, self.px
-        self.paragraph(self.body, "No game data comes with this tool: every step reads your own files. You need "
-                                  "your own Xbox copy of Halo: Combat Evolved. Files already in place are kept, "
-                                  "so any step can be run again.", pady=(0, px(14)))
-        ttk.Label(self.body, text="You will need", style="Field.TLabel").pack(anchor="w", pady=(0, px(6)))
-        self.bullet(self.body, "Your Xbox Halo disc image (.iso) or the unpacked game folder, or your own Halo: "
-                               "The Master Chief Collection on Steam", "Required")
-        self.bullet(self.body, "Halo Custom Edition's bitmaps.map, sounds.map and loc.map: from Halo MCC on "
-                               "Steam, the free Halo Custom Edition installer, or a Custom Edition install",
-                    "Required")
-        self.bullet(self.body, "On the Vita: HENkaku/Enso, VitaShell, and the shader compiler "
-                               "ur0:data/libshacccg.suprx (ShaRKF00D extracts it). See README.md.", "Required")
-        ttk.Frame(self.body, height=px(8)).pack(fill="x")
-        self.path_row("Output folder", self.out, browse_folder=True,
-                      hint="The files are gathered here first, laid out as on the Vita (about 2.5 GB with "
-                           "everything).")
-        self.link("The official downloads (releases)", RELEASES_URL)
-        self.show_staged()
-
-    def option(self, value: str, text: str, variable):
-        """One of a page's ways (a radio button), with its fields below it."""
+    def option(self, value: str, text: str, variable, available: bool = True):
+        """One of a page's ways (a radio button), with its fields below it;
+        one not available yet is greyed and cannot be picked."""
         ttk, px = self.ttk, self.px
         box = ttk.Frame(self.body)
         box.pack(fill="x", pady=(0, px(4)))
-        ttk.Radiobutton(box, text=text, value=value, variable=variable,
-                        style="Option.TRadiobutton").pack(anchor="w")
+        row = ttk.Frame(box)
+        row.pack(anchor="w")
+        button = ttk.Radiobutton(row, text=text, value=value, variable=variable, style="Option.TRadiobutton")
+        button.pack(side="left")
+        if not available:
+            button.state(["disabled"])
+            ttk.Label(row, text="Not yet", style="Tag.TLabel").pack(side="left", padx=(px(8), 0))
         inner = ttk.Frame(box, padding=(px(28), 0, 0, 0))
         inner.pack(fill="x")
         return inner
 
-    def page_1(self):
+    def choice_list(self, choices: Sequence[Choice], variable):
+        for choice in choices:
+            inner = self.option(choice.key, choice.name, variable, choice.available)
+            if choice.note:
+                self.paragraph(inner, choice.note, "Hint.TLabel", pady=(0, self.px(6)))
+
+    def page_game(self):
+        self.choice_list(GAMES, self.game)
+
+    def page_platform(self):
+        px = self.px
+        self.paragraph(self.body, "No game data comes with this tool: every step reads your own files. Files "
+                                  "already in place are kept, so any step can be run again.", pady=(0, px(14)))
+        self.choice_list(PLATFORMS, self.platform)
+        self.link("The official downloads (releases)", RELEASES_URL)
+
+    def page_mode(self):
+        px = self.px
+        inner = self.option("automatic", MODES[0].name, self.mode)
+        self.paragraph(inner, MODES[0].note, "Hint.TLabel", pady=(0, px(2)))
+        if self.mcc_root.get():
+            self.paragraph(inner, "✓ Found: %s" % self.mcc_root.get(), "Success.TLabel", pady=(0, px(8)))
+        else:
+            self.paragraph(inner, "⚠ Halo: The Master Chief Collection was not found on this computer. Use Manual, "
+                                  "or choose its folder on the next page.", "Warning.TLabel", pady=(0, px(8)))
+        inner = self.option("manual", MODES[1].name, self.mode)
+        self.paragraph(inner, "Pick each source yourself: your Xbox disc image, the Halo Custom Edition files." +
+                       ("" if self.on_pc else " The movies too: they come from the disc only."),
+                       "Hint.TLabel", pady=(0, px(12)))
+        self.path_row("Output folder", self.out, browse_folder=True,
+                      hint="The files are gathered here first, laid out as %s (about 2.5 GB with everything)."
+                           % ("in the PC build's data folder" if self.on_pc else "on the Vita"))
+        self.show_staged()
+
+    def look_for_mcc(self):
+        """Look again, after installing MCC or plugging in its drive."""
+        self.mcc_root.set((find_mcc_folders() or [""])[0])
+        self.mcc_folder.set((find_mcc_custom_edition() or [""])[0])
+        self.show(self.page)
+
+    def use_manual(self):
+        self.mode.set("manual")
+        self.go("game_files")
+
+    def page_automatic(self):
+        ttk, px = self.ttk, self.px
+        folder = self.mcc_root.get().strip()
+        if folder:
+            self.paragraph(self.body, "Your MCC was found. Only your own copy is read: nothing in it is changed.",
+                           pady=(0, px(10)))
+        else:
+            self.paragraph(self.body, "⚠ Halo: The Master Chief Collection was not found in your Steam libraries. "
+                                      "If it is somewhere else, choose its folder (Steam: right-click the game, "
+                                      "Manage, Browse local files). If you do not have it, use Manual.",
+                           "Warning.TLabel", pady=(0, px(10)))
+        self.path_row("MCC folder", self.mcc_root, browse_folder=True, picked=lambda: self.show(self.page))
+        row = ttk.Frame(self.body)
+        row.pack(anchor="w", pady=(0, px(10)))
+        ttk.Button(row, text="Look again", command=self.look_for_mcc).pack(side="left")
+        ttk.Button(row, text="Use Manual instead", command=self.use_manual).pack(side="left", padx=(px(8), 0))
+        try:
+            plan = mcc_plan(folder) if folder else None
+        except InstallerError:
+            plan = None
+        if plan and plan.missing:
+            self.paragraph(self.body, "⚠ This MCC lacks %s. Is Halo: Combat Evolved Anniversary installed in it?"
+                           % ", ".join(plan.missing[:3]), "Warning.TLabel", pady=(0, px(8)))
+        elif plan:
+            ttk.Label(self.body, text="What is taken: %d files, %s" % (len(plan.files), human_size(plan.size)),
+                      style="Field.TLabel").pack(anchor="w", pady=(0, px(6)))
+            self.bullet(self.body, "The campaign, the multiplayer maps, MCC's bitmaps.map and menus")
+            self.bullet(self.body, "The Halo PC files (custom_edition) and the classic sound effects")
+            self.paragraph(self.body, "\n".join("Note: " + note for note in plan.notes) if plan.notes else
+                           "MCC has no movies: the game skips them." if not self.on_pc else
+                           "Your PC build also finds MCC by itself. Copying makes it stand on its own: skip this "
+                           "step if you do not need that.", "Hint.TLabel", pady=(0, px(4)))
+        elif folder:
+            self.paragraph(self.body, "⚠ No Halo: The Master Chief Collection in this folder.", "Warning.TLabel",
+                           pady=(0, px(8)))
+        self.action("Get everything from MCC", self.do_mcc)
+        self.show_staged()
+
+    def page_game_files(self):
         ttk, px = self.ttk, self.px
         ttk.Label(self.body, text="Pick one way (run the step again with the other to have both):",
                   style="Muted.TLabel").pack(anchor="w", pady=(0, px(6)))
@@ -3965,12 +4296,12 @@ class InstallerWindow:
         self.path_row("MCC folder", self.mcc_root, browse_folder=True, parent=inner,
                       picked=lambda: self.game_mode.set("mcc"),
                       hint=found + "Its Halo CE maps, the Halo PC files (custom_edition) and the sound effects "
-                                   "bank, about 1.4 GB, go to %s/mcc, for the builds that play MCC's maps "
-                                   "(1.1.1-insider.25 and later). Only your own copy is read." % VITA_GAME_FOLDER)
-        self.action("Get the game files", self.do_game)
+                                   "bank, about 1.4 GB, go to the game's mcc folder. Only your own copy is "
+                                   "read.")
+        self.action("Get the game files", self.do_game_files)
         self.show_staged()
 
-    def do_game(self):
+    def do_game_files(self):
         return self.do_mcc() if self.game_mode.get() == "mcc" else self.do_xbox()
 
     def do_mcc(self):
@@ -4000,17 +4331,17 @@ class InstallerWindow:
             return "Xbox files ready in %s" % out
         return work
 
-    def page_2(self):
+    def page_movies(self):
         ttk, px = self.ttk, self.px
         self.paragraph(self.body, "The disc's Bink movies become the H.264 MP4s the Vita plays. Without them the "
                                   "game skips each movie and the main menu comes up ready to play. Converting takes "
                                   "a few minutes; Skip this step leaves them out. They come from the Xbox disc "
-                                  "only: with MCC's files alone, skip it.", pady=(0, px(12)))
+                                  "only: without one, skip it.", pady=(0, px(12)))
         if not self.movie_source.get() and self.xbox_source.get():
             self.movie_source.set(self.xbox_source.get())
         self.path_row("Xbox disc image or game folder", self.movie_source, browse_file=True, browse_folder=True,
                       filetypes=[("Xbox disc images", "*.iso *.xiso"), ("All files", "*")],
-                      hint="The same one as in step 1.")
+                      hint="The same one as for the game files.")
         self.path_row("ffmpeg", self.ffmpeg, browse_file=True,
                       hint="" if self.ffmpeg.get() else "ffmpeg was not found: install it from ffmpeg.org, or "
                                                         "choose its program.")
@@ -4050,9 +4381,13 @@ class InstallerWindow:
             return self.paragraph(parent or self.body, "✓ bitmaps.map, sounds.map and loc.map are in the output "
                                                        "folder (%s)." % " and ".join(places), "Success.TLabel",
                                   pady=pady)
+        if self.on_pc:
+            return self.paragraph(parent or self.body, "Optional on PC: %s. They give the menus their pictures and "
+                                                       "let you play Custom Edition maps." % ", ".join(status.missing),
+                                  "Muted.TLabel", pady=pady)
         return self.paragraph(parent or self.body, "⚠ " + pc_files_help(status.missing), "Warning.TLabel", pady=pady)
 
-    def page_3(self):
+    def page_pc_files(self):
         ttk, px = self.ttk, self.px
         self.pc_files_line(pady=(0, px(10)))
         self.ttk.Label(self.body, text="Pick one way:", style="Muted.TLabel").pack(anchor="w", pady=(0, px(6)))
@@ -4113,7 +4448,7 @@ class InstallerWindow:
         self.paragraph(box, "As VitaShell shows it after SELECT, like ftp://192.168.1.20:1337 (the port is "
                             "taken from it too).", "Hint.TLabel", pady=(px(3), 0))
 
-    def page_4(self):
+    def page_copy_vita(self):
         ttk, px = self.ttk, self.px
         self.paragraph(self.body, "On the Vita, open VitaShell and press SELECT: it shows FTP mode with an address "
                                   "like ftp://192.168.1.20:1337. Type that address below.", pady=(0, px(12)))
@@ -4145,13 +4480,13 @@ class InstallerWindow:
         replace = self.replace.get()
         if not items:
             raise InstallerError("Nothing to copy yet: do the steps before this one (or check the output "
-                                 "folder on the first page).")
+                                 "folder on the Automatic or Manual page).")
         status = pc_files_status(self.out.get())
         if not status.complete:
             from tkinter import messagebox
             if not messagebox.askyesno("Halo CE for PS Vita", pc_files_help(status.missing) +
                                        "\n\nCopy the other files to the Vita without them?", parent=self.root):
-                raise InstallerError("Not copied: get the required Halo Custom Edition files first (step 3).")
+                raise InstallerError("Not copied: get the required Halo Custom Edition files first.")
 
         def work():
             self.log("Copying %d files (%s) to %s:%d" % (len(items), human_size(sum(i.size for i in items)),
@@ -4160,7 +4495,7 @@ class InstallerWindow:
             return "On the Vita: %(copied)d copied, %(skipped)d were already there" % result
         return work
 
-    def page_5(self):
+    def page_vpk(self):
         px = self.px
         self.paragraph(self.body, "Download halo-ce-vita-<version>-vita.vpk from the official releases (or put it next to this program), "
                                   "then copy it to the Vita's ux0:data/ here. VitaShell installs it: this program "
@@ -4184,6 +4519,43 @@ class InstallerWindow:
             return VPK_INSTRUCTIONS.format(name=name)
         return work
 
+    def page_copy_pc(self):
+        ttk, px = self.ttk, self.px
+        self.paragraph(self.body, "Unpack halo-ce-vita-<version>-pc-windows.zip or -pc-linux.tar.gz first, then "
+                                  "choose that folder.", pady=(0, px(4)))
+        self.link("Releases: download the PC build", RELEASES_URL)
+        self.ttk.Frame(self.body, height=px(10)).pack(fill="x")
+        folder = pc_data_folder(self.pc_build.get().strip())
+        self.path_row("PC build", self.pc_build, browse_folder=True, picked=lambda: self.show(self.page),
+                      hint="The files go into %s." % folder if folder else
+                      "Not found by itself: choose the unpacked folder (it has build/linux or build/windows)."
+                      if not self.pc_build.get().strip() else "⚠ No PC build in this folder.")
+        ttk.Checkbutton(self.body, text="Copy files already there again", variable=self.replace
+                        ).pack(anchor="w", pady=(0, px(6)))
+        items = pc_uploads(self.out.get())
+        self.paragraph(self.body, "To copy: %d files, %s. (Custom maps put in %s are copied too.)" % (
+            len(items), human_size(sum(item.size for item in items)),
+            os.path.join(self.out.get(), STAGING_MAPS)), "Muted.TLabel", pady=(0, px(4)))
+        if items:
+            self.pc_files_line(pady=(px(4), px(4)))
+        self.action("Copy to the PC build", self.do_copy_pc)
+
+    def do_copy_pc(self):
+        build = self.pc_build.get().strip()
+        if not build:
+            raise InstallerError("Choose your PC build first (Choose folder...).")
+        if pc_data_folder(build) is None:
+            raise InstallerError("No PC build in %s: choose the folder you unpacked it into." % build)
+        out, replace = self.out.get(), self.replace.get()
+        if not pc_uploads(out):
+            raise InstallerError("Nothing to copy yet: do the steps before this one (or check the output "
+                                 "folder on the Automatic or Manual page).")
+
+        def work():
+            result = copy_to_pc_build(out, build, replace, self.report, self.log)
+            return "On the PC build: %(copied)d copied, %(skipped)d were already there" % result
+        return work
+
     def done_summary(self) -> List[Tuple[bool, str, str]]:
         """The Done page's list: (done, what, how it went)."""
         summary = self._staged_summary()
@@ -4192,47 +4564,59 @@ class InstallerWindow:
         rows.append((summary["xbe"] and summary["xbox_maps"], "Xbox game files",
                      "default.xbe and %d maps" % len(xbox) if summary["xbe"] and summary["xbox_maps"]
                      else "not gathered (MCC's files instead)" if summary["mcc"]
-                     else "not gathered yet (step 1)"))
-        if summary["mcc"] or self.game_mode.get() == "mcc":
+                     else "not gathered yet"))
+        if summary["mcc"] or self.mode.get() == "automatic" or self.game_mode.get() == "mcc":
             rows.append((bool(summary["mcc"]), "MCC files",
-                         "%d Halo CE maps%s, to %s/%s" % (
+                         "%d Halo CE maps%s, to %s" % (
                              len(summary["mcc_maps"]),
                              " and the sound effects bank" if any(item.name == MCC_SOUND_BANK
                                                                   for item in summary["mcc"]) else "",
-                             VITA_GAME_FOLDER, STAGING_MCC) if summary["mcc"] else "not gathered yet (step 1)"))
-        rows.append((bool(summary["movies"]), "Movies",
-                     "%d movies" % len(summary["movies"]) if summary["movies"]
-                     else "skipped (the game runs without them)"))
+                             "the PC build's mcc folder" if self.on_pc else VITA_GAME_FOLDER + "/" + STAGING_MCC)
+                         if summary["mcc"] else "not gathered yet"))
+        if not self.on_pc:
+            rows.append((bool(summary["movies"]), "Movies",
+                         "%d movies" % len(summary["movies"]) if summary["movies"]
+                         else "skipped (the game runs without them)"))
         status = summary["pc_status"]
         rows.append((status.complete, "Halo PC files",
                      "%s (%s)" % (", ".join(name for name, _ in PC_RESOURCE_MAPS),
                                   " and ".join(sorted(set(status.found.values())))) if status.complete
-                     else "MISSING %s: required (step 3)" % ", ".join(status.missing)))
-        copied = self.results.get(4, "").replace("On the Vita: ", "")
-        rows.append((4 in self.results, "Copied to the Vita",
-                     copied or "not copied in this session (%d files, %s gathered in %s)" % (
-                         len(summary["items"]), human_size(summary["size"]), self.out.get())))
+                     else "not there (optional on PC)" if self.on_pc
+                     else "MISSING %s: required" % ", ".join(status.missing)))
+        gathered = "not copied in this session (%d files, %s gathered in %s)" % (
+            len(summary["items"]), human_size(summary["size"]), self.out.get())
+        if self.on_pc:
+            rows.append(("copy_pc" in self.results, "Copied to the PC build",
+                         self.results.get("copy_pc", "").replace("On the PC build: ", "") or gathered))
+            return rows
+        rows.append(("copy_vita" in self.results, "Copied to the Vita",
+                     self.results.get("copy_vita", "").replace("On the Vita: ", "") or gathered))
         vpk = re.split(r"[\\/]", self.vpk.get())[-1] or "halo.vpk"
-        rows.append((5 in self.results, "The VPK",
-                     "%s copied to %s/" % (vpk, VITA_VPK_FOLDER) if 5 in self.results
+        rows.append(("vpk" in self.results, "The VPK",
+                     "%s copied to %s/" % (vpk, VITA_VPK_FOLDER) if "vpk" in self.results
                      else "not copied in this session"))
         return rows
 
-    def page_6(self):
+    def page_done(self):
         ttk, px = self.ttk, self.px
         ttk.Label(self.body, text="Summary", style="Field.TLabel").pack(anchor="w", pady=(0, px(6)))
         for done, what, how in self.done_summary():
             self.bullet(self.body, "%s: %s" % (what, how), mark="✓" if done else "–",
                         style="Success.TLabel" if done else "Muted.TLabel")
-        ttk.Label(self.body, text="Next, on the Vita", style="Field.TLabel").pack(anchor="w", pady=(px(10), px(6)))
+        ttk.Label(self.body, text="Next, on the PC" if self.on_pc else "Next, on the Vita",
+                  style="Field.TLabel").pack(anchor="w", pady=(px(10), px(6)))
         vpk = re.split(r"[\\/]", self.vpk.get())[-1] or "halo.vpk"
-        steps = ["Install the VPK in VitaShell: leave FTP mode (Circle), open ux0:, then data, press Cross on %s "
-                 "and confirm. The bubble is called Halo CE." % vpk,
-                 "Check that ur0:data/libshacccg.suprx is there (ShaRKF00D extracts it). Stuck on the loading "
-                 "picture while the music plays? It is missing.",
-                 "Start Halo CE from its bubble. The first load of each level takes a while: the game writes a "
-                 "cache file for it.",
-                 "Online play also needs Connection: Online in the settings panel (Select + Start)."]
+        if self.on_pc:
+            steps = ["Start the game: halo.bat on Windows, ./halo.sh on Linux.",
+                     "The first load of each level takes a while: the game writes a cache file for it."]
+        else:
+            steps = ["Install the VPK in VitaShell: leave FTP mode (Circle), open ux0:, then data, press Cross on "
+                     "%s and confirm. The bubble is called Halo CE." % vpk,
+                     "Check that ur0:data/libshacccg.suprx is there (ShaRKF00D extracts it). Stuck on the loading "
+                     "picture while the music plays? It is missing.",
+                     "Start Halo CE from its bubble. The first load of each level takes a while: the game writes a "
+                     "cache file for it.",
+                     "Online play also needs Connection: Online in the settings panel (Select + Start)."]
         for number, text in enumerate(steps, 1):
             self.bullet(self.body, text, mark="%d." % number)
         row = ttk.Frame(self.body)
@@ -4282,8 +4666,9 @@ class InstallerWindow:
                       (xbox > 0, "%d maps" % xbox)]
         if summary["mcc"]:
             shown.append((True, "MCC files"))
-        shown += [(pc, "with the Halo PC files" if pc else "no Halo PC files"),
-                  (bool(summary["movies"]), "%d movies" % len(summary["movies"]))]
+        shown.append((pc, "with the Halo PC files" if pc else "no Halo PC files"))
+        if not self.on_pc:
+            shown.append((bool(summary["movies"]), "%d movies" % len(summary["movies"])))
         for good, text in shown:
             ttk.Label(chips, text=("✓ " if good else "") + text,
                       style="ChipOk.TLabel" if good else "Chip.TLabel").pack(side="left", padx=(0, px(6)))

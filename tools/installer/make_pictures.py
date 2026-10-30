@@ -35,10 +35,14 @@ PICTURES = {
     "welcome.png": ("pelicans.png", (180, 68, 905, 476)),
     "xbox.png": ("beach-landing.png", (120, 68, 845, 476)),
     "movies.png": ("pelicans.png", (466, 262, 806, 453)),
-    "pc.png": ("blood-gulch.png", (0, 0, 960, 544)),
+    "pc.png": ("silent-cartographer-camp.png", (0, 0, 960, 544)),
     "copy.png": ("beach-landing.png", (352, 68, 832, 338)),
-    "vpk.png": ("blood-gulch.png", (190, 60, 670, 330)),
+    "vpk.png": ("silent-cartographer-camp.png", (190, 60, 670, 330)),
     "done.png": ("warthog-beach.png", (0, 0, 960, 544)),
+    "game.png": ("warthog-beach.png", (0, 100, 520, 392)),
+    "mode.png": ("pelicans.png", (210, 90, 600, 310)),
+    "auto.png": ("warthog-beach.png", (360, 240, 700, 431)),
+    "pccopy.png": ("silent-cartographer-camp.png", (260, 220, 620, 423)),
 }
 
 

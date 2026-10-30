@@ -1,10 +1,10 @@
 # Install helper for Halo CE for PS Vita
 
 `halo_ce_vita_installer.py` gathers your own game files in the layout the
-Vita build needs (the main [README](../../README.md#install) gives it) and
-copies them to the Vita over VitaShell's FTP. It is one Python file for
-Windows, Linux and macOS; `HaloCEVitaInstaller.exe` is the same tool as one
-Windows program, with ffmpeg inside it.
+game needs (the main [README](../../README.md#install) gives it) and copies
+them to a Vita over VitaShell's FTP, or into a PC build's data folder. It is
+one Python file for Windows, Linux and macOS; `HaloCEVitaInstaller.exe` is the
+same tool as one Windows program, with ffmpeg inside it.
 
 **No game data comes with it.** Every step reads your own files: your Xbox
 disc image or your own Halo: The Master Chief Collection, your Halo PC
@@ -30,30 +30,49 @@ files.
 - **Without the window:** `python3 halo_ce_vita_installer.py --help` lists
   the same steps as commands (see below).
 
-The window walks through five steps, listed on its left with each one's
-state (done, skipped, or what it needs: required, optional). Each can be skipped (**Skip this step**) and run again: files already
-in place are kept. A step's progress shows the file it is on; **Show
-details** opens the log. The last page sums up what was gathered and copied
-and what to do next on the Vita.
+## The window
+
+1. **Choose the platform.** PS Vita or PC. Platforms that are not ready yet
+   are listed greyed out and cannot be picked.
+2. **Automatic or Manual.** The page says whether Halo: The Master Chief
+   Collection was found. It also holds the output folder.
+   - **Automatic** takes everything from your own MCC (the From your MCC
+     page). The tool finds it the way the game does (see the
+     [steps](#the-steps)). Not found, the page says so: choose its folder,
+     **Look again**, or **Use Manual instead**.
+   - **Manual** has a page for each source: game files (your Xbox disc image,
+     or MCC's folder), the movies (Vita only) and the Halo PC files.
+3. **Copy.** To the Vita over VitaShell's FTP, then the VPK. Or, on PC, into
+   the PC build's data folder.
+
+The list on the left follows your choices, with each page's state (done,
+skipped, or what it needs: required, optional). Each page can be skipped
+(**Skip this step**) and run again: files already in place are kept. A step's
+progress shows the file it is on; **Show details** opens the log. The last
+page sums up what was gathered and copied and what to do next.
+
+Adding a game later is one entry in `GAMES`: a game page then comes first by
+itself. `install_flow()` gives the pages of each choice.
 
 The files are gathered in an output folder first (by default
 `Documents/Halo CE Vita files`, about 2.5 GB with everything), laid out as
-on the Vita:
+the game reads them:
 
 ```
 Halo CE Vita files/
     default.xbe          -> ux0:data/haloce-vita/default.xbe
     maps/*.map           -> ux0:data/haloce-vita/maps/
     movies/*.mp4         -> ux0:data/haloce-vita/movies/
-    mcc/halo1/...        -> ux0:data/haloce-vita/mcc/halo1/...   (from MCC, step 1)
+    mcc/halo1/...        -> ux0:data/haloce-vita/mcc/halo1/...   (from MCC)
 ```
 
-Custom maps you put in that `maps` folder yourself are copied too.
+Custom maps you put in that `maps` folder yourself are copied too. A PC build
+gets the same layout, without the movies.
 
 ## The steps
 
-1. **Game files**, one of two ways (run the step again with the other to
-   have both):
+1. **Game files**, one of two ways (Automatic is the second; on Manual's
+   page, run the step again with the other to have both):
    - **Your Xbox game.** Choose your Xbox Halo disc image (`.iso`, `.xiso`:
      an XISO made by extract-xiso, or a full disc image) or an already
      unpacked game folder. The `maps` folder and `default.xbe` are taken out.
@@ -88,7 +107,8 @@ Custom maps you put in that `maps` folder yourself are copied too.
      `bitmaps.map` must be there, or nothing is copied. Nothing of MCC goes
      to the `maps` folder.
 
-2. **Movies (optional).** The disc's Bink movies (`bink/*.bik`) are
+2. **Movies (optional, Vita only).** The PC build skips movies, so there is
+   no such page for it, and MCC has none. The disc's Bink movies (`bink/*.bik`) are
    converted with ffmpeg to H.264 MP4s, 640 wide, as the README's Movies
    section does. Both choices are H.264 Constrained Baseline with no
    B-frames, the only kind the Vita plays cleanly (High profile's B-frames
@@ -98,14 +118,15 @@ Custom maps you put in that `maps` folder yourself are copied too.
    missing movie is skipped (no intro, no attract videos, no credits movie)
    and the main menu comes up ready to play. Skip the step with **Next** to
    save the few minutes it takes.
-3. **Halo PC files (required).** Halo Custom Edition's `bitmaps.map`,
-   `sounds.map` and `loc.map` are required. The page says at the top
+3. **Halo PC files (required on the Vita, optional on PC).** Halo Custom
+   Edition's `bitmaps.map`, `sounds.map` and `loc.map`. The page says at the top
    whether the output folder has all three, or which are missing and where
    to get them; the Copy page says so too, and copying without them asks
    first. They count as there when they are in the output folder's `maps`
    or in the MCC files of step 1 (`mcc/halo1/maps/custom_edition`, which
    the builds that play MCC's maps read when the `maps` folder has none: an
-   MCC-only install needs nothing more here). Builds before
+   MCC-only install needs nothing more, which is why Automatic has no such
+   page). Builds before
    1.1.1-insider.25 read them from `maps` only: this step puts them there.
    They come from one of:
    - **Halo: The Master Chief Collection** on Steam: its
@@ -137,12 +158,22 @@ Custom maps you put in that `maps` folder yourself are copied too.
    size are skipped, so it goes on from where it stopped. Every file is
    checked by its size on the Vita after copying. "Copy files already on the
    Vita again" replaces them all.
-5. **The VPK.** Download `halo-ce-vita-<version>-vita.vpk` from the
+5. **The VPK (Vita).** Download `halo-ce-vita-<version>-vita.vpk` from the
    [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
    (a VPK next to the tool is picked up by itself). The tool copies it to
    `ux0:data/`. Then, on the Vita, leave FTP mode, open `ux0:data/` in
    VitaShell, press Cross on the VPK and confirm. The tool cannot install
    it: only VitaShell on the Vita can.
+6. **Copy to the PC build (PC, instead of 4 and 5).** Unpack
+   `halo-ce-vita-<version>-pc-windows.zip` or `-pc-linux.tar.gz` and choose
+   that folder (one next to the tool, or in your Downloads, Desktop or
+   Documents, is found by itself). The files go where the game looks: the
+   folder of its program, `build/windows` or `build/linux`. A `maps` folder
+   is made there even with MCC's files alone, as the game needs one to take
+   that folder for its data. Each file is checked by its size; files already
+   there at the right size are kept unless you tick "Copy files already there
+   again". The PC build also finds MCC by itself, so with MCC on the same
+   computer this copy is only needed to play without it.
 
 Still needed on the Vita, as the README says: HENkaku/Enso, VitaShell, and the
 shader compiler `ur0:data/libshacccg.suprx` (ShaRKF00D extracts it).
@@ -190,12 +221,14 @@ python3 halo_ce_vita_installer.py check-installer "any name.exe"
 python3 halo_ce_vita_installer.py [--out FOLDER] check
 python3 halo_ce_vita_installer.py [--out FOLDER] upload 192.168.1.20 [--replace]
 python3 halo_ce_vita_installer.py vpk 192.168.1.20 [halo.vpk]
+python3 halo_ce_vita_installer.py [--out FOLDER] pc-copy [BUILD FOLDER] [--replace]
 python3 halo_ce_vita_installer.py selftest
 ```
 
 `check` says whether the output folder has the required Halo Custom
 Edition files (and, if not, which are missing and where to get them; exit
-code 1); `upload` warns the same way but copies the rest.
+code 1); `upload` warns the same way but copies the rest. Automatic is `mcc`
+with no folder, then `upload` and `vpk`, or `pc-copy`.
 
 (`HaloCEVitaInstaller.exe` takes the same commands, but as a windowed program
 it prints nothing; `selftest --report FILE` writes its results to a file.)
@@ -214,6 +247,9 @@ it prints nothing; `selftest --report FILE` writes its results to a file.)
   Vita), and the data connection goes only to the Vita's own address.
 - MCC's folder is only read: the tool copies the files it names (fixed
   names, never a name read from MCC), into the output folder.
+- The copy to a PC build uses the same checked names, writes only inside the
+  build's data folder, refuses to write through a link, and moves each file
+  into place only once it is whole.
 - No shell is used to run anything; ffmpeg is run with an argument list.
 - The Windows build downloads ffmpeg from one fixed address and refuses it
   unless its SHA-256 matches (`build_windows.py`).
@@ -230,9 +266,12 @@ files with MCC's headers; Windows' registry mocked), a small XDVDFS image, an LZ
 compressor (the decoder's other half) and cabinets, a Windows program with a
 cabinet in its resources, fake resource maps, a stand-in ffmpeg, and a local
 FTP server that answers like VitaShell (its LIST format, no NLST, no SIZE, a
-connection that drops on demand, doubled transfer replies). The window's
-tests run where there is a display (every page, a step run through it, the
-sidebar's states, the details, the Done page, the classic look by default,
+connection that drops on demand, doubled transfer replies), a stand-in Steam
+library and PC build. Each test has a home folder of its own, so a real Steam
+or MCC is never read. The window's tests run where there is a display (every
+page, a step run through it, the platform and Automatic or Manual pages,
+greyed platforms, every flow walked with Next and Back, MCC found and not
+found, Manual through to a PC build, the sidebar's states, the details, the Done page, the classic look by default,
 the Modern look's light and dark with sv-ttk and its setting kept,
 `HCV_THEME`, each page's picture, and the window without its pictures or
 sv-ttk).

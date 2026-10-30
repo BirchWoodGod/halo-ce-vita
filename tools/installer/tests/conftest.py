@@ -21,6 +21,11 @@ def own_settings(tmp_path, monkeypatch):
     path = tmp_path / "settings" / hcv.SETTINGS_FILE
     monkeypatch.setattr(hcv, "settings_path", lambda: str(path))
     monkeypatch.delenv("HCV_THEME", raising=False)
+    # (and a home of its own: a real Steam library or MCC is never found, or read)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     return path
 
 
