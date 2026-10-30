@@ -60,6 +60,18 @@ then the layout's */
 receiver) */
 #define FORGE_NETGAME_TELEPORT_JUMP 3.f
 #define FORGE_NETGAME_TELEPORT_NEAR 1.f
+/* (a game type object's flag on the ground under its marker) how far under
+the marker the surface is looked for (as far as a marker is stood on it:
+forge_markers.inc), from how far over the marker (a marker let go low, or
+nudged, is a little in the ground), how far over a marker deeper in the
+ground the surface can be, and how far over its surface a flag or a ball is
+made: Blood Gulch's own CTF flags are 0.19 over theirs and settle a little
+lower. Made on the surface exactly it can start under it, and it falls out
+of the map (the blue flag to z -361) */
+#define FORGE_NETGAME_GROUND_UNDER 4.25f
+#define FORGE_NETGAME_GROUND_OVER 1.f
+#define FORGE_NETGAME_GROUND_BURIED 8.f
+#define FORGE_NETGAME_GROUND_LIFT 0.19f
 
 /* ---------- globals */
 
@@ -283,6 +295,58 @@ static void forge_netgame_players_resync(
 	}
 }
 
+/* the surface under a marker. The engine makes a CTF flag or a ball where its
+netgame flag is and lets it fall (game_engine_ctf.c ctf_create_flag_object),
+scoring at that point, so the point has to be on the ground as the map's own
+are. Looked for from a little over the marker, for one a little in the
+ground, but never from over a ceiling (a room's, a base's: the roof is not
+this marker's ground). A marker deeper in the ground has the surface over it,
+seen from beneath. FALSE when no surface is near (a marker in the air): the
+marker's own spot */
+static boolean forge_netgame_ground(
+	real_point3d const *marker,
+	real_point3d *ground)
+{
+	struct collision_result collision;
+	real_point3d from = *marker;
+	real_vector3d along;
+
+	along.i = 0.f;
+	along.j = 0.f;
+	along.k = FORGE_NETGAME_GROUND_OVER;
+	from.z += collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit), marker,
+		&along, NONE, &collision) ? MAX(along.k * collision.t - 0.01f, 0.f) : along.k;
+	along.k = marker->z - from.z - FORGE_NETGAME_GROUND_UNDER;
+	if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit), &from,
+		&along, NONE, &collision))
+	{
+		*ground = from;
+		ground->z += along.k * collision.t;
+		return TRUE;
+	}
+	along.k = FORGE_NETGAME_GROUND_BURIED;
+	if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_back_facing_surfaces_bit), marker,
+		&along, NONE, &collision) && collision.plane.n.k > 0.f)
+	{
+		*ground = *marker;
+		ground->z += along.k * collision.t;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/* where a game type object's netgame flag stands: on the ground under its
+marker, a flag or a ball (objects, that fall) a little over it */
+static void forge_netgame_objective_position(
+	struct forge_spawn const *spawn,
+	real_point3d *position)
+{
+	if (!forge_netgame_ground(&spawn->home.position, position))
+		*position = spawn->home.position;
+	else if (spawn->kind == _forge_spawn_flag || spawn->kind == _forge_spawn_oddball)
+		position->z += FORGE_NETGAME_GROUND_LIFT;
+}
+
 /* the block built: the map's own flags, then the layout's teleporters, each
 on the ground under its marker */
 static void forge_netgame_flags_build(
@@ -331,8 +395,7 @@ static void forge_netgame_flags_build(
 			continue;
 		flag = &forge_netgame.flags[forge_netgame.count++];
 		csmemset(flag, 0, sizeof(*flag));
-		flag->position = spawn->home.position;
-		flag->position.z -= FORGE_MARKER_CLEARANCE;
+		forge_netgame_objective_position(spawn, &flag->position);
 		flag->facing = arctangent(spawn->home.forward.j, spawn->home.forward.i);
 		flag->type = forge_objective_flag_type(spawn->kind);
 		flag->team_index = forge_objective_engine_index(spawn);
@@ -487,8 +550,12 @@ static void forge_netgame_log(
 		if (flag->type == _netgame_flag_ctf_flag || flag->type == _netgame_flag_hill ||
 			flag->type == _netgame_flag_oddball_ball_spawn || flag->type == _netgame_flag_race_track)
 		{
-			platform_log("forge: netgame flag %ld: type %d index %d at %.2f %.2f %.2f", index, (int)flag->type,
-				(int)flag->team_index, flag->position.x, flag->position.y, flag->position.z);
+			real_point3d ground;
+			boolean grounded = forge_netgame_ground(&flag->position, &ground);
+
+			platform_log("forge: netgame flag %ld: type %d index %d at %.2f %.2f %.2f, the ground %s%.2f", index, (int)flag->type,
+				(int)flag->team_index, flag->position.x, flag->position.y, flag->position.z, grounded ? "at " : "not found ",
+				grounded ? ground.z : 0.f);
 		}
 	}
 	data_iterator_new(&iterator, object_header_data);
