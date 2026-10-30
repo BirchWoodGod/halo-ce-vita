@@ -69,11 +69,11 @@ static void fuzz_request(
 	switch (copy.op)
 	{
 	case _forge_net_request_spawn:
-		/* (a player spawn point: no tag, a kind, nothing else; else a tag of
-		the palette) */
+		/* (a player spawn point or a later marker - a teleporter's end: no
+		tag, a kind, nothing else; else a tag of the palette) */
 		if (copy.flags & FORGE_NET_FLAG_PLAYER_SPAWN)
 		{
-			if (copy.flags != FORGE_NET_FLAG_PLAYER_SPAWN || copy.tag != FORGE_NET_NO_TAG || copy.aux >= FORGE_NET_SPAWN_KINDS)
+			if (copy.flags != FORGE_NET_FLAG_PLAYER_SPAWN || copy.tag != FORGE_NET_NO_TAG || copy.aux >= FORGE_NET_MARKER_KINDS)
 				abort();
 		}
 		else if (copy.tag >= palette_count)
@@ -130,15 +130,34 @@ static void fuzz_update(
 		return;
 	if (record->op < FORGE_NET_FIRST_UPDATE || record->op >= FORGE_NET_UPDATE_END)
 		abort();
+	/* (an object's physics: one of the modes, never a character's) */
+	if ((record->op == _forge_net_update_entry || record->op == _forge_net_update_link) &&
+		!(record->flags & FORGE_NET_FLAG_PLAYER_SPAWN) &&
+		(record->step < 0 || record->step >= FORGE_NET_PHYSICS_MODES || ((record->flags & FORGE_NET_FLAG_AI) && record->step)))
+	{
+		abort();
+	}
 	if ((record->op == _forge_net_update_entry || record->op == _forge_net_update_link) &&
 		(!forge_transform_sane(&record->transform, 1) || record->team < -1 || record->team > FORGE_NET_MAXIMUM_TEAM ||
 			record->respawn_seconds > FORGE_NET_MAXIMUM_RESPAWN_SECONDS || record->ai_team >= FORGE_NET_AI_TEAM_COUNT))
 	{
 		abort();
 	}
+	/* (a later marker's entry - a teleporter's end: no tag or object, a
+	marker's kind, its channel in range, nothing else) */
+	if (record->op == _forge_net_update_entry && (record->flags & FORGE_NET_FLAG_MARKER))
+	{
+		if (record->flags != (FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER) || record->tag != FORGE_NET_NO_TAG ||
+			record->object != FORGE_NET_NO_OBJECT || record->team != -1 || record->aux < FORGE_NET_SPAWN_KINDS ||
+			record->aux >= FORGE_NET_MARKER_KINDS || record->value >= forge_net_marker_indices(record->aux) || record->record_flags ||
+			record->respawn_seconds || record->ai_team || record->value2 || record->id == 0)
+		{
+			abort();
+		}
+	}
 	/* (a player spawn point's entry: no tag or object, team any, red or
 	blue, its game types' bits, an initial spawn's flag alone) */
-	if (record->op == _forge_net_update_entry && (record->flags & FORGE_NET_FLAG_PLAYER_SPAWN))
+	else if (record->op == _forge_net_update_entry && (record->flags & FORGE_NET_FLAG_PLAYER_SPAWN))
 	{
 		if (record->flags != FORGE_NET_FLAG_PLAYER_SPAWN || record->tag != FORGE_NET_NO_TAG ||
 			record->object != FORGE_NET_NO_OBJECT || record->team < -1 || record->team > 1 ||
@@ -408,6 +427,26 @@ static void seed_write(
 		record.value = 0x02;
 		memcpy(with_count + 1, &record, sizeof(record));
 		SEED_ADD(1, with_count, (int)sizeof(with_count));
+		/* (a teleporter's end: its request and its entry, host version 5) */
+		record_init(&record, _forge_net_request_spawn);
+		record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+		record.aux = 3;
+		memcpy(with_count + 1, &record, sizeof(record));
+		SEED_ADD(0, with_count, (int)sizeof(with_count));
+		record_init(&record, _forge_net_update_entry);
+		record.id = 10;
+		record.flags = FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER;
+		record.aux = 2;
+		record.team = -1;
+		record.value = 5;
+		memcpy(with_count + 1, &record, sizeof(record));
+		SEED_ADD(1, with_count, (int)sizeof(with_count));
+		/* (a game type object's entry: a hill point, host version 6) */
+		record.id = 11;
+		record.aux = 5;
+		record.value = 3;
+		memcpy(with_count + 1, &record, sizeof(record));
+		SEED_ADD(1, with_count, (int)sizeof(with_count));
 	}
 	memset(&entry, 0, sizeof(entry));
 	entry.total = 4;
@@ -516,7 +555,15 @@ int net_fuzz_checks(void)
 	record.aux = 1;
 	CHECK(forge_net_request_valid(&record, 0), "a player spawn point's spawn taken (no tag, initial)");
 	record.aux = FORGE_NET_SPAWN_KINDS;
-	CHECK(!forge_net_request_valid(&record, 0), "a player spawn point of kind 2 refused");
+	CHECK(forge_net_request_valid(&record, 0), "a teleporter sender's spawn taken (kind 2, host version 5)");
+	record.aux = FORGE_NET_MARKER_KINDS - 1;
+	CHECK(forge_net_request_valid(&record, 0), "a teleporter receiver's spawn taken (kind 3)");
+	record.aux = FORGE_NET_MARKER_KINDS;
+	CHECK(!forge_net_request_valid(&record, 0), "a marker of a kind past the markers refused");
+	record.aux = 2;
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER;
+	CHECK(!forge_net_request_valid(&record, 0), "a spawn request with the marker's entry flag refused");
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
 	record.aux = 0;
 	record.tag = 1;
 	CHECK(!forge_net_request_valid(&record, 10), "a player spawn point naming a tag refused");
@@ -572,6 +619,33 @@ int net_fuzz_checks(void)
 	record.tag = 1;
 	record.id = 0;
 	CHECK(!forge_net_update_valid(&record, 3), "an entry of id 0 refused");
+	/* (version 7's physics in the step: normal, fixed, phased; never a
+	character's) */
+	record.id = 5;
+	record.flags = FORGE_NET_FLAG_NETWORKED;
+	record.step = 2;
+	CHECK(forge_net_update_valid(&record, 3), "an entry phased taken");
+	record.step = 1;
+	CHECK(forge_net_update_valid(&record, 3), "an entry fixed taken");
+	record.step = 3;
+	CHECK(!forge_net_update_valid(&record, 3), "an entry of physics 3 refused");
+	record.step = -1;
+	CHECK(!forge_net_update_valid(&record, 3), "an entry of physics -1 refused");
+	record.step = 1;
+	record.flags |= FORGE_NET_FLAG_AI;
+	CHECK(!forge_net_update_valid(&record, 3), "a character's physics refused");
+	record.op = _forge_net_update_link;
+	record.value = 2;
+	CHECK(!forge_net_update_valid(&record, 3), "a character's physics in a link refused");
+	record.flags = FORGE_NET_FLAG_NETWORKED;
+	CHECK(forge_net_update_valid(&record, 3), "a link's physics taken");
+	record.op = _forge_net_update_entry;
+	record.value = 0;
+	record.step = 0;
+	record_init(&record, _forge_net_request_property);
+	record.aux = FORGE_NET_PROPERTY_PHYSICS;
+	record.step = 1;
+	CHECK(forge_net_request_valid(&record, 0), "the PHYSICS property's step taken");
 	record_init(&record, _forge_net_update_refuse);
 	record.aux = _forge_net_refuse_budget;
 	CHECK(forge_net_update_valid(&record, 0), "a refusal taken");
@@ -623,6 +697,129 @@ int net_fuzz_checks(void)
 	record.id = 12;
 	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
 	CHECK(!forge_net_update_valid(&record, 10), "a player spawn point's link refused (entries only)");
+	/* (a teleporter's end: an entry of a later marker) */
+	record_init(&record, _forge_net_update_entry);
+	record.id = 14;
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER;
+	record.aux = 2;
+	record.team = -1;
+	record.value = FORGE_NET_TELEPORTER_CHANNELS - 1;
+	CHECK(forge_net_update_valid(&record, 0), "a teleporter sender's entry taken (channel 15)");
+	record.aux = 3;
+	CHECK(forge_net_update_valid(&record, 0), "a teleporter receiver's entry taken");
+	record.value = FORGE_NET_TELEPORTER_CHANNELS;
+	CHECK(!forge_net_update_valid(&record, 0), "a teleporter of channel 16 refused");
+	record.value = 0;
+	record.aux = 1;
+	CHECK(!forge_net_update_valid(&record, 0), "a marker entry of a player spawn point's kind refused");
+	record.aux = FORGE_NET_MARKER_KINDS;
+	CHECK(!forge_net_update_valid(&record, 0), "a marker entry of a kind past the markers refused");
+	record.aux = 2;
+	record.team = 0;
+	CHECK(!forge_net_update_valid(&record, 0), "a teleporter with a team refused");
+	record.team = -1;
+	record.record_flags = FORGE_NET_SPAWN_INITIAL;
+	CHECK(!forge_net_update_valid(&record, 0), "a teleporter with a spawn's flag refused");
+	record.record_flags = 0;
+	record.respawn_seconds = 1;
+	CHECK(!forge_net_update_valid(&record, 0), "a teleporter with a respawn time refused");
+	record.respawn_seconds = 0;
+	record.value2 = 1;
+	CHECK(!forge_net_update_valid(&record, 0), "a teleporter with a second value refused");
+	record.value2 = 0;
+	record.tag = 0;
+	CHECK(!forge_net_update_valid(&record, 10), "a teleporter naming a tag refused");
+	record.tag = FORGE_NET_NO_TAG;
+	record.object = 0x10002;
+	CHECK(!forge_net_update_valid(&record, 10), "a teleporter naming an object refused");
+	record.object = FORGE_NET_NO_OBJECT;
+	record.flags = FORGE_NET_FLAG_MARKER;
+	CHECK(!forge_net_update_valid(&record, 0), "the marker's flag alone refused");
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER | FORGE_NET_FLAG_AI;
+	CHECK(!forge_net_update_valid(&record, 0), "a teleporter that is a character refused");
+	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER;
+	record.id = 0;
+	CHECK(!forge_net_update_valid(&record, 0), "a teleporter of id 0 refused");
+	record.id = 14;
+	memcpy(&record.transform.position[2], &nan_bits, 4);
+	CHECK(!forge_net_update_valid(&record, 0), "a teleporter at a NaN refused");
+	good_transform(&record.transform);
+	record.transform.position[1] = 5001.f;
+	CHECK(!forge_net_update_valid(&record, 0), "a teleporter past the world's bounds refused");
+	/* (a game type object: a marker entry of kinds 4 to 7, host version 6,
+	its index within its kind's) */
+	{
+		static struct
+		{
+			int kind;
+			int index;
+			int taken;
+			char const *what;
+		} const cases[] =
+		{
+			{ 4, 0, 1, "a red CTF flag's entry taken" },
+			{ 4, 1, 1, "a blue CTF flag's entry taken" },
+			{ 4, 2, 0, "a CTF flag of team 2 refused" },
+			{ 5, 15, 1, "hill 15's point taken" },
+			{ 5, 16, 0, "hill 16's point refused" },
+			{ 6, 15, 1, "ball 15's spawn taken" },
+			{ 6, 16, 0, "ball 16's spawn refused" },
+			{ 7, 31, 1, "checkpoint 31 taken" },
+			{ 7, 32, 0, "checkpoint 32 refused" },
+			{ 7, 0xFFFF, 0, "checkpoint 65535 refused" },
+			{ 8, 0, 0, "a marker of kind 8 refused" },
+		};
+		int index;
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			record_init(&record, _forge_net_update_entry);
+			record.id = 15;
+			record.flags = FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER;
+			record.aux = (uint8_t)cases[index].kind;
+			record.team = -1;
+			record.value = (uint16_t)cases[index].index;
+			CHECK(forge_net_update_valid(&record, 0) == cases[index].taken, cases[index].what);
+		}
+		record_init(&record, _forge_net_request_spawn);
+		record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
+		record.aux = 7;
+		CHECK(forge_net_request_valid(&record, 0), "a race checkpoint's spawn taken (kind 7)");
+		record.aux = 8;
+		CHECK(!forge_net_request_valid(&record, 0), "a spawn of kind 8 refused");
+	}
+
+	/* (1.1.2: a joiner's features, after its answer) */
+	{
+		struct forge_net_lobby_message features;
+
+		memset(&features, 0, sizeof(features));
+		features.command = _forge_net_lobby_features;
+		features.version = FORGE_NET_VERSION;
+		features.capabilities = FORGE_NET_FEATURES_KNOWN;
+		features.session = 7;
+		CHECK(forge_net_lobby_valid(&features, 0), "a joiner's features taken");
+		CHECK(!forge_net_lobby_valid(&features, 1), "features from the host refused");
+		features.capabilities = 0;
+		CHECK(!forge_net_lobby_valid(&features, 0), "features of none refused");
+		features.capabilities = 0x08;
+		CHECK(!forge_net_lobby_valid(&features, 0), "an unknown feature refused");
+		features.capabilities = FORGE_NET_FEATURE_MARKERS;
+		features.packs_ready = 1;
+		CHECK(!forge_net_lobby_valid(&features, 0), "features with packs refused");
+		features.packs_ready = 0;
+		features.flags = 1;
+		CHECK(!forge_net_lobby_valid(&features, 0), "features with flags refused");
+		features.flags = 0;
+		features.title[0] = 'x';
+		CHECK(!forge_net_lobby_valid(&features, 0), "features with a title refused");
+		features.title[0] = 0;
+		features.reason = _forge_net_refusal_version;
+		CHECK(!forge_net_lobby_valid(&features, 0), "features with a refusal refused");
+		features.reason = 0;
+		features.pack_count = 1;
+		CHECK(!forge_net_lobby_valid(&features, 0), "features naming packs refused");
+	}
 
 	/* palette entries */
 	memset(&entry, 0, sizeof(entry));

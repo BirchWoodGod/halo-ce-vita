@@ -228,7 +228,9 @@ under File Share the map variants of every map (the first
 FORGE_PANEL_MAXIMUM), square deleting one after a confirmation. While a
 Forge game is played, Clear dead AI and Clear all AI (asked first) do what
 the Forge menu's CLEAR DEAD AI and CLEAR ALL AI do, each with how many it
-takes (forge.c forge_panel_ai_counts, forge_panel_clear_ai).
+takes (forge.c forge_panel_ai_counts, forge_panel_clear_ai); Magnets and Nudge
+step set the Forge game's blocks' magnets and its nudge (forge.c
+forge_precision.inc: 1.1.2).
 
 Dev holds a few switches for testers (each a debug environment variable;
 most are read once, at start-up, and say so; the renderer's A/B ones on a
@@ -1512,6 +1514,12 @@ int forge_panel_map_available(int map_index);
 is played), and its dead or all of them cleared, at its next update */
 int forge_panel_ai_counts(int *alive, int *dead);
 void forge_panel_clear_ai(int all);
+/* the blocks' magnets on (1) or off, set; the nudge's step (centimetres),
+stepped (forge.c forge_precision.inc) */
+int forge_panel_magnets(void);
+void forge_panel_magnets_set(int on);
+int forge_panel_nudge_centimetres(void);
+void forge_panel_nudge_step(int step);
 /* (system_link_shortcut.c) the Forge game asked for: its map's index and
 its map variant's file name ("" none), with SYSTEM_LINK_REQUEST_FORGE */
 extern volatile int halo_forge_request_map;
@@ -1534,6 +1542,10 @@ enum
 	/* (while a Forge game is played) */
 	FORGE_LINE_CLEAR_DEAD,
 	FORGE_LINE_CLEAR_ALL,
+	/* (1.1.2, while a Forge game is played: forge.c forge_precision.inc) the
+	blocks' magnets, the nudge's step */
+	FORGE_LINE_MAGNETS,
+	FORGE_LINE_NUDGE,
 	FORGE_LINE_COUNT
 };
 
@@ -4467,8 +4479,11 @@ static int page_lines(struct line *lines)
 
 		for (index = 0; index < FORGE_LINE_COUNT; index++)
 		{
-			if (!playing && (index == FORGE_LINE_CLEAR_DEAD || index == FORGE_LINE_CLEAR_ALL))
+			if (!playing && (index == FORGE_LINE_CLEAR_DEAD || index == FORGE_LINE_CLEAR_ALL || index == FORGE_LINE_MAGNETS ||
+				index == FORGE_LINE_NUDGE))
+			{
 				continue;
+			}
 			lines[count].type = LINE_FORGE;
 			lines[count++].index = index;
 		}
@@ -4909,6 +4924,8 @@ static void help_line(char *text, int size, const struct line *line)
 			line->index == FORGE_LINE_NETWORK ? T("Local: alone. Network: friends forge with you (8, never listed online)") :
 			line->index == FORGE_LINE_CLEAR_DEAD ? T("Dead AI you placed, out of the layout: room for more") :
 			line->index == FORGE_LINE_CLEAR_ALL ? T("Every AI you placed, alive or dead, out of the layout") :
+			line->index == FORGE_LINE_MAGNETS ? T("A block held near another snaps flush to its edges") :
+			line->index == FORGE_LINE_NUDGE ? T("Each nudge's move: hold L, click the right stick, flick") :
 			T("A local game: you fly as the monitor and place objects"));
 	else if (line && line->type == LINE_VARIANT)
 	{
@@ -5319,6 +5336,12 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02%c %s %c", T("Network"),
 					forge_network ? '<' : ' ', !forge_network ? T("Local") : !strcmp(running_network, "online") ? T("Online") :
 					!strcmp(running_network, "adhoc") ? T("Ad hoc") : T("Same Wi-Fi"), forge_network ? ' ' : '>');
+			else if (line->index == FORGE_LINE_MAGNETS)
+				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02< %s >", T("Magnets"),
+					forge_panel_magnets() ? T("On") : T("Off"));
+			else if (line->index == FORGE_LINE_NUDGE)
+				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02< %d cm >", T("Nudge step"),
+					forge_panel_nudge_centimetres());
 			else if (line->index == FORGE_LINE_CLEAR_DEAD || line->index == FORGE_LINE_CLEAR_ALL)
 			{
 				int alive = 0, dead = 0;
@@ -8180,6 +8203,10 @@ int vita_settings_input(const struct vita_host_pad *pad)
 				}
 				else if (line->index == FORGE_LINE_CLEAR_ALL && (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_RIGHT)))
 					screen = SCREEN_FORGE_CLEAR;
+				else if (line->index == FORGE_LINE_MAGNETS && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT | VITA_BUTTON_CROSS)))
+					forge_panel_magnets_set(!forge_panel_magnets());
+				else if (line->index == FORGE_LINE_NUDGE && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT)))
+					forge_panel_nudge_step(step);
 				else if (line->index == FORGE_LINE_START)
 				{
 					if (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_RIGHT))

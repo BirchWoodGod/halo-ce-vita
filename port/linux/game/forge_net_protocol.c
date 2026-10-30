@@ -100,6 +100,10 @@ static int forge_net_properties_valid(
 	/* (a character's respawn: after a second or more) */
 	if ((record->record_flags & 0x04) && record->respawn_seconds == 0)
 		return 0;
+	/* (version 7's physics in the step: one of the modes, never a
+	character's) */
+	if (record->step < 0 || record->step >= FORGE_NET_PHYSICS_MODES || ((record->flags & FORGE_NET_FLAG_AI) && record->step))
+		return 0;
 	return 1;
 }
 
@@ -111,6 +115,22 @@ static int forge_net_player_valid(
 }
 
 /* ---------- public code */
+
+int forge_net_marker_indices(
+	int kind)
+{
+	if (kind < FORGE_NET_SPAWN_KINDS || kind >= FORGE_NET_MARKER_KINDS)
+		return 0;
+	if (kind < FORGE_NET_FIRST_OBJECTIVE_KIND)
+		return FORGE_NET_TELEPORTER_CHANNELS;
+	switch (kind - FORGE_NET_FIRST_OBJECTIVE_KIND)
+	{
+	case 0: return FORGE_FILE_MAXIMUM_CTF_TEAMS;
+	case 1: return FORGE_FILE_MAXIMUM_HILLS;
+	case 2: return FORGE_FILE_MAXIMUM_ODDBALLS;
+	}
+	return FORGE_FILE_MAXIMUM_RACE_CHECKPOINTS;
+}
 
 int forge_net_finite(
 	float value)
@@ -185,11 +205,12 @@ int forge_net_request_valid(
 	switch (record->op)
 	{
 	case _forge_net_request_spawn:
-		/* (a player spawn point: no tag, its kind, nothing held) */
+		/* (a player spawn point or a later marker - a teleporter's end: no
+		tag, its kind, nothing held) */
 		if (record->flags & FORGE_NET_FLAG_PLAYER_SPAWN)
 		{
 			if (record->flags != FORGE_NET_FLAG_PLAYER_SPAWN || record->tag != FORGE_NET_NO_TAG ||
-				record->aux >= FORGE_NET_SPAWN_KINDS)
+				record->aux >= FORGE_NET_MARKER_KINDS)
 			{
 				return 0;
 			}
@@ -263,6 +284,20 @@ int forge_net_update_valid(
 	switch (record->op)
 	{
 	case _forge_net_update_entry:
+		/* (a later marker - a teleporter's end: no tag or object, its kind,
+		its channel in range, nothing else) */
+		if (record->flags & FORGE_NET_FLAG_MARKER)
+		{
+			if (record->flags != (FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER) || record->id == 0 ||
+				record->tag != FORGE_NET_NO_TAG || record->object != FORGE_NET_NO_OBJECT ||
+				record->aux < FORGE_NET_SPAWN_KINDS || record->aux >= FORGE_NET_MARKER_KINDS || record->team != -1 ||
+				record->record_flags || record->respawn_seconds || record->ai_team || record->step || record->value2 ||
+				record->value >= forge_net_marker_indices(record->aux))
+			{
+				return 0;
+			}
+			return forge_net_transform_valid(&record->transform);
+		}
 		/* (a player spawn point: no tag or object, its team any, red or blue,
 		its game types, an initial spawn's flag alone) */
 		if (record->flags & FORGE_NET_FLAG_PLAYER_SPAWN)
@@ -436,6 +471,15 @@ int forge_net_lobby_valid(
 			return 0;
 		if (message->capabilities != 0 || message->packs_ready != 0)
 			return 0;
+	}
+	else if (message->command == _forge_net_lobby_features)
+	{
+		/* (its features' bits, known ones, at least one; nothing else) */
+		if (!message->capabilities || (message->capabilities & ~FORGE_NET_FEATURES_KNOWN) || message->packs_ready ||
+			message->flags || message->reason != _forge_net_refusal_none || message->pack_count != 0 || message->title[0])
+		{
+			return 0;
+		}
 	}
 	else if (message->command == _forge_net_lobby_building)
 	{

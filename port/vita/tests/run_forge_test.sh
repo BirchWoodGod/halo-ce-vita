@@ -150,6 +150,44 @@
 #               saved as version 4 (forge_files_test --dump: eight player spawn records, each
 #               team, game type and kind as set); none drawn for the Spartan; the variant
 #               started again: the eight read back
+#   teleport    teleporters (forge_netgame.inc, 1.1.2): in a Forge game of Blood Gulch a
+#               SENDER and a RECEIVER placed by the console (forge spawnpoint sender,
+#               receiver: the receiver takes the sender's channel), the receiver turned;
+#               a second sender alone on channel 2; the properties window's rows (CHANNEL,
+#               LINKED, TELEPORTER, YAW); the Spartan put down on the sender: sent to the
+#               receiver by the engine's own rule (game_engine_update_teleporter: the
+#               layout's teleporters are netgame flags), facing turned by the receiver's
+#               yaw; saved as version 5 (forge_files_test --dump: the pair, the lone
+#               sender left out); the variant started again: read back, and the
+#               Spartan sent again; a multiplayer game of Blood Gulch with no Forge:
+#               the map's own netgame flags, no teleporter of ours
+#   objectives  game type objects (forge_netgame.inc, 1.1.2): in a Forge game of Blood Gulch a
+#               CTF FLAG placed twice by the console (the first red, the second blue: the
+#               team with none yet), three HILL POINTs (one hill), an ODDBALL SPAWN and two
+#               RACE CHECKPOINTs (ordered 1 and 2); the flag's properties window (TEAM, GAME
+#               TYPE, COMPLETE, YAW; screenshot); saved as
+#               version 6 (forge_files_test --dump: the eight as written); then played offline
+#               (the network test's local game, HALO_NETWORK_TEST_MAP_VARIANT, one bot) in
+#               CTF - the game's red and blue flags stand at the layout's spots, the map's own
+#               flags replaced -, in Oddball - the ball at the layout's spawn - and in King of
+#               the Hill (the layout's hill the engine's hill 0); and a CTF game of Blood Gulch
+#               with no map variant: the map's own netgame flags, its flags where they are
+#   physics     an object's PHYSICS (forge_physics.inc, 1.1.2): in a Forge game of Blood
+#               Gulch, snapping off, two large platforms two world units over the ground,
+#               one NORMAL, one PHASED ("forge property physics", twice); the Spartan put down
+#               over each: he stands on the normal one, falls through the phased one to the
+#               ground; two large walls PHASED crossing each other (pieces overlapping:
+#               screenshot) and a Warthog FIXED let go in the air (it stays there; a NORMAL one
+#               falls); the properties window's PHYSICS row (screenshot); saved as version 7
+#               (forge_files_test --dump: fixed and phased as set)
+#   precision   nudge, magnets, the position readout (forge_precision.inc, 1.1.2): in a Forge
+#               game of Blood Gulch, snapping off, a large platform; a second held a tenth
+#               of a world unit off its side: the magnets draw it flush (4 world units
+#               apart, centre to centre); taken again, nudged up twice (5 cm each), the step
+#               made 10 cm, nudged right once: let go 2 x 5 cm higher and 10 cm to the
+#               camera's right; the properties window with its PHYSICS row and the
+#               position in metres (screenshot; precision-es: the same in Spanish); the
+#               magnets turned off: a third held off the side stays where it is held
 #   spawnplay   the spawn points played (players.c player_spawn, forge_spawns.inc
 #               forge_spawn_location): spawns' variant (made by the console) played offline
 #               with 5 bots (network test local:, HALO_NETWORK_TEST_MAP_VARIANT, a kill every
@@ -283,7 +321,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives physics precision allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -390,7 +428,7 @@ v1pad="$v1pad @13-boulder-dropped:0:300 rt:150:1000 lleft:700:600 @14-boulder-ca
 v1pad="$v1pad y:150:1500 @15-deleted:0:300 rs:150:1500 back+rs:150:2500 @16-spartan:0:300 lup:800:1500"
 v1pad="$v1pad back:150:600 rs:150:1200 back+rs:150:2500"
 v1pad="$v1pad @17-monitor-again:0:300 start:150:2000 @18-forge-menu:0:300 down:150:600 down:150:600 down:150:600"
-v1pad="$v1pad down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 a:150:1500"
+v1pad="$v1pad down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 a:150:1500"
 v1pad="$v1pad @19-leave-forge:0:300 a:150:9000 @20-main-menu-again:0:300"
 
 # (variants: the main menu's FORGE, the lobby; START FORGE (the map, no
@@ -922,6 +960,110 @@ spawn_play() {
 	echo $? > "$dir/exit"
 }
 
+teleport_runs() {
+	local store="$out/teleport-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c="L300:forge camera 60 -100 6 0 -89;L312:forge spawnpoint sender;L316:forge drop"
+	c="$c;L330:forge camera 76 -112 6 0 -89;L342:forge spawnpoint receiver;L344:forge property yaw;L345:forge property yaw"
+	c="$c;L346:forge press x;L366:@shot 00-receiver-properties;L370:forge closemenus;L376:forge drop"
+	c="$c;L380:forge camera 66 -96 6 0 -89;L392:forge spawnpoint sender;L394:forge property channel"
+	c="$c;L397:forge drop;L400:forge spawns;L410:forge camera 54 -94 4.5 -40 -18;L430:@shot 01-teleporter-pair"
+	c="$c;L440:forge camera 60 -100 1.2 90 0;L470:forge off;L540:forge where;L555:@shot 02-spartan-at-receiver"
+	c="$c;L570:forge on;L580:forge save Teleport Test;L590:forge spawns"
+	run teleport 40 "" "$c" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none \
+		HALO_SAVE_ROOT="$store" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/teleport_test.hmv" > "$out/teleport/dump.txt" 2>&1
+	run teleport-load 30 "" "L400:forge spawns;L420:forge camera 60 -100 1.2 90 0;L450:forge off;L520:forge where" "" \
+		HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9:teleport_test.hmv HALO_TEST_FORGE_PACKS=none HALO_SAVE_ROOT="$store"
+}
+
+objectives_make_commands() {
+	local c="L300:forge camera 60 -100 6 0 -89;L312:forge spawnpoint flag;L316:forge drop"
+	c="$c;L320:forge camera 76 -112 6 0 -89;L332:forge spawnpoint flag;L336:forge drop"
+	c="$c;L340:forge camera 64 -106 6 0 -89;L352:forge spawnpoint hill;L356:forge drop"
+	c="$c;L360:forge camera 68 -106 6 0 -89;L372:forge spawnpoint hill;L376:forge drop"
+	c="$c;L380:forge camera 66 -102 6 0 -89;L392:forge spawnpoint hill;L396:forge drop"
+	c="$c;L400:forge camera 70 -98 6 0 -89;L412:forge spawnpoint oddball;L416:forge drop"
+	c="$c;L420:forge camera 56 -96 6 0 -89;L432:forge spawnpoint race;L436:forge drop"
+	c="$c;L440:forge camera 52 -92 6 0 -89;L452:forge spawnpoint race;L456:forge drop"
+	echo "$c"
+}
+
+# objectives_play NAME GAME [VARIANT]: a game of Blood Gulch played offline (the network test's
+# local game, one bot), its map variant VARIANT; "forge netflags" a few seconds in
+objectives_play() {
+	local name=$1 game=$2 variant=${3:-} dir="$out/$1"
+	rm -rf "$dir"
+	mkdir -p "$dir/data" "$dir/shots"
+	ln -sfn "$(cd "$data" && pwd)/maps" "$dir/data/maps"
+	(cd "$dir" && exec unshare -rn sh -c 'ip link set lo up 2> /dev/null; exec "$@"' sh \
+		env SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$dir/data" HALO_SAVE_ROOT="$out/objectives-store" \
+		HALO_NO_VSYNC=1 HALO_FRAME_CAP=30 HALO_EXIT_AFTER=35 HALO_FULLSCREEN=0 HALO_HIDDEN_WINDOW=1 HALO_NO_AUDIO=1 \
+		HALO_TICK_THREAD=1 HALO_UPDATE_AUTO=false HALO_NET_ONLINE=false HALO_NETWORK_TEST="local:bloodgulch:$game" \
+		HALO_NETWORK_TEST_START=5 HALO_NETWORK_TEST_SCORE=500 HALO_TEST_INPUT=bot:1 HALO_BOTS=1 \
+		${variant:+HALO_NETWORK_TEST_MAP_VARIANT=$variant} "HALO_TEST_COMMANDS=L450:forge netflags;L800:forge netflags" \
+		timeout -k 5 150 "$binary" > "$dir/run.log" 2>&1)
+	echo $? > "$dir/exit"
+}
+
+objectives_runs() {
+	local store="$out/objectives-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c
+	c="$(objectives_make_commands);L460:forge marker #1;L462:forge press x;L480:@shot 00-flag-properties;L484:forge closemenus"
+	c="$c;L486:forge drop;L490:forge spawns;L495:forge camera 58 -118 9 60 -28;L515:@shot 01-objective-markers"
+	c="$c;L520:forge save Objectives Test"
+	run objectives 30 "" "$c" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none \
+		HALO_SAVE_ROOT="$store" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/objectives_test.hmv" > "$out/objectives/dump.txt" 2>&1
+	objectives_play objectives-ctf ctf objectives_test.hmv
+	objectives_play objectives-oddball oddball objectives_test.hmv
+	objectives_play objectives-king king objectives_test.hmv
+	objectives_play objectives-mapctf ctf
+}
+
+physics_runs() {
+	local store="$out/physics-store" c t
+	rm -rf "$store"
+	mkdir -p "$store"
+	c="L240:forge snap off;L250:forge camera 75 -152 2 0 0;L262:forge spawn platform_large;L263:forge distance 5;L272:forge drop"
+	c="$c;L280:forge camera 85 -160 2 0 0;L292:forge spawn platform_large;L293:forge distance 5;L294:forge property physics"
+	c="$c;L295:forge property physics;L302:forge drop"
+	c="$c;L310:forge camera 85 -144 1.5 0 0;L322:forge spawn wall_large;L323:forge distance 5;L324:forge turn 45"
+	c="$c;L325:forge property physics;L326:forge property physics;L332:forge drop"
+	c="$c;L340:forge camera 85 -144 1.5 0 0;L352:forge spawn wall_large;L353:forge distance 5;L354:forge turn -45"
+	c="$c;L355:forge property physics;L356:forge property physics;L362:forge drop"
+	c="$c;L370:forge camera 70 -136 4 0 0;L382:forge spawn warthog;L383:forge distance 5;L384:forge property physics"
+	c="$c;L390:forge press x;L410:@shot 00-physics-row;L414:forge closemenus;L418:forge drop"
+	c="$c;L420:forge camera 70 -130 4 0 0;L432:forge spawn warthog;L433:forge distance 5;L440:forge drop;L520:forge objects"
+	c="$c;L530:forge camera 80 -132 4 -90 -20;L550:@shot 01-phased-walls-overlap;L555:forge save Physics Test"
+	c="$c;L560:forge camera 80 -152 4 0 -89;L590:forge off;L660:forge where;L680:forge on"
+	c="$c;L690:forge camera 90 -160 4 0 -89;L720:forge off;L800:forge where;L802:@shot 02-fell-through-phased;L810:forge on"
+	run physics 35 "" "$c" "" HALO_MENU_STYLE=classic HALO_SAVE_ROOT="$store" HALO_SYSTEM_LINK_TEST=forge:9 \
+		HALO_TEST_FORGE_PACKS=none HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/physics_test.hmv" > "$out/physics/dump.txt" 2>&1
+}
+
+precision_commands() { # the properties' shot's name
+	local c="L240:forge snap off;L250:forge camera 75 -152 2 0 0;L262:forge spawn platform_large;L263:forge distance 5"
+	c="$c;L272:forge drop;L280:forge camera 79.1 -152 2 0 0;L292:forge spawn platform_large;L293:forge distance 5"
+	c="$c;L302:forge drop;L305:forge objects;L310:forge grab #2;L315:forge nudge up 2;L316:forge nudgestep"
+	c="$c;L317:forge nudge right;L320:forge press x;L340:@shot $1;L345:forge closemenus;L350:forge drop"
+	c="$c;L355:forge objects;L360:forge magnets off;L365:forge camera 75 -147.9 2 0 0;L377:forge spawn platform_large"
+	c="$c;L378:forge distance 5;L387:forge drop;L390:forge objects"
+	echo "$c"
+}
+
+precision_runs() {
+	run precision 25 "" "$(precision_commands 00-properties-position)" "" HALO_MENU_STYLE=classic \
+		HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	run precision-es 25 "" "$(precision_commands 00-properties-position-es)" "" HALO_MENU_STYLE=classic \
+		HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1 \
+		HALO_LANGUAGE=es "HALO_TEST_LANG_DIR=$root/port/vita/app0/lang"
+}
+
 spawnplay_runs() {
 	local store="$out/spawnplay-store"
 	rm -rf "$store"
@@ -975,12 +1117,12 @@ allai_runs() {
 
 allaimenu_runs() {
 	# (an Elite and a grunt, ALL AI off, the grunt's on again: MIXED; the
-	# Forge menu by the pad: Start, down six to ALL AI, A, A)
+	# Forge menu by the pad: Start, down eight to ALL AI, A, A)
 	local c="L300:forge camera 60 -100 1.6 120 0;L302:forge spawn elite major plasma rifle;L303:forge distance 7;L304:forge drop"
 	c="$c;L306:forge camera 60 -100 1.6 140 0;L308:forge spawn grunt minor plasma pistol;L309:forge distance 6;L310:forge drop"
 	c="$c;L314:forge allai;L320:forge grab #2;L322:forge brain on;L324:forge drop;L326:forge ai"
-	local pad="level:150:12000 start:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:800"
-	pad="$pad @00-menu-mixed:0:300 a:150:1500 @01-menu-off:0:300 a:150:1500 @02-menu-on:0:300 b:150:1500"
+	local pad="level:150:12000 start:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
+	pad="$pad down:150:500 down:150:800 @00-menu-mixed:0:300 a:150:1500 @01-menu-off:0:300 a:150:1500 @02-menu-on:0:300 b:150:1500"
 	ai_run allaimenu 45 "$c" "HALO_TEST_PAD=$pad"
 }
 
@@ -1029,7 +1171,7 @@ clearaimenu_runs() {
 	c="$c;L306:forge camera 60 -100 1.6 140 0;L308:forge spawn grunt minor plasma pistol;L309:forge distance 6;L310:forge drop"
 	c="$c;L312:forge allai off;L314:forge kill #1;L345:forge budget"
 	local pad="level:150:12000 start:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
-	pad="$pad down:150:800 @00-menu-clear-dead:0:300 a:150:1500 @01-dead-cleared:0:300 down:150:800 a:150:1500"
+	pad="$pad down:150:500 down:150:500 down:150:800 @00-menu-clear-dead:0:300 a:150:1500 @01-dead-cleared:0:300 down:150:800 a:150:1500"
 	pad="$pad @02-clear-all-asked:0:300 b:150:1500 @03-kept:0:300 a:150:1500 a:150:1500 @04-all-cleared:0:300 b:150:1500"
 	ai_run clearaimenu 45 "$c" "HALO_TEST_PAD=$pad"
 }
@@ -1246,6 +1388,14 @@ for c in $cases; do
 		spawns_runs & ;;
 	spawnplay)
 		spawnplay_runs & ;;
+	teleport)
+		teleport_runs & ;;
+	physics)
+		physics_runs & ;;
+	precision)
+		precision_runs & ;;
+	objectives)
+		objectives_runs & ;;
 	mpvariant)
 		if [ "$menus_files" = 0 ] || [ ! -r "$packcopy_profile" ]; then
 			echo "SKIP: mpvariant: no Halo PC bitmaps.map and loc.map in $data/maps, or no profile ($packcopy_profile)"
@@ -1545,6 +1695,128 @@ for c in $cases; do
 			fail "aicap: the fifth left the layout: $(budget_at 2200)"
 		continue
 	fi
+	if [ "$c" = objectives ]; then
+		checked objectives || continue
+		expect objectives "a CTF flag placed: red" "forge: placed the ctf flag #1 \\(index 0\\)"
+		expect objectives "a second: blue" "forge: placed the ctf flag #2 \\(index 1\\)"
+		count objectives "three hill points of one hill" "forge: placed the hill point #[3-5] \\(index 0\\)" 3
+		expect objectives "an oddball spawn" "forge: placed the oddball spawn #6 \\(index 0\\)"
+		expect objectives "race checkpoints in order" "forge: placed the race checkpoint #8 \\(index 1\\)"
+		expect objectives "the flag's properties window" "menus: forge properties: CTF Flag, Red: game type object 4, index 0, complete, yaw"
+		expect objectives "saved" "forge: map variant \"Objectives Test\" saved as bloodgulch/objectives_test.hmv"
+		grep -q "^version 6 " "$out/objectives/dump.txt" && [ "$(grep -c ": a game type object: " "$out/objectives/dump.txt")" = 8 ] &&
+			grep -q ": a game type object: flag type 0, index 0$" "$out/objectives/dump.txt" &&
+			grep -q ": a game type object: flag type 0, index 1$" "$out/objectives/dump.txt" &&
+			[ "$(grep -c ": a game type object: flag type 8, index 0$" "$out/objectives/dump.txt")" = 3 ] &&
+			grep -q ": a game type object: flag type 2, index 0$" "$out/objectives/dump.txt" &&
+			grep -q ": a game type object: flag type 3, index 1$" "$out/objectives/dump.txt" &&
+			echo "  ok: objectives: the file: version 6, the eight as written" || fail "objectives: the file: $(cat "$out/objectives/dump.txt")"
+		for r in objectives-ctf objectives-oddball objectives-king objectives-mapctf; do
+			checked "$r" || continue
+		done
+		expect objectives-ctf "read as the map loads" "forge: map variant \"Objectives Test\": 8 game type objects"
+		expect objectives-ctf "the map's own flags of those types replaced" "forge: netgame flags: 8 game type objects of the layout, [0-9]+ of the map's replaced"
+		# (the flags' spots: where the markers stood, on the ground)
+		red=$(grep -a "forge: \(placed\|moved\) the ctf flag #1 " "$out/objectives/run.log" | tail -1 | sed 's/.* at \([-0-9.]*\) \([-0-9.]*\) .*/\1 \2/' | head -1)
+		blue=$(grep -a "forge: \(placed\|moved\) the ctf flag #2 " "$out/objectives/run.log" | tail -1 | sed 's/.* at \([-0-9.]*\) \([-0-9.]*\) .*/\1 \2/' | head -1)
+		flags=$(sed -n '/test command at tick 450: forge netflags$/,/test command at tick/p' "$out/objectives-ctf/run.log" | grep -a "forge: the game type's flag at")
+		echo "  (CTF: the layout's red flag at $red, blue at $blue; the game's: $(echo "$flags" | sed 's/.*flag at //' | tr '\n' ';'))"
+		near() { # X Y LINES: a line's flag within 1.5 world units of X Y
+			echo "$3" | sed 's/.*flag at //' | awk -v x="$1" -v y="$2" '{ dx = $1 - x; dy = $2 - y; if (dx * dx + dy * dy < 2.25) found = 1 } END { exit !found }'
+		}
+		[ -n "$red" ] && [ -n "$blue" ] && near $red "$flags" && near $blue "$flags" &&
+			echo "  ok: objectives-ctf: the game's flags at the layout's spots" || fail "objectives-ctf: the flags not at the layout's spots"
+		ball=$(grep -a "forge: placed the oddball spawn #6 " "$out/objectives/run.log" | sed 's/.* at \([-0-9.]*\) \([-0-9.]*\) .*/\1 \2/' | head -1)
+		balls=$(sed -n '/test command at tick 450: forge netflags$/,/test command at tick/p' "$out/objectives-oddball/run.log" | grep -a "forge: the game type's ball at" | sed 's/ball at/flag at/')
+		[ -n "$ball" ] && near $ball "$balls" && echo "  ok: objectives-oddball: the ball at the layout's spawn" ||
+			fail "objectives-oddball: the ball not at the layout's spawn ($balls)"
+		sed -n '/test command at tick 450: forge netflags$/,/test command at tick/p' "$out/objectives-king/run.log" |
+			grep -ac "forge: netgame flag [0-9]*: type 8 index 0 " | grep -q "^3$" &&
+			echo "  ok: objectives-king: the layout's hill the engine's hill 0, its three points; the map's gone" ||
+			fail "objectives-king: the hill not the layout's"
+		expect objectives-mapctf "no map variant: the map's own netgame flags" "forge: netgame flags: [0-9]+ \\(the map's own\\)"
+		grep -aq "forge: netgame flags: the map's\|forge: netgame flag: " "$out/objectives-mapctf/run.log" &&
+			fail "objectives-mapctf: Forge's flags in a game with no map variant"
+		[ "$(sed -n '/test command at tick 450: forge netflags$/,/test command at tick/p' "$out/objectives-mapctf/run.log" | grep -ac "forge: the game type's flag at")" = 2 ] &&
+			echo "  ok: objectives-mapctf: the map's two flags" || fail "objectives-mapctf: the map's flags"
+		continue
+	fi
+	if [ "$c" = precision ]; then
+		checked precision || continue
+		log="$out/precision/run.log"
+		at() { # TICK ID: the layout's object's x y z at that "forge objects"
+			sed -n "/test command at tick $1: forge objects\$/,/test command at tick/p" "$log" | grep -a "(id $2)" |
+				sed 's/.*) [a-z]* at \([-0-9.]*\) \([-0-9.]*\) \([-0-9.]*\),.*/\1 \2 \3/'
+		}
+		first=$(at 305 1); second=$(at 305 2); nudged=$(at 355 2); third=$(at 390 3)
+		echo "  (the first platform at $first, the second at $second, nudged to $nudged; the third, no magnets, at $third)"
+		expect precision "the magnets drew it" "forge: magnets: drawn -0\\.1[0-9]+ -?0\\.00[0-9] -?0\\.00[0-9] to the blocks near it, at 8(3\\.99|4\\.00)"
+		awk -v a="$first" -v b="$second" 'BEGIN { split(a, p, " "); split(b, q, " "); d = q[1] - p[1];
+			exit !(d > 3.995 && d < 4.005 && q[2] - p[2] < 0.005 && p[2] - q[2] < 0.005) }' &&
+			echo "  ok: precision: the second platform flush against the first (4 world units apart)" ||
+			fail "precision: the magnets did not put the second platform flush"
+		expect precision "nudged up twice by 5 cm" "forge: nudged up by 5 cm \\(0.0164 world units\\)"
+		expect precision "the step made 10 cm" "forge: nudge step 10 cm"
+		expect precision "nudged right by 10 cm" "forge: nudged right by 10 cm \\(0.0328 world units\\)"
+		awk -v a="$second" -v b="$nudged" 'BEGIN { split(a, p, " "); split(b, q, " ");
+			dz = q[3] - p[3]; dy = q[2] - p[2]; dx = q[1] - p[1];
+			exit !(dz > 0.025 && dz < 0.04 && dy < -0.025 && dy > -0.04 && dx < 0.006 && dx > -0.006) }' &&
+			echo "  ok: precision: let go 10 cm higher and 10 cm to the right, as nudged" ||
+			fail "precision: the nudge did not move it by its steps"
+		expect precision "the position readout" "menus: forge properties: at [-0-9.]+ [-0-9.]+ [-0-9.]+ m"
+		expect precision "magnets off" "forge: magnets off"
+		awk -v a="$first" -v c="$third" 'BEGIN { split(a, p, " "); split(c, r, " "); d = r[2] - p[2];
+			exit !(d > 4.05 && d < 4.15) }' &&
+			echo "  ok: precision: with the magnets off, the third stays where it is held" ||
+			fail "precision: the third platform moved with the magnets off"
+		checked precision-es && expect precision-es "the position readout in Spanish too" "menus: forge properties: at "
+		continue
+	fi
+	if [ "$c" = physics ]; then
+		checked physics || continue
+		log="$out/physics/run.log"
+		expect physics "a platform phased" "forge: #2's physics phased"
+		count physics "two walls phased" "forge: #[34]'s physics phased" 2
+		expect physics "a Warthog fixed" "forge: #5's physics fixed"
+		expect physics "the PHYSICS row" "menus: forge properties: Warthog: .*, physics 1"
+		# (the fixed Warthog where it was let go, in the air; the normal one fallen)
+		fixed=$(sed -n '/test command at tick 520: forge objects$/,/test command at tick/p' "$log" | grep -a "(id 5)" | sed 's/.*) [a-z]* at [-0-9.]* [-0-9.]* \([-0-9.]*\), placed at [-0-9.]* [-0-9.]* \([-0-9.]*\).*/\1 \2/')
+		normal=$(sed -n '/test command at tick 520: forge objects$/,/test command at tick/p' "$log" | grep -a "(id 6)" | sed 's/.*) [a-z]* at [-0-9.]* [-0-9.]* \([-0-9.]*\),.*/\1/')
+		echo "  (the fixed Warthog at z, placed at z: $fixed; the normal one at z $normal)"
+		awk -v f="$fixed" -v n="$normal" 'BEGIN { split(f, a, " "); exit !(a[1] > 3 && a[1] - a[2] < 0.05 && a[2] - a[1] < 0.05 && n < 2.5) }' &&
+			echo "  ok: physics: the fixed Warthog stays in the air, the normal one falls" ||
+			fail "physics: the fixed Warthog moved, or the normal one did not fall"
+		on=$(sed -n '/test command at tick 660: forge where$/,+3p' "$log" | grep -a "the player's unit at" | sed 's/.*unit at [-0-9.]* [-0-9.]* \([-0-9.]*\),.*/\1/')
+		through=$(sed -n '/test command at tick 800: forge where$/,+3p' "$log" | grep -a "the player's unit at" | sed 's/.*unit at [-0-9.]* [-0-9.]* \([-0-9.]*\),.*/\1/')
+		echo "  (the Spartan over the normal platform at z $on, over the phased one at z $through)"
+		awk -v a="$on" -v b="$through" 'BEGIN { exit !(a > 1.8 && b < a - 1.5) }' &&
+			echo "  ok: physics: he stands on the normal platform, falls through the phased one" ||
+			fail "physics: the platforms did not hold and pass him as set"
+		grep -q "^version 7 " "$out/physics/dump.txt" && [ "$(grep -c ": physics phased$" "$out/physics/dump.txt")" = 3 ] &&
+			[ "$(grep -c ": physics fixed$" "$out/physics/dump.txt")" = 1 ] &&
+			echo "  ok: physics: the file: version 7, one fixed, three phased" || fail "physics: the file: $(cat "$out/physics/dump.txt")"
+		continue
+	fi
+	if [ "$c" = teleport ]; then
+		checked teleport || continue
+		log="$out/teleport/run.log"
+		expect teleport "a sender placed" "forge: placed the teleporter sender #1 \\(channel 0\\)"
+		expect teleport "a receiver placed on the sender's channel" "forge: placed the teleporter receiver #2 \\(channel 0\\)"
+		expect teleport "the receiver's properties window" "menus: forge properties: Teleporter Receiver, Channel 1: teleporter receiver, channel 0, yaw"
+		expect teleport "a lone sender on channel 2" "forge: properties of the teleporter sender #3 \\(channel 2\\)"
+		expect teleport "the flags given to the engine" "forge: netgame flags: the map's [0-9]+ and 3 teleporters \\(2 senders, 1 receivers\\)"
+		expect teleport "the Spartan sent from the sender to the receiver" "forge: player 0 teleported on channel 0: "
+		expect teleport "saved" "forge: map variant \"Teleport Test\" saved as bloodgulch/teleport_test.hmv"
+		expect teleport "the lone sender not saved" "forge: 1 teleporter senders with no receiver on their channel not saved"
+		grep -q "^version 5 " "$out/teleport/dump.txt" && [ "$(grep -c ": a teleporter " "$out/teleport/dump.txt")" = 2 ] &&
+			grep -q ": a teleporter sender, channel 0$" "$out/teleport/dump.txt" &&
+			grep -q ": a teleporter receiver, channel 0$" "$out/teleport/dump.txt" &&
+			echo "  ok: teleport: the file: version 5, the pair" || fail "teleport: the file: $(cat "$out/teleport/dump.txt")"
+		checked teleport-load || continue
+		expect teleport-load "read back as the map loads" "forge: map variant \"Teleport Test\": 2 teleporters \\(1 senders, 1 receivers\\)"
+		expect teleport-load "the Spartan sent again" "forge: player 0 teleported on channel 0: "
+		continue
+	fi
 	if [ "$c" = spawns ]; then
 		checked spawns || continue
 		log="$out/spawns/run.log"
@@ -1824,9 +2096,9 @@ for c in $cases; do
 		expect rotate "dropped, saved" "forge: map variant \"Rotate Test\" saved as bloodgulch/rotate_test.hmv, 1 objects"
 		# (its placed facing: before the round, after it, and loaded)
 		want="0.500 0.500 0.707 up 0.146 -0.854 0.500"
-		before=$(grep -a "forge: object 0: Boulder" "$log" | head -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //')
-		after=$(grep -a "forge: object 0: Boulder" "$log" | tail -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //')
-		loaded=$(grep -a "forge: object 0: Boulder" "$out/rotate-load/run.log" | tail -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //')
+		before=$(grep -a "forge: object 0: Boulder" "$log" | head -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //; s/, physics .*//')
+		after=$(grep -a "forge: object 0: Boulder" "$log" | tail -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //; s/, physics .*//')
+		loaded=$(grep -a "forge: object 0: Boulder" "$out/rotate-load/run.log" | tail -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //; s/, physics .*//')
 		expect rotate "a new round" "forge: new round 1: 1 placed again, 0 skipped"
 		for pair in "dropped:$before" "after the new round:$after" "loaded from the map variant:$loaded"; do
 			got=${pair#*:}

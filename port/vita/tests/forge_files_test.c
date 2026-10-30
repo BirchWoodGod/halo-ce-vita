@@ -649,7 +649,9 @@ static void test_version_2(void)
 	put_u16(work, 4, 4);
 	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 4 without a player spawn: refused");
 	put_u16(work, 4, 5);
-	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 5: refused");
+	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 5 without a teleporter: refused");
+	put_u16(work, 4, FORGE_FILE_VERSION + 1);
+	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "a version past the newest: refused");
 	put_u16(work, 4, 0);
 	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 0: refused");
 	memcpy(work, good2, (size_t)good2_size);
@@ -907,6 +909,521 @@ static void test_version_4(void)
 	}
 }
 
+/* a variant with teleporters (version 5): the sample's objects, a sender
+and a receiver on channel 3, a receiver alone on channel 7 */
+static unsigned char good5[FORGE_FILE_MAXIMUM_SIZE];
+static int good5_size;
+
+static void add_teleporter(struct forge_file_layout *layout, int sender, int channel, float x, float y, float yaw)
+{
+	struct forge_file_record *record = &layout->records[layout->record_count++];
+
+	memset(record, 0, sizeof(*record));
+	record->path_index = FORGE_FILE_NO_PATH;
+	record->kind = sender ? _forge_record_teleporter_in : _forge_record_teleporter_out;
+	record->team = (signed char)channel;
+	record->position[0] = x;
+	record->position[1] = y;
+	record->position[2] = 0.5f;
+	record->angles[0] = yaw;
+	layout->flags |= FORGE_FILE_FLAG_NETGAME_SPAWNS;
+}
+
+static void sample_layout_5(struct forge_file_layout *layout)
+{
+	sample_layout(layout);
+	add_teleporter(layout, 1, 3, 80.f, -140.f, 0.25f);
+	add_teleporter(layout, 0, 3, 40.f, -100.f, -1.5f);
+	add_teleporter(layout, 0, 7, 41.f, -101.f, 0.f);
+}
+
+static void test_version_5(void)
+{
+	struct forge_file_layout layout;
+	int result = -1;
+	int records;
+	int index;
+
+	sample_layout_5(&layout);
+	CHECK(forge_file_layout_version(&layout) == 5, "teleporters need version 5");
+	good5_size = forge_file_encode(&layout, good5, sizeof(good5), &result);
+	CHECK(good5_size > 0 && result == _forge_file_ok && good5[4] == 5 && good5[5] == 0, "written as version 5");
+	CHECK(decode(good5, good5_size, "bloodgulch") == _forge_file_ok && decoded.version == 5, "read back as version 5");
+	layout.version = 5;
+	CHECK(layouts_equal(&layout, &decoded), "the teleporters read back the same");
+	CHECK(decoded.records[5].kind == _forge_record_teleporter_in && decoded.records[5].team == 3 &&
+		decoded.records[6].kind == _forge_record_teleporter_out && decoded.records[6].team == 3 &&
+		decoded.records[7].team == 7, "a sender and a receiver on channel 3, a receiver on 7");
+	CHECK(decode(good5, good5_size, NULL) == _forge_file_ok && forge_file_encode(&decoded, work, sizeof(work), &result) ==
+		good5_size && !memcmp(work, good5, (size_t)good5_size), "a version 5 file writes back as itself");
+	/* (with player spawns too: still version 5, both read) */
+	sample_layout_5(&layout);
+	add_spawn(&layout, 90.f, -150.f, 0.5f, 0, 0, 0);
+	{
+		int written = forge_file_encode(&layout, work, sizeof(work), &result);
+
+		CHECK(forge_file_layout_version(&layout) == 5 && written > 0 && work[4] == 5 &&
+			decode(work, written, "bloodgulch") == _forge_file_ok && decoded.records[8].kind == _forge_record_player_spawn,
+			"teleporters and a player spawn: version 5");
+	}
+	/* (every channel taken; the most teleporters) */
+	sample_layout(&layout);
+	for (index = 0; index < FORGE_FILE_MAXIMUM_TELEPORTERS; index++)
+		add_teleporter(&layout, index % 2 == 0, (index / 2) % FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS, 10.f + index, 10.f, 0.f);
+	CHECK(forge_file_encode(&layout, work, sizeof(work), &result) > 0, "16 channels of a sender and a receiver: written");
+	add_teleporter(&layout, 0, 0, 5.f, 5.f, 0.f);
+	CHECK(encode_refused(&layout), "33 teleporters: not written");
+	/* (the writer's refusals: each field of a teleporter's) */
+	{
+		static struct
+		{
+			int field;
+			int value;
+			char const *what;
+		} const cases[] =
+		{
+			{ 0, 16, "channel 16" },
+			{ 0, -1, "channel -1" },
+			{ 0, 4, "a sender whose channel has no receiver" },
+			{ 1, 1, "a path" },
+			{ 2, 30, "a respawn time" },
+			{ 3, 1, "a count" },
+			{ 4, FORGE_FILE_GAME_TYPE_CTF, "a game type" },
+			{ 5, 1, "a variant" },
+			{ 6, FORGE_RECORD_PLACE_AT_START, "a flag" },
+			{ 7, 1, "an AI team" },
+			{ 8, 1, "a pitch" },
+			{ 9, 1, "a roll" },
+			{ 10, 1, "a place outside the world" },
+		};
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			struct forge_file_record *record;
+			char what[96];
+
+			sample_layout_5(&layout);
+			record = &layout.records[5];
+			switch (cases[index].field)
+			{
+			case 0: record->team = (signed char)cases[index].value; break;
+			case 1: record->path_index = 0; break;
+			case 2: record->respawn_seconds = (unsigned short)cases[index].value; break;
+			case 3: record->count = (unsigned char)cases[index].value; break;
+			case 4: record->game_types = (unsigned short)cases[index].value; break;
+			case 5: record->variant = (unsigned char)cases[index].value; break;
+			case 6: record->flags = (unsigned char)cases[index].value; break;
+			case 7: record->ai_team = (unsigned char)cases[index].value; break;
+			case 8: record->angles[1] = 0.5f; break;
+			case 9: record->angles[2] = -0.5f; break;
+			case 10: record->position[2] = 6000.f; break;
+			}
+			snprintf(what, sizeof(what), "a teleporter's %s is not written", cases[index].what);
+			CHECK(encode_refused(&layout), what);
+		}
+	}
+	sample_layout_5(&layout);
+	layout.version = 4;
+	CHECK(encode_refused(&layout), "teleporters in a version 4 layout are not written");
+	sample_layout_5(&layout);
+	layout.flags = 0;
+	CHECK(encode_refused(&layout), "teleporters without the netgame flag are not written");
+	/* (the reader's: each field of a teleporter's record, checksum right) */
+	records = good5_size - (FORGE_FILE_RECORD_SIZE * 8) -
+		(int)(strlen(layout.title) + strlen(layout.author) + strlen(layout.description) + strlen(layout.date) + 4);
+	{
+		static struct
+		{
+			int record;
+			int offset;
+			unsigned char value;
+			char const *what;
+		} const cases[] =
+		{
+			{ 5, 3, 16, "channel 16" },
+			{ 5, 3, 0xFF, "channel -1" },
+			{ 5, 3, 7, "nothing: channel 7 has a receiver" },
+			{ 5, 3, 4, "a sender whose channel has no receiver" },
+			{ 6, 2, _forge_record_teleporter_in, "channel 3's receiver made a sender" },
+			{ 5, 23, 0x3F, "a pitch" },
+			{ 5, 27, 0x3F, "a roll" },
+			{ 5, 28, 1, "a respawn time" },
+			{ 5, 30, 1, "a count" },
+			{ 5, 31, 1, "a game type" },
+			{ 5, 33, 1, "a variant" },
+			{ 5, 34, 0x01, "a flag" },
+			{ 5, 35, 1, "an AI team" },
+			{ 5, 36, 1, "the first reserved byte" },
+			{ 5, 0, 0, "a path" },
+			{ 5, 2, _forge_record_hill, "a kind no build writes (a hill)" },
+			{ 5, 2, _forge_record_kill_zone, "a kind no build writes (a kill zone)" },
+			{ 5, 2, NUMBER_OF_FORGE_RECORD_KINDS, "an unknown kind" },
+		};
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			char what[96];
+			int expected = cases[index].value == 7 && cases[index].offset == 3 ? _forge_file_ok : _forge_file_bad_record;
+
+			memcpy(work, good5, (size_t)good5_size);
+			work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + cases[index].offset] = cases[index].value;
+			if (cases[index].offset == 0)
+				work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + 1] = 0;
+			fix_checksum(work, good5_size);
+			snprintf(what, sizeof(what), "version 5: a teleporter's %s: %s", cases[index].what,
+				expected == _forge_file_ok ? "taken" : "refused");
+			CHECK(decode(work, good5_size, "bloodgulch") == expected, what);
+		}
+	}
+	/* (called version 4: its teleporters refused) */
+	memcpy(work, good5, (size_t)good5_size);
+	put_u16(work, 4, 4);
+	CHECK(decode(work, good5_size, "bloodgulch") == _forge_file_bad_record, "version 5's teleporters in a file called version 4: refused");
+	/* (a file of 33 teleporters, made by hand: refused) */
+	{
+		struct forge_file_layout many;
+		int written;
+
+		sample_layout(&many);
+		for (index = 0; index < FORGE_FILE_MAXIMUM_TELEPORTERS; index++)
+			add_teleporter(&many, 0, index % FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS, 10.f + index, 10.f, 0.f);
+		written = forge_file_encode(&many, work, sizeof(work), &result);
+		CHECK(written > 0, "32 receivers: written");
+		if (written > 0)
+		{
+			unsigned char *bigger = malloc((size_t)written + FORGE_FILE_RECORD_SIZE);
+			int at = written - (int)(strlen(many.title) + strlen(many.author) + strlen(many.description) + strlen(many.date) + 4);
+
+			/* (one more record, a copy of the last, the counts and checksum
+			made right) */
+			memcpy(bigger, work, (size_t)at);
+			memcpy(bigger + at, work + at - FORGE_FILE_RECORD_SIZE, FORGE_FILE_RECORD_SIZE);
+			memcpy(bigger + at + FORGE_FILE_RECORD_SIZE, work + at, (size_t)(written - at));
+			put_u16(bigger, 52, (unsigned int)(many.record_count + 1));
+			put_u32(bigger, 56, (unsigned int)(written + FORGE_FILE_RECORD_SIZE - FORGE_FILE_HEADER_SIZE));
+			fix_checksum(bigger, written + FORGE_FILE_RECORD_SIZE);
+			CHECK(decode(bigger, written + FORGE_FILE_RECORD_SIZE, "bloodgulch") == _forge_file_too_many, "33 teleporters: refused");
+			free(bigger);
+		}
+	}
+}
+
+/* a variant with game type objects (version 6): the sample's objects, a red
+and a blue CTF flag, a hill of three points (hill 2), a ball spawn, two race
+checkpoints, a teleporter pair */
+static unsigned char good6[FORGE_FILE_MAXIMUM_SIZE];
+static int good6_size;
+
+static void add_game_object(struct forge_file_layout *layout, int flag_type, int index, float x, float y, float yaw)
+{
+	struct forge_file_record *record = &layout->records[layout->record_count++];
+
+	memset(record, 0, sizeof(*record));
+	record->path_index = FORGE_FILE_NO_PATH;
+	record->kind = _forge_record_flag;
+	record->variant = (unsigned char)flag_type;
+	record->team = (signed char)index;
+	record->position[0] = x;
+	record->position[1] = y;
+	record->position[2] = 0.5f;
+	record->angles[0] = yaw;
+	layout->flags |= FORGE_FILE_FLAG_NETGAME_SPAWNS;
+}
+
+static void sample_layout_6(struct forge_file_layout *layout)
+{
+	sample_layout(layout);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_CTF, 0, 70.f, -110.f, 0.5f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_CTF, 1, 40.f, -80.f, -2.5f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_HILL, 2, 60.f, -100.f, 0.f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_HILL, 2, 62.f, -100.f, 0.f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_HILL, 2, 61.f, -98.f, 0.f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_ODDBALL, 0, 55.f, -95.f, 0.f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_RACE, 0, 50.f, -90.f, 0.f);
+	add_game_object(layout, FORGE_FILE_FLAG_TYPE_RACE, 31, 45.f, -85.f, 0.f);
+}
+
+static void test_version_6(void)
+{
+	struct forge_file_layout layout;
+	int result = -1;
+	int records;
+	int index;
+
+	sample_layout_6(&layout);
+	CHECK(forge_file_layout_version(&layout) == 6, "game type objects need version 6");
+	good6_size = forge_file_encode(&layout, good6, sizeof(good6), &result);
+	CHECK(good6_size > 0 && result == _forge_file_ok && good6[4] == 6 && good6[5] == 0, "written as version 6");
+	CHECK(decode(good6, good6_size, "bloodgulch") == _forge_file_ok && decoded.version == 6, "read back as version 6");
+	layout.version = 6;
+	CHECK(layouts_equal(&layout, &decoded), "the game type objects read back the same");
+	CHECK(decoded.records[5].kind == _forge_record_flag && decoded.records[5].variant == FORGE_FILE_FLAG_TYPE_CTF &&
+		decoded.records[5].team == 0 && decoded.records[6].team == 1 && decoded.records[7].variant == FORGE_FILE_FLAG_TYPE_HILL &&
+		decoded.records[7].team == 2 && decoded.records[12].variant == FORGE_FILE_FLAG_TYPE_RACE && decoded.records[12].team == 31,
+		"the flags, the hill, the ball, the checkpoints as written");
+	CHECK(decode(good6, good6_size, NULL) == _forge_file_ok && forge_file_encode(&decoded, work, sizeof(work), &result) ==
+		good6_size && !memcmp(work, good6, (size_t)good6_size), "a version 6 file writes back as itself");
+	/* (with teleporters and player spawns too: version 6) */
+	sample_layout_6(&layout);
+	add_teleporter(&layout, 1, 0, 30.f, -70.f, 0.f);
+	add_teleporter(&layout, 0, 0, 31.f, -71.f, 0.f);
+	add_spawn(&layout, 90.f, -150.f, 0.5f, 0, 0, 0);
+	{
+		int written = forge_file_encode(&layout, work, sizeof(work), &result);
+
+		CHECK(forge_file_layout_version(&layout) == 6 && written > 0 && work[4] == 6 &&
+			decode(work, written, "bloodgulch") == _forge_file_ok, "game type objects, teleporters and a spawn: version 6");
+	}
+	/* (the most of them: 64; a hill's points: 12) */
+	sample_layout(&layout);
+	for (index = 0; index < FORGE_FILE_MAXIMUM_GAME_OBJECTS; index++)
+		add_game_object(&layout, FORGE_FILE_FLAG_TYPE_RACE, index % FORGE_FILE_MAXIMUM_RACE_CHECKPOINTS, 10.f + index, 10.f, 0.f);
+	CHECK(forge_file_encode(&layout, work, sizeof(work), &result) > 0, "64 game type objects: written");
+	add_game_object(&layout, FORGE_FILE_FLAG_TYPE_ODDBALL, 0, 5.f, 5.f, 0.f);
+	CHECK(encode_refused(&layout), "65 game type objects: not written");
+	sample_layout(&layout);
+	for (index = 0; index < FORGE_FILE_MAXIMUM_HILL_POINTS; index++)
+		add_game_object(&layout, FORGE_FILE_FLAG_TYPE_HILL, 3, 10.f + index, 10.f, 0.f);
+	CHECK(forge_file_encode(&layout, work, sizeof(work), &result) > 0, "a hill of 12 points: written");
+	add_game_object(&layout, FORGE_FILE_FLAG_TYPE_HILL, 3, 5.f, 5.f, 0.f);
+	CHECK(encode_refused(&layout), "a hill of 13 points: not written");
+	add_game_object(&layout, FORGE_FILE_FLAG_TYPE_HILL, 4, 6.f, 5.f, 0.f);
+	layout.record_count -= 2;
+	add_game_object(&layout, FORGE_FILE_FLAG_TYPE_HILL, 4, 6.f, 5.f, 0.f);
+	CHECK(forge_file_encode(&layout, work, sizeof(work), &result) > 0, "and a 13th point on another hill: written");
+	/* (the writer's refusals: each field of a game type object's) */
+	{
+		static struct
+		{
+			int field;
+			int value;
+			char const *what;
+		} const cases[] =
+		{
+			{ 0, 2, "CTF team 2" },
+			{ 0, -1, "index -1" },
+			{ 1, 1, "a flag type off the list (a CTF vehicle)" },
+			{ 1, 6, "a flag type off the list (a teleporter's)" },
+			{ 1, 9, "a flag type past the engine's" },
+			{ 2, 0, "a path" },
+			{ 3, 30, "a respawn time" },
+			{ 4, 1, "a count" },
+			{ 5, FORGE_FILE_GAME_TYPE_CTF, "a game type" },
+			{ 6, FORGE_RECORD_PLACE_AT_START, "a flag" },
+			{ 7, 1, "an AI team" },
+			{ 8, 0, "a pitch" },
+			{ 9, 0, "a place outside the world" },
+			{ 10, 16, "hill 16" },
+			{ 11, 16, "ball 16" },
+			{ 12, 32, "checkpoint 32" },
+		};
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			struct forge_file_record *record;
+			char what[96];
+
+			sample_layout_6(&layout);
+			record = &layout.records[5];
+			switch (cases[index].field)
+			{
+			case 0: record->team = (signed char)cases[index].value; break;
+			case 1: record->variant = (unsigned char)cases[index].value; break;
+			case 2: record->path_index = 0; break;
+			case 3: record->respawn_seconds = (unsigned short)cases[index].value; break;
+			case 4: record->count = (unsigned char)cases[index].value; break;
+			case 5: record->game_types = (unsigned short)cases[index].value; break;
+			case 6: record->flags = (unsigned char)cases[index].value; break;
+			case 7: record->ai_team = (unsigned char)cases[index].value; break;
+			case 8: record->angles[1] = 0.5f; break;
+			case 9: record->position[0] = -6000.f; break;
+			case 10: record->variant = FORGE_FILE_FLAG_TYPE_HILL; record->team = (signed char)cases[index].value; break;
+			case 11: record->variant = FORGE_FILE_FLAG_TYPE_ODDBALL; record->team = (signed char)cases[index].value; break;
+			case 12: record->variant = FORGE_FILE_FLAG_TYPE_RACE; record->team = (signed char)cases[index].value; break;
+			}
+			snprintf(what, sizeof(what), "a game type object's %s is not written", cases[index].what);
+			CHECK(encode_refused(&layout), what);
+		}
+	}
+	sample_layout_6(&layout);
+	layout.version = 5;
+	CHECK(encode_refused(&layout), "game type objects in a version 5 layout are not written");
+	/* (the reader's: each field of a game type object's record) */
+	records = good6_size - (FORGE_FILE_RECORD_SIZE * 13) -
+		(int)(strlen(layout.title) + strlen(layout.author) + strlen(layout.description) + strlen(layout.date) + 4);
+	{
+		static struct
+		{
+			int record;
+			int offset;
+			unsigned char value;
+			char const *what;
+		} const cases[] =
+		{
+			{ 5, 3, 2, "CTF team 2" },
+			{ 5, 3, 0xFF, "index -1" },
+			{ 7, 3, 16, "hill 16" },
+			{ 10, 3, 16, "ball 16" },
+			{ 11, 3, 32, "checkpoint 32" },
+			{ 5, 33, 1, "a CTF vehicle's flag type" },
+			{ 5, 33, 5, "a bank's flag type" },
+			{ 5, 33, 6, "a teleporter's flag type" },
+			{ 5, 33, 7, "a teleporter target's flag type" },
+			{ 5, 33, 9, "a flag type past the engine's" },
+			{ 5, 33, 0xFF, "flag type 255" },
+			{ 5, 23, 0x3F, "a pitch" },
+			{ 5, 28, 1, "a respawn time" },
+			{ 5, 30, 1, "a count" },
+			{ 5, 31, 1, "a game type" },
+			{ 5, 34, 0x01, "a flag" },
+			{ 5, 35, 1, "an AI team" },
+			{ 5, 36, 1, "the first reserved byte" },
+			{ 5, 0, 0, "a path" },
+			{ 5, 2, _forge_record_hill, "the kind no build writes (a hill)" },
+		};
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			char what[96];
+
+			memcpy(work, good6, (size_t)good6_size);
+			work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + cases[index].offset] = cases[index].value;
+			if (cases[index].offset == 0)
+				work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + 1] = 0;
+			fix_checksum(work, good6_size);
+			snprintf(what, sizeof(what), "version 6: a game type object's %s: refused", cases[index].what);
+			CHECK(decode(work, good6_size, "bloodgulch") == _forge_file_bad_record, what);
+		}
+		/* (taken: another good index - the blue flag made red too, two red
+		flags; the race checkpoint made 5) */
+		memcpy(work, good6, (size_t)good6_size);
+		work[records + FORGE_FILE_RECORD_SIZE * 6 + 3] = 0;
+		work[records + FORGE_FILE_RECORD_SIZE * 12 + 3] = 5;
+		fix_checksum(work, good6_size);
+		CHECK(decode(work, good6_size, "bloodgulch") == _forge_file_ok, "version 6: other good indices: taken");
+	}
+	/* (called version 5: its game type objects refused) */
+	memcpy(work, good6, (size_t)good6_size);
+	put_u16(work, 4, 5);
+	CHECK(decode(work, good6_size, "bloodgulch") == _forge_file_bad_record, "version 6's game type objects in a file called version 5: refused");
+	/* (a file of version 6 with none: refused) */
+	memcpy(work, good5, (size_t)good5_size);
+	put_u16(work, 4, 6);
+	CHECK(decode(work, good5_size, "bloodgulch") == _forge_file_bad_version, "version 6 without a game type object: refused");
+}
+
+/* a variant with physics (version 7): the sample's objects, the Warthog
+fixed, a boulder phased */
+static unsigned char good7[FORGE_FILE_MAXIMUM_SIZE];
+static int good7_size;
+
+static void sample_layout_7(struct forge_file_layout *layout)
+{
+	sample_layout(layout);
+	layout->records[0].flags |= FORGE_RECORD_PHYSICS_FIXED;
+	layout->records[1].flags |= FORGE_RECORD_PHYSICS_PHASED;
+}
+
+static void test_version_7(void)
+{
+	struct forge_file_layout layout;
+	int result = -1;
+	int records;
+	int index;
+
+	sample_layout_7(&layout);
+	CHECK(forge_file_layout_version(&layout) == 7, "physics needs version 7");
+	good7_size = forge_file_encode(&layout, good7, sizeof(good7), &result);
+	CHECK(good7_size > 0 && result == _forge_file_ok && good7[4] == 7 && good7[5] == 0, "written as version 7");
+	CHECK(decode(good7, good7_size, "bloodgulch") == _forge_file_ok && decoded.version == 7, "read back as version 7");
+	layout.version = 7;
+	CHECK(layouts_equal(&layout, &decoded), "the physics read back the same");
+	CHECK((decoded.records[0].flags & FORGE_RECORD_PHYSICS_MASK) == FORGE_RECORD_PHYSICS_FIXED &&
+		(decoded.records[1].flags & FORGE_RECORD_PHYSICS_MASK) == FORGE_RECORD_PHYSICS_PHASED &&
+		!(decoded.records[2].flags & FORGE_RECORD_PHYSICS_MASK), "the Warthog fixed, a boulder phased, the other normal");
+	CHECK(decode(good7, good7_size, NULL) == _forge_file_ok && forge_file_encode(&decoded, work, sizeof(work), &result) ==
+		good7_size && !memcmp(work, good7, (size_t)good7_size), "a version 7 file writes back as itself");
+	/* (with every other version's fields: still version 7) */
+	sample_layout_6(&layout);
+	layout.records[0].flags |= FORGE_RECORD_PHYSICS_PHASED;
+	add_teleporter(&layout, 1, 2, 30.f, -70.f, 0.f);
+	add_teleporter(&layout, 0, 2, 31.f, -71.f, 0.f);
+	add_spawn(&layout, 90.f, -150.f, 0.5f, 0, 0, 0);
+	{
+		int written = forge_file_encode(&layout, work, sizeof(work), &result);
+
+		CHECK(forge_file_layout_version(&layout) == 7 && written > 0 && work[4] == 7 &&
+			decode(work, written, "bloodgulch") == _forge_file_ok, "physics, game type objects, teleporters, a spawn: version 7");
+	}
+	/* (the writer's refusals) */
+	sample_layout_7(&layout);
+	layout.records[0].flags |= FORGE_RECORD_PHYSICS_PHASED;
+	CHECK(encode_refused(&layout), "fixed and phased at once: not written");
+	sample_layout_7(&layout);
+	layout.version = 6;
+	CHECK(encode_refused(&layout), "physics in a version 6 layout: not written");
+	sample_layout_7(&layout);
+	add_path(&layout, GROUP('a', 'c', 't', 'v'), "characters\\elite\\elite major");
+	add_record(&layout, layout.path_count - 1, 96.f, -159.f, 1.f, 1.f);
+	layout.records[layout.record_count - 1].flags |= FORGE_RECORD_PHYSICS_FIXED;
+	CHECK(encode_refused(&layout), "a character's physics: not written");
+	sample_layout_7(&layout);
+	add_spawn(&layout, 90.f, -150.f, 0.5f, 0, 0, 0);
+	layout.records[layout.record_count - 1].flags |= FORGE_RECORD_PHYSICS_PHASED;
+	CHECK(encode_refused(&layout), "a player spawn's physics: not written");
+	sample_layout_7(&layout);
+	add_teleporter(&layout, 0, 2, 31.f, -71.f, 0.f);
+	layout.records[layout.record_count - 1].flags |= FORGE_RECORD_PHYSICS_FIXED;
+	CHECK(encode_refused(&layout), "a teleporter's physics: not written");
+	sample_layout_7(&layout);
+	add_game_object(&layout, FORGE_FILE_FLAG_TYPE_CTF, 0, 70.f, -110.f, 0.5f);
+	layout.records[layout.record_count - 1].flags |= FORGE_RECORD_PHYSICS_PHASED;
+	CHECK(encode_refused(&layout), "a game type object's physics: not written");
+	/* (the reader's: the flags byte of a record, checksum right) */
+	records = good7_size - (FORGE_FILE_RECORD_SIZE * 5) -
+		(int)(strlen(layout.title) + strlen(layout.author) + strlen(layout.description) + strlen(layout.date) + 4);
+	{
+		static struct
+		{
+			int record;
+			unsigned char flags;
+			int taken;
+			char const *what;
+		} const cases[] =
+		{
+			{ 0, FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_PHYSICS_MASK, 0, "fixed and phased at once: refused" },
+			{ 0, FORGE_RECORD_PLACE_AT_START | 0x40, 0, "flag bit 6: refused" },
+			{ 0, FORGE_RECORD_PLACE_AT_START | 0x80, 0, "flag bit 7: refused" },
+			{ 2, FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_PHYSICS_PHASED, 1, "another object phased: taken" },
+			{ 0, FORGE_RECORD_PLACE_AT_START, 1, "the Warthog normal again (a boulder still phased): taken" },
+		};
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			memcpy(work, good7, (size_t)good7_size);
+			work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + 34] = cases[index].flags;
+			fix_checksum(work, good7_size);
+			CHECK((decode(work, good7_size, "bloodgulch") == _forge_file_ok) == cases[index].taken, cases[index].what);
+		}
+		/* (none left: a version 7 file without physics is refused) */
+		memcpy(work, good7, (size_t)good7_size);
+		work[records + 34] = FORGE_RECORD_PLACE_AT_START;
+		work[records + FORGE_FILE_RECORD_SIZE + 34] = FORGE_RECORD_PLACE_AT_START;
+		fix_checksum(work, good7_size);
+		CHECK(decode(work, good7_size, "bloodgulch") == _forge_file_bad_version, "version 7 without physics: refused");
+	}
+	/* (called version 6, 4 or 1: its physics refused) */
+	for (index = 1; index <= 6; index++)
+	{
+		char what[96];
+
+		memcpy(work, good7, (size_t)good7_size);
+		put_u16(work, 4, (unsigned int)index);
+		snprintf(what, sizeof(what), "version 7's physics in a file called version %d: refused", index);
+		CHECK(decode(work, good7_size, "bloodgulch") != _forge_file_ok, what);
+	}
+}
+
 static void test_names(void)
 {
 	char name[FORGE_FILE_NAME_SIZE];
@@ -976,8 +1493,20 @@ static void fuzz(long iterations)
 		{
 			/* (the version 1 sample, the version 2 one, or the version 4
 			one with player spawns) */
-			switch (next_random() % 3)
+			switch (next_random() % 6)
 			{
+			case 5:
+				size = good7_size;
+				memcpy(work, good7, (size_t)size);
+				break;
+			case 4:
+				size = good6_size;
+				memcpy(work, good6, (size_t)size);
+				break;
+			case 3:
+				size = good5_size;
+				memcpy(work, good5, (size_t)size);
+				break;
 			case 0:
 				size = good_size;
 				memcpy(work, good, (size_t)size);
@@ -1085,6 +1614,20 @@ static int write_samples(char const *folder)
 	return status;
 }
 
+/* (1.1.2, the network tests) a teleporter pair's variant (version 5):
+teleport.hmv */
+static int write_teleport_sample(char const *folder)
+{
+	struct forge_file_layout layout;
+	int result;
+	int size;
+
+	sample_layout_5(&layout);
+	snprintf(layout.title, sizeof(layout.title), "Teleport Sample");
+	size = forge_file_encode(&layout, work, sizeof(work), &result);
+	return size <= 0 || write_file(folder, "teleport.hmv", work, size);
+}
+
 /* a file read through the validator, its header and records printed */
 static int dump(char const *path)
 {
@@ -1122,6 +1665,13 @@ static int dump(char const *path)
 		if (record->kind == _forge_record_player_spawn)
 			printf("record %d: a player spawn: %s, team %d, game types %d\n", index,
 				(record->flags & FORGE_RECORD_SPAWN_INITIAL) ? "initial" : "respawn", record->team, record->game_types);
+		if (record->flags & FORGE_RECORD_PHYSICS_MASK)
+			printf("record %d: physics %s\n", index, (record->flags & FORGE_RECORD_PHYSICS_FIXED) ? "fixed" : "phased");
+		if (record->kind == _forge_record_flag)
+			printf("record %d: a game type object: flag type %d, index %d\n", index, record->variant, record->team);
+		if (record->kind == _forge_record_teleporter_in || record->kind == _forge_record_teleporter_out)
+			printf("record %d: a teleporter %s, channel %d\n", index,
+				record->kind == _forge_record_teleporter_in ? "sender" : "receiver", record->team);
 	}
 	return 0;
 }
@@ -1132,6 +1682,8 @@ int main(int argc, char **argv)
 
 	if (argc == 3 && !strcmp(argv[1], "--write"))
 		return write_samples(argv[2]);
+	if (argc == 3 && !strcmp(argv[1], "--write-teleport"))
+		return write_teleport_sample(argv[2]);
 	if (argc == 3 && !strcmp(argv[1], "--dump"))
 		return dump(argv[2]);
 	if (argc == 2)
@@ -1141,6 +1693,9 @@ int main(int argc, char **argv)
 	test_reader_refuses();
 	test_version_2();
 	test_version_4();
+	test_version_5();
+	test_version_6();
+	test_version_7();
 	test_names();
 	fuzz(iterations);
 	printf("%d checks, %d failed\n", checks, failures);

@@ -445,6 +445,7 @@ static char const *const port_function_names[] =
 	"port fileshare share ask", "port fileshare share option", "port fileshare send init", "port fileshare send act",
 	"port fileshare friend init", "port fileshare friend ask", "port fileshare friend download",
 	"port fileshare friend refresh", "port fileshare friend page up", "port fileshare friend page down",
+	"port forge magnets", "port forge nudge step",
 };
 
 /* the port's game data functions (menu_functions.c), from

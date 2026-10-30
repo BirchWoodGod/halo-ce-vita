@@ -463,6 +463,9 @@ enum
 	_function_fileshare_friend_refresh,
 	_function_fileshare_friend_page_up,
 	_function_fileshare_friend_page_down,
+	/* (1.1.2, the Forge menu's MAGNETS and NUDGE: forge.c forge_precision.inc) */
+	_function_forge_magnets,
+	_function_forge_nudge_step,
 };
 
 /* in port_game_data_input_names' order */
@@ -3599,6 +3602,11 @@ static void h3_forge_title_update(struct widget_instance *widget)
 		text_show(named(screen, "redo"), text);
 		snprintf(text, sizeof(text), "%s: %s", T("SNAP"), forge_snap_enabled() ? T("ON") : T("OFF"));
 		text_show(named(screen, "snap"), text);
+		/* (1.1.2: the blocks' magnets, the nudge's step) */
+		snprintf(text, sizeof(text), "%s: %s", T("MAGNETS"), forge_panel_magnets() ? T("ON") : T("OFF"));
+		text_show(named(screen, "magnets"), text);
+		snprintf(text, sizeof(text), T("NUDGE: %d CM"), forge_panel_nudge_centimetres());
+		text_show(named(screen, "nudge"), text);
 		snprintf(text, sizeof(text), "%s: %s", T("ALL AI"), forge_ai_all_state() == _forge_ai_all_on ? T("ON") : forge_ai_all_state() == _forge_ai_all_off ? T("OFF") : T("MIXED"));
 		text_show(named(screen, "allai"), text);
 		/* (CLEAR DEAD AI and CLEAR ALL AI with how many each takes) */
@@ -3647,6 +3655,8 @@ an Xbox pad's or a PlayStation's, by SDL's names for its buttons) */
 static void h3_forge_controls_update(struct widget_instance *widget)
 {
 	char const *controls;
+	/* (1.1.2: the nudge, a pad's: forge_precision.inc) */
+	char const *nudge = "";
 	char text[640];
 
 #ifdef HALO_VITA
@@ -3654,6 +3664,7 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 		"Grab, drop: R. Copy: Circle. Delete: Triangle.\nObjects: Square. Holding one: its properties.\n"
 		"Rotate: hold L + right stick; with R: roll.\nL + left stick: distance. L + D-pad right: snap.\n"
 		"Upright: D-pad left. Speed: D-pad right.\nSpartan: Select + D-pad up.");
+	nudge = T("Nudge: L + D-pad up, then L + sticks.");
 #elif defined(H3_BUTTON_ICONS)
 	switch (halo_button_icons_shown())
 	{
@@ -3662,12 +3673,14 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 			"Grab, drop: RT. Copy: B. Delete: Y.\nObjects: X. Holding one: its properties.\n"
 			"Rotate: hold LT + right stick; with RT: roll.\nLT + left stick: distance. LT + LB: snap.\n"
 			"Upright: RB. Speed: LB.\nSpartan: Back + right stick click.");
+		nudge = T("Nudge: LT + right stick click, then LT + sticks.");
 		break;
 	case _halo_button_icons_playstation:
 		controls = T("Fly: left stick. Up: Cross. Down: L3.\nFaster: hold L2. Look: right stick.\n"
 			"Grab, drop: R2. Copy: Circle. Delete: Triangle.\nObjects: Square. Holding one: its properties.\n"
 			"Rotate: hold L2 + right stick; with R2: roll.\nL2 + left stick: distance. L2 + L1: snap.\n"
 			"Upright: R1. Speed: L1.\nSpartan: Share + R3.");
+		nudge = T("Nudge: L2 + R3, then L2 + sticks.");
 		break;
 	default:
 		controls = T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
@@ -3683,9 +3696,10 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 		"Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z.");
 #endif
 	/* (and a character's RESPAWN, Oct 22 2026: dead, it comes back; the
-	player spawn points, the browser's SPAWNING) */
-	snprintf(text, sizeof(text), "%s\n%s\n%s", controls, T("AI respawn: a character's properties, RESPAWN."),
-		T("Spawn points: Objects, SPAWNING. Held: team, game type."));
+	player spawn points, the browser's SPAWNING; the teleporters, its
+	TELEPORTERS, 1.1.2) */
+	snprintf(text, sizeof(text), "%s\n%s\n%s%s%s", controls, T("AI respawn: a character's properties, RESPAWN."),
+		T("Spawns, teleporters: Objects. Held: team, channel."), nudge[0] ? "\n" : "", nudge);
 	text_show(widget, text);
 }
 
@@ -11259,16 +11273,65 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		return;
 	}
 	text_show(named(screen, "name"), properties.name);
+	/* (1.1.2: where it is, metres) */
+	if (properties.has_position)
+		snprintf(text, sizeof(text), T("X %.2f  Y %.2f  Z %.2f m"), properties.position[0], properties.position[1],
+			properties.position[2]);
+	else
+		text[0] = 0;
+	text_show(named(screen, "position"), text);
 	for (row = 0, child = list->child; child; child = child->next, row++)
 	{
 		/* (a player spawn point's four rows: its team, game type, kind and
 		yaw - forge_spawns.inc) */
 		if (properties.spawn)
 		{
+			boolean teleporter = properties.spawn_kind == _forge_spawn_teleporter_sender ||
+				properties.spawn_kind == _forge_spawn_teleporter_receiver;
+			boolean objective = properties.spawn_kind >= _forge_spawn_flag;
 			boolean shown = row <= _forge_property_yaw;
 
-			switch (row)
+			switch (objective ? row + 200 : teleporter ? row + 100 : row)
 			{
+			/* (a game type object's four: its index - a CTF flag's team, a
+			hill's number, a ball's, a checkpoint's order -, its game type,
+			whether the game type has it whole, its yaw - forge_netgame.inc) */
+			case _forge_property_team + 200:
+				if (properties.spawn_kind == _forge_spawn_flag)
+					snprintf(text, sizeof(text), "%s: %s", T("TEAM"), properties.channel == 0 ? T("RED") : T("BLUE"));
+				else if (properties.spawn_kind == _forge_spawn_hill)
+					snprintf(text, sizeof(text), T("HILL: %d"), properties.channel + 1);
+				else if (properties.spawn_kind == _forge_spawn_oddball)
+					snprintf(text, sizeof(text), T("BALL: %d"), properties.channel + 1);
+				else
+					snprintf(text, sizeof(text), T("ORDER: %d"), properties.channel + 1);
+				break;
+			case _forge_property_respawn + 200:
+				snprintf(text, sizeof(text), "%s: %s", T("GAME TYPE"), properties.spawn_kind == _forge_spawn_flag ? T("CTF") :
+					properties.spawn_kind == _forge_spawn_hill ? T("KING OF THE HILL") :
+					properties.spawn_kind == _forge_spawn_oddball ? T("ODDBALL") : T("RACE"));
+				break;
+			case _forge_property_place_at_start + 200:
+				snprintf(text, sizeof(text), "%s: %s", T("COMPLETE"), properties.linked ? T("YES") : T("NO"));
+				break;
+			case _forge_property_yaw + 200:
+				snprintf(text, sizeof(text), "%s: %d\xc2\xb0", T("YAW"), properties.yaw);
+				break;
+			/* (a teleporter's four: its channel, whether its channel has the
+			other end, sender or receiver, its yaw - forge_netgame.inc) */
+			case _forge_property_team + 100:
+				snprintf(text, sizeof(text), T("CHANNEL: %d"), properties.channel + 1);
+				break;
+			case _forge_property_respawn + 100:
+				snprintf(text, sizeof(text), "%s: %s", T("LINKED"), properties.linked ? T("YES") : T("NO"));
+				break;
+			case _forge_property_place_at_start + 100:
+				snprintf(text, sizeof(text), "%s: %s", T("TELEPORTER"), properties.spawn_kind == _forge_spawn_teleporter_sender ?
+					T("SENDER") : T("RECEIVER"));
+				break;
+			case _forge_property_yaw + 100:
+				snprintf(text, sizeof(text), "%s: %d\xc2\xb0", T("YAW"), properties.yaw);
+				break;
 			case _forge_property_team:
 				snprintf(text, sizeof(text), "%s: %s", T("TEAM"), properties.team == 0 ? T("RED") : properties.team == 1 ?
 					T("BLUE") : T("ANY"));
@@ -11323,16 +11386,31 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		case _forge_property_ai_team:
 			snprintf(text, sizeof(text), "%s: %s", T("AI TEAM"), properties.ai_team_name);
 			break;
-		default:
+		case _forge_property_ai_brain:
 			snprintf(text, sizeof(text), "%s: %s", T("AI"), properties.ai_on ? T("ON") : T("OFF"));
 			break;
+		case _forge_property_physics:
+			snprintf(text, sizeof(text), "%s: %s", T("PHYSICS"), properties.physics == _forge_physics_fixed ? T("FIXED") :
+				properties.physics == _forge_physics_phased ? T("PHASED") : T("NORMAL"));
+			break;
+		default:
+			text[0] = 0;
+			break;
 		}
-		/* (a character's own rows: hidden for any other object; the rest
-		shown again after a spawn point's) */
-		if (row >= _forge_property_ai_team)
+		/* (a character's own rows: hidden for any other object, its
+		physics' for a character; the rest shown again after a spawn
+		point's) */
+		if (row == _forge_property_ai_team || row == _forge_property_ai_brain || row == _forge_property_physics)
 		{
-			widget_instance_set_visibility_recursive(child, properties.ai);
-			child->disabled = !properties.ai;
+			boolean shown = row == _forge_property_physics ? properties.has_physics : properties.ai;
+
+			widget_instance_set_visibility_recursive(child, shown);
+			child->disabled = !shown;
+		}
+		else if (row > _forge_property_physics)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
 		}
 		else if (child->disabled)
 		{
@@ -11342,7 +11420,14 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		text_show(child, text);
 		child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
 	}
-	if (properties.spawn)
+	if (properties.spawn && properties.spawn_kind >= _forge_spawn_flag)
+		snprintf(text, sizeof(text), "%s: game type object %d, index %d, %s, yaw %d", properties.name, properties.spawn_kind,
+			properties.channel, properties.linked ? "complete" : "not complete", properties.yaw);
+	else if (properties.spawn && (properties.spawn_kind == _forge_spawn_teleporter_sender ||
+		properties.spawn_kind == _forge_spawn_teleporter_receiver))
+		snprintf(text, sizeof(text), "%s: teleporter %s, channel %d, yaw %d", properties.name,
+			properties.spawn_kind == _forge_spawn_teleporter_sender ? "sender" : "receiver", properties.channel, properties.yaw);
+	else if (properties.spawn)
 		snprintf(text, sizeof(text), "%s: spawn point, team %d, game type %s, %s, yaw %d", properties.name, properties.team,
 			properties.game_type_name, properties.spawn_kind == _forge_spawn_initial ? "initial spawn" : "respawn point",
 			properties.yaw);
@@ -11351,13 +11436,16 @@ static void h3_forge_properties_update(struct widget_instance *list)
 			properties.team, properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
 			properties.pitch, properties.roll, properties.ai_team, properties.ai_on ? "on" : "off");
 	else
-		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, yaw %d pitch %d roll %d", properties.name, properties.team,
-			properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
-			properties.pitch, properties.roll);
+		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, yaw %d pitch %d roll %d, physics %d", properties.name,
+			properties.team, properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
+			properties.pitch, properties.roll, properties.physics);
 	if (strcmp(text, said))
 	{
 		snprintf(said, sizeof(said), "%s", text);
 		platform_log("menus: forge properties: %s", said);
+		if (properties.has_position)
+			platform_log("menus: forge properties: at %.2f %.2f %.2f m", properties.position[0], properties.position[1],
+				properties.position[2]);
 	}
 }
 
@@ -20896,6 +20984,13 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_forge_snap:
 		forge_snap_toggle_request();
+		return TRUE;
+	case _function_forge_magnets:
+		forge_panel_magnets_set(!forge_panel_magnets());
+		return TRUE;
+	case _function_forge_nudge_step:
+		/* (A, left or right: the next of 5, 10, 25, 1 cm) */
+		forge_panel_nudge_step(1);
 		return TRUE;
 	case _function_forge_property_next:
 	case _function_forge_property_previous:
