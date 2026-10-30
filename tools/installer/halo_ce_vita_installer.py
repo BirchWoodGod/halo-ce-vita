@@ -10,11 +10,14 @@ PS Vita over VitaShell's FTP mode or into a PC build's data folder.
     python3 halo_ce_vita_installer.py            the window (tkinter)
     python3 halo_ce_vita_installer.py --help     the command-line steps
 
-The window: choose the platform (PLATFORMS; those not ready yet are listed
-greyed), then the way (Automatic: everything from the player's own Halo: The
-Master Chief Collection, found as the game finds it; Manual: each source
-chosen by hand), then the copy. install_flow() gives the pages of each choice;
-a game choice (GAMES) shows up as a page of its own once there are two games.
+The window is a standard Setup wizard: Welcome, License, Where to Install
+(PLATFORMS; those not ready yet are listed greyed), Game Files (Automatic:
+everything from the player's own Halo: The Master Chief Collection, found as
+the game finds it; Manual: the player's files, chosen on that one page),
+Destination, Ready to Install, Installing (one progress bar, everything in
+order), Finish. install_flow() gives the pages of each choice; a game choice
+(GAMES) shows up as a page of its own once there are two games. Run again over
+a PC install it offers repair or uninstall.
 
 The sources, each one optional:
 
@@ -32,27 +35,25 @@ The sources, each one optional:
   name: it is recognised by what is in it, and its cabinet is unpacked here,
   LZX included) or a folder that has them.
 
-The copy:
+What Setup does with them:
 
-- To the Vita: everything gathered, over VitaShell's FTP (port 1337), into
+- On a Vita: everything gathered, over VitaShell's FTP (port 1337), into
   ux0:data/haloce-vita/. A copy that stops (the Vita slept) goes on from the
   files already there. Then the VPK to ux0:data/, to install with VitaShell.
-- To a PC build: everything gathered but the movies, into the folder of its
-  executable (build/linux or build/windows of the unpacked release), where
-  the game looks for maps/ and mcc/.
+- On PC: a real install, for the current user (no admin needed): the PC
+  build's archive unpacked into the install folder, the game files (without
+  the movies) in the folder of its executable, build/linux or build/windows,
+  where the game looks for maps/ and mcc/. Shortcuts; on Windows an
+  uninstaller and an Apps & Features entry under HKCU; on Linux a .desktop
+  file.
 
 No game data comes with this tool: everything is read from the player's own
 files. Every name read from a disc image or a cabinet is checked before a
 file is written (no "..", no absolute paths, nothing outside the output
 folder), and the files are checked once written (sizes, headers).
 
-Python 3.8 or later, no other packages (tkinter for the window). The window
-has the classic grey look of Tk's own widgets by default, with small
-pixelated pictures made from the project's own screenshots of the port on a
-PS Vita (pictures/, made by make_pictures.py). Optional, for its Modern look:
-sv-ttk (the Sun Valley theme, Windows 11's light and dark styles) and
-darkdetect (the system's dark or light setting), both in requirements.txt
-and inside the Windows program.
+Python 3.8 or later, no other packages (tkinter for the window, in ttk's
+native theme: 'vista' on Windows).
 """
 
 from __future__ import annotations
@@ -62,12 +63,15 @@ import hashlib
 import json
 import os
 import queue
+import random
 import re
 import shutil
 import socket
+import stat
 import struct
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -145,23 +149,23 @@ class Choice:
     available: bool = True
 
 
-# One entry each until there are more: Halo 2 joins GAMES in 1.2.0 (with its
-# sources: install_flow is where a game's pages differ), and a console in
-# PLATFORMS is greyed until there is a build of it.
+# One entry until there are more: Halo 2 joins GAMES in 1.2.0 (with its
+# sources: game_tasks and the Game Files page are where a game's differ), and
+# a console in PLATFORMS is greyed until there is a build of it.
 GAMES = (Choice("halo-ce", "Halo: Combat Evolved"),)
 PLATFORMS = (
-    Choice("vita", "PS Vita", "The files go over VitaShell's FTP. Needs HENkaku/Enso, VitaShell and the shader "
-                              "compiler ur0:data/libshacccg.suprx (ShaRKF00D extracts it). See README.md."),
-    Choice("pc", "PC", "Windows or Linux: the files go into the PC build you unpacked."),
+    Choice("vita", "PS Vita", "Setup sends the files over VitaShell's FTP. Needs HENkaku/Enso, VitaShell and the "
+                              "shader compiler ur0:data/libshacccg.suprx (ShaRKF00D extracts it)."),
+    Choice("pc", "PC", "Setup installs the PC build on this computer."),
     Choice("android", "Android", available=False),
     Choice("switch", "Nintendo Switch", available=False),
     Choice("other", "Other consoles", available=False),
 )
 MODES = (
     Choice("automatic", "Automatic", "Everything comes from your own Halo: The Master Chief Collection."),
-    Choice("manual", "Manual", "Pick each source yourself: your Xbox disc image, the Halo Custom Edition files, "
-                               "the movies."),
+    Choice("manual", "Manual", "Pick your disc image, the Halo Custom Edition files and the movies yourself."),
 )
+ACTIONS = ("install", "repair", "uninstall")
 
 
 def pick(choices: Sequence[Choice], key: str) -> Choice:
@@ -174,21 +178,24 @@ def pick(choices: Sequence[Choice], key: str) -> Choice:
     raise InstallerError("Unknown choice: %s" % key)
 
 
-def install_flow(platform: str, mode: str, games: Optional[Sequence[Choice]] = None) -> Tuple[str, ...]:
-    """The window's pages, in order, for these choices. The PC build plays no
-    movies (its Bink is a stand-in, the MP4s are the Vita's): no page for
-    them there; MCC has none either."""
+def install_flow(platform: str, games: Optional[Sequence[Choice]] = None, action: str = "install",
+                 installed: bool = False, need_game: bool = True, need_build: bool = True) -> Tuple[str, ...]:
+    """The wizard's pages, in order, for these choices. Over an install
+    (`installed`) it asks what to do first; a repair shows only the pages it
+    has a use for: the game files if some are damaged (`need_game`), the
+    destination if program files are and no PC build is at hand
+    (`need_build`). An uninstall asks nothing more."""
     pick(PLATFORMS, platform)
-    pick(MODES, mode)
-    pages = ["platform", "mode"]
-    if len(GAMES if games is None else games) > 1:
-        pages.insert(0, "game")
-    if mode == "automatic":
-        pages.append("automatic")
-    else:
-        pages += ["game_files", "pc_files"] if platform == "pc" else ["game_files", "movies", "pc_files"]
-    pages += ["copy_pc"] if platform == "pc" else ["copy_vita", "vpk"]
-    return tuple(pages + ["done"])
+    if action not in ACTIONS:
+        raise InstallerError("Unknown action: %s" % action)
+    end = ["ready", "installing", "finish"]
+    if action == "uninstall":
+        return tuple(["welcome", "maintenance"] + end)
+    if action == "repair":
+        return tuple(["welcome", "maintenance"] + ["game_files"] * need_game + ["destination"] * need_build + end)
+    first = ["welcome"] + ["maintenance"] * installed + ["license"]
+    game = ["game"] if len(GAMES if games is None else games) > 1 else []
+    return tuple(first + game + ["platform", "game_files", "destination"] + end)
 
 
 def _no_progress(message: str, done: int, total: int) -> None:
@@ -197,6 +204,32 @@ def _no_progress(message: str, done: int, total: int) -> None:
 
 class InstallerError(Exception):
     """A problem to show the player as it is."""
+
+
+@dataclass
+class InstallTask:
+    """One piece of Installing's work: what the page says, its share of the
+    one progress bar, and the work, given a Progress for its own share."""
+    label: str
+    weight: int
+    run: Callable[[Progress], object]
+
+
+def run_tasks(tasks: Sequence[InstallTask], report: Progress, started: Callable[[str], None] = lambda label: None) -> None:
+    """Everything in order, each task's progress mapped onto the one bar."""
+    total = max(sum(task.weight for task in tasks), 1)
+    finished = 0
+    for task in tasks:
+        def step(message: str, done: int, whole: int, base: int = finished, weight: int = task.weight) -> None:
+            report(message, base + (min(weight * done // whole, weight) if whole else 0), total)
+        started(task.label)
+        report("", finished, total)
+        task.run(step)
+        finished += task.weight
+    try:
+        report("", total, total)
+    except Cancelled:  # (too late: everything is done)
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -507,21 +540,38 @@ def _find_child(folder: Optional[str], name: str) -> Optional[str]:
     return None
 
 
+def _xbox_files(source: XboxSource, source_path: str):
+    """The maps and default.xbe of the player's game, or why they will not do."""
+    maps = [item for item in source.files_in("maps") if item[0].lower().endswith(".map")]
+    xbe = source.file("default.xbe")
+    names = {item[0].lower() for item in maps}
+    missing = [name for name in XBOX_REQUIRED_MAPS if name not in names]
+    if xbe is None:
+        raise InstallerError("No default.xbe in %s: is it the Xbox Halo disc?" % source_path)
+    if missing:
+        raise InstallerError("The maps folder of %s lacks %s: is it the Xbox Halo disc? "
+                             "(The PC version's maps do not work.)" % (source_path, ", ".join(missing)))
+    return maps, xbe, names
+
+
+def check_xbox_files(source_path: str) -> int:
+    """Whether this is the Xbox game, before anything is copied: its files'
+    size, or InstallerError."""
+    source = XboxSource.open(source_path)
+    try:
+        maps, xbe, _ = _xbox_files(source, source_path)
+        return sum(item[1] for item in maps) + xbe[1]
+    finally:
+        source.close()
+
+
 def extract_xbox_files(source_path: str, staging: str, progress: Progress = _no_progress,
                        log: Callable[[str], None] = print) -> Dict[str, int]:
     """`staging`/maps/*.map and `staging`/default.xbe from the
     player's disc image or folder. Returns {name: size} written."""
     source = XboxSource.open(source_path)
     try:
-        maps = [item for item in source.files_in("maps") if item[0].lower().endswith(".map")]
-        xbe = source.file("default.xbe")
-        names = {item[0].lower() for item in maps}
-        missing = [name for name in XBOX_REQUIRED_MAPS if name not in names]
-        if xbe is None:
-            raise InstallerError("No default.xbe in %s: is it the Xbox Halo disc?" % source_path)
-        if missing:
-            raise InstallerError("The maps folder of %s lacks %s: is it the Xbox Halo disc? "
-                                 "(The PC version's maps do not work.)" % (source_path, ", ".join(missing)))
+        maps, xbe, names = _xbox_files(source, source_path)
         for name in ("bitmaps.map", "sounds.map"):
             if name in names:
                 log("Note: %s has %s, which the Xbox game does not: is this the PC version?"
@@ -2528,6 +2578,590 @@ def copy_to_pc_build(staging: str, build: str, replace: bool = False, progress: 
 
 
 # ---------------------------------------------------------------------------
+# a PC install
+#
+# What Setup does on PC, as any installer does: the PC build's archive (next
+# to the tool, or chosen) unpacked into the install folder, the game files
+# gathered straight into its data folder, the shortcuts, on Windows an
+# uninstaller and an Apps & Features entry under HKCU (no admin needed), and
+# a record in the folder of everything written, which is how repair finds
+# what is damaged and uninstall removes those files and no others.
+#
+# The release's signed manifest covers the VPK alone (tools/release/README.md:
+# "The PC files are not signed"), so nothing here downloads a build: the tool
+# has no way to verify one. The player gets it from the releases page, and
+# its archive is read as untrusted all the same.
+
+
+APP_NAME = "Halo CE"
+PUBLISHER = "Halo CE for PS Vita (fan project)"
+PROJECT_URL = "https://github.com/BirchWoodGod/halo-ce-vita"
+INSTALL_RECORD = "halo-ce-install.json"
+INSTALL_RECORD_MAXIMUM = 8 << 20
+UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\HaloCE"
+SHORTCUT_LINK = "Halo CE.lnk"  # Windows
+SHORTCUT_ENTRY = "halo-ce.desktop"  # Linux
+PACKAGE_ICON = "halo-ce.png"
+PACKAGE_ENTRIES_MAXIMUM = 20000
+PACKAGE_SIZE_MAXIMUM = 2 << 30
+_PACKAGE_NAME = re.compile(r"halo-ce-vita-([0-9][0-9A-Za-z.\-]*)-pc-(?:windows|linux)")
+
+
+def default_install_folder() -> str:
+    """%LOCALAPPDATA%\\Programs\\Halo CE on Windows (no admin needed),
+    ~/.local/share/halo-ce elsewhere."""
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
+        return os.path.join(base, "Programs", APP_NAME)
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "halo-ce")
+
+
+def check_install_folder(path: str) -> str:
+    """The install folder as an absolute path: nothing that a shortcut could
+    not hold."""
+    path = os.path.expanduser((path or "").strip())
+    if not path or not os.path.isabs(path) or any(ord(character) < 32 for character in path):
+        raise InstallerError("Choose a full folder path to install in.")
+    return os.path.normpath(path)
+
+
+def pc_package_suffix() -> str:
+    return "-pc-windows.zip" if sys.platform == "win32" else "-pc-linux.tar.gz"
+
+
+def _tool_folder() -> str:
+    return os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+
+
+def find_pc_packages() -> List[str]:
+    """This system's PC build archives next to the tool and in the current
+    folder (not Downloads: what is picked by itself may be run), the newest
+    version first."""
+    found: List[str] = []
+    for place in (_tool_folder(), os.getcwd()):
+        try:
+            names = os.listdir(place)
+        except OSError:
+            continue
+        for name in names:
+            full = os.path.join(place, name)
+            if name.startswith("halo-ce-vita-") and name.endswith(pc_package_suffix()) and \
+                    os.path.isfile(full) and full not in found:
+                found.append(full)
+    return sorted(found, key=lambda path: [int(number) for number in re.findall(r"\d+", os.path.basename(path))],
+                  reverse=True)
+
+
+@dataclass
+class PackageFile:
+    name: str  # as the archive names it
+    parts: Tuple[str, ...]  # its place in the install folder
+    size: int
+    executable: bool = False
+
+    @property
+    def relative(self) -> str:
+        return "/".join(self.parts)
+
+
+@dataclass
+class PcPackage:
+    path: str
+    kind: str  # "zip" or "tar"
+    version: str
+    files: List[PackageFile]
+
+    @property
+    def size(self) -> int:
+        return sum(item.size for item in self.files)
+
+
+def _archive_entries(path: str) -> Tuple[str, List[Tuple[str, int, bool, bool]]]:
+    """The archive's kind and its files: (name, size, is a plain file or
+    folder, executable). Folders are left out."""
+    entries = []
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as archive:
+            for info in archive.infolist():
+                mode = info.external_attr >> 16
+                if info.flag_bits & 1:
+                    raise InstallerError("%s is password protected: it is not a release's PC build." % path)
+                if not info.is_dir():
+                    entries.append((info.filename, info.file_size, not stat.S_ISLNK(mode), False))
+        return "zip", entries
+    if tarfile.is_tarfile(path):
+        with tarfile.open(path, "r:*") as archive:
+            for info in archive:
+                if len(entries) > PACKAGE_ENTRIES_MAXIMUM:
+                    break
+                if not info.isdir():
+                    entries.append((info.name, info.size, info.isreg(), bool(info.mode & 0o100)))
+        return "tar", entries
+    raise InstallerError("%s is not a PC build archive (.zip or .tar.gz)." % path)
+
+
+def read_pc_package(path: str) -> PcPackage:
+    """What the PC build's archive holds, checked before a byte of it is
+    written: this system's build is in it, one top folder at most, every name
+    safe (check_name), plain files only (no links, devices or doubles), sizes
+    within bounds. CRCs are checked as it is unpacked."""
+    if not path or not os.path.isfile(path):
+        raise InstallerError("%s does not exist." % (path or "The PC build"))
+    platform, program = _pc_builds_here_first()[0]
+    wanted = "build/%s/%s" % (platform, program)
+    try:
+        kind, entries = _archive_entries(path)
+    except (OSError, zipfile.BadZipFile, tarfile.TarError, EOFError, zlib.error) as error:
+        raise InstallerError("%s cannot be read: %s" % (path, error))
+    if len(entries) > PACKAGE_ENTRIES_MAXIMUM:
+        raise InstallerError("%s holds too many files to be a PC build." % path)
+    names = {name for name, _, _, _ in entries}
+    prefix = ""
+    if wanted not in names:
+        tops = {name.split("/")[0] for name in names}
+        prefix = tops.pop() + "/" if len(tops) == 1 else ""
+        if not prefix or prefix + wanted not in names:
+            raise InstallerError("%s has no %s: it is not the PC build for this system (%s). Download "
+                                 "halo-ce-vita-<version>%s from %s" % (path, wanted, platform, pc_package_suffix(),
+                                                                       RELEASES_URL))
+    files: List[PackageFile] = []
+    seen = set()
+    for name, size, plain, executable in entries:
+        if not plain:
+            raise InstallerError("%s holds a link or a device (%s): it is not a release's PC build." % (path, name))
+        if not name.startswith(prefix):
+            raise InstallerError("%s has files outside its folder (%s)." % (path, name))
+        parts = tuple(check_name(part) for part in name[len(prefix):].split("/"))
+        key = "/".join(parts).lower()
+        if key in seen:
+            raise InstallerError("%s names %s twice." % (path, name))
+        seen.add(key)
+        files.append(PackageFile(name, parts, size, executable))
+    if sum(item.size for item in files) > PACKAGE_SIZE_MAXIMUM:
+        raise InstallerError("%s is too large to be a PC build." % path)
+    found = _PACKAGE_NAME.search(prefix or os.path.basename(path)) or _PACKAGE_NAME.search(os.path.basename(path))
+    return PcPackage(path, kind, found.group(1) if found else VERSION, files)
+
+
+def _package_readers(package: PcPackage):
+    """(the open archive, a function that opens one of its files)."""
+    if package.kind == "zip":
+        archive = zipfile.ZipFile(package.path)
+        return archive, archive.open
+    archive = tarfile.open(package.path, "r:*")
+    return archive, archive.extractfile
+
+
+def install_pc_package(package: PcPackage, folder: str, progress: Progress = _no_progress,
+                       log: Callable[[str], None] = print) -> Dict[str, int]:
+    """The archive unpacked into `folder`, the release's layout kept: each
+    file written beside its place, checked by its size (and CRC) and moved
+    in. Returns {relative path: size}."""
+    os.makedirs(folder, exist_ok=True)
+    log("SHA-256 of %s: %s" % (os.path.basename(package.path), file_sha256(package.path)))
+    done = 0
+    written: Dict[str, int] = {}
+    try:
+        archive, opener = _package_readers(package)
+        with archive:
+            for item in package.files:
+                directory = folder
+                for part in item.parts[:-1]:
+                    directory = safe_join(directory, part)
+                    os.makedirs(directory, exist_ok=True)
+                path = safe_join(directory, item.parts[-1])
+                partial = path + ".part"
+                count = 0
+                try:
+                    with opener(item.name) as reader, open(partial, "wb") as writer:
+                        for chunk in iter(lambda: reader.read(1 << 20), b""):
+                            count += len(chunk)
+                            if count > item.size:
+                                raise InstallerError("%s is larger than its archive says." % item.name)
+                            writer.write(chunk)
+                            progress(item.parts[-1], done + count, package.size)
+                    if count != item.size:
+                        raise InstallerError("%s came out damaged." % item.name)
+                    os.replace(partial, path)
+                except BaseException:
+                    if os.path.exists(partial):
+                        os.remove(partial)
+                    raise
+                if item.executable:
+                    os.chmod(path, 0o755)
+                done += item.size
+                written[item.relative] = item.size
+                progress(item.parts[-1], done, package.size)
+    except (zipfile.BadZipFile, tarfile.TarError, EOFError, zlib.error) as error:
+        raise InstallerError("%s is damaged: %s. Download it again." % (package.path, error))
+    except OSError as error:
+        raise InstallerError("Cannot write the PC build into %s: %s. Is Halo CE running?" % (folder, error))
+    log("PC build %s (%d files, %s) in %s" % (package.version, len(written), human_size(package.size), folder))
+    return written
+
+
+def read_install(folder: str) -> Optional[dict]:
+    """The record of the install in `folder`, or None (none, or damaged)."""
+    path = os.path.join(folder, INSTALL_RECORD)
+    try:
+        if os.path.getsize(path) > INSTALL_RECORD_MAXIMUM:
+            return None
+        with open(path, "r", encoding="utf-8") as file:
+            record = json.load(file)
+    except (OSError, ValueError):
+        return None
+    good = isinstance(record, dict) and all(isinstance(record.get(key), dict) for key in ("files", "game_files"))
+    return record if good else None
+
+
+def find_existing_install() -> Optional[str]:
+    """Where Halo CE is installed for this user, if it is: where Apps &
+    Features says on Windows, where Setup last put it, the default folder."""
+    places = []
+    if sys.platform == "win32":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY) as key:
+                places.append(winreg.QueryValueEx(key, "InstallLocation")[0])
+        except (ImportError, OSError):
+            pass
+    remembered = load_settings().get("install_folder")
+    if isinstance(remembered, str):
+        places.append(remembered)
+    places.append(default_install_folder())
+    return next((place for place in places if read_install(place) is not None), None)
+
+
+def _recorded_path(folder: str, relative: str) -> str:
+    """A path of the record, which is only a file in a folder the user can
+    write: inside `folder`, checked as any other name."""
+    return safe_join(folder, *str(relative).split("/"))
+
+
+def check_install(folder: str) -> Tuple[List[str], List[str]]:
+    """What is missing or the wrong size in the install: (program files,
+    game files)."""
+    record = read_install(folder)
+    if record is None:
+        raise InstallerError("No Halo CE install in %s." % folder)
+
+    def damaged(files: dict) -> List[str]:
+        found = []
+        for relative, size in files.items():
+            try:
+                path = _recorded_path(folder, relative)
+                good = os.path.isfile(path) and os.path.getsize(path) == size
+            except InstallerError:
+                good = False
+            if not good:
+                found.append(relative)
+        return found
+    return damaged(record["files"]), damaged(record["game_files"])
+
+
+def installed_game_files(folder: str) -> Dict[str, int]:
+    """The game files in the install's data folder: {relative path: size}."""
+    data = pc_data_folder(folder)
+    if data is None:
+        return {}
+    return {os.path.relpath(item.local, folder).replace(os.sep, "/"): item.size for item in pc_uploads(data)}
+
+
+def _desktop_value(text: str) -> str:
+    return text.replace("\\", "\\\\")
+
+
+def _desktop_exec(path: str) -> str:
+    """`path` as Exec= takes it: quoted, with what the quotes leave special
+    escaped (the Desktop Entry specification's two levels)."""
+    return _desktop_value('"%s"' % re.sub(r'(["`$\\])', r"\\\1", path)).replace("%", "%%")
+
+
+def desktop_entry(folder: str, program: str, icon: str) -> str:
+    return ("[Desktop Entry]\nType=Application\nName=%s\nComment=Halo: Combat Evolved on your own game files\n"
+            "Exec=%s\nPath=%s\nIcon=%s\nTerminal=false\nCategories=Game;\n"
+            % (APP_NAME, _desktop_exec(program), _desktop_value(folder), _desktop_value(icon)))
+
+
+# One line for PowerShell's WScript.Shell: what varies comes in through the
+# environment, never in the command's text, so no folder name is read as code.
+SHORTCUT_SCRIPT = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+                   "$path = Join-Path ([Environment]::GetFolderPath($env:HCV_PLACE)) '" + SHORTCUT_LINK + "'; "
+                   "$link = (New-Object -ComObject WScript.Shell).CreateShortcut($path); "
+                   "$link.TargetPath = $env:HCV_TARGET; $link.WorkingDirectory = $env:HCV_FOLDER; "
+                   "$link.IconLocation = $env:HCV_TARGET; $link.Save(); Write-Output $path")
+
+
+def _windows_shortcut(place: str, target: str, folder: str) -> str:
+    """A shortcut in the Desktop or Programs (Start menu) folder, wherever
+    Windows keeps them (OneDrive moves the desktop). Returns its path."""
+    system = os.environ.get("SystemRoot", r"C:\Windows")
+    shell = os.path.join(system, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", SHORTCUT_SCRIPT],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+                            env=dict(os.environ, HCV_PLACE=place, HCV_TARGET=target, HCV_FOLDER=folder),
+                            **_hidden_window())
+    path = result.stdout.decode("utf-8", "replace").strip().lstrip("\ufeff")
+    if result.returncode != 0 or not path:
+        raise OSError(result.stderr.decode("utf-8", "replace").strip() or "PowerShell failed")
+    return path
+
+
+def make_shortcuts(folder: str, desktop: bool, start_menu: bool) -> Tuple[List[str], List[str]]:
+    """The desktop shortcut and the Start menu or applications menu entry.
+    Returns (their paths, warnings): one that fails does not stop the
+    install."""
+    made: List[str] = []
+    warnings: List[str] = []
+    data = pc_data_folder(folder) or folder
+    if sys.platform == "win32":
+        target = os.path.join(data, "halo.exe")
+        for wanted, place, name in ((desktop, "Desktop", "desktop shortcut"), (start_menu, "Programs", "Start menu entry")):
+            if wanted:
+                try:
+                    made.append(_windows_shortcut(place, target, folder))
+                except (OSError, subprocess.SubprocessError) as error:
+                    warnings.append("The %s could not be made: %s" % (name, error))
+        return made, warnings
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    launcher = os.path.join(folder, "halo.sh")
+    entry = desktop_entry(folder, launcher, os.path.join(folder, PACKAGE_ICON))
+    places = [(start_menu, os.path.join(base, "applications"), "applications menu entry"),
+              (desktop, os.path.join(os.path.expanduser("~"), "Desktop"), "desktop shortcut")]
+    for wanted, place, name in places:
+        if wanted:
+            try:
+                os.makedirs(place, exist_ok=True)
+                path = os.path.join(place, SHORTCUT_ENTRY)
+                with open(path, "w", encoding="utf-8") as file:
+                    file.write(entry)
+                os.chmod(path, 0o755)
+                made.append(path)
+            except OSError as error:
+                warnings.append("The %s could not be made: %s" % (name, error))
+    return made, warnings
+
+
+def remove_shortcuts(paths: Sequence[str]) -> None:
+    """The shortcuts Setup made, by exact name: a damaged record can name no
+    other file."""
+    for path in paths:
+        if isinstance(path, str) and os.path.basename(path) in (SHORTCUT_LINK, SHORTCUT_ENTRY):
+            try:
+                if os.path.isfile(path) and not os.path.islink(path):
+                    os.remove(path)
+            except OSError:
+                pass
+
+
+def write_uninstaller(folder: str) -> Tuple[str, List[str]]:
+    """A copy of this tool in the install folder: (its name there, the command
+    that runs it)."""
+    frozen = getattr(sys, "frozen", False)
+    name = "uninstall.exe" if frozen else "uninstall.py"
+    path = safe_join(folder, name)
+    source = sys.executable if frozen else os.path.abspath(__file__)
+    if os.path.realpath(source) != os.path.realpath(path):
+        shutil.copy2(source, path)
+    return name, ([path, "--uninstall"] if frozen else [sys.executable, path, "--uninstall"])
+
+
+def register_windows(folder: str, version: str, command: Sequence[str], program: str, size: int) -> None:
+    """The Apps & Features entry, the current user's own: no admin needed."""
+    import winreg
+    line = subprocess.list2cmdline(list(command))
+    texts = {"DisplayName": APP_NAME, "DisplayVersion": version, "Publisher": PUBLISHER, "InstallLocation": folder,
+             "UninstallString": line, "DisplayIcon": program, "URLInfoAbout": PROJECT_URL}
+    numbers = {"EstimatedSize": min(size // 1024, 0x7fffffff), "NoModify": 1, "NoRepair": 1}
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY) as key:
+        for name, value in texts.items():
+            winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+        for name, value in numbers.items():
+            winreg.SetValueEx(key, name, 0, winreg.REG_DWORD, value)
+
+
+def unregister_windows() -> None:
+    import winreg
+    try:
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY)
+    except OSError:
+        pass
+
+
+def finish_pc_install(folder: str, version: str, files: Dict[str, int], desktop: bool, start_menu: bool,
+                      log: Callable[[str], None] = print) -> List[str]:
+    """What makes the files an install: the maps folder the game takes the
+    folder by (as copy_to_pc_build), the shortcuts, the uninstaller and the
+    Apps & Features entry, and the record. Returns warnings."""
+    data = pc_data_folder(folder)
+    if data is None:
+        raise InstallerError("No PC build in %s." % folder)
+    os.makedirs(safe_join(data, STAGING_MAPS), exist_ok=True)
+    files = dict(files)
+    old = read_install(folder) or {}
+    old_shortcuts = old.get("shortcuts")
+    if isinstance(old_shortcuts, list):
+        remove_shortcuts(old_shortcuts)
+    warnings: List[str] = []
+    uninstaller = ""
+    if sys.platform != "win32":
+        icon = safe_join(folder, PACKAGE_ICON)
+        with open(icon, "wb") as file:
+            file.write(icon_png(128))
+        files[PACKAGE_ICON] = os.path.getsize(icon)
+    game_files = installed_game_files(folder)
+    shortcuts, failed = make_shortcuts(folder, desktop, start_menu)
+    warnings += failed
+    record = {"format": 1, "name": APP_NAME, "version": version, "files": files, "game_files": game_files,
+              "desktop": desktop, "start_menu": start_menu, "shortcuts": shortcuts}
+    if sys.platform == "win32":
+        uninstaller, command = write_uninstaller(folder)
+        record["uninstaller"] = uninstaller
+        try:
+            register_windows(folder, version, command, os.path.join(data, "halo.exe"),
+                             sum(files.values()) + sum(game_files.values()))
+        except (OSError, ImportError) as error:
+            warnings.append("The Apps & Features entry could not be made: %s" % error)
+    partial = safe_join(folder, INSTALL_RECORD + ".part")
+    with open(partial, "w", encoding="utf-8") as file:
+        json.dump(record, file, indent=1, sort_keys=True)
+    os.replace(partial, safe_join(folder, INSTALL_RECORD))
+    settings = load_settings()
+    settings["install_folder"] = folder
+    save_settings(settings)
+    for warning in warnings:
+        log("Warning: " + warning)
+    log("Installed in %s" % folder)
+    return warnings
+
+
+def _remove_empty_folders(folder: str) -> None:
+    """Empty folders under `folder`, then `folder` if it is empty too."""
+    for directory, _, _ in os.walk(folder, topdown=False):
+        try:
+            os.rmdir(directory)
+        except OSError:
+            pass
+
+
+def uninstall_pc(folder: str, progress: Progress = _no_progress, log: Callable[[str], None] = print) -> Dict[str, int]:
+    """Everything the record names, and no other file: what the game wrote
+    later (saved games, config.toml) stays, and the folder with it. Returns
+    counts: removed, kept (what is left in the folder)."""
+    record = read_install(folder)
+    if record is None:
+        raise InstallerError("No Halo CE install in %s." % folder)
+    names = list(record["files"]) + list(record["game_files"])
+    if isinstance(record.get("uninstaller"), str):
+        names.append(record["uninstaller"])
+    removed = 0
+    for index, relative in enumerate(names):
+        try:
+            path = _recorded_path(folder, relative)
+            if os.path.isfile(path):
+                os.remove(path)
+                removed += 1
+        except InstallerError as error:
+            log("Left alone: %s" % error)
+        except OSError as error:
+            log("Could not remove %s: %s" % (relative, error))
+        progress(os.path.basename(str(relative)), index + 1, len(names))
+    if isinstance(record.get("shortcuts"), list):
+        remove_shortcuts(record["shortcuts"])
+    if sys.platform == "win32":
+        unregister_windows()
+    os.remove(os.path.join(folder, INSTALL_RECORD))
+    settings = load_settings()
+    if settings.pop("install_folder", None) is not None:
+        save_settings(settings)
+    _remove_empty_folders(folder)
+    kept = sum(len(found) for _, _, found in os.walk(folder))
+    log("Removed %d files from %s (%d left)" % (removed, folder, kept))
+    return {"removed": removed, "kept": kept}
+
+
+def snapshot_folder(folder: str) -> set:
+    """What is in `folder` before an install, to take it back to that."""
+    found = set()
+    for directory, folders, names in os.walk(folder):
+        for name in folders + names:
+            found.add(os.path.relpath(os.path.join(directory, name), folder))
+    return found
+
+
+def roll_back_install(folder: str, before: set) -> None:
+    """An install that did not finish: everything it added, and nothing that
+    was there before it."""
+    for directory, _, names in os.walk(folder, topdown=False):
+        for name in names:
+            path = os.path.join(directory, name)
+            if os.path.relpath(path, folder) not in before:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        relative = os.path.relpath(directory, folder)
+        if relative != "." and relative not in before:
+            try:
+                os.rmdir(directory)
+            except OSError:
+                pass
+    if not before:
+        try:
+            os.rmdir(folder)
+        except OSError:
+            pass
+
+
+def launch_pc(folder: str) -> None:
+    """The game, as its shortcut starts it: never through a shell, and only
+    the install's own program."""
+    data = pc_data_folder(folder)
+    if data is None:
+        raise InstallerError("No PC build in %s." % folder)
+    launcher = os.path.join(folder, "halo.sh")
+    program = os.path.join(data, "halo.exe") if sys.platform == "win32" else \
+        launcher if os.path.isfile(launcher) else os.path.join(data, "halo")
+    subprocess.Popen([program], cwd=folder, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL)
+
+
+# The uninstaller is this one-file program, in the folder it empties, and a
+# running program cannot delete itself on Windows: it runs again from a copy
+# in the temporary folder, and that copy is deleted once it has closed.
+TEMPORARY_UNINSTALLER = "halo-ce-uninstall-"
+
+
+def uninstall_from_outside(folder: str) -> bool:
+    """When this is the install's own uninstall.exe: started again from a
+    temporary copy. True if so (this one then closes)."""
+    if sys.platform != "win32" or not getattr(sys, "frozen", False):
+        return False
+    if os.path.dirname(os.path.realpath(sys.executable)) != os.path.realpath(folder):
+        return False
+    temporary = tempfile.mkdtemp(prefix=TEMPORARY_UNINSTALLER)
+    copy = os.path.join(temporary, "uninstall.exe")
+    shutil.copy2(sys.executable, copy)
+    subprocess.Popen([copy, "--uninstall", folder], cwd=temporary)
+    return True
+
+
+def delete_temporary_uninstaller() -> None:
+    """The temporary copy's own folder, a moment after it closes. The one
+    command this tool gives a shell: fixed text, the folder (made by
+    uninstall_from_outside, by its name) coming in through the environment."""
+    folder = os.path.dirname(os.path.realpath(sys.executable))
+    if sys.platform != "win32" or not getattr(sys, "frozen", False) or \
+            not os.path.basename(folder).startswith(TEMPORARY_UNINSTALLER):
+        return
+    shell = os.environ.get("ComSpec") or os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "cmd.exe")
+    subprocess.Popen('"%s" /c ping -n 4 127.0.0.1 >nul & rmdir /s /q "%%HCV_DELETE%%"' % shell, cwd=tempfile.gettempdir(),
+                     env=dict(os.environ, HCV_DELETE=folder), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, **_hidden_window())
+
+
+# ---------------------------------------------------------------------------
 # the command line
 
 
@@ -2575,10 +3209,9 @@ def xbox_files_size(source_path: str) -> int:
 
 
 def self_test(report: Optional[str] = None) -> int:
-    """What this copy of the tool can do: tkinter for the window, its
-    pictures and its Modern look's theme (sv-ttk; the Windows program must
-    bring both), ffmpeg for the movies (the Windows program brings its
-    own)."""
+    """What this copy of the tool can do: tkinter for the window, the
+    license's text (the Windows program must bring it), ffmpeg for the movies
+    (the Windows program brings its own)."""
     lines = ["halo_ce_vita_installer %s, Python %s on %s" % (VERSION, sys.version.split()[0], sys.platform)]
     good = True
     try:
@@ -2587,18 +3220,9 @@ def self_test(report: Optional[str] = None) -> int:
     except ImportError as error:
         lines.append("tkinter: missing (%s)" % error)
         good = False
-    if _sv_ttk_module():
-        try:
-            import darkdetect  # noqa: F401
-            lines.append("theme: sv-ttk ok, darkdetect ok (the system is set to %s)" % system_theme())
-        except ImportError:
-            lines.append("theme: sv-ttk ok, darkdetect missing (light, unless chosen)")
-    else:
-        lines.append("theme: sv-ttk missing (the window has its classic look only)")
-        good = good and not getattr(sys, "frozen", False)
-    pictures = [name for name, _ in PAGE_PICTURES.values() if os.path.isfile(picture_path(name))]
-    lines.append("pictures: %d of %d in %s" % (len(pictures), len(PAGE_PICTURES), picture_path("")))
-    good = good and (len(pictures) == len(PAGE_PICTURES) or not getattr(sys, "frozen", False))
+    whole = "TERMS AND CONDITIONS" in license_text()
+    lines.append("license text: %s" % ("ok" if whole else "only the short notice"))
+    good = good and (whole or not getattr(sys, "frozen", False))
     ffmpeg = find_ffmpeg()
     if ffmpeg:
         try:
@@ -2626,11 +3250,13 @@ def self_test(report: Optional[str] = None) -> int:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="halo_ce_vita_installer",
-        description="Install helper for Halo: Combat Evolved, for the PS Vita and PC. With no command, the window "
-                    "opens. Every step reads your own files; no game data comes with this tool.")
+        description="Halo CE Setup: installs Halo: Combat Evolved on a PS Vita or a PC. With no command, the "
+                    "Setup window opens. Every step reads your own files; no game data comes with this tool.")
     parser.add_argument("--version", action="version", version=VERSION)
     parser.add_argument("--out", default=default_output_folder(),
                         help="the folder the files are gathered in (default: %(default)s)")
+    parser.add_argument("--uninstall", nargs="?", const="", metavar="FOLDER",
+                        help="open the window to uninstall the PC install (what Apps & Features runs)")
     commands = parser.add_subparsers(dest="command")
     step = commands.add_parser("xbox", help="manual: maps and default.xbe from your Xbox disc image or folder")
     step.add_argument("source", help="the Xbox disc image (.iso / .xiso) or the unpacked game folder")
@@ -2666,12 +3292,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     step.add_argument("build", nargs="?", help="the unpacked PC build (default: one found next to this tool or in "
                                                "your Downloads, Desktop or Documents)")
     step.add_argument("--replace", action="store_true", help="copy files already there again")
+    step = commands.add_parser("pc-install", help="install the PC build: the archive, the gathered files, shortcuts "
+                                                  "and, on Windows, the uninstaller and Apps & Features entry")
+    step.add_argument("folder", nargs="?", help="the install folder (default: %s)" % default_install_folder())
+    step.add_argument("--package", help="the PC build's archive (default: one next to this tool)")
+    step.add_argument("--desktop-shortcut", action="store_true", help="make a desktop shortcut")
+    step.add_argument("--start-menu", action="store_true", help="make a Start menu or applications menu entry")
+    step = commands.add_parser("pc-uninstall", help="remove a PC install: the files it wrote and its shortcuts")
+    step.add_argument("folder", nargs="?", help="the install folder (default: the install found)")
     step = commands.add_parser("selftest", help="check this copy of the tool (the window, ffmpeg)")
     step.add_argument("--report", help="write the results to this file too")
     arguments = parser.parse_args(argv)
     if arguments.command == "selftest":
         return self_test(arguments.report)
 
+    if arguments.uninstall is not None:
+        folder = arguments.uninstall or find_existing_install()
+        if not folder or read_install(folder) is None:
+            _console_log("No Halo CE install found: give its folder (--uninstall FOLDER).")
+            return 1
+        if uninstall_from_outside(folder):
+            return 0
+        result = run_window(arguments.out, folder)
+        delete_temporary_uninstaller()
+        return result
     if not arguments.command:
         return run_window(arguments.out)
     progress = _ConsoleProgress()
@@ -2745,6 +3389,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 raise InstallerError("No PC build found: give its folder (pc-copy FOLDER)")
             result = copy_to_pc_build(out, build, arguments.replace, progress, _console_log)
             _console_log("Done: %(copied)d copied, %(skipped)d already there" % result)
+        elif arguments.command == "pc-install":
+            package_path = arguments.package or (find_pc_packages() or [None])[0]
+            if not package_path:
+                raise InstallerError("No PC build next to this tool: give it (--package). Download "
+                                     "halo-ce-vita-<version>%s from %s" % (pc_package_suffix(), RELEASES_URL))
+            folder = check_install_folder(arguments.folder or default_install_folder())
+            package = read_pc_package(package_path)
+            files = install_pc_package(package, folder, progress, _console_log)
+            if pc_uploads(out):
+                copy_to_pc_build(out, folder, False, progress, _console_log)
+            else:
+                _console_log("No game files gathered in %s: the game will ask for them." % out)
+            finish_pc_install(folder, package.version, files, arguments.desktop_shortcut, arguments.start_menu,
+                              _console_log)
+        elif arguments.command == "pc-uninstall":
+            folder = arguments.folder or find_existing_install()
+            if not folder:
+                raise InstallerError("No Halo CE install found: give its folder (pc-uninstall FOLDER)")
+            result = uninstall_pc(check_install_folder(folder), progress, _console_log)
+            _console_log("Done: %(removed)d files removed, %(kept)d left in the folder" % result)
     except InstallerError as error:
         _console_log("Error: %s" % error)
         return 1
@@ -2754,18 +3418,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# the window
+# the window: a standard Setup wizard
 #
-# Two looks. The classic one, the default: Tk's own grey widgets in its
-# Windows 95/98-style ttk theme ("alt"), a white header band, the steps as a
-# list with check boxes, and a small pixelated picture for each page (the
-# project's own screenshots of the port on a PS Vita: pictures/, made by
-# make_pictures.py). The Modern look (a check box at the bottom left, off by
-# default, remembered in the user's settings file): the Sun Valley ttk theme
-# (sv-ttk, MIT: Windows 11's light and dark styles for ttk's own widgets),
-# following the system's dark or light setting (darkdetect, BSD), both
-# optional. HCV_THEME=classic, light, dark, modern (light or dark as the
-# system is) or plain (Tk's platform theme: vista/aqua/clam) picks one.
+# Next, next, finish, with what every Windows installer has: < Back, Next >
+# and Cancel at the bottom right, a picture on the first and last pages and a
+# white band on the others, one progress bar. ttk's native theme ('vista' on
+# Windows), nothing styled but the white of those bands.
 
 
 def _windows_dpi_awareness() -> None:
@@ -2783,78 +3441,18 @@ def _windows_dpi_awareness() -> None:
         except (AttributeError, OSError):
             pass
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("HaloCEVita.InstallHelper")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("HaloCE.Setup")
     except (AttributeError, OSError):
         pass
 
 
-
-def _set_palette(root, **colours):
-    """Tk's tk_setPalette, or the same colours through the option database
-    when Tk can't load the script that defines it (palette.tcl: seen on
-    Windows runners, where its auto-load fails with "invalid command name
-    tk_setPalette"); the window then looks the same for the widgets made
-    after it, and the root's own colour is set directly."""
-    import tkinter as tk
-    try:
-        root.tk_setPalette(**colours)
-        return True
-    except tk.TclError:
-        pass
-    names = {"background": "background", "foreground": "foreground",
-             "selectBackground": "selectBackground", "selectForeground": "selectForeground",
-             "activeBackground": "activeBackground", "highlightColor": "highlightColor"}
-    for key, value in colours.items():
-        root.option_add("*" + names.get(key, key), value)
-    if "background" in colours:
-        root.option_add("*activeBackground", colours.get("activeBackground", colours["background"]))
-        try:
-            root.configure(background=colours["background"])
-        except tk.TclError:
-            pass
-    return False
-
-def _windows_title_bar(root, dark: bool) -> None:
-    """Windows 10/11's dark title bar to go with the dark theme."""
-    if sys.platform != "win32":
-        return
-    try:
-        import ctypes
-        root.update_idletasks()
-        window = ctypes.windll.user32.GetParent(root.winfo_id())
-        value = ctypes.c_int(1 if dark else 0)
-        for attribute in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE, and its number before Windows 10 20H1
-            if ctypes.windll.dwmapi.DwmSetWindowAttribute(window, attribute, ctypes.byref(value),
-                                                          ctypes.sizeof(value)) == 0:
-                break
-    except Exception:  # cosmetic only
-        pass
-
-
-def system_theme() -> str:
-    """'dark' or 'light', as the system is set (darkdetect), else light."""
-    try:
-        import darkdetect
-        return "dark" if (darkdetect.theme() or "").lower() == "dark" else "light"
-    except Exception:
-        return "light"
-
-
-def _sv_ttk_module():
-    try:
-        import sv_ttk
-        return sv_ttk
-    except ImportError:
-        return None
-
-
-THEMES = ("classic", "light", "dark", "modern", "plain")  # HCV_THEME's values
 SETTINGS_FILE = "installer-settings.json"
+LOG_FILE = "setup-log.txt"
 
 
 def settings_path() -> str:
-    """The window's settings (its look): a small JSON file in the user's
-    application data folder."""
+    """Setup's settings (where it installed): a small JSON file in the
+    user's application data folder."""
     if sys.platform == "win32":
         base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
         folder = os.path.join(base, "HaloCEVita")
@@ -2892,29 +3490,17 @@ def save_settings(settings: dict) -> bool:
         return False
 
 
-# Each page's picture (pictures/, from docs/screenshots by make_pictures.py)
-# and its caption. The window works without them.
-PAGE_PICTURES = {
-    "game": ("game.png", "The beach below the cliffs of The Silent Cartographer"),
-    "platform": ("welcome.png", "Two Pelicans over the sea in The Silent Cartographer's opening"),
-    "mode": ("mode.png", "A Pelican up close"),
-    "automatic": ("auto.png", "A Warthog and its gunner on the beach"),
-    "game_files": ("xbox.png", "Landing on The Silent Cartographer's beach"),
-    "movies": ("movies.png", "A Pelican in The Silent Cartographer's opening"),
-    "pc_files": ("pc.png", "A Covenant camp on The Silent Cartographer's island"),
-    "copy_vita": ("copy.png", "The Silent Cartographer's beach"),
-    "vpk": ("vpk.png", "The camp, closer"),
-    "copy_pc": ("pccopy.png", "The Covenant at their camp"),
-    "done": ("done.png", "A Warthog on The Silent Cartographer's beach"),
-}
-PICTURE_ZOOM = 3  # each picture pixel as 3x3 screen pixels at 100%
-
-
-def picture_path(name: str) -> str:
-    """A picture of pictures/: next to this file, or in the Windows program's
-    bundle."""
-    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base, "pictures", name)
+def license_text() -> str:
+    """The GPL's text: inside the Windows program, or the repository's."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in (os.path.join(getattr(sys, "_MEIPASS", here), "LICENSE"), os.path.join(here, "..", "..", "LICENSE")):
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                return file.read()
+        except OSError:
+            pass
+    return "Halo CE for PS Vita is free software under the GNU General Public License, version 3 only.\n\n" \
+           "The license's full text: https://www.gnu.org/licenses/gpl-3.0.txt\n"
 
 
 # The window's icon, drawn here (no image files): a blue rounded square with
@@ -2941,13 +3527,13 @@ def _icon_sample(u: float, v: float):
     return tuple(round(a + (b - a) * v) for a, b in zip(top, bottom))
 
 
-def _png(size: int, rgba: bytes) -> bytes:
-    row = size * 4
-    raw = b"".join(b"\0" + rgba[y * row:(y + 1) * row] for y in range(size))
+def _png(width: int, height: int, rgba: bytes) -> bytes:
+    row = width * 4
+    raw = b"".join(b"\0" + rgba[y * row:(y + 1) * row] for y in range(height))
 
     def chunk(kind: bytes, data: bytes) -> bytes:
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)) +
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) +
             chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
 
 
@@ -2972,67 +3558,7 @@ def icon_png(size: int) -> bytes:
                 out += bytes((red // alpha, green // alpha, blue // alpha, 255 * alpha // (grid * grid)))
             else:
                 out += b"\0\0\0\0"
-    return _png(size, bytes(out))
-
-
-def _segment_distance(x: float, y: float, a, b) -> float:
-    dx, dy = b[0] - a[0], b[1] - a[1]
-    t = max(0.0, min(1.0, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy)))
-    return ((x - a[0] - t * dx) ** 2 + (y - a[1] - t * dy) ** 2) ** 0.5
-
-
-def _indicator_sample(kind: str, on: bool, disabled: bool, size: int, x: float, y: float):
-    """A Windows 95/98 check box or radio button at size x size pixels:
-    its colour at (x, y), or None outside it."""
-    bevel = max(1.0, size / 13.0)
-    face = (0xc0, 0xc0, 0xc0) if disabled else (0xff, 0xff, 0xff)
-    mark = (0x80, 0x80, 0x80) if disabled else (0, 0, 0)
-    if kind == "radio":
-        centre = size / 2.0
-        r = ((x - centre) ** 2 + (y - centre) ** 2) ** 0.5
-        if r > centre:
-            return None
-        upper_left = x + y < size
-        if r > centre - bevel:
-            return (0x80, 0x80, 0x80) if upper_left else (0xff, 0xff, 0xff)
-        if r > centre - 2 * bevel:
-            return (0, 0, 0) if upper_left else (0xdf, 0xdf, 0xdf)
-        return mark if on and r < centre * 0.34 else face
-    edge = min(x, y, size - x, size - y)
-    upper_left = min(x, y) <= min(size - x, size - y)
-    if edge < bevel:
-        return (0x80, 0x80, 0x80) if upper_left else (0xff, 0xff, 0xff)
-    if edge < 2 * bevel:
-        return (0, 0, 0) if upper_left else (0xdf, 0xdf, 0xdf)
-    if on:
-        tick = [(size * u, size * v) for u, v in ((0.26, 0.50), (0.42, 0.66), (0.74, 0.32))]
-        if min(_segment_distance(x, y, tick[0], tick[1]), _segment_distance(x, y, tick[1], tick[2])) <= bevel:
-            return mark
-    return face
-
-
-def indicator_png(kind: str, on: bool, disabled: bool, size: int) -> bytes:
-    """The classic look's check box ("check") or radio button ("radio") as
-    a PNG, for displays scaled past what Tk's own (13 pixels) suits."""
-    grid = 3
-    out = bytearray()
-    for row in range(size):
-        for column in range(size):
-            red = green = blue = alpha = 0
-            for j in range(grid):
-                for i in range(grid):
-                    colour = _indicator_sample(kind, on, disabled, size, column + (i + 0.5) / grid,
-                                               row + (j + 0.5) / grid)
-                    if colour:
-                        red += colour[0]
-                        green += colour[1]
-                        blue += colour[2]
-                        alpha += 1
-            if alpha:
-                out += bytes((red // alpha, green // alpha, blue // alpha, 255 * alpha // (grid * grid)))
-            else:
-                out += b"\0\0\0\0"
-    return _png(size, bytes(out))
+    return _png(size, size, bytes(out))
 
 
 def write_icon(path: str, sizes: Sequence[int] = ICON_SIZES) -> None:
@@ -3049,7 +3575,36 @@ def write_icon(path: str, sizes: Sequence[int] = ICON_SIZES) -> None:
         file.write(header + entries + b"".join(images))
 
 
-def run_window(out: str) -> int:
+def sidebar_png(width: int, height: int) -> bytes:
+    """The picture on the first and last pages, drawn here: a night sky over
+    a dark horizon's curve, a few stars. No artwork of anyone's."""
+    stars = random.Random(11)
+    bright = {}
+    for _ in range(width * height // 900):
+        bright[stars.randrange(width), stars.randrange(height * 7 // 10)] = stars.randrange(120, 255)
+    centre_x, centre_y = width * 0.15, height * 1.55
+    radius = height * 0.85
+    out = bytearray()
+    for y in range(height):
+        share = y / max(height - 1, 1)
+        sky = (int(7 + 16 * share), int(12 + 58 * share), int(34 + 96 * share))
+        for x in range(width):
+            star = bright.get((x, y))
+            distance = ((x - centre_x) ** 2 + (y - centre_y) ** 2) ** 0.5 - radius
+            if distance < 0:
+                glow = max(0.0, 1.0 + distance / (height * 0.05))
+                out += bytes((int(6 + 40 * glow), int(16 + 96 * glow), int(26 + 120 * glow), 255))
+            elif distance < height * 0.03:
+                glow = 1.0 - distance / (height * 0.03)
+                out += bytes((int(sky[0] + 60 * glow), int(sky[1] + 110 * glow), int(sky[2] + 110 * glow), 255))
+            elif star:
+                out += bytes((star, star, min(star + 20, 255), 255))
+            else:
+                out += bytes(sky + (255,))
+    return _png(width, height, bytes(out))
+
+
+def run_window(out: str, uninstall: Optional[str] = None) -> int:
     try:
         import tkinter
         from tkinter import ttk  # noqa: F401 (the window's widgets)
@@ -3063,1615 +3618,989 @@ def run_window(out: str) -> int:
     except tkinter.TclError as error:
         _console_log("Cannot open a window (%s): use the command-line steps (--help)." % error)
         return 1
-    InstallerWindow(root, out)
+    InstallerWindow(root, out, uninstall)
     root.mainloop()
     return 0
 
 
-# the colours: the classic look's (Windows 95/98's grey, navy and white),
-# and the Modern look's around sv-ttk's own (its backgrounds and accent blues)
-PALETTES = {
-    "classic": {"bg": "#c0c0c0", "sidebar": "#c0c0c0", "header": "#ffffff", "fg": "#000000", "muted": "#3c3c3c",
-                "accent": "#000080", "on_accent": "#ffffff", "tag": "#ffffe1", "error": "#a00000", "ok": "#006400",
-                "ring": "#808080", "chip": "#c0c0c0", "log": "#ffffff", "border": "#808080", "link": "#0000ee",
-                "row": "#ffffff", "row_current": "#000080", "row_fg_current": "#ffffff",
-                "row_muted": "#3c3c3c", "row_muted_current": "#d8d8ff"},
-    "light": {"bg": "#fafafa", "sidebar": "#f0f0f0", "fg": "#1c1c1c", "muted": "#5f5f5f", "accent": "#005fb8",
-              "on_accent": "#ffffff", "tag": "#e1ecf7", "error": "#c42b1c", "ok": "#0f7b0f",
-              "ring": "#8a8a8a", "chip": "#ececec", "log": "#ffffff", "border": "#d9d9d9"},
-    "dark": {"bg": "#1c1c1c", "sidebar": "#242424", "fg": "#fafafa", "muted": "#b8b8b8", "accent": "#57c8ff",
-             "on_accent": "#000000", "tag": "#173647", "error": "#ff99a4", "ok": "#6ccb5f",
-             "ring": "#8a8a8a", "chip": "#2e2e2e", "log": "#262626", "border": "#3d3d3d"},
-}
-
-
-def _palette(theme: str) -> dict:
-    palette = dict(PALETTES[theme])
-    # (the Modern look's header, sidebar rows and links are its page's colours)
-    palette.setdefault("header", palette["bg"])
-    palette.setdefault("link", palette["accent"])
-    palette.setdefault("row", palette["sidebar"])
-    palette.setdefault("row_current", palette["sidebar"])
-    palette.setdefault("row_fg_current", palette["fg"])
-    palette.setdefault("row_muted", palette["muted"])
-    palette.setdefault("row_muted_current", palette["muted"])
-    return palette
+def _native_theme(style) -> str:
+    """Windows' own look, or the system's nearest."""
+    names = style.theme_names()
+    for name in ("vista", "aqua", "clam"):
+        if name in names:
+            style.theme_use(name)
+            return name
+    return style.theme_use()
 
 
 class InstallerWindow:
-    # each page: the sidebar's name, what it needs, the header's title and its short description
+    WIDTH, HEIGHT = 620, 480  # at 100%
+    SIDEBAR = 164
+    EXTERIOR = ("welcome", "finish")
+    # each page's title and the line below it
     PAGES = {
-        "game": ("Game", "", "Choose the game", "The game to set up."),
-        "platform": ("Platform", "", "Choose the platform",
-                     "Where you will play. The next pages follow from this."),
-        "mode": ("Automatic or Manual", "", "Automatic or Manual",
-                 "Take everything from your own Halo: The Master Chief Collection, or pick each source yourself."),
-        "automatic": ("From your MCC", "Required", "From your MCC",
-                      "Everything the game needs, taken from your own Halo: The Master Chief Collection."),
-        "game_files": ("Game files", "Required", "Game files",
-                       "Choose your Xbox disc image (.iso) or the unpacked game folder, or your own Halo: The "
-                       "Master Chief Collection on Steam: the files the game needs are taken out."),
-        "movies": ("Movies", "Optional", "Movies",
-                   "The disc's intro, attract and credits movies, converted for the Vita with ffmpeg. The game "
-                   "runs without them."),
-        "pc_files": ("Halo PC files", "Required", "Halo PC files",
-                     "bitmaps.map, sounds.map and loc.map from Halo Custom Edition. From your own Halo MCC, the "
-                     "free Halo Custom Edition installer, or a Custom Edition install."),
-        "copy_vita": ("Copy to the Vita", "Required", "Copy to the Vita",
-                      "Everything gathered goes to %s over VitaShell's FTP." % VITA_GAME_FOLDER),
-        "vpk": ("Install the VPK", "Required for a first install", "Install the VPK",
-                "Copy the VPK to the Vita's ux0:data/, then install it with VitaShell."),
-        "copy_pc": ("Copy to the PC build", "Required", "Copy to the PC build",
-                    "Everything gathered goes into your PC build's data folder."),
-        "done": ("Done", "", "All done", "What was gathered and copied, and what to do next."),
+        "welcome": ("Welcome to Halo CE Setup", ""),
+        "maintenance": ("Halo CE Is Already Installed", "Choose what Setup should do."),
+        "license": ("License Agreement", "Please read the license before you install Halo CE."),
+        "game": ("Choose a Game", "Which game do you want to install?"),
+        "platform": ("Where to Install", "Choose where you will play Halo CE."),
+        "game_files": ("Game Files", "Choose where Setup gets the game files from."),
+        "destination": ("Destination", ""),
+        "ready": ("Ready to Install", "Setup is ready to install Halo CE."),
+        "installing": ("Installing", "Please wait while Setup installs Halo CE."),
+        "finish": ("Setup completed", ""),
     }
-    CHOICE_PAGES = ("game", "platform", "mode")  # (what they show instead of what they need)
-    SIDEBAR_NEEDS = {"vpk": "For a first install"}  # (shorter, for the sidebar)
+    NOTICE = ("This is an unofficial fan project, not affiliated with or endorsed by Microsoft or Bungie. No game "
+              "data comes with it: Setup uses your own copy of the game.")
 
-    def __init__(self, root, out: str, theme: Optional[str] = None):
+    def __init__(self, root, out: str, uninstall: Optional[str] = None):
         import tkinter
         from tkinter import ttk
         self.tk = tkinter
         self.ttk = ttk
         self.root = root
-        root.title("Halo CE for PS Vita - Install helper")
+        root.title("%s Setup" % APP_NAME)
         self.messages: "queue.Queue" = queue.Queue()
         self.worker: Optional[threading.Thread] = None
+        self.tester: Optional[threading.Thread] = None
         self.cancel = threading.Event()
-        self.page = "game" if len(GAMES) > 1 else "platform"
-        self.running_page: Optional[str] = None
-        self.done_steps: set = set()  # pages finished in this session, by key
-        self.skipped: set = set()
-        self.results: Dict[str, str] = {}
-        self.notice = None
-        self.details_shown = False
-        self._pictures: Dict[str, object] = {}
-        self._listening = False
+        self.page = ""
+        self.outcome = ""  # at the end: done, failed or cancelled
+        self.reason = ""
+        self.warnings: List[str] = []
+        self.log_lines: List[str] = []
+        self.left_behind = 0
+        self.direct = uninstall is not None  # started as the uninstaller: straight to it
+        self.existing = uninstall or find_existing_install()
+        self.damaged: Tuple[List[str], List[str]] = ([], [])
+        self.package_cache: Dict[str, PcPackage] = {}
+        self.game_bytes = 0
+        self.rollback: Optional[set] = None
 
-        # the look: HCV_THEME (or the caller's), else the one saved, else classic
-        self.settings = load_settings()
-        self.sv_ttk = _sv_ttk_module()
-        theme = (theme or os.environ.get("HCV_THEME", "")).strip().lower()
-        if theme not in THEMES:
-            theme = "modern" if self.settings.get("look") == "modern" else "classic"
-        if theme in ("light", "dark", "modern") and not self.sv_ttk:
-            theme = "classic"
-        self.follow_system = False
-        if theme == "modern":
-            theme = self._modern_theme()
-        self.theme = theme
+        var = tkinter.StringVar
+        self.action = var(value="uninstall" if self.direct else "repair" if self.existing else "install")
+        self.accepted = var(value="no")
+        self.game = var(value=GAMES[0].key)
+        self.platform = var(value=PLATFORMS[0].key)
+        self.mcc_root = var(value=(find_mcc_folders() or [""])[0])
+        self.mcc_found = bool(self.mcc_root.get())
+        self.mode = var(value="automatic" if self.mcc_found else "manual")
+        self.xbox_source = var()
+        self.ce_source = var(value=next(iter(find_mcc_custom_edition() + find_ce_installers() +
+                                             find_ce_install_folders()), ""))
+        self.quality = var(value="baseline")
+        self.movies = tkinter.BooleanVar(value=bool(find_ffmpeg()))
+        self.host = var()
+        self.vpk = var(value=(find_local_vpks() or [""])[0])
+        self.out = var(value=out)
+        self.install_folder = var(value=self.existing or default_install_folder())
+        self.package = var(value=(find_pc_packages() or [""])[0])
+        self.package_found = bool(self.package.get())
+        self.desktop_shortcut = tkinter.BooleanVar(value=True)
+        self.start_menu = tkinter.BooleanVar(value=True)
+        self.launch = tkinter.BooleanVar(value=True)
+        self.space = var()
+        self.test_result = var()
+        self.current_task = var(value="Preparing...")
+        self.current_file = var()
+        self.percent = var()
+
+        self.style = ttk.Style(root)
+        self.theme = _native_theme(self.style)
         self.scale = max(1.0, root.winfo_fpixels("1i") / 96.0)
-
-        self.out = tkinter.StringVar(value=out)
-        self.game = tkinter.StringVar(value=GAMES[0].key)
-        self.platform = tkinter.StringVar(value=PLATFORMS[0].key)
-        self.xbox_source = tkinter.StringVar()
-        self.game_mode = tkinter.StringVar(value="xbox")
-        self.mcc_root = tkinter.StringVar(value=(find_mcc_folders() or [""])[0])
-        self.mode = tkinter.StringVar(value="automatic" if self.mcc_root.get() else "manual")
-        self.movie_source = tkinter.StringVar()
-        self.ffmpeg = tkinter.StringVar(value=find_ffmpeg() or "")
-        self.quality = tkinter.StringVar(value="baseline")
-        self.mcc_folder = tkinter.StringVar(value=(find_mcc_custom_edition() or [""])[0])
-        self.installer = tkinter.StringVar(value=(find_ce_installers() or [""])[0])
-        self.pc_folder = tkinter.StringVar(value=(find_ce_install_folders() or [""])[0])
-        # (the way found by itself, MCC first)
-        self.pc_mode = tkinter.StringVar(value="installer" if self.installer.get() and not self.mcc_folder.get()
-                                         else "folder" if self.pc_folder.get() and not self.mcc_folder.get()
-                                         else "mcc")
-        self.host = tkinter.StringVar()
-        self.port = tkinter.StringVar(value=str(FTP_PORT))
-        self.replace = tkinter.BooleanVar(value=False)
-        self.vpk = tkinter.StringVar(value=(find_local_vpks() or [""])[0])
-        self.pc_build = tkinter.StringVar(value=(find_pc_builds() or [""])[0])
-        self.status = tkinter.StringVar(value="Ready")
-        self.percent = tkinter.StringVar(value="")
-        self.dark = tkinter.BooleanVar(value=self.theme == "dark")
-        self.modern = tkinter.BooleanVar(value=self.modern_look)
-
         self._make_fonts()
-        self._icons = []
+        self._images: Dict[str, object] = {}
         try:
             self._icons = [tkinter.PhotoImage(data=icon_png(size), format="png") for size in (64, 32, 16)]
             root.iconphoto(True, *self._icons)
         except tkinter.TclError:
             pass
+        self.width, self.height = self.px(self.WIDTH), self.px(self.HEIGHT)
+        root.geometry("%dx%d" % (self.width, self.height))
+        root.resizable(False, False)
         self._build()
-        self.apply_theme(self.theme)
-        width, height = self.px(1000), self.px(740)
-        width = min(width, max(root.winfo_screenwidth() - 40, 640))
-        height = min(height, max(root.winfo_screenheight() - 90, 520))
-        root.geometry("%dx%d" % (width, height))
-        root.minsize(min(self.px(860), width), min(self.px(620), height))
-        self.platform.trace_add("write", lambda *ignored: self._choices_changed())
-        self.mode.trace_add("write", lambda *ignored: self._choices_changed())
-        self.show(self.page)
-        self._listen_for_system_theme()
+        root.protocol("WM_DELETE_WINDOW", self.ask_cancel)
+        root.bind("<Return>", lambda event: self.press(self.next_button))
+        root.bind("<Escape>", lambda event: self.press(self.cancel_button))
+        self.accepted.trace_add("write", lambda *ignored: self.update_buttons())
+        self.mode.trace_add("write", lambda *ignored: self.update_fields())
+        self.install_folder.trace_add("write", lambda *ignored: self.update_space())
+        self.package.trace_add("write", lambda *ignored: self.update_space())
+        self.show(self.flow()[0])
         root.after(100, self.poll)
 
     def flow(self) -> Tuple[str, ...]:
         """The pages of the choices made so far."""
-        return install_flow(self.platform.get(), self.mode.get())
+        if self.direct:
+            return ("ready", "installing", "finish")
+        return install_flow(self.platform.get(), action=self.action.get(), installed=bool(self.existing),
+                            need_game=bool(self.damaged[1]),
+                            need_build=bool(self.damaged[0]) and not self.package_found)
 
     @property
     def on_pc(self) -> bool:
-        return self.platform.get() == "pc"
+        return self.platform.get() == "pc" or self.action.get() != "install"
 
-    def need(self, page: str) -> str:
-        """What the page needs: the Halo PC files are the Vita's to need."""
-        return "Optional" if page == "pc_files" and self.on_pc else self.PAGES[page][1]
+    def verb(self) -> str:
+        return {"repair": "Repair", "uninstall": "Uninstall"}.get(self.action.get(), "Install")
 
-    @property
-    def classic(self) -> bool:
-        return self.theme == "classic"
-
-    @property
-    def modern_look(self) -> bool:
-        return self.theme in ("light", "dark")
-
-    def _modern_theme(self) -> str:
-        """The Modern look's light or dark: the one chosen with Dark mode,
-        else the system's (followed while it changes)."""
-        dark = self.settings.get("dark")
-        if isinstance(dark, bool):
-            self.follow_system = False
-            return "dark" if dark else "light"
-        self.follow_system = True
-        return system_theme()
-
-    # -- sizes, fonts and colours
+    # -- the shell of the pages
     def px(self, value: float) -> int:
         return int(round(value * self.scale))
 
     def _make_fonts(self):
         from tkinter import font as tkfont
-        families = set(tkfont.families(self.root))
-        default = tkfont.nametofont("TkDefaultFont", root=self.root).actual("family")
+        base = tkfont.nametofont("TkDefaultFont", root=self.root).actual()
+        self.font_bold = tkfont.Font(root=self.root, family=base["family"], size=base["size"], weight="bold")
+        self.font_large = tkfont.Font(root=self.root, family=base["family"], size=int(base["size"] * 1.5), weight="bold")
+        white = "#ffffff"
+        self.style.configure("White.TFrame", background=white)
+        self.style.configure("White.TLabel", background=white)
+        self.style.configure("White.TCheckbutton", background=white)
+        self.style.map("White.TCheckbutton", background=[("active", white), ("disabled", white)])
 
-        def first(names, fallback):
-            return next((name for name in names if name in families), fallback)
-        if self.classic:
-            # Windows 95/98's dialog fonts (MS Sans Serif's TrueType sibling,
-            # Verdana for the titles, as its setup wizards had), in points
-            if sys.platform == "win32":
-                text = first(("Microsoft Sans Serif", "Tahoma", "Arial"), default)
-                display = first(("Verdana",), text)
-                fixed = first(("Courier New",), None)
-            else:
-                text = first(("DejaVu Sans", "Liberation Sans", "Arial", "Helvetica"), default)
-                display = text
-                fixed = None
-            self.fonts = {
-                "HcvCaption": (text, 8, "normal"), "HcvBody": (text, 9, "normal"),
-                "HcvBodyStrong": (text, 9, "bold"), "HcvSubtitle": (display, 10, "bold"),
-                "HcvTitle": (display, 12, "bold"), "HcvLink": (text, 9, "normal"),
-            }
-            sizes = {name: size for name, (_, size, _) in self.fonts.items()}
-            body, fixed_size = 9, 9
-        else:
-            if sys.platform == "win32":
-                text = first(("Segoe UI Variable Text",), "Segoe UI")
-                display = first(("Segoe UI Variable Display",), "Segoe UI")
-            else:
-                text = first(("Segoe UI", "Inter", "Cantarell", "Noto Sans", "Ubuntu", "DejaVu Sans"), default)
-                display = text
-            fixed = None
-            # sizes in pixels (sv-ttk's), scaled for the display
-            self.fonts = {
-                "HcvCaption": (text, 12, "normal"), "HcvBody": (text, 14, "normal"),
-                "HcvBodyStrong": (text, 14, "bold"), "HcvSubtitle": (display, 17, "bold"),
-                "HcvTitle": (display, 26, "bold"), "HcvLink": (text, 14, "normal"),
-            }
-            sizes = {name: -self.px(size) for name, (_, size, _) in self.fonts.items()}
-            body, fixed_size = -self.px(14), -self.px(12)
-        # (kept: tkinter deletes a named font when its Font object goes)
-        self._font_objects = getattr(self, "_font_objects", [])
-        for name, (family, _, weight) in self.fonts.items():
-            options = dict(family=family, size=sizes[name], weight=weight, underline=name == "HcvLink")
-            try:
-                tkfont.Font(root=self.root, name=name, exists=True).configure(**options)
-            except self.tk.TclError:
-                self._font_objects.append(tkfont.Font(root=self.root, name=name, **options))
-        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont"):
-            tkfont.nametofont(name, root=self.root).configure(family=text, size=body)
-        fixed_font = tkfont.nametofont("TkFixedFont", root=self.root)
-        if not hasattr(self, "_fixed_family"):
-            self._fixed_family = fixed_font.actual("family")
-        fixed_font.configure(family=fixed or self._fixed_family, size=fixed_size)
-
-    def _sv_fonts(self):
-        """sv-ttk's named fonts in the window's family and scaled sizes
-        (its own are Windows 11's Segoe UI Variable at fixed pixel sizes)."""
-        from tkinter import font as tkfont
-        text = self.fonts["HcvBody"][0]
-        display = self.fonts["HcvTitle"][0]
-        for name, family, size, weight in (("SunValleyCaptionFont", text, 12, "normal"),
-                                           ("SunValleyBodyFont", text, 14, "normal"),
-                                           ("SunValleyBodyStrongFont", text, 14, "bold"),
-                                           ("SunValleyBodyLargeFont", text, 18, "normal"),
-                                           ("SunValleySubtitleFont", display, 20, "bold"),
-                                           ("SunValleyTitleFont", display, 28, "bold")):
-            try:
-                tkfont.Font(root=self.root, name=name, exists=True).configure(
-                    family=family, size=-self.px(size), weight=weight)
-            except self.tk.TclError:
-                pass
-
-    def apply_theme(self, theme: str):
-        style = self.ttk.Style(self.root)
-        if self.sv_ttk and theme in ("light", "dark"):
-            self.sv_ttk.set_theme(theme, self.root)
-            self._sv_fonts()
-            palette = _palette(theme)
-        elif theme == "classic":
-            # Tk's Windows 95/98-style theme, everywhere (Windows' own
-            # "winnative" would draw its buttons in the system's colours)
-            names = style.theme_names()
-            style.theme_use("alt" if "alt" in names else "classic")
-            palette = _palette("classic")
-            _set_palette(self.root, background=palette["bg"], foreground=palette["fg"],
-                         selectBackground=palette["accent"], selectForeground=palette["on_accent"],
-                         activeBackground=palette["bg"], highlightColor=palette["fg"])
-            style.configure(".", background=palette["bg"], foreground=palette["fg"], font="TkDefaultFont",
-                            troughcolor=palette["bg"], selectbackground=palette["accent"],
-                            selectforeground=palette["on_accent"], fieldbackground="#ffffff")
-            self._classic_indicators(style)
-        else:
-            theme = "plain"
-            names = style.theme_names()
-            for name in ("vista", "aqua", "clam"):
-                if name in names:
-                    style.theme_use(name)
-                    break
-            palette = _palette("light")
-            palette["bg"] = palette["header"] = style.lookup(".", "background") or "#f0f0f0"
-            palette["sidebar"] = palette["row"] = palette["row_current"] = "#e6e6e6"
-            palette["fg"] = palette["row_fg_current"] = style.lookup(".", "foreground") or "#000000"
-            palette["border"] = "#c4c4c4"
-        self.theme = theme
-        self.palette = palette
-        self._styles(style, palette)
-        self._repaint()
-        # sv-ttk recolours the widgets there are (tk_setPalette) once Tk
-        # gets to its <<ThemeChanged>>, after this: painted again then
-        self.root.after_idle(self._repaint)
-        _windows_title_bar(self.root, theme == "dark")
-
-    def _classic_indicators(self, style):
-        """Check boxes and radio buttons drawn at the display's scale: Tk's
-        own in its classic themes are 13 pixels whatever the scale (tiny
-        next to the text at 150%)."""
-        size = self.px(13)
-        if size < 16 or "Hcv.Checkbutton.indicator" in style.element_names():
-            return
-        try:
-            images = {}
-            for kind in ("check", "radio"):
-                for on in (False, True):
-                    for disabled in (False, True):
-                        images[kind, on, disabled] = self.tk.PhotoImage(
-                            master=self.root, data=indicator_png(kind, on, disabled, size), format="png")
-        except self.tk.TclError:
-            return
-        self._indicator_images = images
-        for kind, widget in (("check", "Checkbutton"), ("radio", "Radiobutton")):
-            style.element_create("Hcv.%s.indicator" % widget, "image", images[kind, False, False],
-                                 ("disabled", "selected", images[kind, True, True]),
-                                 ("disabled", images[kind, False, True]),
-                                 ("selected", images[kind, True, False]),
-                                 width=size + self.px(5), sticky="w")  # (the gap before the text)
-            style.layout("T" + widget, [("%s.padding" % widget, {"sticky": "nswe", "children": [
-                ("Hcv.%s.indicator" % widget, {"side": "left", "sticky": ""}),
-                ("%s.focus" % widget, {"side": "left", "sticky": "w", "children": [
-                    ("%s.label" % widget, {"sticky": "nswe"})]})]})])
-
-    def _repaint(self):
-        """The colours that are not ttk styles: the labels' own (tk_setPalette
-        gives every label the theme's background, which hides the styles'),
-        the log and the sidebar's markers."""
-        if not self.card.winfo_exists():
-            return
-        palette = self.palette
-        widgets = [self.root]
-        while widgets:
-            widget = widgets.pop()
-            widgets.extend(widget.winfo_children())
-            if widget.winfo_class() == "TLabel":
-                widget.configure(background="", foreground="")
-        self.root.configure(background=palette["bg"])
-        if self.classic:
-            self.card.configure(background=palette["bg"], highlightthickness=0)
-            self.step_list.configure(background=palette["row"])
-        else:
-            self.card.configure(background=palette["bg"], highlightthickness=1,
-                                highlightbackground=palette["border"], highlightcolor=palette["border"])
-        self.canvas.configure(background=palette["bg"], yscrollincrement=self.px(20))
-        self.log_text.configure(background=palette["log"], foreground=palette["fg"],
-                                insertbackground=palette["fg"], highlightbackground=palette["border"],
-                                highlightcolor=palette["border"], selectbackground=palette["accent"],
-                                selectforeground=palette["on_accent"])
-        self.refresh_sidebar()
-
-    def _styles(self, style, p):
-        px = self.px
-        classic = self.classic
-        for name in ("TFrame", "TLabel", "TRadiobutton", "TCheckbutton"):
-            style.configure(name, background=p["bg"])
-        style.configure("TLabel", foreground=p["fg"], font="HcvBody")
-        style.configure("TRadiobutton", font="HcvBody")
-        style.configure("TCheckbutton", font="HcvBody")
-        style.configure("Sidebar.TFrame", background=p["sidebar"])
-        style.configure("Sidebar.TLabel", background=p["sidebar"], foreground=p["fg"], font="HcvBody")
-        style.configure("SidebarCurrent.TLabel", background=p["sidebar"], foreground=p["fg"], font="HcvBodyStrong")
-        style.configure("SidebarMuted.TLabel", background=p["sidebar"], foreground=p["muted"], font="HcvCaption")
-        style.configure("SidebarBrand.TLabel", background=p["sidebar"], foreground=p["fg"], font="HcvSubtitle")
-        style.configure("Sidebar.Switch.TCheckbutton", background=p["sidebar"], foreground=p["fg"],
-                        font="HcvCaption")
-        style.configure("Sidebar.TCheckbutton", background=p["sidebar"], foreground=p["fg"], font="HcvCaption")
-        # the step list's rows: the current one as a selected list item in
-        # the classic look, in bold in the Modern one
-        style.configure("Row.TFrame", background=p["row"])
-        style.configure("RowCurrent.TFrame", background=p["row_current"])
-        style.configure("Row.TLabel", background=p["row"], foreground=p["fg"], font="HcvBody")
-        style.configure("RowCurrent.TLabel", background=p["row_current"], foreground=p["row_fg_current"],
-                        font="HcvBody" if classic else "HcvBodyStrong")
-        style.configure("RowMuted.TLabel", background=p["row"], foreground=p["row_muted"], font="HcvCaption")
-        style.configure("RowCurrentMuted.TLabel", background=p["row_current"],
-                        foreground=p["row_muted_current"], font="HcvCaption")
-        style.configure("Picture.TLabel", background=p["sidebar"], relief="sunken" if classic else "flat",
-                        borderwidth=2 if classic else 0, padding=0)
-        style.configure("Header.TFrame", background=p["header"])
-        style.configure("Step.TLabel", background=p["header"], foreground=p["accent"], font="HcvCaption")
-        style.configure("Title.TLabel", background=p["header"], foreground=p["fg"], font="HcvTitle")
-        style.configure("Description.TLabel", background=p["header"], foreground=p["muted"], font="HcvBody")
-        style.configure("Subtitle.TLabel", foreground=p["fg"], font="HcvSubtitle")
-        style.configure("Muted.TLabel", foreground=p["muted"], font="HcvBody")
-        style.configure("Field.TLabel", foreground=p["fg"], font="HcvBodyStrong")
-        style.configure("Hint.TLabel", foreground=p["muted"], font="HcvCaption")
-        # (a tooltip's pale yellow box in the classic look, a pill in the Modern one)
-        style.configure("Tag.TLabel", background=p["tag"], foreground=p["fg"] if classic else p["accent"],
-                        font="HcvCaption", padding=(px(5), 0) if classic else (px(8), px(1)),
-                        relief="solid" if classic else "flat", borderwidth=1 if classic else 0)
-        # (the classic look's chips are status bar panes)
-        for name, colour in (("Chip.TLabel", p["muted"]), ("ChipOk.TLabel", p["ok"])):
-            style.configure(name, background=p["chip"], foreground=colour, font="HcvCaption",
-                            padding=(px(6), px(1)) if classic else (px(8), px(2)),
-                            relief="sunken" if classic else "flat", borderwidth=1 if classic else 0)
-        style.configure("Warning.TLabel", foreground=p["error"], font="HcvBody")
-        style.configure("Success.TLabel", foreground=p["ok"], font="HcvBody")
-        style.configure("Link.TLabel", foreground=p["link"], font="HcvLink")
-        style.configure("HintLink.TLabel", foreground=p["link"], font="HcvCaption")
-        style.configure("Option.TRadiobutton", font="HcvBodyStrong")
-        if self.theme in ("plain", "classic"):
-            style.configure("Accent.TButton", font="HcvBodyStrong" if self.theme == "plain" else "HcvBody")
-        if classic:
-            style.configure("TButton", font="HcvBody", padding=(px(10), px(2)))
-            style.configure("Accent.TButton", padding=(px(10), px(2)))
-            style.configure("TEntry", fieldbackground="#ffffff", foreground=p["fg"])
-            # (Tk's theme lights up what is greyed)
-            style.map("Option.TRadiobutton", background=[("disabled", p["bg"]), ("active", p["bg"])])
-            style.configure("Horizontal.TProgressbar", background=p["accent"], troughcolor=p["bg"])
-
-    # -- the layout
     def _build(self):
-        tk, ttk, px = self.tk, self.ttk, self.px
-        root = self.root
-        classic = self.classic
-        self.sidebar = ttk.Frame(root, style="Sidebar.TFrame", width=px(264),
-                                 padding=(px(14), px(14)) if classic else (px(18), px(20)))
-        self.sidebar.pack(side="left", fill="y")
-        self.sidebar.pack_propagate(False)
-        if classic:
-            ttk.Separator(root, orient="vertical").pack(side="left", fill="y")
-        brand = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
-        brand.pack(fill="x", pady=(0, px(14 if classic else 22)))
-        self._brand_icon = None
-        try:
-            self._brand_icon = tk.PhotoImage(data=icon_png(px(32 if classic else 36)), format="png")
-            ttk.Label(brand, image=self._brand_icon, style="Sidebar.TLabel").pack(side="left", padx=(0, px(10)))
-        except tk.TclError:
-            pass
-        names = ttk.Frame(brand, style="Sidebar.TFrame")
-        names.pack(side="left", fill="x")
-        ttk.Label(names, text="Halo CE for PS Vita", style="SidebarCurrent.TLabel").pack(anchor="w")
-        ttk.Label(names, text="Install helper %s" % VERSION, style="SidebarMuted.TLabel").pack(anchor="w")
-
-        # the steps: in the classic look a white list box (sunken), each
-        # step with a check box and its number
-        self.step_list = tk.Frame(self.sidebar, relief="sunken" if classic else "flat",
-                                  borderwidth=2 if classic else 0, highlightthickness=0)
-        self.step_list.pack(fill="x")
-        self._rows_shown = None
-        self.build_rows()
-
-        # the bottom of the sidebar: the looks, then above them the page's picture
-        if self.sv_ttk:
-            if self.modern_look:
-                ttk.Checkbutton(self.sidebar, text="Dark mode", variable=self.dark,
-                                style="Sidebar.Switch.TCheckbutton",
-                                command=self.toggle_theme).pack(side="bottom", anchor="w", pady=(px(6), 0))
-            ttk.Checkbutton(self.sidebar, text="Modern look", variable=self.modern,
-                            style="Sidebar.Switch.TCheckbutton" if self.modern_look else "Sidebar.TCheckbutton",
-                            command=self.toggle_look).pack(side="bottom", anchor="w", pady=(px(6), 0))
-        self.picture_box = ttk.Frame(self.sidebar, style="Sidebar.TFrame")
-        self.picture_box.pack(side="bottom", fill="x", pady=(px(10), 0))
-        self.picture_label = ttk.Label(self.picture_box, style="Picture.TLabel", anchor="center")
-        self.picture_caption = ttk.Label(self.picture_box, style="SidebarMuted.TLabel", justify="left",
-                                         wraplength=px(228))
-
-        main = ttk.Frame(root)
-        main.pack(side="left", fill="both", expand=True)
-        self.main = main
-        # the header: in the classic look a white band (a setup wizard's),
-        # with an etched line below
-        header = ttk.Frame(main, style="Header.TFrame",
-                           padding=(px(18), px(12), px(18), px(12)) if classic else (px(30), px(24), px(30), px(16)))
-        header.pack(side="top", fill="x")
-        self.header = header
-        if classic:
-            ttk.Separator(main).pack(side="top", fill="x")
-        self.step_caption = ttk.Label(header, style="Step.TLabel")
-        self.step_caption.pack(anchor="w")
-        title_row = ttk.Frame(header, style="Header.TFrame")
-        title_row.pack(fill="x", pady=(px(2), px(4)))
-        self.title_label = ttk.Label(title_row, style="Title.TLabel")
-        self.title_label.pack(side="left")
-        self.tag_label = ttk.Label(title_row, style="Tag.TLabel")
-        self.description = self.paragraph(header, "", "Description.TLabel")
-        if classic:
-            self.description.pack_configure(padx=(px(14), 0))
-
-        content = ttk.Frame(main, padding=(px(18), px(12), px(18), px(12)) if classic
-                            else (px(30), 0, px(30), px(18)))
-        content.pack(side="top", fill="both", expand=True)
-        # (packed from the bottom up, so the buttons stay on screen)
-        buttons = ttk.Frame(content)
-        buttons.pack(side="bottom", fill="x", pady=(px(12), 0))
-        self.back_button = ttk.Button(buttons, text="Back", width=10,
-                                      command=lambda: self.go_step(-1))
-        self.back_button.pack(side="left")
-        self.stop_button = ttk.Button(buttons, text="Stop", width=10, command=self.cancel.set, state="disabled")
-        self.stop_button.pack(side="left", padx=(px(8), 0))
-        self.next_button = ttk.Button(buttons, text="Next", width=14, style="Accent.TButton",
-                                      command=lambda: self.go_step(1))
-        self.next_button.pack(side="right")
-        ttk.Separator(content).pack(side="bottom", fill="x", pady=(px(12), 0))
-
-        self.details = ttk.Frame(content)
-        self.log_text = tk.Text(self.details, height=8, wrap="word", state="disabled",
-                                relief="sunken" if classic else "flat", borderwidth=2 if classic else 0,
-                                highlightthickness=0 if classic else 1, padx=px(8), pady=px(6),
-                                font="TkFixedFont")
-        scroll = ttk.Scrollbar(self.details, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=scroll.set)
-        self.log_text.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
-
-        self.progress_frame = ttk.Frame(content)
-        self.progress_frame.pack(side="bottom", fill="x", pady=(px(14), 0))
-        line = ttk.Frame(self.progress_frame)
-        line.pack(fill="x")
-        ttk.Label(line, textvariable=self.status, style="Muted.TLabel").pack(side="left")
-        self.details_button = ttk.Button(line, text="Show details", style="TButton" if classic else "Toolbutton",
-                                         command=self.toggle_details)
-        self.details_button.pack(side="right")
-        ttk.Label(line, textvariable=self.percent, style="Muted.TLabel").pack(side="right", padx=(0, px(10)))
-        self.progress = ttk.Progressbar(self.progress_frame, mode="determinate", maximum=1000)
-        self.progress.pack(fill="x", pady=(px(6), 0))
-
-        # the step's card (a thin border around the page's own widgets in the
-        # Modern look), which scrolls when the window is too short for them
-        # (a small screen at a large scale)
-        self.card = tk.Frame(content, highlightthickness=0 if classic else 1, borderwidth=0)
-        self.card.pack(side="top", fill="both", expand=True)
-        self.canvas = tk.Canvas(self.card, highlightthickness=0, borderwidth=0)
-        self.scrollbar = ttk.Scrollbar(self.card, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.body = ttk.Frame(self.canvas, padding=(px(4), px(4)) if classic else (px(22), px(18)))
-        self._body_item = self.canvas.create_window(0, 0, window=self.body, anchor="nw")
-        self.body.bind("<Configure>", lambda event: self._fit_body())
-        self.canvas.bind("<Configure>", lambda event: self._fit_body())
-        self.canvas.bind("<Enter>", lambda event: self._wheel(True))
-        self.canvas.bind("<Leave>", lambda event: self._wheel(False))
-
-    def build_rows(self):
-        """The sidebar's list: the pages of the choices made so far."""
-        tk, ttk, px = self.tk, self.ttk, self.px
-        classic = self.classic
-        flow = self.flow()
-        if flow == self._rows_shown:
-            return
-        self._rows_shown = flow
-        for child in self.step_list.winfo_children():
-            child.destroy()
-        self.step_rows = {}
-        self._row_frames = {}
-        for number, page in enumerate(flow, 1):
-            name = self.PAGES[page][0]
-            row = ttk.Frame(self.step_list, style="Row.TFrame",
-                            padding=(px(4), px(3), 0, px(3)) if classic else (0, px(5)))
-            row.pack(fill="x")
-            size = px(18) if classic else px(26)
-            marker = tk.Canvas(row, width=size, height=size, highlightthickness=0, borderwidth=0)
-            marker.pack(side="left", padx=(0, px(6 if classic else 10)), anchor="n" if classic else "center")
-            words = ttk.Frame(row, style="Row.TFrame")
-            words.pack(side="left", fill="x", expand=True)
-            # (a little room to the right: Windows' text can be drawn wider than Tk measured it)
-            title = ttk.Label(words, text="%d. %s" % (number, name) if classic and page != "done" else name,
-                              style="Row.TLabel", padding=(0, 0, px(6), 0))
-            title.pack(anchor="w")
-            state = ttk.Label(words, style="RowMuted.TLabel", padding=(0, 0, px(6), 0))
-            if page != "done":
-                state.pack(anchor="w")
-            for widget in (row, marker, words, title, state):
-                widget.bind("<Button-1>", lambda event, key=page: self.go(key))
-                widget.configure(cursor="hand2")
-            self.step_rows[page] = (marker, title, state, number)
-            self._row_frames[page] = (row, words)
-
-    def _choices_changed(self):
-        """A platform or a way picked: the sidebar shows its pages."""
-        self.build_rows()
-        self.refresh_sidebar()
-
-    def _fit_body(self):
-        """The page as wide as the card and at least as tall (so what is
-        packed at its bottom sits there), with the scroll bar only when the
-        page is taller."""
-        width, height = self.canvas.winfo_width(), self.canvas.winfo_height()
-        needed = self.body.winfo_reqheight()
-        if width <= 1 or height <= 1:
-            return
-        self.canvas.itemconfigure(self._body_item, width=width, height=max(needed, height))
-        self.canvas.configure(scrollregion=(0, 0, width, max(needed, height)))
-        if needed > height + 1:
-            if not self.scrollbar.winfo_ismapped():
-                self.scrollbar.pack(side="right", fill="y", before=self.canvas)
-        elif self.scrollbar.winfo_ismapped():
-            self.scrollbar.pack_forget()
-            self.canvas.yview_moveto(0)
-
-    def _wheel(self, inside: bool):
-        if not inside:
-            self.canvas.unbind_all("<MouseWheel>")
-            self.canvas.unbind_all("<Button-4>")
-            self.canvas.unbind_all("<Button-5>")
-            return
-
-        def scroll(steps):
-            if self.scrollbar.winfo_ismapped():
-                self.canvas.yview_scroll(steps, "units")
-        self.canvas.bind_all("<MouseWheel>", lambda event: scroll(-1 if event.delta > 0 else 1))
-        self.canvas.bind_all("<Button-4>", lambda event: scroll(-1))
-        self.canvas.bind_all("<Button-5>", lambda event: scroll(1))
-
-    # -- the pictures
-    def picture(self, page: str):
-        """The page's picture, zoomed by whole pixels (so it shows as big
-        square pixels), or None when its file is missing or unreadable."""
-        if page in self._pictures:
-            return self._pictures[page]
-        image = None
-        name = PAGE_PICTURES[page][0] if page in PAGE_PICTURES else ""
-        path = picture_path(name) if name else ""
-        if path and os.path.isfile(path):
-            try:
-                image = self.tk.PhotoImage(master=self.root, file=path)
-                # (whole pixels that fit the sidebar's width at any scale)
-                zoom = max(1, int(PICTURE_ZOOM * self.scale + 1e-6))
-                if zoom > 1:
-                    image = image.zoom(zoom)
-            except self.tk.TclError:
-                image = None
-        self._pictures[page] = image
-        return image
-
-    def show_picture(self, page: str):
-        image = self.picture(page)
-        if image is None:
-            self.picture_label.pack_forget()
-            self.picture_caption.pack_forget()
-            return
-        self.picture_label.configure(image=image)
-        self.picture_caption.configure(text=PAGE_PICTURES[page][1])
-        if not self.picture_label.winfo_manager():
-            self.picture_label.pack(anchor="w")
-            self.picture_caption.pack(anchor="w", fill="x", pady=(self.px(4), 0))
-
-    def refresh_sidebar(self):
-        if not hasattr(self, "step_rows"):
-            return
-        p = self.palette
-        staged = self._staged_done()
-        for page, (marker, title, state, number) in self.step_rows.items():
-            current = page == self.page
-            done = self.step_state_done(page)
-            skipped = page in self.skipped and not done
-            row, words = self._row_frames[page]
-            row.configure(style="RowCurrent.TFrame" if current else "Row.TFrame")
-            words.configure(style="RowCurrent.TFrame" if current else "Row.TFrame")
-            title.configure(style="RowCurrent.TLabel" if current else "Row.TLabel")
-            state.configure(style="RowCurrentMuted.TLabel" if current else "RowMuted.TLabel")
-            state.configure(text=self.row_state(page, done, skipped))
-            marker.configure(background=p["row_current"] if current else p["row"])
-            marker.delete("all")
-            size = int(marker.cget("width"))
-            if self.classic:
-                self._classic_marker(marker, size, page, done, skipped)
-                continue
-            inset = max(1, self.px(1.5))
-            box = (inset, inset, size - inset, size - inset)
-            if page == "done":  # a dot
-                radius = self.px(5 if current else 4)
-                colour = p["accent"] if current else p["ring"]
-                marker.create_oval(size / 2 - radius, size / 2 - radius, size / 2 + radius, size / 2 + radius,
-                                   fill=colour, outline=colour)
-            elif current:
-                marker.create_oval(*box, fill=p["accent"], outline=p["accent"])
-                marker.create_text(size / 2, size / 2, text=str(number), fill=p["on_accent"], font="HcvCaption")
-            elif done:
-                marker.create_oval(*box, fill=p["ok"], outline=p["ok"])
-                marker.create_line(size * 0.30, size * 0.52, size * 0.44, size * 0.66, size * 0.71, size * 0.36,
-                                   fill=p["bg"] if self.theme == "dark" else "#ffffff", width=max(2, self.px(2)),
-                                   capstyle="round", joinstyle="round")
-            elif skipped:
-                marker.create_oval(*box, outline=p["ring"], width=max(1, self.px(1.5)), dash=(3, 2))
-                marker.create_line(size * 0.35, size / 2, size * 0.65, size / 2, fill=p["ring"],
-                                   width=max(2, self.px(2)), capstyle="round")
-            else:
-                marker.create_oval(*box, outline=p["ring"], width=max(1, self.px(1.5)))
-                marker.create_text(size / 2, size / 2, text=str(number), fill=p["muted"], font="HcvCaption")
-
-    def row_state(self, page: str, done: bool, skipped: bool) -> str:
-        """The line under a page's name in the sidebar."""
-        if page in self.CHOICE_PAGES:
-            choices = {"game": (GAMES, self.game), "platform": (PLATFORMS, self.platform),
-                       "mode": (MODES, self.mode)}[page]
-            return pick(*(choices[0], choices[1].get())).name
-        return "Done" if done else "Skipped" if skipped else self.SIDEBAR_NEEDS.get(page, self.need(page))
-
-    def _classic_marker(self, marker, size: int, page: str, done: bool, skipped: bool):
-        """A Windows 95/98 check box: sunken, ticked when the step is done,
-        greyed with a dash when it was skipped. The Done page: an arrow."""
-        px = self.px
-        box = px(13)
-        x0 = (size - box) // 2
-        y0 = max(0, (size - box) // 2)
-        x1, y1 = x0 + box - 1, y0 + box - 1
-        if page == "done":
-            colour = "#ffffff" if page == self.page else "#000000"
-            marker.create_polygon(x0 + px(3), y0 + px(2), x1 - px(2), (y0 + y1) / 2, x0 + px(3), y1 - px(2),
-                                  fill=colour, outline=colour)
-            return
-        marker.create_rectangle(x0, y0, x1, y1, fill="#c0c0c0" if skipped else "#ffffff", outline="")
-        # the bevel: dark grey and black above and left, white and light grey below and right
-        for offset, top_left, bottom_right in ((0, "#808080", "#ffffff"), (1, "#000000", "#dfdfdf")):
-            marker.create_line(x0 + offset, y1 - offset, x0 + offset, y0 + offset, x1 - offset, y0 + offset,
-                               fill=top_left)
-            marker.create_line(x0 + offset, y1 - offset, x1 - offset, y1 - offset, x1 - offset, y0 + offset - 1,
-                               fill=bottom_right)
-        if done:
-            marker.create_line(x0 + box * 0.25, y0 + box * 0.50, x0 + box * 0.42, y0 + box * 0.68,
-                               x0 + box * 0.76, y0 + box * 0.30, fill="#000000", width=max(2, px(2)))
-        elif skipped:
-            marker.create_line(x0 + box * 0.28, y0 + box / 2, x0 + box * 0.72, y0 + box / 2, fill="#808080",
-                               width=max(2, px(2)))
-
-    def step_state(self, page: str) -> str:
-        """'current', 'done', 'skipped' or 'todo', as the sidebar shows it."""
-        if page == self.page:
-            return "current"
-        if self.step_state_done(page):
-            return "done"
-        if page in self.skipped:
-            return "skipped"
-        return "todo"
-
-    def _staged_summary(self) -> dict:
-        items = staged_uploads(self.out.get())
-        maps = [item for item in items if item.folder == VITA_GAME_FOLDER + "/" + STAGING_MAPS]
-        names = {item.name.lower() for item in maps}
-        pc = [name for name, _ in PC_RESOURCE_MAPS if name in names]
-        mcc = [item for item in items if item.folder.startswith(VITA_GAME_FOLDER + "/" + STAGING_MCC + "/")]
-        return {"items": items, "maps": maps, "movies": [item for item in items if item.folder.endswith("/movies")],
-                "pc": pc, "pc_status": pc_files_status(self.out.get()),
-                "xbe": any(item.name == STAGING_XBE for item in items),
-                "xbox_maps": all(name in names for name in XBOX_REQUIRED_MAPS),
-                "mcc": mcc if mcc_staged(self.out.get()) else [],
-                "mcc_maps": [item for item in mcc if item.folder.endswith("/halo1/maps") and
-                             item.name.lower()[:-4] in MCC_CAMPAIGN_MAPS + MCC_MULTIPLAYER_MAPS],
-                "size": sum(item.size for item in items)}
-
-    def _staged_done(self) -> set:
-        try:
-            summary = self._staged_summary()
-        except OSError:
-            return set()
-        done = set()
-        if summary["xbe"] and summary["xbox_maps"] or summary["mcc"]:
-            done.add("game_files")
-        if summary["mcc"]:
-            done.add("automatic")
-        if summary["movies"]:
-            done.add("movies")
-        if summary["pc_status"].complete:
-            done.add("pc_files")
-        return done
-
-    # -- helpers
-    def clear(self):
-        for child in self.body.winfo_children():
-            child.destroy()
-        self.notice = None
-        self.canvas.yview_moveto(0)
-
-    def paragraph(self, parent, text: str, style: str = "TLabel", pady=(0, 0)):
-        """A label that wraps to the width it is given."""
-        label = self.ttk.Label(parent, text=text, style=style, justify="left", anchor="w",
-                               wraplength=self.px(600))
-        label.pack(fill="x", anchor="w", pady=pady)
-        label.bind("<Configure>", self._wrap)
-        return label
-
-    def _wrap(self, event):
-        """A label wrapped to the width it was given; the page fitted again
-        once it has (fewer lines can make the scroll bar unneeded, and the
-        page's own size does not change for it to notice)."""
-        width = max(event.width - 4, 120)
-        if str(event.widget.cget("wraplength")) != str(width):
-            event.widget.configure(wraplength=width)
-            if not getattr(self, "_fit_pending", None):
-                self._fit_pending = self.root.after_idle(self._fit_later)
-
-    def _fit_later(self):
-        self._fit_pending = None
-        if self.canvas.winfo_exists():
-            self._fit_body()
-
-    def heading(self, text: str, explanation: str = ""):
-        """A section's heading in the card, and its text."""
-        self.ttk.Label(self.body, text=text, style="Subtitle.TLabel").pack(anchor="w", pady=(0, self.px(4)))
-        if explanation:
-            self.paragraph(self.body, explanation, "Muted.TLabel", pady=(0, self.px(12)))
-
-    def path_row(self, label: str, variable, browse_file=None, browse_folder=None, filetypes=None, hint: str = "",
-                 tag: str = "", parent=None, picked=None):
-        """A field: its name (and what it needs), the entry and its Choose
-        buttons, then a hint below."""
         ttk, px = self.ttk, self.px
-        from tkinter import filedialog
-        box = ttk.Frame(parent or self.body)
-        box.pack(fill="x", pady=(0, px(10)))
-        head = ttk.Frame(box)
-        head.pack(fill="x")
-        ttk.Label(head, text=label, style="Field.TLabel").pack(side="left")
-        if tag:
-            ttk.Label(head, text=tag, style="Tag.TLabel").pack(side="left", padx=(px(8), 0))
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=(px(4), 0))
+        self.shell = ttk.Frame(self.root)
+        self.separator = ttk.Separator(self.root)
+        self.separator.pack(side="top", fill="x")
+        bar = self.button_bar = ttk.Frame(self.root, padding=(px(12), px(10)))
+        bar.pack(side="bottom", fill="x")
+        self.cancel_button = ttk.Button(bar, text="Cancel", width=10, command=self.ask_cancel)
+        self.cancel_button.pack(side="right")
+        self.next_button = ttk.Button(bar, text="Next >", width=10, default="active", command=self.go_next)
+        self.next_button.pack(side="right", padx=(0, px(10)))
+        self.back_button = ttk.Button(bar, text="< Back", width=10, command=self.go_back)
+        self.back_button.pack(side="right")
+        self.shell.pack(side="top", fill="both", expand=True, before=self.separator)
 
-        def choose(chosen):
-            if chosen:
-                variable.set(chosen)
-                if picked:
-                    picked()
-        entry = ttk.Entry(row, textvariable=variable)
-        entry.pack(side="left", fill="x", expand=True)
-        if picked:
-            entry.bind("<FocusIn>", lambda event: picked())
-        if browse_file:
-            ttk.Button(row, text="Choose file...", command=lambda: choose(
-                filedialog.askopenfilename(parent=self.root, filetypes=filetypes or [("All files", "*")]))
-            ).pack(side="left", padx=(px(6), 0))
-        if browse_folder:
-            ttk.Button(row, text="Choose folder...", command=lambda: choose(
-                filedialog.askdirectory(parent=self.root))).pack(side="left", padx=(px(6), 0))
-        if hint:
-            self.paragraph(box, hint, "Hint.TLabel", pady=(px(3), 0))
-        return box
-
-    def action(self, text: str, prepare, parent=None):
-        """The step's own button (the page's main action), with the line
-        that says what is missing, or what the step did."""
-        row = self.ttk.Frame(parent or self.body)
-        row.pack(fill="x", pady=(self.px(8), 0))
-        # (the main button until the step is done; then Next is)
-        button = self.ttk.Button(row, text=text, command=lambda: self.start(prepare))
-        self.set_main_button(button, not self.step_state_done(self.page))
-        button.pack(side="left")
-        result = self.results.get(self.page)
-        self.notice = self.ttk.Label(row, text=("✓ " + result.splitlines()[0]) if result else "",
-                                     style="Success.TLabel", justify="left", wraplength=self.px(420))
-        self.notice.pack(side="left", padx=(self.px(14), 0), fill="x", expand=True)
-        self.notice.bind("<Configure>", self._wrap)
-        return button
-
-    def set_main_button(self, button, main: bool):
-        """The page's main button: the accent colour in the Modern look, the
-        default button's black ring in the classic one."""
-        button.configure(style="Accent.TButton" if main else "TButton")
-        if self.classic:
-            button.configure(default="active" if main else "normal")
-
-    def show_notice(self, text: str, problem: bool = True):
-        if self.notice is not None and self.notice.winfo_exists():
-            self.notice.configure(text=("⚠ " if problem else "✓ ") + text,
-                                  style="Warning.TLabel" if problem else "Success.TLabel")
-            return True
-        return False
-
-    def notice_text(self) -> str:
-        return self.notice.cget("text") if self.notice is not None and self.notice.winfo_exists() else ""
-
-    def link(self, text: str, url: str, parent=None):
-        import webbrowser
-        label = self.ttk.Label(parent or self.body, text=text + " ↗", style="Link.TLabel", cursor="hand2")
-        label.pack(anchor="w", pady=(self.px(2), 0))
-        label.bind("<Button-1>", lambda event: webbrowser.open(url))
-        return label
-
-    def bullet(self, parent, text: str, tag: str = "", mark: str = "•", style: str = "TLabel"):
-        row = self.ttk.Frame(parent)
-        row.pack(fill="x", pady=(0, self.px(6)))
-        self.ttk.Label(row, text=mark, style=style, width=2).pack(side="left", anchor="n")
-        if tag:
-            self.ttk.Label(row, text=tag, style="Tag.TLabel").pack(side="right", anchor="n", padx=(self.px(8), 0))
-        words = self.ttk.Label(row, text=text, style=style, justify="left", wraplength=self.px(480))
-        words.pack(side="left", fill="x", expand=True)
-        words.bind("<Configure>", self._wrap)
-        return row
-
-    def log(self, message: str):
-        self.messages.put(("log", message))
-
-    def report(self, message: str, done: int, total: int):
-        if self.cancel.is_set():
-            raise Cancelled()
-        self.messages.put(("progress", message, done, total))
-
-    def toggle_details(self, show: Optional[bool] = None):
-        self.details_shown = (not self.details_shown) if show is None else show
-        if self.details_shown:
-            self.details.pack(side="bottom", fill="x", pady=(self.px(10), 0), before=self.progress_frame)
-            self.details_button.configure(text="Hide details")
-            self.root.update_idletasks()
-            needed = self.root.winfo_reqheight()
-            if self.root.winfo_height() < needed <= self.root.winfo_screenheight() - 90:
-                self.root.geometry("%dx%d" % (self.root.winfo_width(), needed))
-        else:
-            self.details.pack_forget()
-            self.details_button.configure(text="Show details")
-
-    def toggle_theme(self):
-        """Dark mode (the Modern look's): kept in the settings."""
-        self.follow_system = False
-        self.settings["dark"] = bool(self.dark.get())
-        save_settings(self.settings)
-        self.apply_theme("dark" if self.dark.get() else "light")
-
-    def toggle_look(self):
-        """The Modern look check box: the window drawn again in the other
-        look (not while a step runs), kept in the settings."""
-        if self.busy() or not self.sv_ttk:
-            self.modern.set(self.modern_look)
-            return
-        if self.modern.get():
-            self.settings["look"] = "modern"
-            theme = self._modern_theme()
-        else:
-            self.settings["look"] = "classic"
-            self.follow_system = False
-            theme = "classic"
-        save_settings(self.settings)
-        self.set_look(theme)
-
-    def set_look(self, theme: str):
-        """Builds the window again in another look, keeping the page, the
-        fields (their variables), the log and whether it is shown."""
-        log = self.log_text.get("1.0", "end-1c")
-        details = self.details_shown
-        for child in self.root.winfo_children():
-            child.destroy()
-        self.notice = None
-        self.details_shown = False
-        self.theme = theme
-        self.dark.set(theme == "dark")
-        self.modern.set(self.modern_look)
-        self._make_fonts()
-        self._build()
-        self.apply_theme(theme)
-        if log:
-            self.append_log(log)
-        if details:
-            self.toggle_details(True)
-        self.show(self.page)
-        self._listen_for_system_theme()
-
-    def _listen_for_system_theme(self):
-        """The Modern look follows the system's dark or light setting while it
-        changes (Windows: darkdetect's listener, once)."""
-        if self._listening or not (self.follow_system and self.modern_look and sys.platform == "win32"):
-            return
-        try:
-            import darkdetect
-            listener = getattr(darkdetect, "listener", None)
-            if listener:
-                threading.Thread(target=listener, args=(lambda name: self.messages.put(("theme", name)),),
-                                 daemon=True).start()
-                self._listening = True
-        except Exception:
-            pass
-
-    # -- the worker: `prepare` reads the window's fields (here, on the
-    # window's thread: tkinter is not thread-safe) and returns the work,
-    # which runs on a thread of its own and reports through the queue
-    def start(self, prepare):
-        if self.worker and self.worker.is_alive():
-            return
-        try:
-            function = prepare()
-        except InstallerError as error:
-            if not self.show_notice(str(error)):
-                from tkinter import messagebox
-                messagebox.showerror("Halo CE for PS Vita", str(error), parent=self.root)
-            return
-        self.cancel.clear()
-        self.running_page = self.page
-        self.results.pop(self.page, None)
-        if self.notice is not None and self.notice.winfo_exists():
-            self.notice.configure(text="Working... (Show details for each file)", style="Muted.TLabel")
-        self.stop_button.configure(state="normal")
-        self.next_button.configure(state="disabled")
-        self.back_button.configure(state="disabled")
-        self.progress["value"] = 0
-        self.status.set("Starting...")
-        self.percent.set("")
-
-        def run():
+    def image(self, name: str, make):
+        if name not in self._images:
             try:
-                result = function()
-                self.messages.put(("done", result))
-            except Cancelled:
-                self.messages.put(("error", "Stopped."))
-            except InstallerError as error:
-                self.messages.put(("error", str(error)))
-            except Exception as error:  # shown, not lost in a thread
-                self.messages.put(("error", "Unexpected problem: %r" % (error,)))
-
-        self.worker = threading.Thread(target=run, daemon=True)
-        self.worker.start()
-
-    def busy(self) -> bool:
-        return bool(self.worker and self.worker.is_alive())
-
-    def poll(self):
-        try:
-            while True:
-                message = self.messages.get_nowait()
-                if message[0] == "log":
-                    self.append_log(message[1])
-                elif message[0] == "progress":
-                    _, text, done, total = message
-                    self.progress["value"] = 1000 * done // total if total else 0
-                    self.status.set(text[:1].upper() + text[1:] if text else "Working...")
-                    self.percent.set("%d%%" % (100 * done // total if total else 100))
-                elif message[0] == "theme":
-                    if self.follow_system and self.sv_ttk and self.modern_look:
-                        theme = "dark" if str(message[1]).lower() == "dark" else "light"
-                        self.dark.set(theme == "dark")
-                        self.apply_theme(theme)
-                elif message[0] in ("done", "error"):
-                    self.stop_button.configure(state="disabled")
-                    self.next_button.configure(state="normal")
-                    self.back_button.configure(state="normal")
-                    page, self.running_page = self.running_page, None
-                    if message[0] == "error":
-                        self.status.set("Stopped" if message[1] == "Stopped." else "Problem - see the details")
-                        self.percent.set("")
-                        self.append_log("ERROR: " + message[1])
-                        self.show(self.page)
-                        self.show_notice(message[1])
-                        if message[1] != "Stopped.":
-                            self.toggle_details(True)
-                            from tkinter import messagebox
-                            messagebox.showerror("Halo CE for PS Vita", message[1], parent=self.root)
-                    else:
-                        self.progress["value"] = 1000
-                        self.status.set("Done")
-                        self.percent.set("100%")
-                        if page is not None:
-                            self.done_steps.add(page)
-                            self.skipped.discard(page)
-                            self.results[page] = message[1] if isinstance(message[1], str) and message[1] else "Done"
-                        if isinstance(message[1], str) and message[1]:
-                            self.append_log(message[1])
-                        self.show(self.page)
-        except queue.Empty:
-            pass
-        self.root.after(100, self.poll)
-
-    def append_log(self, text: str):
-        self.log_text.configure(state="normal")
-        self.log_text.insert("end", text + "\n")
-        self.log_text.see("end")
-        self.log_text.configure(state="disabled")
-
-    # -- the pages
-    def go_step(self, by: int):
-        """Back and Next: the page before or after this one (Next on the last
-        page closes the window)."""
-        if self.busy():
-            return
-        flow = self.flow()
-        position = flow.index(self.page) + by if self.page in flow else 0
-        if position >= len(flow):
-            self.root.destroy()
-            return
-        self.go(flow[max(position, 0)])
-
-    def go(self, page: str):
-        """Back, Next and the sidebar: moving on past a step not done marks
-        it skipped, past a choice marks it made."""
-        if self.busy():
-            return
-        flow = self.flow()
-        if self.page in flow and page in flow and flow.index(page) > flow.index(self.page):
-            if self.page in self.CHOICE_PAGES:
-                self.done_steps.add(self.page)
-            elif not self.step_state_done(self.page):
-                self.skipped.add(self.page)
-        if page != self.page:
-            self.status.set("Ready")
-            self.percent.set("")
-            self.progress["value"] = 0
-        self.show(page)
-
-    def step_state_done(self, page: str) -> bool:
-        return page in self.done_steps or page in self._staged_done()
+                self._images[name] = self.tk.PhotoImage(master=self.root, data=make(), format="png")
+            except self.tk.TclError:
+                self._images[name] = None
+        return self._images[name]
 
     def show(self, page: str):
         self.page = page
-        self.build_rows()
-        flow = self.flow()
-        _, _, title, description = self.PAGES[page]
-        need = self.need(page)
-        number = flow.index(page) + 1 if page in flow else 0
-        self.step_caption.configure(text="FINISHED" if page == "done" else "STEP %d OF %d" % (number, len(flow) - 1))
-        self.title_label.configure(text=title)
-        if need:
-            self.tag_label.configure(text=need)
-            self.tag_label.pack(side="left", padx=(self.px(12), 0), pady=(self.px(6), 0))
-        else:
-            self.tag_label.pack_forget()
-        self.description.configure(text=description)
-        self.clear()
-        self.back_button.configure(state="normal" if number > 1 else "disabled")
-        ready = page in self.CHOICE_PAGES or page == "done" or self.step_state_done(page)
-        if page == "done":
-            self.next_button.configure(text="Close", state="normal")
-        elif ready:
-            self.next_button.configure(text="Next", state="normal")
-        else:
-            # the step's own button is the page's main one; this skips it
-            self.next_button.configure(text="Skip this step", state="normal")
-        self.set_main_button(self.next_button, ready)
-        getattr(self, "page_" + page)()
-        self.show_picture(page)
-        self.refresh_sidebar()
-
-    def option(self, value: str, text: str, variable, available: bool = True):
-        """One of a page's ways (a radio button), with its fields below it;
-        one not available yet is greyed and cannot be picked."""
         ttk, px = self.ttk, self.px
-        box = ttk.Frame(self.body)
-        box.pack(fill="x", pady=(0, px(4)))
-        row = ttk.Frame(box)
-        row.pack(anchor="w")
-        button = ttk.Radiobutton(row, text=text, value=value, variable=variable, style="Option.TRadiobutton")
-        button.pack(side="left")
+        for child in self.shell.winfo_children():
+            child.destroy()
+        title, line = self.PAGES[page]
+        title, line = self.words_of(page, title, line)
+        if page in self.EXTERIOR:
+            self.root.update_idletasks()
+            height = self.height - self.button_bar.winfo_reqheight() - self.separator.winfo_reqheight()
+            picture = self.image("sidebar", lambda: sidebar_png(px(self.SIDEBAR), height))
+            if picture is not None:
+                self.sidebar = self.tk.Label(self.shell, image=picture, borderwidth=0, highlightthickness=0)
+                self.sidebar.pack(side="left", fill="y")
+            self.body = ttk.Frame(self.shell, style="White.TFrame", padding=(px(20), px(20)))
+            self.body.pack(side="left", fill="both", expand=True)
+            self.wrap = self.width - px(self.SIDEBAR + 48)
+            self.white = True
+            self.title_label = ttk.Label(self.body, text=title, style="White.TLabel", font=self.font_large,
+                                         wraplength=self.wrap, justify="left")
+            self.title_label.pack(anchor="w", pady=(0, px(14)))
+        else:
+            band = ttk.Frame(self.shell, style="White.TFrame", padding=(px(16), px(10)))
+            band.pack(side="top", fill="x")
+            icon = self.image("icon", lambda: icon_png(px(40)))
+            if icon is not None:
+                ttk.Label(band, image=icon, style="White.TLabel").pack(side="right")
+            self.title_label = ttk.Label(band, text=title, style="White.TLabel", font=self.font_bold)
+            self.title_label.pack(anchor="w")
+            self.subtitle_label = ttk.Label(band, text=line, style="White.TLabel")
+            self.subtitle_label.pack(anchor="w", padx=(px(14), 0), pady=(px(2), 0))
+            ttk.Separator(self.shell).pack(side="top", fill="x")
+            self.body = ttk.Frame(self.shell, padding=(px(24), px(12)))
+            self.body.pack(side="top", fill="both", expand=True)
+            self.wrap = self.width - px(56)
+            self.white = False
+        getattr(self, "page_" + page)()
+        self.update_buttons()
+        self.next_button.focus_set()
+
+    def words_of(self, page: str, title: str, line: str) -> Tuple[str, str]:
+        """The titles that follow the choices."""
+        action = self.action.get()
+        if page == "destination":
+            line = "Choose the folder to install Halo CE in." if self.on_pc else "Tell Setup where your PS Vita is."
+        if page == "ready" and action != "install":
+            title, line = "Ready to %s" % self.verb(), "Setup is ready to %s Halo CE." % action
+        if page == "installing" and action == "repair":
+            title, line = "Repairing", "Please wait while Setup repairs Halo CE."
+        if page == "installing" and action == "uninstall":
+            title, line = "Uninstalling", "Please wait while Setup removes Halo CE."
+        if page == "finish":
+            done = {"repair": "Repair completed", "uninstall": "Uninstall completed"}.get(action, title)
+            title = {"failed": "Setup was not completed", "cancelled": "Setup was cancelled"}.get(self.outcome, done)
+        return title, line
+
+    def update_buttons(self):
+        page = self.page
+        if not page:
+            return
+        flow = self.flow()
+        running = page == "installing"
+        ended = page == "finish"
+        next_on = not running and (page != "license" or self.accepted.get() == "yes")
+        back_on = not running and (page in flow and flow.index(page) > 0 if not ended else self.outcome != "done")
+        self.next_button.configure(text="Finish" if ended else self.verb() if page == "ready" else "Next >",
+                                   state="normal" if next_on else "disabled")
+        self.back_button.configure(state="normal" if back_on else "disabled")
+        self.cancel_button.configure(state="disabled" if ended or self.cancel.is_set() else "normal")
+
+    def press(self, button):
+        if button.instate(["!disabled"]):
+            button.invoke()
+
+    def complain(self, text: str):
+        from tkinter import messagebox
+        messagebox.showerror("%s Setup" % APP_NAME, text, parent=self.root)
+
+    def text(self, text: str, parent=None, pady=(0, 0), indent: int = 0, **options):
+        """A paragraph, wrapped to the page."""
+        parent = parent or self.body
+        style = "White.TLabel" if self.white else "TLabel"
+        label = self.ttk.Label(parent, text=text, style=style, justify="left",
+                               wraplength=self.wrap - self.px(indent), **options)
+        label.pack(anchor="w", pady=pady, padx=(self.px(indent), 0))
+        return label
+
+    def radio(self, text: str, value: str, variable, available: bool = True, note: str = "", pady: int = 0):
+        button = self.ttk.Radiobutton(self.body, text=text, value=value, variable=variable)
+        button.pack(anchor="w", pady=(self.px(pady), 0))
         if not available:
             button.state(["disabled"])
-            ttk.Label(row, text="Not yet", style="Tag.TLabel").pack(side="left", padx=(px(8), 0))
-        inner = ttk.Frame(box, padding=(px(28), 0, 0, 0))
-        inner.pack(fill="x")
-        return inner
+        if note:
+            self.text(note, indent=20, pady=(0, self.px(6)))
+        return button
 
-    def choice_list(self, choices: Sequence[Choice], variable):
-        for choice in choices:
-            inner = self.option(choice.key, choice.name, variable, choice.available)
-            if choice.note:
-                self.paragraph(inner, choice.note, "Hint.TLabel", pady=(0, self.px(6)))
+    def field(self, label: str, variable, browse=None, more=None, indent: int = 0, pady=(0, 8), state: str = "normal"):
+        """A label over an entry and its Browse button. Returns the widgets
+        to turn on and off."""
+        ttk, px = self.ttk, self.px
+        if label:
+            self.text(label, indent=indent)
+        row = ttk.Frame(self.body)
+        row.pack(fill="x", padx=(px(indent), 0), pady=(px(2), px(pady[1])))
+        entry = ttk.Entry(row, textvariable=variable, state=state)
+        entry.pack(side="left", fill="x", expand=True)
+        widgets = [entry]
+        for text, command in ((("Browse...", browse),) if browse else ()) + tuple(more or ()):
+            button = ttk.Button(row, text=text, command=command, state=state)
+            button.pack(side="left", padx=(px(6), 0))
+            widgets.append(button)
+        return widgets
+
+    def browse_file(self, variable, filetypes=None):
+        from tkinter import filedialog
+        chosen = filedialog.askopenfilename(parent=self.root, filetypes=filetypes or [("All files", "*")])
+        if chosen:
+            variable.set(chosen)
+
+    def browse_folder(self, variable):
+        from tkinter import filedialog
+        chosen = filedialog.askdirectory(parent=self.root)
+        if chosen:
+            variable.set(chosen)
+
+    def link(self, text: str, url: str, indent: int = 0):
+        import webbrowser
+        label = self.text(text, indent=indent, foreground="#0066cc", cursor="hand2")
+        label.bind("<Button-1>", lambda event: webbrowser.open(url))
+        return label
+
+    # -- moving through the pages
+    def go_next(self):
+        page = self.page
+        check = getattr(self, "leave_" + page, None)
+        if check is not None and not check():
+            return
+        if page == "ready":
+            self.begin()
+        elif page == "finish":
+            self.finish()
+        else:
+            flow = self.flow()
+            self.show(flow[flow.index(page) + 1])
+
+    def go_back(self):
+        flow = self.flow()
+        if self.page == "finish":  # after a failure: try again from the summary
+            self.outcome = ""
+            self.show("ready")
+        else:
+            self.show(flow[max(flow.index(self.page) - 1, 0)])
+
+    def ask_cancel(self):
+        """Cancel asks first, and the window's close button is Cancel."""
+        from tkinter import messagebox
+        if self.page == "finish":
+            self.root.destroy()
+            return
+        if self.cancel.is_set():
+            return
+        if not messagebox.askyesno("%s Setup" % APP_NAME, "Are you sure you want to cancel %s Setup?" % APP_NAME,
+                                   icon="warning", parent=self.root):
+            return
+        if self.busy():
+            self.cancel.set()
+            self.current_task.set("Cancelling...")
+            self.update_buttons()
+        else:
+            self.root.destroy()
+
+    def finish(self):
+        if self.outcome == "done" and self.action.get() != "uninstall" and self.on_pc and self.launch.get():
+            try:
+                launch_pc(self.installed_folder())
+            except (OSError, InstallerError) as error:
+                self.complain("Halo CE could not be started: %s" % error)
+        self.root.destroy()
+
+    def installed_folder(self) -> str:
+        return check_install_folder(self.install_folder.get())
+
+    # -- the pages
+    def page_welcome(self):
+        self.text("This will install Halo: Combat Evolved %s on your PS Vita or PC, from your own game files." % VERSION,
+                  pady=(0, self.px(12)))
+        self.text(self.NOTICE, pady=(0, self.px(12)))
+        self.text("Click Next to continue, or Cancel to exit Setup.")
+
+    def page_maintenance(self):
+        record = read_install(self.existing) or {}
+        self.text("Version %s is installed in:" % record.get("version", "unknown"))
+        self.text(self.existing, indent=14, pady=(0, self.px(10)))
+        self.radio("Repair", "repair", self.action, note="Put back any file that is missing or damaged. Your saved "
+                                                         "games are kept.")
+        self.radio("Uninstall", "uninstall", self.action, note="Remove Halo CE from this computer. Your saved games "
+                                                               "are kept.")
+        self.radio("Install again, or install on a PS Vita", "install", self.action,
+                   note="Go through Setup from the start.")
+
+    def leave_maintenance(self):
+        self.damaged = ([], [])
+        if self.action.get() == "install":
+            return True
+        self.install_folder.set(self.existing)
+        self.package_found = bool(find_pc_packages())
+        record = read_install(self.existing) or {}
+        self.desktop_shortcut.set(record.get("desktop") is not False)
+        self.start_menu.set(record.get("start_menu") is not False)
+        if self.action.get() == "repair":
+            self.damaged = check_install(self.existing)
+        return True
+
+    def page_license(self):
+        ttk, px = self.ttk, self.px
+        self.text("Halo CE for PS Vita is free software under the GNU General Public License, version 3. No game "
+                  "data is included: you need your own copy of the game.", pady=(0, px(6)))
+        box = ttk.Frame(self.body)
+        box.pack(fill="both", expand=True)
+        text = self.tk.Text(box, wrap="word", height=8, width=10, font="TkDefaultFont", relief="sunken", borderwidth=1)
+        scroll = ttk.Scrollbar(box, command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        text.pack(side="left", fill="both", expand=True)
+        text.insert("1.0", license_text())
+        text.configure(state="disabled")
+        self.license_box = text
+        self.radio("I accept the terms of the license", "yes", self.accepted, pady=6)
+        self.radio("I do not accept the terms of the license", "no", self.accepted)
 
     def page_game(self):
-        self.choice_list(GAMES, self.game)
+        for choice in GAMES:
+            self.radio(choice.name, choice.key, self.game, choice.available, choice.note)
 
     def page_platform(self):
-        px = self.px
-        self.paragraph(self.body, "No game data comes with this tool: every step reads your own files. Files "
-                                  "already in place are kept, so any step can be run again.", pady=(0, px(14)))
-        self.choice_list(PLATFORMS, self.platform)
-        self.link("The official downloads (releases)", RELEASES_URL)
-
-    def page_mode(self):
-        px = self.px
-        inner = self.option("automatic", MODES[0].name, self.mode)
-        self.paragraph(inner, MODES[0].note, "Hint.TLabel", pady=(0, px(2)))
-        if self.mcc_root.get():
-            self.paragraph(inner, "✓ Found: %s" % self.mcc_root.get(), "Success.TLabel", pady=(0, px(8)))
-        else:
-            self.paragraph(inner, "⚠ Halo: The Master Chief Collection was not found on this computer. Use Manual, "
-                                  "or choose its folder on the next page.", "Warning.TLabel", pady=(0, px(8)))
-        inner = self.option("manual", MODES[1].name, self.mode)
-        self.paragraph(inner, "Pick each source yourself: your Xbox disc image, the Halo Custom Edition files." +
-                       ("" if self.on_pc else " The movies too: they come from the disc only."),
-                       "Hint.TLabel", pady=(0, px(12)))
-        self.path_row("Output folder", self.out, browse_folder=True,
-                      hint="The files are gathered here first, laid out as %s (about 2.5 GB with everything)."
-                           % ("in the PC build's data folder" if self.on_pc else "on the Vita"))
-        self.show_staged()
-
-    def look_for_mcc(self):
-        """Look again, after installing MCC or plugging in its drive."""
-        self.mcc_root.set((find_mcc_folders() or [""])[0])
-        self.mcc_folder.set((find_mcc_custom_edition() or [""])[0])
-        self.show(self.page)
-
-    def use_manual(self):
-        self.mode.set("manual")
-        self.go("game_files")
-
-    def page_automatic(self):
-        ttk, px = self.ttk, self.px
-        folder = self.mcc_root.get().strip()
-        if folder:
-            self.paragraph(self.body, "Your MCC was found. Only your own copy is read: nothing in it is changed.",
-                           pady=(0, px(10)))
-        else:
-            self.paragraph(self.body, "⚠ Halo: The Master Chief Collection was not found in your Steam libraries. "
-                                      "If it is somewhere else, choose its folder (Steam: right-click the game, "
-                                      "Manage, Browse local files). If you do not have it, use Manual.",
-                           "Warning.TLabel", pady=(0, px(10)))
-        self.path_row("MCC folder", self.mcc_root, browse_folder=True, picked=lambda: self.show(self.page))
-        row = ttk.Frame(self.body)
-        row.pack(anchor="w", pady=(0, px(10)))
-        ttk.Button(row, text="Look again", command=self.look_for_mcc).pack(side="left")
-        ttk.Button(row, text="Use Manual instead", command=self.use_manual).pack(side="left", padx=(px(8), 0))
-        try:
-            plan = mcc_plan(folder) if folder else None
-        except InstallerError:
-            plan = None
-        if plan and plan.missing:
-            self.paragraph(self.body, "⚠ This MCC lacks %s. Is Halo: Combat Evolved Anniversary installed in it?"
-                           % ", ".join(plan.missing[:3]), "Warning.TLabel", pady=(0, px(8)))
-        elif plan:
-            ttk.Label(self.body, text="What is taken: %d files, %s" % (len(plan.files), human_size(plan.size)),
-                      style="Field.TLabel").pack(anchor="w", pady=(0, px(6)))
-            self.bullet(self.body, "The campaign, the multiplayer maps, MCC's bitmaps.map and menus")
-            self.bullet(self.body, "The Halo PC files (custom_edition) and the classic sound effects")
-            self.paragraph(self.body, "\n".join("Note: " + note for note in plan.notes) if plan.notes else
-                           "MCC has no movies: the game skips them." if not self.on_pc else
-                           "Your PC build also finds MCC by itself. Copying makes it stand on its own: skip this "
-                           "step if you do not need that.", "Hint.TLabel", pady=(0, px(4)))
-        elif folder:
-            self.paragraph(self.body, "⚠ No Halo: The Master Chief Collection in this folder.", "Warning.TLabel",
-                           pady=(0, px(8)))
-        self.action("Get everything from MCC", self.do_mcc)
-        self.show_staged()
+        for choice in PLATFORMS:
+            self.radio(choice.name if choice.available else "%s (not available yet)" % choice.name, choice.key,
+                       self.platform, choice.available, choice.note, pady=2)
 
     def page_game_files(self):
-        ttk, px = self.ttk, self.px
-        ttk.Label(self.body, text="Pick one way (run the step again with the other to have both):",
-                  style="Muted.TLabel").pack(anchor="w", pady=(0, px(6)))
-        inner = self.option("xbox", "Your Xbox Halo disc image or game folder", self.game_mode)
-        self.path_row("Xbox disc image or game folder", self.xbox_source, browse_file=True, browse_folder=True,
-                      filetypes=[("Xbox disc images", "*.iso *.xiso"), ("All files", "*")], parent=inner,
-                      picked=lambda: self.game_mode.set("xbox"),
-                      hint="An .iso / .xiso (a full disc image works too) or an already unpacked game folder. "
-                           "The maps folder and default.xbe are taken out of it. It must be the Xbox version: "
-                           "the PC version's maps do not work.")
-        inner = self.option("mcc", "Halo: The Master Chief Collection on Steam", self.game_mode)
-        found = "Found in your Steam libraries. " if self.mcc_root.get() else \
-            "Not found by itself: choose MCC's folder (Steam: right-click the game, Manage, Browse local files). "
-        self.path_row("MCC folder", self.mcc_root, browse_folder=True, parent=inner,
-                      picked=lambda: self.game_mode.set("mcc"),
-                      hint=found + "Its Halo CE maps, the Halo PC files (custom_edition) and the sound effects "
-                                   "bank, about 1.4 GB, go to the game's mcc folder. Only your own copy is "
-                                   "read.")
-        self.action("Get the game files", self.do_game_files)
-        self.show_staged()
+        px = self.px
+        mcc = self.mcc_root.get()
+        self.radio(MODES[0].name, "automatic", self.mode, pady=0)
+        if self.mcc_found:
+            self.text("Everything comes from your own Halo: The Master Chief Collection, found here:", indent=20,
+                      pady=(0, px(2)))
+        else:
+            self.text("Halo: The Master Chief Collection was not found on this computer, so Manual is selected. If "
+                      "you have it somewhere else, choose its folder.", indent=20, pady=(0, px(2)))
+        automatic = self.field("MCC folder:" if not mcc else "", self.mcc_root, indent=20, pady=(0, 4),
+                               browse=lambda: self.browse_folder(self.mcc_root))
+        self.radio(MODES[1].name, "manual", self.mode, pady=2)
+        self.text("Pick your own files.", indent=20, pady=(0, px(2)))
+        manual = self.field("Xbox disc image (.iso, .xiso) or game folder:", self.xbox_source, indent=20, pady=(0, 4),
+                            browse=lambda: self.browse_file(
+                                self.xbox_source, [("Xbox disc images", "*.iso *.xiso"), ("All files", "*")]),
+                            more=(("Folder...", lambda: self.browse_folder(self.xbox_source)),))
+        ce = "Halo Custom Edition installer or folder%s:" % (" (optional)" if self.on_pc else "")
+        manual += self.field(ce, self.ce_source, indent=20, pady=(0, 4),
+                             browse=lambda: self.browse_file(self.ce_source, [("Programs", "*.exe"),
+                                                                              ("All files", "*")]),
+                             more=(("Folder...", lambda: self.browse_folder(self.ce_source)),))
+        if not self.on_pc:
+            ffmpeg = find_ffmpeg()
+            row = self.ttk.Frame(self.body)
+            row.pack(fill="x", padx=(px(20), 0))
+            movies = self.ttk.Checkbutton(row, text="Convert the disc's movies (takes a few minutes)" if ffmpeg else
+                                          "Movies need ffmpeg, which was not found: skipped", variable=self.movies)
+            movies.pack(side="left")
+            quality = self.ttk.Combobox(row, state="readonly", width=16, values=("Standard quality", "Better quality"))
+            quality.current(0 if self.quality.get() == "baseline" else 1)
+            quality.bind("<<ComboboxSelected>>", lambda event: self.quality.set(
+                "baseline" if quality.current() == 0 else "better"))
+            quality.pack(side="right")
+            manual += [movies, quality] if ffmpeg else []
+            if not ffmpeg:
+                self.movies.set(False)
+                movies.state(["disabled"])
+                quality.state(["disabled"])
+        self.mode_widgets = {"automatic": automatic, "manual": manual}
+        self.update_fields()
 
-    def do_game_files(self):
-        return self.do_mcc() if self.game_mode.get() == "mcc" else self.do_xbox()
+    def update_fields(self):
+        """The fields of the way not chosen are greyed."""
+        if self.page != "game_files":
+            return
+        for mode, widgets in self.mode_widgets.items():
+            for widget in widgets:
+                widget.state(["!disabled" if mode == self.mode.get() else "disabled"])
+                if widget.winfo_class() == "TCombobox" and mode == self.mode.get():
+                    widget.state(["readonly"])
 
-    def do_mcc(self):
+    def staged_ready(self) -> bool:
+        """An earlier run gathered the game on the Vita's path: it can go on
+        from there, with no source chosen again."""
+        try:
+            summary = self._staged()
+        except OSError:
+            return False
+        return summary["xbe"] and summary["xbox_maps"] or bool(summary["mcc"])
+
+    def _staged(self) -> dict:
+        out = self.out.get()
+        items = staged_uploads(out)
+        names = {item.name.lower() for item in items if item.folder == VITA_GAME_FOLDER + "/" + STAGING_MAPS}
+        return {"xbe": any(item.name == STAGING_XBE for item in items),
+                "xbox_maps": all(name in names for name in XBOX_REQUIRED_MAPS), "mcc": mcc_staged(out)}
+
+    def pc_files_ready(self) -> bool:
+        try:
+            return pc_files_status(self.out.get()).complete
+        except OSError:
+            return False
+
+    def leave_game_files(self) -> bool:
+        try:
+            self.game_bytes = self.check_automatic() if self.mode.get() == "automatic" else self.check_manual()
+        except InstallerError as error:
+            self.complain(str(error))
+            return False
+        except OSError as error:
+            self.complain("That file cannot be read: %s" % error)
+            return False
+        return True
+
+    def check_automatic(self) -> int:
         folder = self.mcc_root.get().strip()
         if not folder:
-            raise InstallerError("Choose MCC's folder first (Choose folder...): the one that has halo1.")
-        out = self.out.get()
+            raise InstallerError("Choose MCC's folder (Steam: right-click the game, Manage, Browse local files), "
+                                 "or use Manual.")
+        plan = mcc_plan(folder)
+        if plan.missing:
+            raise InstallerError("This MCC lacks %s. Is Halo: Combat Evolved Anniversary installed in it?"
+                                 % ", ".join(plan.missing[:3]))
+        resources = sum(1 for item in plan.files if item.kind == "resource")
+        if resources < len(PC_RESOURCE_MAPS) and not self.on_pc and not self.pc_files_ready():
+            raise InstallerError("This MCC lacks the Halo Custom Edition files the Vita needs. Use Manual.")
+        return plan.size
 
-        def work():
-            plan = mcc_plan(folder)
-            _check_space(out, plan.needed(out))
-            install_mcc_files(folder, out, self.report, self.log)
-            return "MCC files ready in %s (%d files, %s)" % (out, len(plan.files), human_size(plan.size))
-        return work
-
-    def do_xbox(self):
+    def check_manual(self) -> int:
         source = self.xbox_source.get().strip()
-        if not source:
-            raise InstallerError("Choose your Xbox disc image (.iso) or the unpacked game folder first.")
-        out = self.out.get()
-        if not self.movie_source.get():
-            self.movie_source.set(source)
+        ce = self.ce_source.get().strip()
+        size = 0
+        if source:
+            size = check_xbox_files(source)
+        elif self.on_pc or not self.staged_ready():
+            raise InstallerError("Choose your Xbox disc image (.iso) or the unpacked game folder.")
+        if ce:
+            if not os.path.exists(ce):
+                raise InstallerError("%s does not exist." % ce)
+            if os.path.isdir(ce) and not pc_maps_folder(ce):
+                raise InstallerError("No bitmaps.map, sounds.map and loc.map in %s." % ce)
+            size += 200 << 20
+        elif not self.on_pc and not self.pc_files_ready():
+            raise InstallerError(pc_files_help(list(name for name, _ in PC_RESOURCE_MAPS)))
+        return size + ((600 << 20) if self.will_convert() else 0)
 
-        def work():
-            _check_space(out, xbox_files_size(source))
-            extract_xbox_files(source, out, self.report, self.log)
-            return "Xbox files ready in %s" % out
-        return work
+    def will_convert(self) -> bool:
+        return not self.on_pc and self.mode.get() == "manual" and self.movies.get() and \
+            bool(self.xbox_source.get().strip())
 
-    def page_movies(self):
-        ttk, px = self.ttk, self.px
-        self.paragraph(self.body, "The disc's Bink movies become the H.264 MP4s the Vita plays. Without them the "
-                                  "game skips each movie and the main menu comes up ready to play. Converting takes "
-                                  "a few minutes; Skip this step leaves them out. They come from the Xbox disc "
-                                  "only: without one, skip it.", pady=(0, px(12)))
-        if not self.movie_source.get() and self.xbox_source.get():
-            self.movie_source.set(self.xbox_source.get())
-        self.path_row("Xbox disc image or game folder", self.movie_source, browse_file=True, browse_folder=True,
-                      filetypes=[("Xbox disc images", "*.iso *.xiso"), ("All files", "*")],
-                      hint="The same one as for the game files.")
-        self.path_row("ffmpeg", self.ffmpeg, browse_file=True,
-                      hint="" if self.ffmpeg.get() else "ffmpeg was not found: install it from ffmpeg.org, or "
-                                                        "choose its program.")
-        ttk.Label(self.body, text="Quality", style="Field.TLabel").pack(anchor="w")
-        row = ttk.Frame(self.body)
-        row.pack(anchor="w", pady=(px(2), 0))
-        ttk.Radiobutton(row, text="Standard (H.264 Baseline, as README.md)", value="baseline",
-                        variable=self.quality).pack(anchor="w")
-        ttk.Radiobutton(row, text="Better quality (the same Baseline, larger files, slower)", value="better",
-                        variable=self.quality).pack(anchor="w")
-        self.paragraph(self.body, "Both play on the Vita (H.264 Constrained Baseline, no B-frames: the Vita shows "
-                                  "High profile's B-frames as white frames).", "Hint.TLabel", pady=(px(3), 0))
-        self.action("Convert the movies", self.do_movies)
-        self.show_staged()
-
-    def do_movies(self):
-        source = self.movie_source.get().strip()
-        if not source:
-            raise InstallerError("Choose your Xbox disc image (.iso) or the unpacked game folder first.")
-        out, ffmpeg, quality = self.out.get(), self.ffmpeg.get() or None, self.quality.get()
-
-        def work():
-            _check_space(out, 600 << 20)
-            convert_movies(source, out, ffmpeg, quality, self.report, self.log, self.cancel)
-            return "Movies ready"
-        return work
-
-    def pc_files_line(self, parent=None, pady=(0, 0)):
-        """The required Halo Custom Edition files' check, as a line: what is
-        missing and where to get it, or that all three are in place."""
-        try:
-            status = pc_files_status(self.out.get())
-        except OSError:
-            return None
-        if status.complete:
-            places = sorted(set(status.found.values()))
-            return self.paragraph(parent or self.body, "✓ bitmaps.map, sounds.map and loc.map are in the output "
-                                                       "folder (%s)." % " and ".join(places), "Success.TLabel",
-                                  pady=pady)
+    def page_destination(self):
         if self.on_pc:
-            return self.paragraph(parent or self.body, "Optional on PC: %s. They give the menus their pictures and "
-                                                       "let you play Custom Edition maps." % ", ".join(status.missing),
-                                  "Muted.TLabel", pady=pady)
-        return self.paragraph(parent or self.body, "⚠ " + pc_files_help(status.missing), "Warning.TLabel", pady=pady)
+            self.destination_pc()
+        else:
+            self.destination_vita()
 
-    def page_pc_files(self):
+    def destination_vita(self):
         ttk, px = self.ttk, self.px
-        self.pc_files_line(pady=(0, px(10)))
-        self.ttk.Label(self.body, text="Pick one way:", style="Muted.TLabel").pack(anchor="w", pady=(0, px(6)))
+        self.text("On the Vita, open VitaShell and press SELECT. It shows an address like ftp://192.168.1.20:1337: "
+                  "type it here.", pady=(0, px(8)))
+        self.text("Vita's address:")
+        row = ttk.Frame(self.body)
+        row.pack(fill="x", pady=(px(2), 0))
+        ttk.Entry(row, textvariable=self.host).pack(side="left", fill="x", expand=True)
+        self.test_button = ttk.Button(row, text="Test connection", command=self.test_connection)
+        self.test_button.pack(side="left", padx=(px(6), 0))
+        self.test_result.set("")
+        self.text("", textvariable=self.test_result, pady=(px(2), px(6)))
+        self.field("Game package (VPK):", self.vpk, pady=(0, 2),
+                   browse=lambda: self.browse_file(self.vpk, [("VPK", "*.vpk"), ("All files", "*")]))
+        if not self.vpk.get():
+            self.text("None found next to Setup. Leave it empty if the game is already on the Vita.", pady=(0, px(2)))
+            self.link("Download halo-ce-vita-<version>-vita.vpk from the releases page", RELEASES_URL)
+        self.ttk.Frame(self.body, height=px(6)).pack()
+        self.field("Folder for the files on their way to the Vita (about 2.5 GB):", self.out, pady=(0, 2),
+                   browse=lambda: self.browse_folder(self.out))
 
-        def option(value, text):
-            return self.option(value, text, self.pc_mode)
-
-        inner = option("mcc", "Halo: The Master Chief Collection on Steam")
-        self.path_row("custom_edition folder", self.mcc_folder, browse_folder=True, parent=inner,
-                      picked=lambda: self.pc_mode.set("mcc"),
-                      hint="Found in your Steam libraries." if self.mcc_folder.get() else
-                      "Not found by itself: choose halo1/maps/custom_edition in MCC's folder.")
-        inner = option("installer", "The Halo Custom Edition installer (any file name)")
-        box = self.path_row("Installer", self.installer, browse_file=True, parent=inner,
-                            filetypes=[("Programs", "*.exe"), ("All files", "*")],
-                            picked=lambda: self.pc_mode.set("installer"),
-                            hint="Found in your Downloads." if self.installer.get() else "")
-        self.link("Where to get it: halomaps.org (Halo Custom Edition)", CE_INSTALLER_URL, parent=box)
-        inner = option("folder", "A folder that has them (a Custom Edition install's maps)")
-        self.path_row("Folder", self.pc_folder, browse_folder=True, parent=inner,
-                      picked=lambda: self.pc_mode.set("folder"),
-                      hint="Your Halo Custom Edition install, found by itself." if self.pc_folder.get() else "")
-        self.action("Get the Halo PC files", self.do_pc_files)
-        self.show_staged()
-
-    def do_pc_files(self):
-        out = self.out.get()
-        mode = self.pc_mode.get()
-        installer = self.installer.get()
-        folder = self.mcc_folder.get() if mode == "mcc" else self.pc_folder.get()
-        if mode == "installer" and not installer:
-            raise InstallerError("Choose the installer first (Choose file...).")
-        if mode != "installer" and not folder:
-            raise InstallerError("Choose the folder first (Choose folder...).")
-
-        def work():
-            _check_space(out, 200 << 20)
-            if mode == "installer":
-                extract_pc_maps_from_installer(installer, out, self.report, self.log)
-            else:
-                copy_pc_maps_from_folder(folder, out, self.report, self.log)
-            return "Halo PC files ready: bitmaps.map, sounds.map and loc.map"
-        return work
-
-    def address_row(self, port: bool = True):
+    def destination_pc(self):
         ttk, px = self.ttk, self.px
-        box = ttk.Frame(self.body)
-        box.pack(fill="x", pady=(0, px(10)))
-        head = ttk.Frame(box)
-        head.pack(fill="x")
-        ttk.Label(head, text="Vita address", style="Field.TLabel").pack(side="left")
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=(px(4), 0))
-        ttk.Entry(row, textvariable=self.host, width=28).pack(side="left")
-        if port:
-            ttk.Label(row, text="Port", style="Muted.TLabel").pack(side="left", padx=(px(12), px(6)))
-            ttk.Entry(row, textvariable=self.port, width=7).pack(side="left")
-        self.paragraph(box, "As VitaShell shows it after SELECT, like ftp://192.168.1.20:1337 (the port is "
-                            "taken from it too).", "Hint.TLabel", pady=(px(3), 0))
+        repairing = self.action.get() == "repair"
+        self.text("Setup will install Halo CE in this folder. No administrator rights are needed.",
+                  pady=(0, px(8)))
+        self.field("Install folder:", self.install_folder, browse=lambda: self.browse_folder(self.install_folder),
+                   state="disabled" if repairing else "normal")
+        if self.package_found:
+            self.text("PC build: %s" % os.path.basename(self.package.get()), pady=(0, px(8)))
+        else:
+            kind = [("PC build", "*" + os.path.splitext(pc_package_suffix())[1]), ("All files", "*")]
+            self.field("PC build (halo-ce-vita-<version>%s):" % pc_package_suffix(), self.package, pady=(0, 2),
+                       browse=lambda: self.browse_file(self.package, kind))
+            self.link("Download it from the releases page", RELEASES_URL)
+            self.ttk.Frame(self.body, height=px(6)).pack()
+        self.text("", textvariable=self.space, pady=(0, px(8)))
+        self.update_space()
+        if not repairing:
+            ttk.Checkbutton(self.body, text="Create a desktop shortcut", variable=self.desktop_shortcut).pack(anchor="w")
+            ttk.Checkbutton(self.body, text="Create a Start menu entry" if sys.platform == "win32" else
+                            "Create an applications menu entry", variable=self.start_menu).pack(anchor="w")
 
-    def page_copy_vita(self):
-        ttk, px = self.ttk, self.px
-        self.paragraph(self.body, "On the Vita, open VitaShell and press SELECT: it shows FTP mode with an address "
-                                  "like ftp://192.168.1.20:1337. Type that address below.", pady=(0, px(12)))
-        self.address_row()
-        ttk.Checkbutton(self.body, text="Copy files already on the Vita again", variable=self.replace
-                        ).pack(anchor="w", pady=(0, px(6)))
-        items = staged_uploads(self.out.get())
-        self.paragraph(self.body, "To copy into %s: %d files, %s. (Custom maps put in %s are copied too.)" % (
-            VITA_GAME_FOLDER, len(items), human_size(sum(item.size for item in items)),
-            os.path.join(self.out.get(), STAGING_MAPS)), "Muted.TLabel", pady=(0, px(4)))
-        self.paragraph(self.body, "Keep the Vita awake while it copies (touch the screen now and then, or turn off "
-                                  "auto-standby): if it sleeps the copy stops; press Copy again and it goes on from "
-                                  "where it stopped.", "Hint.TLabel", pady=(0, px(4)))
-        if items:
-            self.pc_files_line(pady=(px(4), px(4)))
-        self.action("Copy to the Vita", self.do_upload)
+    def package_info(self, path: str) -> PcPackage:
+        path = path.strip()
+        if path not in self.package_cache:
+            self.package_cache[path] = read_pc_package(path)
+        return self.package_cache[path]
+
+    def needed_bytes(self) -> int:
+        needed = self.game_bytes
+        if self.package.get().strip():
+            try:
+                needed += self.package_info(self.package.get()).size
+            except InstallerError:
+                pass
+        return needed
+
+    def free_bytes(self, path: str) -> int:
+        path = os.path.abspath(os.path.expanduser(path or "."))
+        while not os.path.isdir(path) and os.path.dirname(path) != path:
+            path = os.path.dirname(path)
+        try:
+            return shutil.disk_usage(path).free
+        except OSError:
+            return 0
+
+    def update_space(self):
+        if self.page != "destination" or not self.on_pc:
+            return
+        self.space.set("Space needed: %s     Space free: %s" % (
+            human_size(self.needed_bytes()), human_size(self.free_bytes(self.install_folder.get()))))
 
     def _host_port(self) -> Tuple[str, int]:
         text = self.host.get().strip()
         found = re.match(r"^(?:ftp://)?([A-Za-z0-9.\-]+)(?::(\d+))?/?$", text)
         if not found:
             raise InstallerError("Type the Vita's address as VitaShell shows it (like 192.168.1.20).")
-        port = int(found.group(2) or self.port.get() or FTP_PORT)
-        return found.group(1), port
+        return found.group(1), int(found.group(2) or FTP_PORT)
 
-    def do_upload(self):
-        host, port = self._host_port()
-        items = staged_uploads(self.out.get())
-        replace = self.replace.get()
-        if not items:
-            raise InstallerError("Nothing to copy yet: do the steps before this one (or check the output "
-                                 "folder on the Automatic or Manual page).")
-        status = pc_files_status(self.out.get())
-        if not status.complete:
-            from tkinter import messagebox
-            if not messagebox.askyesno("Halo CE for PS Vita", pc_files_help(status.missing) +
-                                       "\n\nCopy the other files to the Vita without them?", parent=self.root):
-                raise InstallerError("Not copied: get the required Halo Custom Edition files first.")
-
-        def work():
-            self.log("Copying %d files (%s) to %s:%d" % (len(items), human_size(sum(i.size for i in items)),
-                                                         host, port))
-            result = upload_files(host, items, port, replace, self.report, self.log, self.cancel)
-            return "On the Vita: %(copied)d copied, %(skipped)d were already there" % result
-        return work
-
-    def page_vpk(self):
-        px = self.px
-        self.paragraph(self.body, "Download halo-ce-vita-<version>-vita.vpk from the official releases (or put it next to this program), "
-                                  "then copy it to the Vita's ux0:data/ here. VitaShell installs it: this program "
-                                  "cannot.", pady=(0, px(4)))
-        self.link("Releases: download the VPK", RELEASES_URL)
-        self.ttk.Frame(self.body, height=px(10)).pack(fill="x")
-        self.path_row("VPK", self.vpk, browse_file=True, filetypes=[("VPK", "*.vpk"), ("All files", "*")])
-        self.address_row(port=False)
-        self.action("Copy the VPK to the Vita", self.do_vpk)
-        self.paragraph(self.body, VPK_INSTRUCTIONS.format(name=os.path.basename(self.vpk.get()) or "halo.vpk"),
-                       "Hint.TLabel", pady=(px(12), 0))
-
-    def do_vpk(self):
-        vpk = self.vpk.get()
-        if not vpk:
-            raise InstallerError("Choose the VPK first (Choose file...).")
-        host, port = self._host_port()
-
-        def work():
-            name = upload_vpk(host, vpk, port, self.report, self.log, self.cancel)
-            return VPK_INSTRUCTIONS.format(name=name)
-        return work
-
-    def page_copy_pc(self):
-        ttk, px = self.ttk, self.px
-        self.paragraph(self.body, "Unpack halo-ce-vita-<version>-pc-windows.zip or -pc-linux.tar.gz first, then "
-                                  "choose that folder.", pady=(0, px(4)))
-        self.link("Releases: download the PC build", RELEASES_URL)
-        self.ttk.Frame(self.body, height=px(10)).pack(fill="x")
-        folder = pc_data_folder(self.pc_build.get().strip())
-        self.path_row("PC build", self.pc_build, browse_folder=True, picked=lambda: self.show(self.page),
-                      hint="The files go into %s." % folder if folder else
-                      "Not found by itself: choose the unpacked folder (it has build/linux or build/windows)."
-                      if not self.pc_build.get().strip() else "⚠ No PC build in this folder.")
-        ttk.Checkbutton(self.body, text="Copy files already there again", variable=self.replace
-                        ).pack(anchor="w", pady=(0, px(6)))
-        items = pc_uploads(self.out.get())
-        self.paragraph(self.body, "To copy: %d files, %s. (Custom maps put in %s are copied too.)" % (
-            len(items), human_size(sum(item.size for item in items)),
-            os.path.join(self.out.get(), STAGING_MAPS)), "Muted.TLabel", pady=(0, px(4)))
-        if items:
-            self.pc_files_line(pady=(px(4), px(4)))
-        self.action("Copy to the PC build", self.do_copy_pc)
-
-    def do_copy_pc(self):
-        build = self.pc_build.get().strip()
-        if not build:
-            raise InstallerError("Choose your PC build first (Choose folder...).")
-        if pc_data_folder(build) is None:
-            raise InstallerError("No PC build in %s: choose the folder you unpacked it into." % build)
-        out, replace = self.out.get(), self.replace.get()
-        if not pc_uploads(out):
-            raise InstallerError("Nothing to copy yet: do the steps before this one (or check the output "
-                                 "folder on the Automatic or Manual page).")
-
-        def work():
-            result = copy_to_pc_build(out, build, replace, self.report, self.log)
-            return "On the PC build: %(copied)d copied, %(skipped)d were already there" % result
-        return work
-
-    def done_summary(self) -> List[Tuple[bool, str, str]]:
-        """The Done page's list: (done, what, how it went)."""
-        summary = self._staged_summary()
-        xbox = [item for item in summary["maps"] if item.name.lower() not in dict(PC_RESOURCE_MAPS)]
-        rows = []
-        rows.append((summary["xbe"] and summary["xbox_maps"], "Xbox game files",
-                     "default.xbe and %d maps" % len(xbox) if summary["xbe"] and summary["xbox_maps"]
-                     else "not gathered (MCC's files instead)" if summary["mcc"]
-                     else "not gathered yet"))
-        if summary["mcc"] or self.mode.get() == "automatic" or self.game_mode.get() == "mcc":
-            rows.append((bool(summary["mcc"]), "MCC files",
-                         "%d Halo CE maps%s, to %s" % (
-                             len(summary["mcc_maps"]),
-                             " and the sound effects bank" if any(item.name == MCC_SOUND_BANK
-                                                                  for item in summary["mcc"]) else "",
-                             "the PC build's mcc folder" if self.on_pc else VITA_GAME_FOLDER + "/" + STAGING_MCC)
-                         if summary["mcc"] else "not gathered yet"))
-        if not self.on_pc:
-            rows.append((bool(summary["movies"]), "Movies",
-                         "%d movies" % len(summary["movies"]) if summary["movies"]
-                         else "skipped (the game runs without them)"))
-        status = summary["pc_status"]
-        rows.append((status.complete, "Halo PC files",
-                     "%s (%s)" % (", ".join(name for name, _ in PC_RESOURCE_MAPS),
-                                  " and ".join(sorted(set(status.found.values())))) if status.complete
-                     else "not there (optional on PC)" if self.on_pc
-                     else "MISSING %s: required" % ", ".join(status.missing)))
-        gathered = "not copied in this session (%d files, %s gathered in %s)" % (
-            len(summary["items"]), human_size(summary["size"]), self.out.get())
-        if self.on_pc:
-            rows.append(("copy_pc" in self.results, "Copied to the PC build",
-                         self.results.get("copy_pc", "").replace("On the PC build: ", "") or gathered))
-            return rows
-        rows.append(("copy_vita" in self.results, "Copied to the Vita",
-                     self.results.get("copy_vita", "").replace("On the Vita: ", "") or gathered))
-        vpk = re.split(r"[\\/]", self.vpk.get())[-1] or "halo.vpk"
-        rows.append(("vpk" in self.results, "The VPK",
-                     "%s copied to %s/" % (vpk, VITA_VPK_FOLDER) if "vpk" in self.results
-                     else "not copied in this session"))
-        return rows
-
-    def page_done(self):
-        ttk, px = self.ttk, self.px
-        ttk.Label(self.body, text="Summary", style="Field.TLabel").pack(anchor="w", pady=(0, px(6)))
-        for done, what, how in self.done_summary():
-            self.bullet(self.body, "%s: %s" % (what, how), mark="✓" if done else "–",
-                        style="Success.TLabel" if done else "Muted.TLabel")
-        ttk.Label(self.body, text="Next, on the PC" if self.on_pc else "Next, on the Vita",
-                  style="Field.TLabel").pack(anchor="w", pady=(px(10), px(6)))
-        vpk = re.split(r"[\\/]", self.vpk.get())[-1] or "halo.vpk"
-        if self.on_pc:
-            steps = ["Start the game: halo.bat on Windows, ./halo.sh on Linux.",
-                     "The first load of each level takes a while: the game writes a cache file for it."]
-        else:
-            steps = ["Install the VPK in VitaShell: leave FTP mode (Circle), open ux0:, then data, press Cross on "
-                     "%s and confirm. The bubble is called Halo CE." % vpk,
-                     "Check that ur0:data/libshacccg.suprx is there (ShaRKF00D extracts it). Stuck on the loading "
-                     "picture while the music plays? It is missing.",
-                     "Start Halo CE from its bubble. The first load of each level takes a while: the game writes a "
-                     "cache file for it.",
-                     "Online play also needs Connection: Online in the settings panel (Select + Start)."]
-        for number, text in enumerate(steps, 1):
-            self.bullet(self.body, text, mark="%d." % number)
-        row = ttk.Frame(self.body)
-        row.pack(fill="x", pady=(px(8), 0))
-        ttk.Button(row, text="Open the output folder", command=self.open_output).pack(side="left")
-        self.notice = ttk.Label(row, text=self.out.get(), style="Hint.TLabel")
-        self.notice.pack(side="left", padx=(px(14), 0))
-
-    def open_output(self):
-        folder = self.out.get()
-        if not os.path.isdir(folder):
-            self.show_notice("The output folder is not there yet: %s" % folder)
+    def test_connection(self):
+        if self.tester and self.tester.is_alive():
             return
         try:
-            if sys.platform == "win32":
-                os.startfile(folder)  # type: ignore[attr-defined]
-            else:
-                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", folder],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except OSError as error:
-            self.show_notice("Cannot open %s (%s)" % (folder, error))
-
-    def show_staged(self):
-        """What is in the output folder so far, as a row of chips at the
-        bottom of the card."""
-        ttk, px = self.ttk, self.px
-        try:
-            summary = self._staged_summary()
-        except OSError:
+            host, port = self._host_port()
+        except InstallerError as error:
+            self.test_result.set(str(error))
             return
+        self.test_result.set("Connecting...")
+        self.test_button.state(["disabled"])
+
+        def run():
+            client = VitaFtp(host, port, 5.0)
+            try:
+                client.connect()
+                self.messages.put(("tested", "Connected to the Vita at %s:%d." % (host, port)))
+            except FtpError as error:
+                self.messages.put(("tested", str(error)))
+            finally:
+                client.close()
+        self.tester = threading.Thread(target=run, daemon=True)
+        self.tester.start()
+
+    def leave_destination(self) -> bool:
+        return self.leave_destination_pc() if self.on_pc else self.leave_destination_vita()
+
+    def leave_destination_vita(self) -> bool:
+        try:
+            self._host_port()
+            if self.vpk.get().strip():
+                check_vpk(self.vpk.get().strip())
+            if not self.out.get().strip():
+                raise InstallerError("Choose a folder for the files on their way to the Vita.")
+            needed, free = self.game_bytes, self.free_bytes(self.out.get())
+            if needed > free:
+                raise InstallerError("Not enough free space for the files: %s needed, %s free."
+                                     % (human_size(needed), human_size(free)))
+        except InstallerError as error:
+            self.complain(str(error))
+            return False
+        return True
+
+    def leave_destination_pc(self) -> bool:
+        from tkinter import messagebox
+        try:
+            folder = self.installed_folder()
+            self.package_info(self.package.get())
+            needed, free = self.needed_bytes(), self.free_bytes(folder)
+            if needed > free:
+                raise InstallerError("Not enough free space in %s: %s needed, %s free."
+                                     % (folder, human_size(needed), human_size(free)))
+        except InstallerError as error:
+            self.complain(str(error))
+            return False
+        if self.action.get() == "install" and os.path.isdir(folder) and os.listdir(folder):
+            question = "Halo CE is already installed in %s. Install over it?" if read_install(folder) is not None \
+                else "%s already has files in it. Install there anyway?"
+            return messagebox.askyesno("%s Setup" % APP_NAME, question % folder, parent=self.root)
+        return True
+
+    def page_ready(self):
+        ttk = self.ttk
+        action = self.action.get()
+        self.text("Click %s to %s." % (self.verb(), "begin" if action == "install" else "go on"),
+                  pady=(0, self.px(6)))
         box = ttk.Frame(self.body)
-        box.pack(side="bottom", fill="x", pady=(px(14), 0))
-        ttk.Separator(box).pack(fill="x", pady=(0, px(10)))
-        head = ttk.Frame(box)
-        head.pack(fill="x")
-        ttk.Label(head, text="Gathered so far in the output folder", style="Hint.TLabel").pack(side="left")
-        opener = ttk.Label(head, text="Open the folder", style="HintLink.TLabel", cursor="hand2")
-        opener.pack(side="right")
-        opener.bind("<Button-1>", lambda event: self.open_output())
-        chips = ttk.Frame(box)
-        chips.pack(fill="x", pady=(px(6), 0))
-        xbox = len([item for item in summary["maps"] if item.name.lower() not in dict(PC_RESOURCE_MAPS)])
-        pc = summary["pc_status"].complete
-        shown = []
-        if summary["xbe"] or xbox or not summary["mcc"]:
-            shown += [(summary["xbe"], "default.xbe" if summary["xbe"] else "no default.xbe"),
-                      (xbox > 0, "%d maps" % xbox)]
-        if summary["mcc"]:
-            shown.append((True, "MCC files"))
-        shown.append((pc, "with the Halo PC files" if pc else "no Halo PC files"))
+        box.pack(fill="both", expand=True)
+        text = self.tk.Text(box, wrap="char", height=8, width=10, font="TkDefaultFont", relief="sunken", borderwidth=1)
+        scroll = ttk.Scrollbar(box, command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        text.pack(side="left", fill="both", expand=True)
+        text.insert("1.0", "\n".join(self.summary()))
+        text.configure(state="disabled")
+        self.summary_box = text
+
+    def source_lines(self) -> List[str]:
+        if self.mode.get() == "automatic":
+            return ["Game files: from your MCC", "    %s" % self.mcc_root.get().strip()]
+        lines = []
+        source = self.xbox_source.get().strip()
+        ce = self.ce_source.get().strip()
+        lines += ["Game files: your Xbox game", "    %s" % source] if source else \
+            ["Game files: already gathered in %s" % self.out.get()]
+        if ce:
+            lines += ["Halo Custom Edition files:", "    %s" % ce]
+        elif self.on_pc:
+            lines.append("Halo Custom Edition files: left out")
         if not self.on_pc:
-            shown.append((bool(summary["movies"]), "%d movies" % len(summary["movies"])))
-        for good, text in shown:
-            ttk.Label(chips, text=("✓ " if good else "") + text,
-                      style="ChipOk.TLabel" if good else "Chip.TLabel").pack(side="left", padx=(0, px(6)))
+            lines.append("Movies: %s" % ("converted from the disc (%s quality)" % (
+                "better" if self.quality.get() == "better" else "standard") if self.will_convert() else "left out"))
+        return lines
+
+    def summary(self) -> List[str]:
+        """The Ready page's plain list of the choices."""
+        action = self.action.get()
+        if action == "uninstall":
+            return ["Remove Halo CE from:", "    %s" % self.existing, "",
+                    "The game and its game files are removed, with the shortcuts.",
+                    "Your saved games and settings are kept."]
+        if action == "repair":
+            program, game = self.damaged
+            lines = ["Repair Halo CE in:", "    %s" % self.existing, ""]
+            if not program and not game:
+                return lines + ["Every file is there and the right size. The shortcuts are made again."]
+            if program:
+                lines.append("Program files to put back: %d" % len(program))
+                lines.append("    From: %s" % self.package.get())
+            if game:
+                lines += ["Game files to put back: %d" % len(game)] + self.source_lines()
+            return lines
+        if self.on_pc:
+            shortcuts = [name for wanted, name in ((self.desktop_shortcut.get(), "desktop"),
+                                                   (self.start_menu.get(), "Start menu" if sys.platform == "win32"
+                                                    else "applications menu")) if wanted]
+            return ["Install on: PC", "Install folder:", "    %s" % self.install_folder.get(),
+                    "PC build:", "    %s" % self.package.get()] + self.source_lines() + [
+                "Space needed: %s" % human_size(self.needed_bytes()),
+                "Shortcuts: %s" % (", ".join(shortcuts) or "none")]
+        host, port = self._host_port()
+        return ["Install on: PS Vita at %s:%d, in %s" % (host, port, VITA_GAME_FOLDER)] + self.source_lines() + [
+            "Game package: %s" % (os.path.basename(self.vpk.get()) if self.vpk.get().strip() else "none chosen"),
+            "Files gathered in:", "    %s" % self.out.get()]
+
+    def page_installing(self):
+        ttk, px = self.ttk, self.px
+        self.text("", textvariable=self.current_task, pady=(px(8), px(4)))
+        self.bar = ttk.Progressbar(self.body, mode="determinate", maximum=1000)
+        self.bar.pack(fill="x", pady=(px(4), px(4)))
+        row = ttk.Frame(self.body)
+        row.pack(fill="x")
+        ttk.Label(row, textvariable=self.current_file).pack(side="left")
+        ttk.Label(row, textvariable=self.percent).pack(side="right")
+        if not self.on_pc:
+            self.text("Keep the Vita awake while it copies: touch its screen now and then, or turn off auto-standby "
+                      "in its power settings.", pady=(px(16), 0))
+
+    def page_finish(self):
+        px = self.px
+        action = self.action.get()
+        if self.outcome != "done":
+            if self.reason:
+                self.text(self.reason, pady=(0, px(10)))
+            if self.rollback is not None:
+                self.text("What Setup had copied was removed again.", pady=(0, px(10)))
+            elif not self.on_pc:
+                self.text("Files already copied are kept, so a second try goes on from where this one stopped.",
+                          pady=(0, px(10)))
+            self.text("Click Back to try again, or Finish to close Setup.")
+            return
+        for warning in self.warnings:
+            self.text(warning, pady=(0, px(8)))
+        if action == "uninstall":
+            self.text("Halo CE was removed from this computer.", pady=(0, px(8)))
+            if self.left_behind:
+                self.text("%s still has %d files the game wrote there. They were left alone: delete the folder if "
+                          "you do not want them." % (self.existing, self.left_behind), pady=(0, px(8)))
+            self.text("Click Finish to close Setup.")
+        elif self.on_pc:
+            self.text("Halo CE was %s in:" % ("repaired" if action == "repair" else "installed"))
+            self.text(self.install_folder.get(), pady=(0, px(8)))
+            self.text("The first load of each level takes a while: the game writes a cache file for it.",
+                      pady=(0, px(10)))
+            self.ttk.Checkbutton(self.body, text="Launch Halo CE", variable=self.launch,
+                                 style="White.TCheckbutton").pack(anchor="w", pady=(0, px(10)))
+            self.text("Click Finish to close Setup.")
+        else:
+            self.finish_vita()
+
+    def finish_vita(self):
+        px = self.px
+        self.text("The files are on your PS Vita. What is left, on the Vita:", pady=(0, px(6)))
+        vpk = os.path.basename(self.vpk.get().strip())
+        steps = ["In VitaShell, press Circle to leave FTP mode, open ux0:, then data, press Cross on %s and confirm. "
+                 "The bubble is called Halo CE." % vpk if vpk else
+                 "Install the VPK in VitaShell, if the game is not on the Vita yet.",
+                 "Check that ur0:data/libshacccg.suprx is there (ShaRKF00D extracts it).",
+                 "Start Halo CE from its bubble."]
+        for number, step in enumerate(steps, 1):
+            self.text("%d.  %s" % (number, step), pady=(0, px(4)))
+        self.text("You can delete %s now." % self.out.get(), pady=(px(6), 0))
+
+    # -- the work: everything is read from the window here, on its thread
+    # (tkinter is not thread-safe), and runs in order on a thread of its own
+    def game_tasks(self, out: str) -> List[InstallTask]:
+        """Gathering the game files into `out`, from the Game Files page's
+        choice."""
+        log = self.log
+        if self.mode.get() == "automatic":
+            folder = self.mcc_root.get().strip()
+
+            def from_mcc(step):
+                _check_space(out, mcc_plan(folder).needed(out))
+                install_mcc_files(folder, out, step, log)
+            return [InstallTask("Copying the game files from MCC", max(self.game_bytes, 1), from_mcc)]
+        tasks = []
+        source = self.xbox_source.get().strip()
+        ce = self.ce_source.get().strip()
+        if source:
+            def from_disc(step):
+                _check_space(out, xbox_files_size(source))
+                extract_xbox_files(source, out, step, log)
+            tasks.append(InstallTask("Copying the game files from your Xbox game", 1 << 30, from_disc))
+        if ce:
+            def from_ce(step):
+                _check_space(out, 200 << 20)
+                os.makedirs(out, exist_ok=True)
+                if os.path.isdir(ce):
+                    copy_pc_maps_from_folder(ce, out, step, log)
+                else:
+                    extract_pc_maps_from_installer(ce, out, step, log)
+            tasks.append(InstallTask("Getting the Halo Custom Edition files", 200 << 20, from_ce))
+        if self.will_convert():
+            quality = self.quality.get()
+
+            def movies(step):
+                _check_space(out, 600 << 20)
+                convert_movies(source, out, None, quality, step, log, self.cancel)
+            tasks.append(InstallTask("Converting the movies", 1 << 30, movies))
+        return tasks
+
+    def vita_tasks(self) -> List[InstallTask]:
+        out = self.out.get()
+        host, port = self._host_port()
+        vpk = self.vpk.get().strip()
+        tasks = self.game_tasks(out)
+
+        def send(step):
+            items = staged_uploads(out)
+            status = pc_files_status(out)
+            if not items:
+                raise InstallerError("Nothing to copy in %s." % out)
+            if not status.complete:
+                raise InstallerError(pc_files_help(status.missing))
+            log_line = "Copying %d files (%s) to %s:%d"
+            self.log(log_line % (len(items), human_size(sum(item.size for item in items)), host, port))
+            upload_files(host, items, port, False, step, self.log, self.cancel)
+        tasks.append(InstallTask("Sending the files to the Vita", max(self.game_bytes, 1 << 30), send))
+        if vpk:
+            tasks.append(InstallTask("Sending the game package to the Vita", 64 << 20,
+                                     lambda step: upload_vpk(host, vpk, port, step, self.log, self.cancel)))
+        return tasks
+
+    def pc_tasks(self) -> List[InstallTask]:
+        folder = self.installed_folder()
+        action = self.action.get()
+        record = read_install(folder) or {}
+        files = dict(record.get("files", {})) if isinstance(record.get("files"), dict) else {}
+        version = record.get("version", VERSION) if isinstance(record.get("version"), str) else VERSION
+        desktop, start_menu = self.desktop_shortcut.get(), self.start_menu.get()
+        program, game = self.damaged
+        unpack = action == "install" or bool(program)
+        gather = action == "install" or bool(game)
+        platform = _pc_builds_here_first()[0][0]
+        tasks = []
+        if unpack:
+            package = self.package_info(self.package.get())
+            version = package.version
+
+            def unpacked(step):
+                files.clear()
+                files.update(install_pc_package(package, folder, step, self.log))
+            tasks.append(InstallTask("Copying the program files", max(package.size, 1), unpacked))
+        if gather:
+            data = pc_data_folder(folder) or os.path.join(folder, "build", platform)
+            tasks += self.game_tasks(data)
+
+        def finished(step):
+            self.warnings = finish_pc_install(folder, version, files, desktop, start_menu, self.log)
+        tasks.append(InstallTask("Creating the shortcuts", 1 << 20, finished))
+        return tasks
+
+    def uninstall_tasks(self) -> List[InstallTask]:
+        folder = self.existing
+
+        def remove(step):
+            self.left_behind = uninstall_pc(folder, step, self.log)["kept"]
+        return [InstallTask("Removing Halo CE", 1, remove)]
+
+    def begin(self):
+        """The Install button: the plan, then the Installing page."""
+        action = self.action.get()
+        try:
+            tasks = self.uninstall_tasks() if action == "uninstall" else self.pc_tasks() if self.on_pc \
+                else self.vita_tasks()
+        except InstallerError as error:
+            self.complain(str(error))
+            return
+        self.rollback = None
+        folder = ""
+        if self.on_pc and action == "install":
+            folder = self.installed_folder()
+            if read_install(folder) is None:  # (a new install: taken back if it stops)
+                self.rollback = snapshot_folder(folder)
+        self.cancel.clear()
+        self.outcome = ""
+        self.reason = ""
+        self.warnings = []
+        self.current_task.set("Preparing...")
+        self.current_file.set("")
+        self.percent.set("")
+        self.show("installing")
+
+        def run():
+            try:
+                run_tasks(tasks, self.report, lambda label: self.messages.put(("task", label)))
+                self.messages.put(("end", "done", ""))
+            except Cancelled:
+                self.roll_back(folder)
+                self.messages.put(("end", "cancelled", ""))
+            except InstallerError as error:
+                self.log("ERROR: %s" % error)
+                self.roll_back(folder)
+                self.messages.put(("end", "failed", str(error)))
+            except Exception as error:  # shown, not lost in a thread
+                self.log("ERROR: %r" % (error,))
+                self.roll_back(folder)
+                self.messages.put(("end", "failed", "Unexpected problem: %r" % (error,)))
+
+        self.worker = threading.Thread(target=run, daemon=True)
+        self.worker.start()
+
+    def roll_back(self, folder: str):
+        if self.rollback is not None:
+            roll_back_install(folder, self.rollback)
+
+    def busy(self) -> bool:
+        return bool(self.worker and self.worker.is_alive())
+
+    def log(self, message: str):
+        self.log_lines.append(message)
+
+    def save_log(self):
+        """What Setup did, for a report when it went wrong."""
+        path = os.path.join(os.path.dirname(settings_path()), LOG_FILE)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as file:
+                file.write("Halo CE Setup %s\n%s\n" % (VERSION, "\n".join(self.log_lines)))
+        except OSError:
+            pass
+
+    def report(self, message: str, done: int, total: int):
+        if self.cancel.is_set():
+            raise Cancelled()
+        self.messages.put(("progress", message, done, total))
+
+    def poll(self):
+        try:
+            while True:
+                message = self.messages.get_nowait()
+                if message[0] == "task":
+                    if not self.cancel.is_set():
+                        self.current_task.set(message[1] + "...")
+                elif message[0] == "progress":
+                    _, text, done, total = message
+                    if self.page == "installing":
+                        self.bar["value"] = 1000 * done // total if total else 0
+                    self.current_file.set(text)
+                    self.percent.set("%d%%" % (100 * done // total if total else 100))
+                elif message[0] == "tested":
+                    self.test_result.set(message[1])
+                    if self.page == "destination" and not self.on_pc and self.test_button.winfo_exists():
+                        self.test_button.state(["!disabled"])
+                elif message[0] == "end":
+                    self.outcome, self.reason = message[1], message[2]
+                    self.cancel.clear()
+                    self.save_log()
+                    self.show("finish")
+        except queue.Empty:
+            pass
+        self.root.after(100, self.poll)
 
 
 if __name__ == "__main__":

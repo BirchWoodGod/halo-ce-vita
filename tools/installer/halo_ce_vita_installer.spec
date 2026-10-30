@@ -3,16 +3,10 @@
 # PyInstaller: the install helper as one windowed program,
 # HaloCEVitaInstaller.exe. build_windows.py runs it (and fetches ffmpeg into
 # build/ffmpeg first, passed in HCV_FFMPEG_DIR); the program finds ffmpeg in
-# its bundle's ffmpeg folder. The window's pictures go in (pictures/*.png, a
-# few KB made from docs/screenshots by make_pictures.py), and its Modern
-# look's theme: sv-ttk (its Tcl files and sprites) and darkdetect, with their
-# licences in licenses/. The icon is drawn by the tool itself (write_icon)
-# into build/.
+# its bundle's ffmpeg folder. The project's LICENSE goes in, for the License
+# page. The icon is drawn by the tool itself (write_icon) into build/.
 import os
 import sys
-from importlib import metadata
-
-from PyInstaller.utils.hooks import collect_data_files
 
 here = os.path.abspath(SPECPATH)
 ffmpeg_folder = os.environ.get("HCV_FFMPEG_DIR", os.path.join(here, "build", "ffmpeg"))
@@ -23,20 +17,9 @@ if ffmpeg_folder and os.path.isdir(ffmpeg_folder):
         if os.path.isfile(path):
             datas.append((path, "ffmpeg"))
 
-# the pictures and the theme: required in the Windows program (its selftest
-# says so)
-pictures = os.path.join(here, "pictures")
-for name in sorted(os.listdir(pictures)):
-    if name.endswith(".png"):
-        datas.append((os.path.join(pictures, name), "pictures"))
-
-import sv_ttk  # noqa: E402,F401
-import darkdetect  # noqa: E402,F401
-datas += collect_data_files("sv_ttk")
-for distribution in ("sv-ttk", "darkdetect"):
-    for file in metadata.distribution(distribution).files or ():
-        if file.name.upper().startswith(("LICENSE", "LICENCE", "COPYING")):
-            datas.append((str(file.locate()), os.path.join("licenses", distribution)))
+# the License page's text: required in the Windows program (its selftest says
+# so)
+datas.append((os.path.join(here, "..", "..", "LICENSE"), "."))
 
 sys.path.insert(0, here)
 import halo_ce_vita_installer  # noqa: E402
@@ -50,7 +33,7 @@ a = Analysis(
     pathex=[here],
     binaries=[],
     datas=datas,
-    hiddenimports=["sv_ttk", "darkdetect"],
+    hiddenimports=[],
     hookspath=[],
     runtime_hooks=[],
     excludes=["pytest", "pyftpdlib", "unittest", "pydoc", "xmlrpc"],

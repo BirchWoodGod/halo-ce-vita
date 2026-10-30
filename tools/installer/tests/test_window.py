@@ -1,10 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""The window: every page drawn, a step run through it (the Xbox files from
-a generated image), the fields read on the window's thread, the sidebar's
-step states, the details, the Done page, the classic look by default, the
-Modern look (light and dark) and its setting kept, HCV_THEME, the pictures
-and the window without them. Skipped where there is no display or no
-tkinter (the icon's tests need neither)."""
+"""The window's parts that are not the wizard's flow (test_flow.py has that):
+ttk's native theme and nothing custom, the generated pictures, the icon, the
+settings file. Skipped where there is no display or no tkinter (the icon's and
+pictures' tests need neither)."""
 
 import os
 import struct
@@ -29,7 +27,10 @@ def root():
     except tkinter.TclError as error:
         pytest.skip("no display: %s" % error)
     yield window
-    window.destroy()
+    try:
+        window.destroy()
+    except tkinter.TclError:  # (Finish closed it)
+        pass
 
 
 def pump(root, until, seconds=20.0):
@@ -63,208 +64,6 @@ def stage(folder, xbox=True, pc=False, movies=0):
                 file.write(bytes(64))
 
 
-def test_pages_and_a_step(root, tmp_path, monkeypatch):
-    from tkinter import messagebox
-    errors = []
-    monkeypatch.setattr(messagebox, "showerror", lambda title, text, **options: errors.append(text))
-    out = tmp_path / "out"
-    window = hcv.InstallerWindow(root, str(out))
-    for page in window.PAGES:
-        window.show(page)
-        root.update()
-        assert window.body.winfo_children()
-        assert window.title_label.cget("text") == window.PAGES[page][2]
-    image = tmp_path / "halo.iso"
-    fakes.make_xiso(str(image), fakes.xbox_tree())
-    window.show("game_files")
-    window.xbox_source.set(str(image))
-    window.start(window.do_xbox)
-    assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
-    pump(root, lambda: False, 0.3)
-    assert not errors
-    assert (out / "maps" / "a10.map").exists() and (out / "default.xbe").exists()
-    assert window.movie_source.get() == str(image)
-    # done: the sidebar's tick, the step's line, Next back as the main button
-    assert window.step_state("game_files") == "current" and "game_files" in window.done_steps
-    assert "Xbox files ready" in window.notice_text()
-    assert window.next_button.cget("text") == "Next"
-    # a step without its file: told on the page, nothing started, no dialog
-    window.show("pc_files")
-    window.pc_mode.set("installer")
-    window.installer.set("")
-    window.start(window.do_pc_files)
-    assert "Choose the installer" in window.notice_text()
-    assert not window.busy() and not errors
-    # the address field
-    window.host.set("ftp://192.168.1.20:1337/")
-    assert window._host_port() == ("192.168.1.20", 1337)
-    window.host.set("rm -rf /")
-    with pytest.raises(hcv.InstallerError):
-        window._host_port()
-
-
-def test_mcc_through_the_window(root, tmp_path, monkeypatch):
-    """Step 1's other way: MCC's folder (found by itself, mocked), its files
-    copied, the step done, the Done page's row."""
-    from tkinter import messagebox
-    errors = []
-    monkeypatch.setattr(messagebox, "showerror", lambda title, text, **options: errors.append(text))
-    mcc = tmp_path / "Halo The Master Chief Collection"
-    fakes.make_mcc(str(mcc))
-    monkeypatch.setattr(hcv, "find_mcc_folders", lambda: [str(mcc)])
-    out = tmp_path / "out"
-    window = hcv.InstallerWindow(root, str(out))
-    assert window.mcc_root.get() == str(mcc) and window.game_mode.get() == "xbox"
-    assert window.mode.get() == "automatic"  # MCC there: Automatic picked already
-    window.mode.set("manual")
-    window.show("game_files")
-    root.update()
-    texts = [widget.cget("text") for widget in all_widgets(window.body)
-             if widget.winfo_class() in ("TRadiobutton", "TCheckbutton")]
-    assert any("Master Chief Collection" in text for text in texts)
-    window.game_mode.set("mcc")
-    window.start(window.do_game_files)
-    assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
-    pump(root, lambda: False, 0.3)
-    assert not errors
-    assert hcv.mcc_staged(str(out)) and not (out / "maps").exists()
-    assert window.step_state("game_files") == "current" and window.step_state_done("game_files")
-    assert "MCC files ready" in window.notice_text()
-    rows = {what: (done, how) for done, what, how in window.done_summary()}
-    assert rows["MCC files"][0] is True and "29 Halo CE maps" in rows["MCC files"][1]
-    for page in window.PAGES:
-        window.show(page)
-        root.update()
-    # no folder chosen: told on the page
-    window.show("game_files")
-    window.game_mode.set("mcc")
-    window.mcc_root.set("")
-    window.start(window.do_game_files)
-    assert "Choose MCC's folder" in window.notice_text() and not window.busy()
-
-
-def test_required_pc_files_check(root, tmp_path, monkeypatch):
-    """Step 3 is required: its page and the copy page say what is missing
-    and where to get it; copying without them asks first; MCC's
-    custom_edition counts."""
-    from tkinter import messagebox
-    asked = []
-    answer = [False]
-    monkeypatch.setattr(messagebox, "askyesno", lambda title, text, **options: asked.append(text) or answer[0])
-    monkeypatch.setattr(messagebox, "showerror", lambda title, text, **options: None)
-    calls = []
-    monkeypatch.setattr(hcv, "upload_files", lambda *arguments, **options: calls.append(arguments) or
-                        {"copied": 1, "skipped": 0, "retries": 0})
-    out = tmp_path / "out"
-    stage(str(out), xbox=True)
-    window = hcv.InstallerWindow(root, str(out))
-    assert window.PAGES["pc_files"][1] == "Required"
-    assert window.step_rows["pc_files"][2].cget("text") == "Required"
-    window.show("pc_files")
-    root.update()
-    labels = [widget.cget("text") for widget in all_widgets(window.body) if widget.winfo_class() == "TLabel"]
-    assert any(text.startswith("⚠ Required Halo Custom Edition files missing: bitmaps.map, sounds.map, loc.map")
-               for text in labels)
-    window.show("copy_vita")
-    window.host.set("192.168.1.20")
-    window.start(window.do_upload)
-    assert asked and "Copy the other files" in asked[0]
-    assert "Not copied" in window.notice_text() and not calls
-    answer[0] = True
-    window.start(window.do_upload)
-    assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
-    assert len(calls) == 1
-    rows = {what: (done, how) for done, what, how in window.done_summary()}
-    assert rows["Halo PC files"] == (False, "MISSING bitmaps.map, sounds.map, loc.map: required")
-    # from MCC's custom_edition: done, nothing asked
-    for name, kind in hcv.PC_RESOURCE_MAPS:
-        folder = out / "mcc" / "halo1" / "maps" / "custom_edition"
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / name).write_bytes(fakes.fake_resource_map(kind))
-    asked.clear()
-    window.show("pc_files")
-    root.update()
-    assert window.step_state_done("pc_files")
-    labels = [widget.cget("text") for widget in all_widgets(window.body) if widget.winfo_class() == "TLabel"]
-    assert any(text.startswith("✓ bitmaps.map, sounds.map and loc.map") for text in labels)
-    window.show("copy_vita")
-    window.start(window.do_upload)
-    assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
-    assert not asked and len(calls) == 2
-
-
-def test_a_failed_step_is_shown(root, tmp_path, monkeypatch):
-    from tkinter import messagebox
-    errors = []
-    monkeypatch.setattr(messagebox, "showerror", lambda title, text, **options: errors.append(text))
-    window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    window.show("game_files")
-    window.xbox_source.set(str(tmp_path / "missing.iso"))
-    window.start(window.do_xbox)
-    assert pump(root, lambda: not window.worker.is_alive() and window.messages.empty())
-    pump(root, lambda: False, 0.3)
-    assert errors and "game_files" not in window.done_steps
-    assert window.notice_text().startswith("⚠")
-    assert window.details_shown  # the log opened to show what happened
-
-
-def test_sidebar_states(root, tmp_path):
-    out = tmp_path / "out"
-    window = hcv.InstallerWindow(root, str(out))
-    assert window.step_state("platform") == "current" and window.step_state("game_files") == "todo"
-    assert window.next_button.cget("text") == "Next"
-    assert not window.back_button.instate(["!disabled"])
-    window.go("game_files")
-    assert window.next_button.cget("text") == "Skip this step"
-    window.go("movies")  # moving on past a step not done: skipped
-    assert window.step_state("game_files") == "skipped"
-    assert window.step_rows["game_files"][2].cget("text") == "Skipped"
-    window.go("game_files")  # going back skips nothing
-    assert window.step_state("movies") == "todo"
-    # files already in the output folder count as done (an earlier run)
-    stage(str(out), xbox=True, pc=True)
-    window.show("copy_vita")
-    assert window.step_state("game_files") == "done" and window.step_state("pc_files") == "done"
-    assert window.step_state("movies") == "todo"
-    assert window.step_rows["pc_files"][2].cget("text") == "Done"
-    # the sidebar moves too
-    window.step_rows["vpk"][1].event_generate("<Button-1>")
-    root.update()
-    assert window.page == "vpk" and window.step_state("copy_vita") == "skipped"
-
-
-def test_details_collapsed_by_default(root, tmp_path):
-    window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    root.update()
-    assert not window.details_shown and not window.details.winfo_ismapped()
-    window.append_log("hello")
-    window.toggle_details()
-    root.update()
-    assert window.details.winfo_ismapped() and window.details_button.cget("text") == "Hide details"
-    assert "hello" in window.log_text.get("1.0", "end")
-    window.toggle_details()
-    root.update()
-    assert not window.details.winfo_ismapped()
-
-
-def test_done_page_summary(root, tmp_path):
-    out = tmp_path / "out"
-    stage(str(out), xbox=True, pc=False, movies=3)
-    window = hcv.InstallerWindow(root, str(out))
-    window.results["copy_vita"] = "On the Vita: 17 copied, 2 were already there"
-    window.done_steps.add("copy_vita")
-    window.show("done")
-    rows = {what: (done, how) for done, what, how in window.done_summary()}
-    assert rows["Xbox game files"] == (True, "default.xbe and %d maps" % len(hcv.XBOX_REQUIRED_MAPS))
-    assert rows["Movies"] == (True, "3 movies")
-    assert rows["Halo PC files"][0] is False
-    assert rows["Copied to the Vita"] == (True, "17 copied, 2 were already there")
-    assert rows["The VPK"] == (False, "not copied in this session")
-    texts = [widget.cget("text") for widget in all_widgets(window.body) if widget.winfo_class() == "TLabel"]
-    assert any("Next, on the Vita" == text for text in texts)
-    assert window.next_button.cget("text") == "Close"
-
-
 def all_widgets(widget):
     found = []
     for child in widget.winfo_children():
@@ -273,112 +72,34 @@ def all_widgets(widget):
     return found
 
 
-def test_light_and_dark(root, tmp_path):
-    pytest.importorskip("sv_ttk")
-    from tkinter import ttk
-    window = hcv.InstallerWindow(root, str(tmp_path / "out"), theme="dark")
-    style = ttk.Style(root)
-    assert style.theme_use() == "sun-valley-dark" and window.dark.get()
-    root.update()
-    # sv-ttk's palette does not paint over the styles' colours
-    assert str(window.step_caption.cget("background")) == ""
-    assert style.lookup("Sidebar.TLabel", "background") == hcv.PALETTES["dark"]["sidebar"]
-    window.dark.set(False)
-    window.toggle_theme()
-    root.update()
-    assert style.theme_use() == "sun-valley-light" and window.theme == "light"
-    assert not window.follow_system
-    assert str(window.step_rows["game_files"][1].cget("background")) == ""
-    assert window.log_text.cget("background") == hcv.PALETTES["light"]["log"]
-    for page in window.PAGES:
-        window.show(page)
-        root.update()
-
-
-def test_classic_is_the_default(root, tmp_path, own_settings):
+def test_the_native_theme_and_nothing_of_the_old_looks(root, tmp_path):
     from tkinter import ttk
     window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    root.update()
-    assert window.theme == "classic" and window.classic and not window.modern.get()
-    assert ttk.Style(root).theme_use() == "alt"  # Tk's Windows 95/98 look
-    assert ttk.Style(root).lookup("Header.TFrame", "background") == hcv.PALETTES["classic"]["header"]
-    assert str(window.next_button.cget("default")) == "active"  # the default button's ring
-    assert not own_settings.exists()  # nothing written until the look is changed
-    for page in window.PAGES:
-        window.show(page)
-        root.update()
-        assert window.body.winfo_children()
-        assert window.title_label.cget("text") == window.PAGES[page][2]
+    assert window.theme == ttk.Style(root).theme_use() and window.theme in ("vista", "aqua", "clam")
+    for name in ("PALETTES", "THEMES", "PAGE_PICTURES", "indicator_png", "_sv_ttk_module", "_set_palette"):
+        assert not hasattr(hcv, name)
 
 
-def test_modern_look_is_remembered(root, tmp_path, own_settings):
-    pytest.importorskip("sv_ttk")
-    import json
-    from tkinter import ttk
-    out = str(tmp_path / "out")
-    stage(out, xbox=True)
-    window = hcv.InstallerWindow(root, out)
-    window.show("movies")
-    window.movie_source.set("/some/halo.iso")
-    window.append_log("a line of the log")
-    window.modern.set(True)
-    window.toggle_look()
-    root.update()
-    assert window.modern_look and ttk.Style(root).theme_use().startswith("sun-valley-")
-    assert json.loads(own_settings.read_text())["look"] == "modern"
-    # drawn again: same page, fields, log and sidebar states
-    assert window.page == "movies" and window.movie_source.get() == "/some/halo.iso"
-    assert "a line of the log" in window.log_text.get("1.0", "end")
-    assert window.step_state("game_files") == "done" and window.step_rows["game_files"][2].cget("text") == "Done"
-    for page in window.PAGES:
-        window.show(page)
-        root.update()
-    # Dark mode is kept too
-    window.dark.set(True)
-    window.toggle_theme()
-    assert ttk.Style(root).theme_use() == "sun-valley-dark"
-    assert json.loads(own_settings.read_text()) == {"look": "modern", "dark": True}
-    # the next start: the Modern look, dark
-    window = hcv.InstallerWindow(root, out)
-    assert window.theme == "dark" and window.modern.get() and not window.follow_system
-    # and back to classic
-    window.modern.set(False)
-    window.toggle_look()
-    root.update()
-    assert window.theme == "classic" and ttk.Style(root).theme_use() == "alt"
-    assert json.loads(own_settings.read_text())["look"] == "classic"
-    assert hcv.InstallerWindow(root, out).theme == "classic"
-
-
-def test_the_look_is_not_changed_while_a_step_runs(root, tmp_path, own_settings):
-    pytest.importorskip("sv_ttk")
-    import threading
+def test_the_window_has_a_fixed_size_and_every_page_fits(root, tmp_path):
     window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    release = threading.Event()
-    window.start(lambda: (lambda: release.wait(10) and None))
-    try:
-        assert window.busy()
-        window.modern.set(True)
-        window.toggle_look()
-        assert window.theme == "classic" and not window.modern.get() and not own_settings.exists()
-    finally:
-        release.set()
-    assert pump(root, lambda: not window.busy() and window.messages.empty())
-
-
-def test_hcv_theme_picks_the_look(root, tmp_path, own_settings, monkeypatch):
-    pytest.importorskip("sv_ttk")
-    from tkinter import ttk
-    hcv.save_settings({"look": "modern", "dark": False})
-    monkeypatch.setenv("HCV_THEME", "classic")
-    assert hcv.InstallerWindow(root, str(tmp_path / "out")).theme == "classic"
-    monkeypatch.setenv("HCV_THEME", "dark")
-    assert hcv.InstallerWindow(root, str(tmp_path / "out")).theme == "dark"
-    monkeypatch.setenv("HCV_THEME", "plain")
-    window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    assert window.theme == "plain" and ttk.Style(root).theme_use() in ("vista", "aqua", "clam")
-    monkeypatch.setenv("HCV_THEME", "something else")  # the saved look
-    assert hcv.InstallerWindow(root, str(tmp_path / "out")).theme == "light"
+    assert root.resizable() == (False, False)
+    window.host.set("192.168.1.20")
+    window.existing = str(tmp_path)  # (so the maintenance page is one of them)
+    for platform in ("vita", "pc"):
+        window.platform.set(platform)
+        for mode in ("automatic", "manual"):
+            window.mode.set(mode)
+            for page in window.PAGES:
+                window.show(page)
+                root.update()
+                assert window.shell.winfo_reqheight() <= window.shell.winfo_height(), page
+                assert window.shell.winfo_reqwidth() <= window.shell.winfo_width(), page
+                bottom = window.shell.winfo_rooty() + window.shell.winfo_height()
+                right = window.shell.winfo_rootx() + window.shell.winfo_width()
+                for widget in all_widgets(window.body):
+                    if widget.winfo_ismapped():
+                        assert widget.winfo_rooty() + widget.winfo_height() <= bottom, page
+                        assert widget.winfo_rootx() + widget.winfo_width() <= right, page
 
 
 def test_damaged_or_unwritable_settings(root, tmp_path, own_settings, monkeypatch):
@@ -387,11 +108,11 @@ def test_damaged_or_unwritable_settings(root, tmp_path, own_settings, monkeypatc
     assert hcv.load_settings() == {}
     own_settings.write_text("[1, 2]")
     assert hcv.load_settings() == {}
-    assert hcv.InstallerWindow(root, str(tmp_path / "out")).theme == "classic"
+    hcv.InstallerWindow(root, str(tmp_path / "out"))
     blocked = tmp_path / "a file"
     blocked.write_text("")
     monkeypatch.setattr(hcv, "settings_path", lambda: str(blocked / "settings.json"))
-    assert hcv.save_settings({"look": "modern"}) is False
+    assert hcv.save_settings({"install_folder": "/somewhere"}) is False
     assert hcv.load_settings() == {}
 
 
@@ -406,65 +127,8 @@ def test_settings_path_is_in_the_users_app_data(monkeypatch, tmp_path, real_sett
     else:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
         assert hcv.settings_path() == str(tmp_path / "halo-ce-vita" / hcv.SETTINGS_FILE)
-    assert hcv.save_settings({"look": "modern"})
-    assert hcv.load_settings() == {"look": "modern"}
-
-
-def test_pictures(root, tmp_path):
-    window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    zoom = max(1, int(hcv.PICTURE_ZOOM * window.scale + 1e-6))
-    names = set()
-    for page in window.PAGES:
-        window.show(page)
-        root.update()
-        image = window.picture(page)
-        assert image is not None and (image.width(), image.height()) == (76 * zoom, 43 * zoom)
-        assert window.picture_label.winfo_ismapped()
-        assert str(image) in str(window.picture_label.cget("image"))
-        assert window.picture_caption.cget("text") == hcv.PAGE_PICTURES[page][1]
-        names.add(hcv.PAGE_PICTURES[page][0])
-    assert len(names) == len(window.PAGES)  # a picture of its own for each page
-    # small: they go inside the Windows program
-    assert sum(os.path.getsize(hcv.picture_path(name)) for name in names) < 64 * 1024
-
-
-def test_the_window_works_without_its_pictures(root, tmp_path, monkeypatch):
-    from tkinter import messagebox
-    errors = []
-    monkeypatch.setattr(messagebox, "showerror", lambda title, text, **options: errors.append(text))
-    monkeypatch.setattr(hcv, "picture_path", lambda name: str(tmp_path / "missing" / name))
-    damaged = tmp_path / "damaged.png"
-    damaged.write_bytes(b"\x89PNG\r\n\x1a\nnot really")
-    window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    for page in window.PAGES:
-        window.show(page)
-        root.update()
-        assert window.picture(page) is None and not window.picture_label.winfo_ismapped()
-        assert window.body.winfo_children()
-    monkeypatch.setattr(hcv, "picture_path", lambda name: str(damaged))
-    window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    root.update()
-    assert window.picture("platform") is None and not window.picture_label.winfo_ismapped()
-    assert not errors
-
-
-def test_without_the_modern_theme(root, tmp_path, own_settings, monkeypatch):
-    monkeypatch.setitem(sys.modules, "sv_ttk", None)  # as if not installed
-    assert hcv._sv_ttk_module() is None
-    hcv.save_settings({"look": "modern"})
-    window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    assert window.sv_ttk is None and window.theme == "classic"
-    texts = [widget.cget("text") for widget in all_widgets(window.sidebar)
-             if widget.winfo_class() == "TCheckbutton"]
-    assert "Modern look" not in texts
-    for page in window.PAGES:
-        window.show(page)
-        root.update()
-        assert window.body.winfo_children()
-    monkeypatch.setenv("HCV_THEME", "dark")
-    assert hcv.InstallerWindow(root, str(tmp_path / "out")).theme == "classic"
-    window = hcv.InstallerWindow(root, str(tmp_path / "out"), theme="plain")
-    assert window.sv_ttk is None and window.theme == "plain"
+    assert hcv.save_settings({"install_folder": "/somewhere"})
+    assert hcv.load_settings() == {"install_folder": "/somewhere"}
 
 
 def read_png(data):
@@ -491,33 +155,11 @@ def test_icon_png():
     assert alpha == 255 and blue > red  # the square: blue
 
 
-def test_classic_indicators_png():
-    size = 20
-    width, height, raw = read_png(hcv.indicator_png("check", True, False, size))
-    assert (width, height) == (size, size)
-    pixel = lambda x, y: raw[y * (size * 4 + 1) + 1 + x * 4:][:4]
-    assert pixel(0, 0) == b"\x80\x80\x80\xff"  # the bevel's dark grey corner
-    assert pixel(size - 1, size // 2) == b"\xff\xff\xff\xff"  # its white side
-    assert pixel(int(size * 0.42), int(size * 0.66)) == b"\0\0\0\xff"  # the tick
-    assert pixel(size // 2, 4) == b"\xff\xff\xff\xff"  # the white box
-    _, _, raw = read_png(hcv.indicator_png("radio", True, True, size))
-    assert pixel(0, 0)[3] == 0  # outside the circle: transparent
-    assert pixel(size // 2, size // 2)[:3] == b"\x80\x80\x80"  # a disabled one's dot
-
-
-def test_classic_indicators_at_a_large_scale(root, tmp_path):
-    from tkinter import ttk
-    window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    style = ttk.Style(root)
-    if window.scale < 1.2:  # (Tk's own at 100%)
-        assert "Hcv.Checkbutton.indicator" not in style.element_names()
-        window.scale = 1.5
-        window._classic_indicators(style)
-    assert "Hcv.Radiobutton.indicator" in style.element_names()
-    assert "Hcv.Checkbutton.indicator" in str(style.layout("TCheckbutton"))
-    for page in window.PAGES:
-        window.show(page)
-        root.update()
+def test_sidebar_png():
+    width, height, raw = read_png(hcv.sidebar_png(164, 420))
+    assert (width, height) == (164, 420)
+    assert all(raw[y * (164 * 4 + 1) + 4] == 255 for y in range(0, 420, 50))  # opaque
+    assert hcv.sidebar_png(164, 420) == hcv.sidebar_png(164, 420)  # always the same picture
 
 
 def test_icon_file(tmp_path):
@@ -531,32 +173,3 @@ def test_icon_file(tmp_path):
             "<BBBBHHII", data[6 + 16 * index:22 + 16 * index])
         assert (width, height, planes, bits) == (size % 256, size % 256, 1, 32)
         assert read_png(data[offset:offset + length])[:2] == (size, size)
-
-
-def test_a_short_window_scrolls(root, tmp_path):
-    window = hcv.InstallerWindow(root, str(tmp_path / "out"))
-    window.show("pc_files")
-    root.minsize(1, 1)
-    tall, short = "%dx%d" % (window.px(1000), window.px(900)), "%dx%d" % (window.px(900), window.px(420))
-    root.geometry(tall)
-    pump(root, lambda: not window.scrollbar.winfo_ismapped(), 3)
-    assert not window.scrollbar.winfo_ismapped()
-    root.geometry(short)
-    pump(root, lambda: window.scrollbar.winfo_ismapped(), 3)
-    assert window.scrollbar.winfo_ismapped()
-    root.geometry(tall)
-    pump(root, lambda: not window.scrollbar.winfo_ismapped(), 3)
-    assert not window.scrollbar.winfo_ismapped()
-
-
-def test_classic_palette_without_tk_setpalette(root, monkeypatch):
-    """Windows runners failed to auto-load Tk's palette.tcl ("invalid command
-    name tk_setPalette"): the classic look's colours then go through the
-    option database instead of stopping the window."""
-    def broken(*args, **kwargs):
-        raise tk_module().TclError('invalid command name "tk_setPalette"')
-
-    monkeypatch.setattr(root, "tk_setPalette", broken)
-    assert hcv._set_palette(root, background="#c0c0c0", foreground="#000000") is False
-    assert root.option_get("background", "Frame") == "#c0c0c0"
-    assert str(root.cget("background")) == "#c0c0c0"
