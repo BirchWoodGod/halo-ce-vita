@@ -175,7 +175,7 @@
 		<data input="port forge title" />
 	</widget>
 	<widget name="online/forge/pause/column" left="28" top="122" width="236" height="256" bitmap="online/f_panel" />
-	<widget name="online/forge/pause/status" type="text" left="36" top="382" width="236" height="64" font="online/font_small" color="#FF9FD8FF" />
+	<widget name="online/forge/pause/status" type="text" left="36" top="382" width="508" height="64" font="online/font_small" color="#FF9FD8FF" />
 	<widget name="online/forge/pause/controls_panel" left="280" top="150" width="320" height="194" bitmap="online/f_panel" />
 	<widget name="online/forge/pause/controls_caption" type="text" left="292" top="156" width="296" height="16" font="online/font_small" color="#FF9FB6CC" string_list="h3/forge_menu" string_index="6" />
 	<widget name="online/forge/pause/controls_rule" left="292" top="174" width="296" height="2" bitmap="online/f_rule" />

@@ -572,6 +572,13 @@ boolean forge_net_local_object(
 boolean forge_net_client_holds(
 	long object_index);
 
+/* ---------- prototypes/FORGE_NETGAME.INC (in forge.c) */
+
+/* (game_engine_ctf.c) whether this game's CTF flags are a layout's own: only
+then a team left no spawn by the flags' places keeps its spawns */
+boolean forge_netgame_custom_flags(
+	void);
+
 /* ---------- prototypes/FORGE_SPAWNS.INC (in forge.c) */
 
 struct player_starting_location;

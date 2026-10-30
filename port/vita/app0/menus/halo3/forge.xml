@@ -243,7 +243,7 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	</widget>
 	<widget name="h3/forge/pause/column" left="48" top="112" width="236" height="268" bitmap="h3/column"/>
 	<!-- (what the last thing asked came to, and the map variant played: port forge title writes it) -->
-	<widget name="h3/forge/pause/status" type="text" left="56" top="384" width="236" height="52" font="h3/font_small" color="#FF9FD8FF"/>
+	<widget name="h3/forge/pause/status" type="text" left="56" top="384" width="488" height="52" font="h3/font_small" color="#FF9FD8FF"/>
 	<widget name="h3/forge/pause/controls_panel" left="300" top="140" width="320" height="194" bitmap="h3/panel"/>
 	<widget name="h3/forge/pause/controls_caption" type="text" left="312" top="146" width="296" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/forge_menu" string_index="6"/>
 	<widget name="h3/forge/pause/controls_rule" left="312" top="164" width="296" height="2" bitmap="h3/rule"/>

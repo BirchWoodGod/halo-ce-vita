@@ -297,6 +297,7 @@ enum
 	FORGE_KEY_WHEEL = 1 << 3,
 	/* a notice's time on the screen */
 	FORGE_NOTICE_MILLISECONDS = 3000,
+	FORGE_WARNING_MILLISECONDS = 7000,
 	/* the undo history's steps */
 	FORGE_UNDO_DEPTH = 32,
 	/* the HUD's lines (UTF-8) */
@@ -1027,6 +1028,7 @@ static void forge_physics_apply(struct forge_placed *placed);
 static void forge_physics_update(void);
 static char const *const forge_physics_log_names[NUMBER_OF_FORGE_PHYSICS_MODES] = { "normal", "fixed", "phased" };
 static void forge_netgame_log(void);
+static char const *forge_netgame_flags_warning(void);
 static void forge_spawn_remove(struct forge_spawn *spawn);
 static void forge_net_update(void);
 static void forge_net_monitor_pack_want(void);
@@ -1453,6 +1455,15 @@ static void forge_menu_notice(
 	vsnprintf(forge_globals.menu_status, sizeof(forge_globals.menu_status), format, arguments);
 	va_end(arguments);
 	forge_notice("%s", forge_globals.menu_status);
+}
+
+/* a warning: on the HUD and the Forge menu's status line, longer than a
+notice (a whole sentence to read) */
+static void forge_warning(
+	char const *text)
+{
+	forge_menu_notice("%s", text);
+	forge_globals.notice_until = system_milliseconds() + FORGE_WARNING_MILLISECONDS;
 }
 
 /* ---- the budget */
@@ -4233,6 +4244,9 @@ static void forge_variant_save(
 	if (!done)
 		platform_log("forge: the map variant was not saved: %s", forge_globals.save_status);
 	forge_menu_notice("%s", forge_globals.save_status);
+	/* (saved, but with a team left no spawn by its flags: that is said) */
+	if (done && forge_netgame_flags_warning())
+		forge_warning(forge_netgame_flags_warning());
 }
 
 /* (the session's start) the map variant read for it placed: each record's

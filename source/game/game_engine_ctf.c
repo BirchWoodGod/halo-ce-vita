@@ -448,6 +448,72 @@ static wchar_t *ctf_get_team_score_string(
 	return buffer;
 }
 
+/* whether a starting location is nearer the enemy's flag than its team's
+(ctf.assault: the flags change places, the rule with them) */
+static boolean ctf_starting_location_near_enemy_flag(
+	struct player_starting_location const *starting_location)
+{
+	boolean assault = game_engine_get_variant()->game_engine_variant.ctf.assault > 0;
+	long location_team_index = starting_location->team_index;
+	long own_team_index = location_team_index % 2;
+	real distance_to_own_flag = distance_squared3d(
+		&ctf_globals.flags[own_team_index]->position,
+		&starting_location->position);
+	real distance_to_enemy_flag = distance_squared3d(
+		&ctf_globals.flags[(own_team_index + 1) % 2]->position,
+		&starting_location->position);
+
+	return assault ?
+		distance_to_own_flag < distance_to_enemy_flag :
+		distance_to_own_flag > distance_to_enemy_flag;
+}
+
+#ifdef HALO_LINUX
+/* port/linux/game/forge_netgame.inc's */
+boolean forge_netgame_custom_flags(void);
+void platform_log(char const *format, ...);
+
+/* port: a Forge map variant's own flags can stand anywhere, and each spawn of
+a team nearer the enemy's flag leaves that team with none: nobody of it ever
+spawns. Such a team keeps its spawns, the flags' rule not applied to it. Only
+a layout's own flags: a game with the map's has the rule as it was */
+static void ctf_custom_flags_teams_kept(
+	boolean kept[NUMBER_OF_CTF_TEAMS])
+{
+	boolean any[NUMBER_OF_CTF_TEAMS] = { FALSE, FALSE };
+	boolean valid[NUMBER_OF_CTF_TEAMS] = { FALSE, FALSE };
+	short starting_location_count = player_get_starting_location_count();
+	short starting_location_index;
+	long team_index;
+
+	kept[0] = FALSE;
+	kept[1] = FALSE;
+	if (!forge_netgame_custom_flags())
+		return;
+	for (starting_location_index = 0;
+		starting_location_index < starting_location_count;
+		starting_location_index++)
+	{
+		struct player_starting_location *starting_location =
+			player_get_starting_location(starting_location_index);
+
+		if ((starting_location->team_index == _team_red || starting_location->team_index == _team_blue) &&
+			match_game_type(game_engine_ctf, 4, starting_location->game_types))
+		{
+			any[starting_location->team_index] = TRUE;
+			if (!ctf_starting_location_near_enemy_flag(starting_location))
+				valid[starting_location->team_index] = TRUE;
+		}
+	}
+	for (team_index = 0; team_index < NUMBER_OF_CTF_TEAMS; team_index++)
+	{
+		kept[team_index] = any[team_index] && !valid[team_index];
+		if (kept[team_index])
+			platform_log("ctf: the layout's flags leave team %ld no spawn: its spawns kept", team_index);
+	}
+}
+#endif
+
 static boolean ctf_engine_initialize_for_new_map(
 	void)
 {
@@ -455,6 +521,9 @@ static boolean ctf_engine_initialize_for_new_map(
 	long team_index;
 	short starting_location_count;
 	short starting_location_index;
+#ifdef HALO_LINUX
+	boolean spawns_kept[NUMBER_OF_CTF_TEAMS];
+#endif
 
 	if (!game_engine_get_variant()->universal_variant.teams)
 	{
@@ -521,6 +590,9 @@ static boolean ctf_engine_initialize_for_new_map(
 
 	ctf_globals.score_to_win = game_engine_get_variant()->universal_variant.score_to_win;
 
+#ifdef HALO_LINUX
+	ctf_custom_flags_teams_kept(spawns_kept);
+#endif
 	starting_location_count = player_get_starting_location_count();
 	for (starting_location_index = 0;
 		starting_location_index < starting_location_count;
@@ -540,19 +612,13 @@ static boolean ctf_engine_initialize_for_new_map(
 		}
 		else if (match_game_type(game_engine_ctf, 4, starting_location->game_types))
 		{
-			boolean assault = game_engine_get_variant()->game_engine_variant.ctf.assault > 0;
 			long location_team_index = starting_location->team_index;
-			long own_team_index = location_team_index % 2;
-			real distance_to_own_flag = distance_squared3d(
-				&ctf_globals.flags[own_team_index]->position,
-				&starting_location->position);
-			real distance_to_enemy_flag = distance_squared3d(
-				&ctf_globals.flags[(own_team_index + 1) % 2]->position,
-				&starting_location->position);
 
-			if (assault ?
-				distance_to_own_flag < distance_to_enemy_flag :
-				distance_to_own_flag > distance_to_enemy_flag)
+			if (ctf_starting_location_near_enemy_flag(starting_location)
+#ifdef HALO_LINUX
+				&& !spawns_kept[location_team_index]
+#endif
+				)
 			{
 				error(
 					_error_silent,

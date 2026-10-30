@@ -2696,6 +2696,9 @@
 "RECEIVER" = "RECEPTOR"
 
 # ---------- Forge's game type objects (forge_netgame.inc, forge_spawns.inc, menu_functions.c; 1.1.2)
+"Red's flag is nearer Blue's spawns and Blue's nearer Red's: nobody will spawn" = "La bandera roja está más cerca de las apariciones azules y la azul de las rojas: nadie aparecerá"
+"Red's spawns are nearer Blue's flag: Red players won't spawn" = "Las apariciones rojas están más cerca de la bandera azul: el equipo rojo no aparecerá"
+"Blue's spawns are nearer Red's flag: Blue players won't spawn" = "Las apariciones azules están más cerca de la bandera roja: el equipo azul no aparecerá"
 "CTF Flag" = "Bandera de CTF"
 "Hill Point" = "Punto de colina"
 "Oddball Spawn" = "Aparición de Oddball"
