@@ -348,6 +348,11 @@
 #   fsbrowseui fsbrowse through the Halo 3 menus (HALO_TEST_PAD): the joiner opens FRIENDS,
 #            Triangle on the host (a friend online), FILE SHARE, Cross on the first file and
 #            DOWNLOAD's Cross; the file must be saved as fsbrowse's are
+#   fsbrowsecp fsbrowseui through the Classic+ menus (Menu style Halo CE, classic/
+#            fileshare_friends.xml), its screens shot (joiner/shots): FRIENDS, Triangle on the
+#            host, FILE SHARE, the friend's FILE SHARE, DOWNLOAD?, then the joiner's own FILE
+#            SHARE, Start on the file saved (SHARING) and SEND TO A FRIEND; HALO_TEST_JOIN_ENV
+#            gives the language (HALO_LANGUAGE=es HALO_TEST_LANG_DIR=...)
 #   fssend   send to friend: the host sends a map variant, then a game variant, to
 #            the joiner, who is asked (HALO_TEST_FILESHARE_ANSWER: accept) and saves
 #            both; nothing pulled before the answer
@@ -933,7 +938,7 @@ case $mode in lan|adhoc|h3lan|h3adhoc) export HALO_TEST_ENV_host="HALO_BOTS_ONLI
 [ "$mode" = party ] && seconds=${HALO_TEST_SECONDS:-210}
 [ "$mode" = partyfollow ] && seconds=${HALO_TEST_SECONDS:-210}
 [ "$mode" = friendsbackup ] && seconds=${HALO_TEST_SECONDS:-200}
-case $mode in fsbrowse|fsbrowseui|fssend|fsbad) seconds=${HALO_TEST_SECONDS:-130} ;; fsrefuse) seconds=${HALO_TEST_SECONDS:-150} ;; esac
+case $mode in fsbrowse|fsbrowseui|fsbrowsecp|fssend|fsbad) seconds=${HALO_TEST_SECONDS:-130} ;; fsrefuse) seconds=${HALO_TEST_SECONDS:-150} ;; esac
 [ "$mode" = chat ] && seconds=${HALO_TEST_SECONDS:-250}
 # (chat: a team game, long enough for every line)
 if [ "$mode" = chat ]; then
@@ -5604,7 +5609,7 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|f
 		[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	fi
 	;;
-fsbrowse|fsbrowseui|fssend|fsrefuse|fsbad)
+fsbrowse|fsbrowseui|fsbrowsecp|fssend|fsrefuse|fsbad)
 	# (File Share with friends: Alpha the host's copy, at the menus, its map variants
 	# forge_files_test's and a game type of its own; Bravo its friend)
 	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code hk=$out/host.key
@@ -5631,6 +5636,21 @@ fsbrowse|fsbrowseui|fssend|fsrefuse|fsbad)
 		mkdir -p "$out/joiner/shots"
 		join_pad="wait:150:45000 @pre:0:300 $d $d $d $d $d $d a:150:4000 $d $d $d $d $d @00-friends:0:300 y:150:2500 @01-options:0:300"
 		join_pad="$join_pad $d $d $d $d a:150:6000 @02-fileshare:0:300 a:150:2500 @03-download:0:300 a:150:9000 @04-after:0:300"
+		join_pad="$join_pad wait:150:$((seconds * 1000))" ;;
+	fsbrowsecp)
+		# (Classic+: FRIENDS the main menu's fifth row, the host after FRIENDS' five rows of
+		# its own; Triangle's options as fsbrowseui's; back to the main menu, FILE SHARE the
+		# sixth row, Start on the file saved, SEND TO A FRIEND the question's second row)
+		d="down:150:500"
+		export HALO_TEST_DATA_JOINER=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+		join_more="$join_more HALO_UI_LOG=1 HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1 HALO_SCREENSHOT_DIR=$out/joiner/shots HALO_SCREENSHOT_EVERY=100000"
+		mkdir -p "$out/joiner/shots"
+		join_pad="wait:150:45000 $d $d $d $d a:150:4000 $d $d $d $d $d @00-friends:0:300 y:150:2500 @01-options:0:300"
+		join_pad="$join_pad $d $d $d $d a:150:6000 @02-friend-fileshare:0:300 down:150:800 @02b-friend-row2:0:300 down:150:800 @02c-friend-row3:0:300"
+		join_pad="$join_pad up:150:500 up:150:500 a:150:2500 @03-download:0:300 a:150:9000 @04-after:0:300"
+		join_pad="$join_pad b:150:2500 @05-back1:0:300 b:150:2500 @06-back2:0:300 b:150:2500 @07-back3:0:300"
+		join_pad="$join_pad ${HALO_TEST_FSCP_TO_FILESHARE:-down:150:800} a:150:4000 @08-fileshare:0:300 start:150:3000 @09-sharing:0:300"
+		join_pad="$join_pad $d a:150:4000 @10-send:0:300 b:150:2500 @11-after-send:0:300"
 		join_pad="$join_pad wait:150:$((seconds * 1000))" ;;
 	fssend) host_files="$host_files,send-at=35,send-at=60:game" ;;
 	fsrefuse)
@@ -5691,6 +5711,15 @@ fsbrowse|fsbrowseui|fssend|fsrefuse|fsbad)
 		grep -aq "menus: fileshare friends: Alpha: state 2, [1-9]" "$jl" || fail "the friend's File Share listed nothing"
 		grep -aq "fileshare: .* passed the validator: saved as bloodgulch/r[0-9a-f]\{8\}\.hmv" "$jl" ||
 			fail "the file chosen in the menus was not saved"
+		;;
+	fsbrowsecp)
+		grep -aq "menus: fileshare friends: h3/fileshare/friend/screen opens" "$jl" || fail "FILE SHARE did not open the friend's"
+		grep -aq "menus: fileshare friends: Alpha: state 2, [1-9]" "$jl" || fail "the friend's File Share listed nothing"
+		grep -aq "fileshare: .* passed the validator: saved as bloodgulch/r[0-9a-f]\{8\}\.hmv" "$jl" ||
+			fail "the file chosen in the menus was not saved"
+		grep -aq "menus: fileshare friends: send \".*\": [1-9][0-9]* friends online" "$jl" ||
+			fail "SEND TO A FRIEND did not open with the host online"
+		echo "shots: $(ls "$out/joiner/shots" | tr '\n' ' ')"
 		;;
 	fssend)
 		grep -aq "fileshare: Alpha offered you \".*\" (the test answers)" "$jl" || fail "Bravo was not asked"
@@ -6282,7 +6311,7 @@ forge|forge3|forgemp|forgeold|forgeleave|forgetele|forgeold112|forgeold111|forge
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menusjoinpress|onlinebrowser|onlinebrowserded|onlinebrowsertab|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3livebots|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|fsbrowse|fsbrowseui|fssend|fsrefuse|fsbad|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin|forgetele|forgeold112|forgeold111|forgelate112" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menusjoinpress|onlinebrowser|onlinebrowserded|onlinebrowsertab|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3livebots|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|fsbrowse|fsbrowseui|fsbrowsecp|fssend|fsrefuse|fsbad|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin|forgetele|forgeold112|forgeold111|forgelate112" >&2
 	exit 2
 	;;
 esac

@@ -49,7 +49,9 @@ HEADINGS = (('header_lobby_options', 'LOBBY OPTIONS'),
             # (classic/standins.xml: the Halo 3 set's NETWORK, PLAYERS and GAME TYPES in this look)
             ('header_select_network', 'SELECT NETWORK'), ('header_players', 'PLAYERS'),
             ('header_game_types', 'GAME TYPES'), ('header_choose_a_base', 'CHOOSE A BASE'),
-            ('header_edit_game_type', 'EDIT GAME TYPE'))
+            ('header_edit_game_type', 'EDIT GAME TYPE'),
+            # (classic/fileshare_friends.xml: File Share with friends)
+            ('header_sharing', 'SHARING'), ('header_send_to_a_friend', 'SEND TO A FRIEND'))
 
 # (the widget it is drawn into, fit="widget": 226 x 229; the PNG a power of
 # two, so drawn at that scale and stretched back by the game)

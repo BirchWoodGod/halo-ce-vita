@@ -17598,8 +17598,9 @@ static void h3_fsfriends_friend_update(struct widget_instance *list)
 			focused_row = index;
 		index++;
 	}
-	target = browser_view_follow(&h3_fsfriends.view, H3_FSFRIENDS_ROWS, h3_fsfriends.remote_count, (int)focused_row,
-		h3_fsfriends.chosen, h3_fsfriends.page);
+	/* (the rows the screen has: Halo 3's 12, Classic+'s 8 across the screen, as FILE SHARE's) */
+	target = browser_view_follow(&h3_fsfriends.view, index > 0 && index < H3_FSFRIENDS_ROWS ? (int)index :
+		H3_FSFRIENDS_ROWS, h3_fsfriends.remote_count, (int)focused_row, h3_fsfriends.chosen, h3_fsfriends.page);
 	h3_fsfriends.page = 0;
 	h3_fsfriends.chosen = (int)target;
 	for (index = 0, child = list->child; child; child = child->next)

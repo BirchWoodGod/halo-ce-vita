@@ -117,6 +117,7 @@
 	<widget name="ce/friends/code_value" type="text" left="290" top="104" width="280" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
 	<widget name="ce/friends/friends_status" type="text" left="290" top="132" width="280" height="54" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/friends/detail_name" type="text" left="290" top="172" width="280" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/friends/detail_name_small" type="text" left="290" top="176" width="280" height="22" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
 	<widget name="ce/friends/detail_state" type="text" left="290" top="198" width="280" height="36" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/friends/detail_help" type="text" left="290" top="238" width="280" height="80" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/friends/friends_message" type="text" left="290" top="326" width="280" height="66" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
@@ -136,6 +137,7 @@
 		<child widget="ce/friends/friends_status"/>
 		<child widget="ce/friends/list"/>
 		<child widget="ce/friends/detail_name"/>
+		<child widget="ce/friends/detail_name_small"/>
 		<child widget="ce/friends/detail_state"/>
 		<child widget="ce/friends/detail_help"/>
 		<child widget="ce/friends/friends_message"/>

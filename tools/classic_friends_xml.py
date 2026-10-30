@@ -120,6 +120,8 @@ w(text('classic/friends/code_label', IN_X, 88, IN_W, 18, extra=' string_list="cl
 w(text('classic/friends/code_value', IN_X, 104, IN_W, 26, 'large', WHITE))
 w(text('classic/friends/friends_status', IN_X, 132, IN_W, 54))
 w(text('classic/friends/detail_name', IN_X, 172, IN_W, 26, 'large', WHITE))
+# (a name of 16 letters and its code: the small font's twin, menu_functions.c classic_text_fit)
+w(text('classic/friends/detail_name_small', IN_X, 176, IN_W, 22, 'small', WHITE))
 w(text('classic/friends/detail_state', IN_X, 198, IN_W, 36))
 w(text('classic/friends/detail_help', IN_X, 238, IN_W, 80))
 w(text('classic/friends/friends_message', IN_X, 326, IN_W, 66, color=YELLOW))
@@ -130,7 +132,8 @@ w(f'\t<widget name="classic/friends/screen" flags="pass_unhandled_to_focused_chi
 w('\t\t<on event="created" run="port h3 friends init"/>')
 w('\t\t<on event="b back" back="true"/>')
 for c in ['classic/header/friends', 'classic/friends/field', 'classic/friends/code_label', 'classic/friends/code_value',
-          'classic/friends/friends_status', 'classic/friends/list', 'classic/friends/detail_name', 'classic/friends/detail_state',
+          'classic/friends/friends_status', 'classic/friends/list', 'classic/friends/detail_name',
+          'classic/friends/detail_name_small', 'classic/friends/detail_state',
           'classic/friends/detail_help', 'classic/friends/friends_message'] + knames:
     w(f'\t\t<child widget="{c}"/>')
 w('\t\t<child widget="classic/back/b_butn"/>')
