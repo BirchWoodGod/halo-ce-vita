@@ -46,6 +46,13 @@ numbered from 0 as the engine counts them (King starts at hill 0), and its
 checkpoints in their order. The game type reads them as its game starts (a
 map variant played in CTF: its flags' spots); in a Forge game, itself a
 Slayer game, they are only drawn, for the monitor, and saved.
+
+CTF skips any of the map's player spawns nearer the enemy's flag than its own
+(game_engine_ctf.c), so flags on the wrong sides can leave a team none: said
+when a flag is let go and on saving (forge_netgame_flags_warning), and a game
+with a layout's own flags gives such a team its spawns back
+(ctf_engine_initialize_for_new_map, forge_netgame_custom_flags). A game with
+the map's own flags keeps the rule as it is.
 */
 
 /* ---------- constants */
@@ -60,6 +67,18 @@ then the layout's */
 receiver) */
 #define FORGE_NETGAME_TELEPORT_JUMP 3.f
 #define FORGE_NETGAME_TELEPORT_NEAR 1.f
+/* (a game type object's flag on the ground under its marker) how far under
+the marker the surface is looked for (as far as a marker is stood on it:
+forge_markers.inc), from how far over the marker (a marker let go low, or
+nudged, is a little in the ground), how far over a marker deeper in the
+ground the surface can be, and how far over its surface a flag or a ball is
+made: Blood Gulch's own CTF flags are 0.19 over theirs and settle a little
+lower. Made on the surface exactly it can start under it, and it falls out
+of the map (the blue flag to z -361) */
+#define FORGE_NETGAME_GROUND_UNDER 4.25f
+#define FORGE_NETGAME_GROUND_OVER 1.f
+#define FORGE_NETGAME_GROUND_BURIED 8.f
+#define FORGE_NETGAME_GROUND_LIFT 0.19f
 
 /* ---------- globals */
 
@@ -74,6 +93,9 @@ static struct
 	any change builds them again) */
 	boolean dirty;
 	unsigned long built_hash;
+	/* the layout's CTF flags' places as last warned about (any change, a
+	flag placed, moved or given to the other team: said again) */
+	unsigned long flags_hash;
 	/* the block's flags: the map's own, then the layout's */
 	struct scenario_netgame_flag flags[FORGE_NETGAME_MAXIMUM_FLAGS];
 	long count;
@@ -85,6 +107,15 @@ static struct
 } forge_netgame;
 
 /* ---------- private code */
+
+/* whether a CTF flag's marker is held (a flag is said where it is let go) */
+static boolean forge_spawn_held_is_flag(
+	void)
+{
+	struct forge_spawn const *spawn = forge_globals.held_marker_id ? forge_spawn_of_id(forge_globals.held_marker_id) : NULL;
+
+	return spawn && spawn->kind == _forge_spawn_flag;
+}
 
 /* whether this game gives its layout's markers to the engine: a Forge game
 or a map variant played, of the loaded map */
@@ -283,6 +314,58 @@ static void forge_netgame_players_resync(
 	}
 }
 
+/* the surface under a marker. The engine makes a CTF flag or a ball where its
+netgame flag is and lets it fall (game_engine_ctf.c ctf_create_flag_object),
+scoring at that point, so the point has to be on the ground as the map's own
+are. Looked for from a little over the marker, for one a little in the
+ground, but never from over a ceiling (a room's, a base's: the roof is not
+this marker's ground). A marker deeper in the ground has the surface over it,
+seen from beneath. FALSE when no surface is near (a marker in the air): the
+marker's own spot */
+static boolean forge_netgame_ground(
+	real_point3d const *marker,
+	real_point3d *ground)
+{
+	struct collision_result collision;
+	real_point3d from = *marker;
+	real_vector3d along;
+
+	along.i = 0.f;
+	along.j = 0.f;
+	along.k = FORGE_NETGAME_GROUND_OVER;
+	from.z += collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit), marker,
+		&along, NONE, &collision) ? MAX(along.k * collision.t - 0.01f, 0.f) : along.k;
+	along.k = marker->z - from.z - FORGE_NETGAME_GROUND_UNDER;
+	if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit), &from,
+		&along, NONE, &collision))
+	{
+		*ground = from;
+		ground->z += along.k * collision.t;
+		return TRUE;
+	}
+	along.k = FORGE_NETGAME_GROUND_BURIED;
+	if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_back_facing_surfaces_bit), marker,
+		&along, NONE, &collision) && collision.plane.n.k > 0.f)
+	{
+		*ground = *marker;
+		ground->z += along.k * collision.t;
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/* where a game type object's netgame flag stands: on the ground under its
+marker, a flag or a ball (objects, that fall) a little over it */
+static void forge_netgame_objective_position(
+	struct forge_spawn const *spawn,
+	real_point3d *position)
+{
+	if (!forge_netgame_ground(&spawn->home.position, position))
+		*position = spawn->home.position;
+	else if (spawn->kind == _forge_spawn_flag || spawn->kind == _forge_spawn_oddball)
+		position->z += FORGE_NETGAME_GROUND_LIFT;
+}
+
 /* the block built: the map's own flags, then the layout's teleporters, each
 on the ground under its marker */
 static void forge_netgame_flags_build(
@@ -331,8 +414,7 @@ static void forge_netgame_flags_build(
 			continue;
 		flag = &forge_netgame.flags[forge_netgame.count++];
 		csmemset(flag, 0, sizeof(*flag));
-		flag->position = spawn->home.position;
-		flag->position.z -= FORGE_MARKER_CLEARANCE;
+		forge_netgame_objective_position(spawn, &flag->position);
 		flag->facing = arctangent(spawn->home.forward.j, spawn->home.forward.i);
 		flag->type = forge_objective_flag_type(spawn->kind);
 		flag->team_index = forge_objective_engine_index(spawn);
@@ -450,8 +532,116 @@ static unsigned long forge_netgame_hash(
 	return hash;
 }
 
+/* the layout's CTF flags' hash: their teams and places */
+static unsigned long forge_netgame_flags_hash(
+	void)
+{
+	unsigned long hash = 2166136261UL;
+	short index;
+
+	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+	{
+		struct forge_spawn const *spawn = &forge_globals.spawns[index];
+		real values[4];
+		unsigned char const *bytes = (unsigned char const *)values;
+		unsigned int at;
+
+		if (spawn->kind != _forge_spawn_flag)
+			continue;
+		values[0] = (real)spawn->channel;
+		values[1] = spawn->home.position.x;
+		values[2] = spawn->home.position.y;
+		values[3] = spawn->home.position.z;
+		for (at = 0; at < sizeof(values); at++)
+			hash = (hash ^ bytes[at]) * 16777619UL;
+	}
+	return hash;
+}
+
+/* the first CTF flag of a team in the block as it is now, as the game type
+takes it (find_netgame_flag); NULL for none */
+static struct scenario_netgame_flag const *forge_netgame_ctf_flag(
+	struct scenario const *scenario,
+	short team)
+{
+	long index;
+
+	for (index = 0; index < scenario->netgame_flags.count; index++)
+	{
+		struct scenario_netgame_flag const *flag = TAG_BLOCK_GET_ELEMENT(&scenario->netgame_flags, index,
+			struct scenario_netgame_flag);
+
+		if (flag->type == _netgame_flag_ctf_flag && flag->team_index == team)
+			return flag;
+	}
+	return NULL;
+}
+
+/* whether a CTF game of this layout leaves a team no spawn of the map's and
+none of its own: the engine skips a starting location nearer the enemy's
+flag than its team's (game_engine_ctf.c ctf_engine_initialize_for_new_map), a
+layout's spawn points not (forge_spawn_location) */
+static boolean forge_netgame_team_spawns_skipped(
+	struct scenario const *scenario,
+	short team)
+{
+	struct scenario_netgame_flag const *own = forge_netgame_ctf_flag(scenario, team);
+	struct scenario_netgame_flag const *enemy = forge_netgame_ctf_flag(scenario, (short)!team);
+	boolean skipped = FALSE;
+	short index;
+
+	if (!own || !enemy)
+		return FALSE;
+	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+	{
+		struct forge_spawn const *spawn = &forge_globals.spawns[index];
+
+		if (spawn->kind == _forge_spawn_respawn && (spawn->team == NONE || spawn->team == team) &&
+			(!spawn->game_types || (spawn->game_types & FORGE_FILE_GAME_TYPE_CTF)))
+		{
+			return FALSE;
+		}
+	}
+	for (index = 0; index < scenario->players.count; index++)
+	{
+		struct player_starting_location const *location = TAG_BLOCK_GET_ELEMENT(&scenario->players, index,
+			struct player_starting_location);
+
+		if (location->team_index != team || !match_game_type(game_engine_ctf, 4, location->game_types))
+			continue;
+		if (distance_squared3d(&own->position, &location->position) <= distance_squared3d(&enemy->position, &location->position))
+			return FALSE;
+		skipped = TRUE;
+	}
+	return skipped;
+}
+
+/* the warning for the layout's flags as they stand, in plain words; NULL
+when both teams keep a spawn or the layout has no flag of its own */
+static char const *forge_netgame_flags_warning(
+	void)
+{
+	struct scenario const *scenario;
+	boolean red;
+	boolean blue;
+
+	if (!forge_netgame_custom_flags() || global_scenario_index == NONE || (scenario = global_scenario_get()) == NULL)
+		return NULL;
+	red = forge_netgame_team_spawns_skipped(scenario, 0);
+	blue = forge_netgame_team_spawns_skipped(scenario, 1);
+	if (red && blue)
+		return T("Red's flag is nearer Blue's spawns and Blue's nearer Red's: nobody will spawn");
+	if (red)
+		return T("Red's spawns are nearer Blue's flag: Red players won't spawn");
+	if (blue)
+		return T("Blue's spawns are nearer Red's flag: Blue players won't spawn");
+	return NULL;
+}
+
 /* (forge_update, each frame before the tick) the flags built again when the
-layout's teleporters changed; the teleports watched */
+layout's teleporters changed; the teleports watched; a flag let go where a
+team has no spawn left said (every machine of a network Forge game, each
+from its own copy of the layout) */
 static void forge_netgame_update(
 	void)
 {
@@ -463,6 +653,14 @@ static void forge_netgame_update(
 		forge_netgame_flags_build();
 	}
 	forge_netgame_teleports_watch();
+	if (forge_netgame_flags_hash() != forge_netgame.flags_hash && !forge_spawn_held_is_flag())
+	{
+		char const *warning = forge_netgame_flags_warning();
+
+		forge_netgame.flags_hash = forge_netgame_flags_hash();
+		if (warning)
+			forge_warning(warning);
+	}
 }
 
 /* (the console's "forge netflags") the block's game type flags, and the game
@@ -487,8 +685,12 @@ static void forge_netgame_log(
 		if (flag->type == _netgame_flag_ctf_flag || flag->type == _netgame_flag_hill ||
 			flag->type == _netgame_flag_oddball_ball_spawn || flag->type == _netgame_flag_race_track)
 		{
-			platform_log("forge: netgame flag %ld: type %d index %d at %.2f %.2f %.2f", index, (int)flag->type,
-				(int)flag->team_index, flag->position.x, flag->position.y, flag->position.z);
+			real_point3d ground;
+			boolean grounded = forge_netgame_ground(&flag->position, &ground);
+
+			platform_log("forge: netgame flag %ld: type %d index %d at %.2f %.2f %.2f, the ground %s%.2f", index, (int)flag->type,
+				(int)flag->team_index, flag->position.x, flag->position.y, flag->position.z, grounded ? "at " : "not found ",
+				grounded ? ground.z : 0.f);
 		}
 	}
 	data_iterator_new(&iterator, object_header_data);
@@ -509,6 +711,15 @@ static void forge_netgame_log(
 
 /* ---------- public code */
 
+/* (game_engine_ctf.c, forge_netgame_flags_warning) whether this game's CTF
+flags are a layout's: a Forge game or a map variant played, with a flag of
+its own in the block */
+boolean forge_netgame_custom_flags(
+	void)
+{
+	return forge_netgame_wanted() && forge_netgame.scenario && forge_objectives_count(_forge_spawn_flag, NONE) > 0;
+}
+
 /* (game.c, a map's game starting, before the game type reads the flags) */
 void forge_netgame_flags_prepare(
 	void)
@@ -518,5 +729,6 @@ void forge_netgame_flags_prepare(
 	for (index = 0; index < FORGE_SPAWN_PLAYERS; index++)
 		forge_netgame.last_unit[index] = NONE;
 	forge_netgame.built_hash = forge_netgame_hash();
+	forge_netgame.flags_hash = forge_netgame_flags_hash();
 	forge_netgame_flags_build();
 }
