@@ -16,7 +16,9 @@ pause screen (ingame.txt; its fonts and pictures are halo3/pause.xml's, the same
 - the object's properties (Square while holding an object you placed): its team, respawn time and
   whether it is placed at the start, its exact angles (yaw, pitch, roll: left and right step them,
   by rotate mode's snapping or 15 degrees) and their reset, and a character's AI team and AI on or
-  off (those two rows hidden for any other object), A or left and right to change one, B to close;
+  off (those two rows hidden for any other object), its PHYSICS (any other object's: normal, fixed
+  - never moves -, phased - no collision -: forge_physics.inc), A or left and right to change one,
+  B to close;
   kept in the map variant. A character's RESPAWN is NEVER or 10, 30, 60, 120 S: dead, it is placed
   again that long after (map variant version 3); opened from its spawn marker too (R takes the
   marker, Square its character's properties: forge_markers.inc);
@@ -344,6 +346,10 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<on event="a right" run="port forge property next"/>
 		<on event="left" run="port forge property previous"/>
 	</widget>
+	<widget name="h3/forge/properties/row_9" type="text" width="252" height="18" bitmap="h3/browser_row" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="1">
+		<on event="a right" run="port forge property next"/>
+		<on event="left" run="port forge property previous"/>
+	</widget>
 	<widget name="h3/forge/properties/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port forge properties"/>
 		<on event="b x" run="port forge close"/>
@@ -356,6 +362,7 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 		<child widget="h3/forge/properties/row_6" x="0" y="114"/>
 		<child widget="h3/forge/properties/row_7" x="0" y="133"/>
 		<child widget="h3/forge/properties/row_8" x="0" y="152"/>
+		<child widget="h3/forge/properties/row_9" x="0" y="171"/>
 	</widget>
 	<widget name="h3/forge/properties/panel" left="356" top="90" width="268" height="290" bitmap="h3/panel"/>
 	<widget name="h3/forge/properties/strip" left="356" top="90" width="268" height="30" bitmap="h3/strip"/>

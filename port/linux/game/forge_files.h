@@ -83,6 +83,15 @@ map's own flags of that type for the game (a CTF flag a team's), one it has
 none of keeps the map's. A file of version 5 or before holds none (the kind
 was never written: refused there); a layout with one is written as version
 6, and a version 6 file has one at least.
+
+Version 7 (Oct 30 2026) adds an object's physics (Halo 3's Physics: Normal,
+Fixed, Phased): flag bit 4, FORGE_RECORD_PHYSICS_FIXED (it never moves: held
+where the editor put it), or flag bit 5, FORGE_RECORD_PHYSICS_PHASED (no
+collision: players, vehicles and objects pass through it; others' collision
+as ever), never both, on an object's record (_forge_record_object) that is
+not a character's only. A file of version 6 or before holds neither (the
+bits must be zero in them); a layout with one is written as version 7, and
+a version 7 file has one at least.
 */
 
 #ifndef __FORGE_FILES_H
@@ -92,7 +101,7 @@ was never written: refused there); a layout with one is written as version
 
 #define FORGE_FILE_EXTENSION ".hmv"
 /* the version written when a layout needs it, and the oldest read */
-#define FORGE_FILE_VERSION 6
+#define FORGE_FILE_VERSION 7
 #define FORGE_FILE_FIRST_VERSION 1
 #define FORGE_FILE_HEADER_SIZE 64
 #define FORGE_FILE_MAXIMUM_SIZE 65536
@@ -177,10 +186,16 @@ enum
 	/* (version 4, a player spawn's only) an initial spawn (a round's first
 	spawns), else a respawn point */
 	FORGE_RECORD_SPAWN_INITIAL = 1 << 3,
+	/* (version 7, an object's that is no character's only) its physics:
+	fixed (never moves), or phased (no collision); never both */
+	FORGE_RECORD_PHYSICS_FIXED = 1 << 4,
+	FORGE_RECORD_PHYSICS_PHASED = 1 << 5,
+	FORGE_RECORD_PHYSICS_MASK = FORGE_RECORD_PHYSICS_FIXED | FORGE_RECORD_PHYSICS_PHASED,
 	FORGE_RECORD_FLAGS_VERSION_1 = FORGE_RECORD_PLACE_AT_START,
 	FORGE_RECORD_FLAGS_VERSION_2 = FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF,
 	FORGE_RECORD_FLAGS_VERSION_3 = FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN,
-	FORGE_RECORD_FLAGS_KNOWN = FORGE_RECORD_FLAGS_VERSION_3 | FORGE_RECORD_SPAWN_INITIAL,
+	FORGE_RECORD_FLAGS_VERSION_4 = FORGE_RECORD_FLAGS_VERSION_3 | FORGE_RECORD_SPAWN_INITIAL,
+	FORGE_RECORD_FLAGS_KNOWN = FORGE_RECORD_FLAGS_VERSION_4 | FORGE_RECORD_PHYSICS_MASK,
 };
 
 /* (version 2) a character's AI team: whom it fights. The engine's teams
@@ -335,7 +350,7 @@ int forge_file_layout_check(
 	char const *expected_map);
 
 /* the version a layout is written as: its own when set, else the lowest
-that holds it (6 with a game type object, 5 with a teleporter, 4 with a player spawn, 3 with a
+that holds it (7 with an object's physics, 6 with a game type object, 5 with a teleporter, 4 with a player spawn, 3 with a
 respawning character, 2 when a record has an AI setting) */
 int forge_file_layout_version(
 	struct forge_file_layout const *layout);

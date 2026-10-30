@@ -57,6 +57,18 @@ enum
 	NUMBER_OF_FORGE_CATEGORIES
 };
 
+/* an object's physics (the properties' PHYSICS: Halo 3's Normal, Fixed,
+Phased; forge_files.h FORGE_RECORD_PHYSICS_*) */
+enum
+{
+	_forge_physics_normal = 0,
+	/* never moves: held where the editor put it */
+	_forge_physics_fixed,
+	/* no collision: players, vehicles and objects pass through it */
+	_forge_physics_phased,
+	NUMBER_OF_FORGE_PHYSICS_MODES
+};
+
 /* a layout's marker's kind (no object: drawn as a marker, forge_spawns.inc):
 a player spawn point (the SPAWNING category's items, in its order), a
 teleporter's end (the TELEPORTERS category's) */
@@ -99,6 +111,9 @@ enum
 	_forge_property_reset_rotation,
 	_forge_property_ai_team,
 	_forge_property_ai_brain,
+	/* (1.1.2) an object's physics: normal, fixed, phased (not a
+	character's) */
+	_forge_property_physics,
 	NUMBER_OF_FORGE_PROPERTIES
 };
 
@@ -124,6 +139,9 @@ struct forge_properties
 	short ai_team;
 	char ai_team_name[32];
 	boolean ai_on;
+	/* (not a character's) its physics: _forge_physics_* */
+	boolean has_physics;
+	short physics;
 	/* a player spawn point's (forge_spawns.inc): its kind
 	(_forge_spawn_*) and its game type, named */
 	boolean spawn;

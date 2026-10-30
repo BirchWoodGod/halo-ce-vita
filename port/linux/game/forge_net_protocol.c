@@ -100,6 +100,10 @@ static int forge_net_properties_valid(
 	/* (a character's respawn: after a second or more) */
 	if ((record->record_flags & 0x04) && record->respawn_seconds == 0)
 		return 0;
+	/* (version 7's physics in the step: one of the modes, never a
+	character's) */
+	if (record->step < 0 || record->step >= FORGE_NET_PHYSICS_MODES || ((record->flags & FORGE_NET_FLAG_AI) && record->step))
+		return 0;
 	return 1;
 }
 

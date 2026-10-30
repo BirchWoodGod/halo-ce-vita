@@ -10914,16 +10914,31 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		case _forge_property_ai_team:
 			snprintf(text, sizeof(text), "%s: %s", T("AI TEAM"), properties.ai_team_name);
 			break;
-		default:
+		case _forge_property_ai_brain:
 			snprintf(text, sizeof(text), "%s: %s", T("AI"), properties.ai_on ? T("ON") : T("OFF"));
 			break;
+		case _forge_property_physics:
+			snprintf(text, sizeof(text), "%s: %s", T("PHYSICS"), properties.physics == _forge_physics_fixed ? T("FIXED") :
+				properties.physics == _forge_physics_phased ? T("PHASED") : T("NORMAL"));
+			break;
+		default:
+			text[0] = 0;
+			break;
 		}
-		/* (a character's own rows: hidden for any other object; the rest
-		shown again after a spawn point's) */
-		if (row >= _forge_property_ai_team)
+		/* (a character's own rows: hidden for any other object, its
+		physics' for a character; the rest shown again after a spawn
+		point's) */
+		if (row == _forge_property_ai_team || row == _forge_property_ai_brain || row == _forge_property_physics)
 		{
-			widget_instance_set_visibility_recursive(child, properties.ai);
-			child->disabled = !properties.ai;
+			boolean shown = row == _forge_property_physics ? properties.has_physics : properties.ai;
+
+			widget_instance_set_visibility_recursive(child, shown);
+			child->disabled = !shown;
+		}
+		else if (row > _forge_property_physics)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
 		}
 		else if (child->disabled)
 		{
@@ -10949,9 +10964,9 @@ static void h3_forge_properties_update(struct widget_instance *list)
 			properties.team, properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
 			properties.pitch, properties.roll, properties.ai_team, properties.ai_on ? "on" : "off");
 	else
-		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, yaw %d pitch %d roll %d", properties.name, properties.team,
-			properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
-			properties.pitch, properties.roll);
+		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, yaw %d pitch %d roll %d, physics %d", properties.name,
+			properties.team, properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
+			properties.pitch, properties.roll, properties.physics);
 	if (strcmp(text, said))
 	{
 		snprintf(said, sizeof(said), "%s", text);

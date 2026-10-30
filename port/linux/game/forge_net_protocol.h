@@ -63,7 +63,7 @@ which every host takes: a joiner reads any hello of version 1 or more):
 CLEAR DEAD AI, CLEAR ALL AI, ALL AI, NEW ROUND); a client sends them only
 to a host of 2 or more - one of 1 (insider.21 and before) would count the
 record as malformed - and says "Only the host can do that" to an older one */
-#define FORGE_NET_HOST_VERSION 6
+#define FORGE_NET_HOST_VERSION 7
 #define FORGE_NET_HOST_VERSION_COMMANDS 2
 /* 3: it takes a spawn marker's move and its character's properties
 (_forge_net_request_set and _forge_net_request_property with
@@ -90,6 +90,14 @@ the CTF flags' spots, hill points, oddball spawns, race checkpoints), markers
 as version 5's are, each its index in value (below its kind's: forge_net_
 marker_indices); a client asks for one only of a host of 6 or more */
 #define FORGE_NET_HOST_VERSION_OBJECTIVES 6
+/* 7: an object's physics (forge.h _forge_physics_*): the host's entries and
+links carry it in their step (0 normal, 1 fixed, 2 phased: an older joiner
+reads no step there and ignores it) and it takes the PHYSICS property
+(_forge_net_request_property, aux FORGE_NET_PROPERTY_PHYSICS); a client asks
+it only of a host of 7 or more */
+#define FORGE_NET_HOST_VERSION_PHYSICS 7
+#define FORGE_NET_PROPERTY_PHYSICS 9
+#define FORGE_NET_PHYSICS_MODES 3
 /* a joiner's capabilities (its answer's bits) */
 #define FORGE_NET_CAPABILITY_FORGE 0x00000001u
 #define FORGE_NET_CAPABILITIES_KNOWN FORGE_NET_CAPABILITY_FORGE
@@ -139,7 +147,7 @@ this of square */
 #define FORGE_NET_UNIT_TOLERANCE 0.02f
 #define FORGE_NET_SQUARE_TOLERANCE 0.05f
 /* the properties window's rows (forge.h NUMBER_OF_FORGE_PROPERTIES) */
-#define FORGE_NET_PROPERTY_COUNT 9
+#define FORGE_NET_PROPERTY_COUNT 10
 /* properties' ranges (forge_files.h's) */
 #define FORGE_NET_MAXIMUM_TEAM 7
 #define FORGE_NET_MAXIMUM_RESPAWN_SECONDS 600

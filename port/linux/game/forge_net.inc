@@ -2326,6 +2326,9 @@ static void forge_net_entry_fill(
 		record->record_flags &= (uint8_t)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
 	if (!record->respawn_seconds)
 		record->record_flags &= (uint8_t)~FORGE_RECORD_AI_RESPAWN;
+	/* (its physics in the step, never in the flags an older joiner checks) */
+	record->record_flags &= (uint8_t)FORGE_NET_RECORD_FLAGS_KNOWN;
+	record->step = (int8_t)(placed->ai ? 0 : forge_physics_mode(placed));
 	if (placed->has_home)
 		home = placed->home;
 	else if (forge_object_alive(placed->object_index))
@@ -2465,7 +2468,7 @@ static void forge_net_host_broadcast(
 			home_only = before.op == entry.op && before.object == entry.object && before.tag == entry.tag &&
 				before.player == entry.player && before.flags == entry.flags && before.team == entry.team &&
 				before.record_flags == entry.record_flags && before.respawn_seconds == entry.respawn_seconds &&
-				before.ai_team == entry.ai_team;
+				before.ai_team == entry.ai_team && before.step == entry.step;
 			if (!home_only || (!forge_net_transforms_near(&before.transform, &entry.transform) &&
 				now - shadow->entry_time >= FORGE_NET_ENTRY_MILLISECONDS))
 			{
@@ -3059,6 +3062,12 @@ static boolean forge_net_client_property(
 
 	if (property >= _forge_property_yaw && property <= _forge_property_reset_rotation)
 		return FALSE;
+	/* (PHYSICS: of a host of version 7) */
+	if (property == _forge_property_physics && forge_net.host_version < FORGE_NET_HOST_VERSION_PHYSICS)
+	{
+		forge_notice("%s", T("The host's game has no physics settings"));
+		return TRUE;
+	}
 	forge_net_request_init(&record, _forge_net_request_property);
 	if (!forge_net_reference(forge_globals.held_object_index, &record))
 		return TRUE;
@@ -3397,6 +3406,11 @@ static void forge_net_mirror_take(
 	placed->ai = (record->flags & FORGE_NET_FLAG_AI) != 0;
 	placed->team = record->team;
 	placed->flags = record->record_flags;
+	/* (its physics: the entry's step, or a layout's link's flags) */
+	if (record->step > 0 && record->step < NUMBER_OF_FORGE_PHYSICS_MODES && !placed->ai)
+		placed->flags = (unsigned char)((placed->flags & ~FORGE_RECORD_PHYSICS_MASK) | forge_physics_flags(record->step));
+	if (placed->ai)
+		placed->flags &= (unsigned char)~FORGE_RECORD_PHYSICS_MASK;
 	placed->respawn_seconds = record->respawn_seconds;
 	placed->ai_team = record->ai_team;
 	placed->holder = record->player != FORGE_NET_NO_PLAYER ? record->player : NONE;

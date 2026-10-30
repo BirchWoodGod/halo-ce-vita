@@ -30,7 +30,8 @@ taken whole or not at all). The checks, in order:
   (version 6 only) no path, a netgame flag type of the list, its index
   below that type's limit, its yaw alone, nothing else; at most
   FORGE_FILE_MAXIMUM_GAME_OBJECTS, a hill's points at most
-  FORGE_FILE_MAXIMUM_HILL_POINTS;
+  FORGE_FILE_MAXIMUM_HILL_POINTS; an object's physics (version 7 only) fixed
+  or phased, never both, on an object's record that is no character's;
 - the meta: four texts, each valid UTF-8 within its room with no control
   character, the title not empty, the date "YYYY-MM-DD HH:MM" or empty,
   and nothing after them.
@@ -588,7 +589,8 @@ static int forge_file_record_check(
 		return 0;
 	}
 	if ((!spawn && (record->game_types & ~FORGE_FILE_GAME_TYPES_MASK)) || record->variant > FORGE_FILE_MAXIMUM_VARIANT ||
-		(record->flags & ~(version >= 4 ? FORGE_RECORD_FLAGS_KNOWN : version == 3 ? FORGE_RECORD_FLAGS_VERSION_3 :
+		(record->flags & ~(version >= 7 ? FORGE_RECORD_FLAGS_KNOWN : version >= 4 ? FORGE_RECORD_FLAGS_VERSION_4 :
+			version == 3 ? FORGE_RECORD_FLAGS_VERSION_3 :
 			version == 2 ? FORGE_RECORD_FLAGS_VERSION_2 : FORGE_RECORD_FLAGS_VERSION_1)) ||
 		(!spawn && (record->flags & FORGE_RECORD_SPAWN_INITIAL)))
 	{
@@ -606,6 +608,13 @@ static int forge_file_record_check(
 	/* (version 3's respawn: a character's only, after a second or more) */
 	if ((record->flags & FORGE_RECORD_AI_RESPAWN) && (!character || record->respawn_seconds == 0))
 		return 0;
+	/* (version 7's physics: an object's that is no character's, fixed or
+	phased, never both) */
+	if ((record->flags & FORGE_RECORD_PHYSICS_MASK) && (record->kind != _forge_record_object || character ||
+		(record->flags & FORGE_RECORD_PHYSICS_MASK) == FORGE_RECORD_PHYSICS_MASK))
+	{
+		return 0;
+	}
 	return forge_file_record_floats_check(record);
 }
 
@@ -647,7 +656,9 @@ int forge_file_layout_version(
 		struct forge_file_record const *record = &layout->records[index];
 		int needs = FORGE_FILE_FIRST_VERSION;
 
-		if (record->kind == _forge_record_flag)
+		if (record->flags & FORGE_RECORD_PHYSICS_MASK)
+			needs = 7;
+		else if (record->kind == _forge_record_flag)
 			needs = 6;
 		else if (forge_file_kind_teleporter(record->kind))
 			needs = 5;
@@ -674,6 +685,7 @@ int forge_file_layout_check(
 	int player_spawns = 0;
 	int teleporters = 0;
 	int game_objects = 0;
+	int physics = 0;
 	unsigned char hill_points[FORGE_FILE_MAXIMUM_HILLS];
 	unsigned int sender_channels = 0;
 	unsigned int receiver_channels = 0;
@@ -727,6 +739,8 @@ int forge_file_layout_check(
 			netgame = 1;
 		if (layout->records[index].flags & FORGE_RECORD_AI_RESPAWN)
 			respawning = 1;
+		if (layout->records[index].flags & FORGE_RECORD_PHYSICS_MASK)
+			physics = 1;
 		if (layout->records[index].kind == _forge_record_player_spawn)
 			player_spawns = 1;
 		/* (version 6's game type objects: a hill's points counted, its
@@ -757,7 +771,7 @@ int forge_file_layout_check(
 	for a player spawn, version 5 only for a teleporter: a file of one
 	without it is not one this writer made) */
 	if ((version == 3 && !respawning) || (version == 4 && !player_spawns) || (version == 5 && !teleporters) ||
-		(version == 6 && !game_objects))
+		(version == 6 && !game_objects) || (version == 7 && !physics))
 	{
 		return _forge_file_bad_version;
 	}

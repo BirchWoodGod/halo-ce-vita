@@ -130,6 +130,13 @@ static void fuzz_update(
 		return;
 	if (record->op < FORGE_NET_FIRST_UPDATE || record->op >= FORGE_NET_UPDATE_END)
 		abort();
+	/* (an object's physics: one of the modes, never a character's) */
+	if ((record->op == _forge_net_update_entry || record->op == _forge_net_update_link) &&
+		!(record->flags & FORGE_NET_FLAG_PLAYER_SPAWN) &&
+		(record->step < 0 || record->step >= FORGE_NET_PHYSICS_MODES || ((record->flags & FORGE_NET_FLAG_AI) && record->step)))
+	{
+		abort();
+	}
 	if ((record->op == _forge_net_update_entry || record->op == _forge_net_update_link) &&
 		(!forge_transform_sane(&record->transform, 1) || record->team < -1 || record->team > FORGE_NET_MAXIMUM_TEAM ||
 			record->respawn_seconds > FORGE_NET_MAXIMUM_RESPAWN_SECONDS || record->ai_team >= FORGE_NET_AI_TEAM_COUNT))
@@ -612,6 +619,33 @@ int net_fuzz_checks(void)
 	record.tag = 1;
 	record.id = 0;
 	CHECK(!forge_net_update_valid(&record, 3), "an entry of id 0 refused");
+	/* (version 7's physics in the step: normal, fixed, phased; never a
+	character's) */
+	record.id = 5;
+	record.flags = FORGE_NET_FLAG_NETWORKED;
+	record.step = 2;
+	CHECK(forge_net_update_valid(&record, 3), "an entry phased taken");
+	record.step = 1;
+	CHECK(forge_net_update_valid(&record, 3), "an entry fixed taken");
+	record.step = 3;
+	CHECK(!forge_net_update_valid(&record, 3), "an entry of physics 3 refused");
+	record.step = -1;
+	CHECK(!forge_net_update_valid(&record, 3), "an entry of physics -1 refused");
+	record.step = 1;
+	record.flags |= FORGE_NET_FLAG_AI;
+	CHECK(!forge_net_update_valid(&record, 3), "a character's physics refused");
+	record.op = _forge_net_update_link;
+	record.value = 2;
+	CHECK(!forge_net_update_valid(&record, 3), "a character's physics in a link refused");
+	record.flags = FORGE_NET_FLAG_NETWORKED;
+	CHECK(forge_net_update_valid(&record, 3), "a link's physics taken");
+	record.op = _forge_net_update_entry;
+	record.value = 0;
+	record.step = 0;
+	record_init(&record, _forge_net_request_property);
+	record.aux = FORGE_NET_PROPERTY_PHYSICS;
+	record.step = 1;
+	CHECK(forge_net_request_valid(&record, 0), "the PHYSICS property's step taken");
 	record_init(&record, _forge_net_update_refuse);
 	record.aux = _forge_net_refuse_budget;
 	CHECK(forge_net_update_valid(&record, 0), "a refusal taken");

@@ -1312,6 +1312,118 @@ static void test_version_6(void)
 	CHECK(decode(work, good5_size, "bloodgulch") == _forge_file_bad_version, "version 6 without a game type object: refused");
 }
 
+/* a variant with physics (version 7): the sample's objects, the Warthog
+fixed, a boulder phased */
+static unsigned char good7[FORGE_FILE_MAXIMUM_SIZE];
+static int good7_size;
+
+static void sample_layout_7(struct forge_file_layout *layout)
+{
+	sample_layout(layout);
+	layout->records[0].flags |= FORGE_RECORD_PHYSICS_FIXED;
+	layout->records[1].flags |= FORGE_RECORD_PHYSICS_PHASED;
+}
+
+static void test_version_7(void)
+{
+	struct forge_file_layout layout;
+	int result = -1;
+	int records;
+	int index;
+
+	sample_layout_7(&layout);
+	CHECK(forge_file_layout_version(&layout) == 7, "physics needs version 7");
+	good7_size = forge_file_encode(&layout, good7, sizeof(good7), &result);
+	CHECK(good7_size > 0 && result == _forge_file_ok && good7[4] == 7 && good7[5] == 0, "written as version 7");
+	CHECK(decode(good7, good7_size, "bloodgulch") == _forge_file_ok && decoded.version == 7, "read back as version 7");
+	layout.version = 7;
+	CHECK(layouts_equal(&layout, &decoded), "the physics read back the same");
+	CHECK((decoded.records[0].flags & FORGE_RECORD_PHYSICS_MASK) == FORGE_RECORD_PHYSICS_FIXED &&
+		(decoded.records[1].flags & FORGE_RECORD_PHYSICS_MASK) == FORGE_RECORD_PHYSICS_PHASED &&
+		!(decoded.records[2].flags & FORGE_RECORD_PHYSICS_MASK), "the Warthog fixed, a boulder phased, the other normal");
+	CHECK(decode(good7, good7_size, NULL) == _forge_file_ok && forge_file_encode(&decoded, work, sizeof(work), &result) ==
+		good7_size && !memcmp(work, good7, (size_t)good7_size), "a version 7 file writes back as itself");
+	/* (with every other version's fields: still version 7) */
+	sample_layout_6(&layout);
+	layout.records[0].flags |= FORGE_RECORD_PHYSICS_PHASED;
+	add_teleporter(&layout, 1, 2, 30.f, -70.f, 0.f);
+	add_teleporter(&layout, 0, 2, 31.f, -71.f, 0.f);
+	add_spawn(&layout, 90.f, -150.f, 0.5f, 0, 0, 0);
+	{
+		int written = forge_file_encode(&layout, work, sizeof(work), &result);
+
+		CHECK(forge_file_layout_version(&layout) == 7 && written > 0 && work[4] == 7 &&
+			decode(work, written, "bloodgulch") == _forge_file_ok, "physics, game type objects, teleporters, a spawn: version 7");
+	}
+	/* (the writer's refusals) */
+	sample_layout_7(&layout);
+	layout.records[0].flags |= FORGE_RECORD_PHYSICS_PHASED;
+	CHECK(encode_refused(&layout), "fixed and phased at once: not written");
+	sample_layout_7(&layout);
+	layout.version = 6;
+	CHECK(encode_refused(&layout), "physics in a version 6 layout: not written");
+	sample_layout_7(&layout);
+	add_path(&layout, GROUP('a', 'c', 't', 'v'), "characters\\elite\\elite major");
+	add_record(&layout, layout.path_count - 1, 96.f, -159.f, 1.f, 1.f);
+	layout.records[layout.record_count - 1].flags |= FORGE_RECORD_PHYSICS_FIXED;
+	CHECK(encode_refused(&layout), "a character's physics: not written");
+	sample_layout_7(&layout);
+	add_spawn(&layout, 90.f, -150.f, 0.5f, 0, 0, 0);
+	layout.records[layout.record_count - 1].flags |= FORGE_RECORD_PHYSICS_PHASED;
+	CHECK(encode_refused(&layout), "a player spawn's physics: not written");
+	sample_layout_7(&layout);
+	add_teleporter(&layout, 0, 2, 31.f, -71.f, 0.f);
+	layout.records[layout.record_count - 1].flags |= FORGE_RECORD_PHYSICS_FIXED;
+	CHECK(encode_refused(&layout), "a teleporter's physics: not written");
+	sample_layout_7(&layout);
+	add_game_object(&layout, FORGE_FILE_FLAG_TYPE_CTF, 0, 70.f, -110.f, 0.5f);
+	layout.records[layout.record_count - 1].flags |= FORGE_RECORD_PHYSICS_PHASED;
+	CHECK(encode_refused(&layout), "a game type object's physics: not written");
+	/* (the reader's: the flags byte of a record, checksum right) */
+	records = good7_size - (FORGE_FILE_RECORD_SIZE * 5) -
+		(int)(strlen(layout.title) + strlen(layout.author) + strlen(layout.description) + strlen(layout.date) + 4);
+	{
+		static struct
+		{
+			int record;
+			unsigned char flags;
+			int taken;
+			char const *what;
+		} const cases[] =
+		{
+			{ 0, FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_PHYSICS_MASK, 0, "fixed and phased at once: refused" },
+			{ 0, FORGE_RECORD_PLACE_AT_START | 0x40, 0, "flag bit 6: refused" },
+			{ 0, FORGE_RECORD_PLACE_AT_START | 0x80, 0, "flag bit 7: refused" },
+			{ 2, FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_PHYSICS_PHASED, 1, "another object phased: taken" },
+			{ 0, FORGE_RECORD_PLACE_AT_START, 1, "the Warthog normal again (a boulder still phased): taken" },
+		};
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			memcpy(work, good7, (size_t)good7_size);
+			work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + 34] = cases[index].flags;
+			fix_checksum(work, good7_size);
+			CHECK((decode(work, good7_size, "bloodgulch") == _forge_file_ok) == cases[index].taken, cases[index].what);
+		}
+		/* (none left: a version 7 file without physics is refused) */
+		memcpy(work, good7, (size_t)good7_size);
+		work[records + 34] = FORGE_RECORD_PLACE_AT_START;
+		work[records + FORGE_FILE_RECORD_SIZE + 34] = FORGE_RECORD_PLACE_AT_START;
+		fix_checksum(work, good7_size);
+		CHECK(decode(work, good7_size, "bloodgulch") == _forge_file_bad_version, "version 7 without physics: refused");
+	}
+	/* (called version 6, 4 or 1: its physics refused) */
+	for (index = 1; index <= 6; index++)
+	{
+		char what[96];
+
+		memcpy(work, good7, (size_t)good7_size);
+		put_u16(work, 4, (unsigned int)index);
+		snprintf(what, sizeof(what), "version 7's physics in a file called version %d: refused", index);
+		CHECK(decode(work, good7_size, "bloodgulch") != _forge_file_ok, what);
+	}
+}
+
 static void test_names(void)
 {
 	char name[FORGE_FILE_NAME_SIZE];
@@ -1381,8 +1493,12 @@ static void fuzz(long iterations)
 		{
 			/* (the version 1 sample, the version 2 one, or the version 4
 			one with player spawns) */
-			switch (next_random() % 5)
+			switch (next_random() % 6)
 			{
+			case 5:
+				size = good7_size;
+				memcpy(work, good7, (size_t)size);
+				break;
 			case 4:
 				size = good6_size;
 				memcpy(work, good6, (size_t)size);
@@ -1535,6 +1651,8 @@ static int dump(char const *path)
 		if (record->kind == _forge_record_player_spawn)
 			printf("record %d: a player spawn: %s, team %d, game types %d\n", index,
 				(record->flags & FORGE_RECORD_SPAWN_INITIAL) ? "initial" : "respawn", record->team, record->game_types);
+		if (record->flags & FORGE_RECORD_PHYSICS_MASK)
+			printf("record %d: physics %s\n", index, (record->flags & FORGE_RECORD_PHYSICS_FIXED) ? "fixed" : "phased");
 		if (record->kind == _forge_record_flag)
 			printf("record %d: a game type object: flag type %d, index %d\n", index, record->variant, record->team);
 		if (record->kind == _forge_record_teleporter_in || record->kind == _forge_record_teleporter_out)
@@ -1561,6 +1679,7 @@ int main(int argc, char **argv)
 	test_version_4();
 	test_version_5();
 	test_version_6();
+	test_version_7();
 	test_names();
 	fuzz(iterations);
 	printf("%d checks, %d failed\n", checks, failures);

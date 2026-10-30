@@ -667,6 +667,8 @@ struct forge_placed
 	already: a new round's, a variant's or a respawn's -, placed as soon as
 	one alive is fewer; no object meanwhile */
 	boolean waiting;
+	/* (forge_physics.inc) its collision switch set by its PHASED physics */
+	boolean phased_applied;
 };
 
 /* a step of the undo history */
@@ -981,6 +983,11 @@ static short forge_marker_new_index(short kind);
 static short forge_teleporters_count(short kind, short channel);
 static short forge_teleporter_new_channel(short kind);
 static void forge_netgame_update(void);
+static short forge_physics_mode(struct forge_placed const *placed);
+static unsigned char forge_physics_flags(short mode);
+static void forge_physics_apply(struct forge_placed *placed);
+static void forge_physics_update(void);
+static char const *const forge_physics_log_names[NUMBER_OF_FORGE_PHYSICS_MODES] = { "normal", "fixed", "phased" };
 static void forge_netgame_log(void);
 static void forge_spawn_remove(struct forge_spawn *spawn);
 static void forge_net_update(void);
@@ -1615,6 +1622,13 @@ static void forge_homes_update(
 		if (placed->object_index != forge_globals.held_object_index &&
 			((long)(placed->settle_until - now) <= 0 || object->object.parent_object_index != NONE ||
 				TEST_FLAG(object->object.damage_flags, _object_dead_bit)))
+		{
+			continue;
+		}
+		/* (a fixed one let go: where it was let go, never where it falls -
+		forge_physics_update holds it there) */
+		if ((placed->flags & FORGE_RECORD_PHYSICS_FIXED) && placed->has_home &&
+			placed->object_index != forge_globals.held_object_index)
 		{
 			continue;
 		}
@@ -3706,6 +3720,19 @@ static void forge_property_apply(
 		placed->flags ^= FORGE_RECORD_AI_OFF;
 		forge_ai_apply(placed);
 		break;
+	case _forge_property_physics:
+	{
+		/* (normal, fixed, phased, round: not a character's) */
+		short mode = forge_physics_mode(placed);
+
+		if (placed->ai)
+			return;
+		mode = (short)((mode + step + NUMBER_OF_FORGE_PHYSICS_MODES) % NUMBER_OF_FORGE_PHYSICS_MODES);
+		placed->flags = (unsigned char)((placed->flags & ~FORGE_RECORD_PHYSICS_MASK) | forge_physics_flags(mode));
+		forge_physics_apply(placed);
+		platform_log("forge: #%ld's physics %s", placed->id, forge_physics_log_names[mode]);
+		break;
+	}
 	}
 	{
 		float angles[3];
@@ -4033,6 +4060,12 @@ static boolean forge_variant_capture(
 			record->ai_team = (unsigned char)(placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS);
 		else
 			record->flags &= (unsigned char)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
+		/* (an object's physics: version 7, never a character's, never both) */
+		if (placed->ai || group_tag == ACTOR_VARIANT_DEFINITION_TAG ||
+			(record->flags & FORGE_RECORD_PHYSICS_MASK) == FORGE_RECORD_PHYSICS_MASK)
+		{
+			record->flags &= (unsigned char)~FORGE_RECORD_PHYSICS_MASK;
+		}
 		/* (a character's respawn: version 3, after a second or more) */
 		if ((record->flags & FORGE_RECORD_AI_RESPAWN) && !record->respawn_seconds)
 			record->flags &= (unsigned char)~FORGE_RECORD_AI_RESPAWN;
@@ -4279,7 +4312,12 @@ static void forge_variant_apply(
 				entry->ai_team = FORGE_AI_TEAM_DEFAULT;
 				entry->flags &= (unsigned char)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
 			}
+			else
+			{
+				entry->flags &= (unsigned char)~FORGE_RECORD_PHYSICS_MASK;
+			}
 			forge_ai_apply(entry);
+			forge_physics_apply(entry);
 		}
 		placed++;
 	}
@@ -5136,6 +5174,8 @@ boolean forge_properties_get(
 		properties->roll = (short)forge_round(RADIANS_TO_DEGREES(angles[2]));
 	}
 	properties->ai = placed->ai;
+	properties->has_physics = !placed->ai;
+	properties->physics = forge_physics_mode(placed);
 	properties->ai_team = placed->ai_team;
 	properties->ai_on = !(placed->flags & FORGE_RECORD_AI_OFF);
 	if (placed->ai_team == FORGE_AI_TEAM_DEFAULT && forge_object_alive(placed->object_index))
@@ -5744,6 +5784,7 @@ void forge_update(
 		{
 			forge_placed_update();
 			forge_homes_update();
+			forge_physics_update();
 			/* (its characters that respawn: the game's host's) */
 			forge_ai_life_update();
 			forge_net_update();
@@ -5900,6 +5941,7 @@ void forge_update(
 	forge_globals.menu_was_open = menu_open;
 	forge_placed_update();
 	forge_homes_update();
+	forge_physics_update();
 	/* (a network Forge game: the requests and the layout's changes) */
 	forge_net_update();
 	/* (a network game: the game's own Start opens the multiplayer pause,
@@ -6735,6 +6777,8 @@ boolean forge_command(
 			property = _forge_property_ai_team;
 		else if (!strncmp(rest, "brain", 5))
 			property = _forge_property_ai_brain;
+		else if (!strncmp(rest, "physics", 7))
+			property = _forge_property_physics;
 		else if (!strncmp(rest, "yaw", 3))
 			property = _forge_property_yaw;
 		else if (!strncmp(rest, "pitch", 5))
@@ -7065,3 +7109,4 @@ boolean forge_command(
 #include "forge_markers.inc"
 #include "forge_spawns.inc"
 #include "forge_netgame.inc"
+#include "forge_physics.inc"

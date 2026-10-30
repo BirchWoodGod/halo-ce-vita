@@ -172,6 +172,14 @@
 #               flags replaced -, in Oddball - the ball at the layout's spawn - and in King of
 #               the Hill (the layout's hill the engine's hill 0); and a CTF game of Blood Gulch
 #               with no map variant: the map's own netgame flags, its flags where they are
+#   physics     an object's PHYSICS (forge_physics.inc, 1.1.2): in a Forge game of Blood
+#               Gulch, snapping off, two large platforms two world units over the ground,
+#               one NORMAL, one PHASED ("forge property physics", twice); the Spartan put down
+#               over each: he stands on the normal one, falls through the phased one to the
+#               ground; two large walls PHASED crossing each other (pieces overlapping:
+#               screenshot) and a Warthog FIXED let go in the air (it stays there; a NORMAL one
+#               falls); the properties window's PHYSICS row (screenshot); saved as version 7
+#               (forge_files_test --dump: fixed and phased as set)
 #   spawnplay   the spawn points played (players.c player_spawn, forge_spawns.inc
 #               forge_spawn_location): spawns' variant (made by the console) played offline
 #               with 5 bots (network test local:, HALO_NETWORK_TEST_MAP_VARIANT, a kill every
@@ -305,7 +313,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives physics allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -1008,6 +1016,28 @@ objectives_runs() {
 	objectives_play objectives-mapctf ctf
 }
 
+physics_runs() {
+	local store="$out/physics-store" c t
+	rm -rf "$store"
+	mkdir -p "$store"
+	c="L240:forge snap off;L250:forge camera 75 -152 2 0 0;L262:forge spawn platform_large;L263:forge distance 5;L272:forge drop"
+	c="$c;L280:forge camera 85 -160 2 0 0;L292:forge spawn platform_large;L293:forge distance 5;L294:forge property physics"
+	c="$c;L295:forge property physics;L302:forge drop"
+	c="$c;L310:forge camera 85 -144 1.5 0 0;L322:forge spawn wall_large;L323:forge distance 5;L324:forge turn 45"
+	c="$c;L325:forge property physics;L326:forge property physics;L332:forge drop"
+	c="$c;L340:forge camera 85 -144 1.5 0 0;L352:forge spawn wall_large;L353:forge distance 5;L354:forge turn -45"
+	c="$c;L355:forge property physics;L356:forge property physics;L362:forge drop"
+	c="$c;L370:forge camera 70 -136 4 0 0;L382:forge spawn warthog;L383:forge distance 5;L384:forge property physics"
+	c="$c;L390:forge press x;L410:@shot 00-physics-row;L414:forge closemenus;L418:forge drop"
+	c="$c;L420:forge camera 70 -130 4 0 0;L432:forge spawn warthog;L433:forge distance 5;L440:forge drop;L520:forge objects"
+	c="$c;L530:forge camera 80 -132 4 -90 -20;L550:@shot 01-phased-walls-overlap;L555:forge save Physics Test"
+	c="$c;L560:forge camera 80 -152 4 0 -89;L590:forge off;L660:forge where;L680:forge on"
+	c="$c;L690:forge camera 90 -160 4 0 -89;L720:forge off;L800:forge where;L802:@shot 02-fell-through-phased;L810:forge on"
+	run physics 35 "" "$c" "" HALO_MENU_STYLE=classic HALO_SAVE_ROOT="$store" HALO_SYSTEM_LINK_TEST=forge:9 \
+		HALO_TEST_FORGE_PACKS=none HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/physics_test.hmv" > "$out/physics/dump.txt" 2>&1
+}
+
 spawnplay_runs() {
 	local store="$out/spawnplay-store"
 	rm -rf "$store"
@@ -1334,6 +1364,8 @@ for c in $cases; do
 		spawnplay_runs & ;;
 	teleport)
 		teleport_runs & ;;
+	physics)
+		physics_runs & ;;
 	objectives)
 		objectives_runs & ;;
 	mpvariant)
@@ -1679,6 +1711,31 @@ for c in $cases; do
 			fail "objectives-mapctf: Forge's flags in a game with no map variant"
 		[ "$(sed -n '/test command at tick 450: forge netflags$/,/test command at tick/p' "$out/objectives-mapctf/run.log" | grep -ac "forge: the game type's flag at")" = 2 ] &&
 			echo "  ok: objectives-mapctf: the map's two flags" || fail "objectives-mapctf: the map's flags"
+		continue
+	fi
+	if [ "$c" = physics ]; then
+		checked physics || continue
+		log="$out/physics/run.log"
+		expect physics "a platform phased" "forge: #2's physics phased"
+		count physics "two walls phased" "forge: #[34]'s physics phased" 2
+		expect physics "a Warthog fixed" "forge: #5's physics fixed"
+		expect physics "the PHYSICS row" "menus: forge properties: Warthog: .*, physics 1"
+		# (the fixed Warthog where it was let go, in the air; the normal one fallen)
+		fixed=$(sed -n '/test command at tick 520: forge objects$/,/test command at tick/p' "$log" | grep -a "(id 5)" | sed 's/.*) [a-z]* at [-0-9.]* [-0-9.]* \([-0-9.]*\), placed at [-0-9.]* [-0-9.]* \([-0-9.]*\).*/\1 \2/')
+		normal=$(sed -n '/test command at tick 520: forge objects$/,/test command at tick/p' "$log" | grep -a "(id 6)" | sed 's/.*) [a-z]* at [-0-9.]* [-0-9.]* \([-0-9.]*\),.*/\1/')
+		echo "  (the fixed Warthog at z, placed at z: $fixed; the normal one at z $normal)"
+		awk -v f="$fixed" -v n="$normal" 'BEGIN { split(f, a, " "); exit !(a[1] > 3 && a[1] - a[2] < 0.05 && a[2] - a[1] < 0.05 && n < 2.5) }' &&
+			echo "  ok: physics: the fixed Warthog stays in the air, the normal one falls" ||
+			fail "physics: the fixed Warthog moved, or the normal one did not fall"
+		on=$(sed -n '/test command at tick 660: forge where$/,+3p' "$log" | grep -a "the player's unit at" | sed 's/.*unit at [-0-9.]* [-0-9.]* \([-0-9.]*\),.*/\1/')
+		through=$(sed -n '/test command at tick 800: forge where$/,+3p' "$log" | grep -a "the player's unit at" | sed 's/.*unit at [-0-9.]* [-0-9.]* \([-0-9.]*\),.*/\1/')
+		echo "  (the Spartan over the normal platform at z $on, over the phased one at z $through)"
+		awk -v a="$on" -v b="$through" 'BEGIN { exit !(a > 1.8 && b < a - 1.5) }' &&
+			echo "  ok: physics: he stands on the normal platform, falls through the phased one" ||
+			fail "physics: the platforms did not hold and pass him as set"
+		grep -q "^version 7 " "$out/physics/dump.txt" && [ "$(grep -c ": physics phased$" "$out/physics/dump.txt")" = 3 ] &&
+			[ "$(grep -c ": physics fixed$" "$out/physics/dump.txt")" = 1 ] &&
+			echo "  ok: physics: the file: version 7, one fixed, three phased" || fail "physics: the file: $(cat "$out/physics/dump.txt")"
 		continue
 	fi
 	if [ "$c" = teleport ]; then
