@@ -35,6 +35,8 @@ halo3/dialog_ui.xml
 # for h3/<name>: menu_tags.c menu_tags_online)
 classic/forge.xml
 classic/customize.xml
+classic/standins.xml
+classic/players.xml
 # Menu style Online (a preview: menus/online, menu_tags.c menu_tags_online)
 online/main.xml
 online/customize.xml

@@ -82,5 +82,20 @@ Menu style Classic+'s screens for the port's features (classic/forge.xml, ...)
   panel at the right, the button key. The pictures and fonts are the
   player's (ui.map, Halo PC's bitmaps.map: art.xml); the headings are the
   port's words drawn in the game's look (tools/classic_menu_art.py).
+- standins.xml and players.xml (tools/classic_standins_xml.py): the Halo 3
+  set's NETWORK picker, GAME TYPES (the list, a game type's options, the
+  delete question, the bases, the editor, its groups of settings, the
+  question before leaving it) and PLAYERS (players.xml, read over a level
+  too: ingame.txt) in the same look; each row's handlers copied from the
+  Halo 3 set's widget of its name.
+- The common layout: lists of list_item_bkd rows at 51 (their tab 232 wide,
+  224 for Halo PC's), the description's list_field at 275,78 320 x 322,
+  lists of files and players across the screen on Halo PC's server browser
+  rows, settings on its option_bkds rows; the button key at the foot as the
+  Xbox's ("=" and the word: A at 481, B at 371, the others at 196 and 40).
+  No text is cut nor ended in "...": a box's text that is too wide goes to
+  its smaller twin (<name>_small, small_ui) or onto lines (menu_functions.c
+  classic_text_fit); a test build says any text a box still cuts
+  ("menus: text cut:" in halo.log, ui_widget.c ui_widget_port_text_check).
 - Menu style Classic (HALO_MENU_STYLE=original) shows none of this: the
   Xbox menus as they shipped; the settings panel has the port's features.

@@ -5503,6 +5503,103 @@ boolean ui_widget_port_text_too_wide(
 	return text_bounds.x1 - text_bounds.x0 > width;
 }
 
+/* port: the room a text box's text has (its bounds less its text's offset)
+and what the text takes there in its font, as widget_instance_render_text_box
+draws it (a line as long as it is - the box does not wrap it, it cuts it -,
+a new one at each line break): its widest line and its lines' height (Menu style Classic+'s check that no text of the port's screens is
+cut: port/linux/game/menu_functions.c classic_text_fit) */
+boolean ui_widget_port_text_measure(
+	struct widget_instance *widget,
+	wchar_t const *text,
+	short *room_width,
+	short *room_height,
+	short *text_width,
+	short *text_height)
+{
+	struct ui_widget_definition *definition = ui_widget_definition_get(widget->definition_tag_index);
+	long font_index = definition->text_font.index;
+	rectangle2d bounds;
+	rectangle2d text_bounds;
+	rectangle2d cursor_bounds;
+	real_argb_color color = get_ui_argb_white();
+
+	*room_width = (short)(definition->bounds.x1 - definition->bounds.x0 - definition->horizontal_offset);
+	*room_height = (short)(definition->bounds.y1 - definition->bounds.y0 - definition->vertical_offset);
+	*text_width = *text_height = 0;
+	if (font_index == NONE)
+		return FALSE;
+	if (!text || !*text)
+		return TRUE;
+	bounds.y0 = 0;
+	bounds.x0 = 0;
+	bounds.y1 = 2000;
+	bounds.x1 = 4000;
+	draw_string_set_draw_mode(font_index, NONE, 0, 0, &color);
+	draw_unicode_string_compute_bounds(&bounds, text, &text_bounds, &cursor_bounds);
+	if (text_bounds.x0 <= text_bounds.x1)
+		*text_width = (short)(text_bounds.x1 - MIN(text_bounds.x0, 0));
+	/* (the box draws a line whose baseline is in it: the last line's, about a quarter of a line
+	over its bottom) */
+	*text_height = (short)(cursor_bounds.y1 - (cursor_bounds.y1 - cursor_bounds.y0) / 4);
+	return TRUE;
+}
+
+#if defined(HALO_LINUX) && !defined(HALO_RELEASE)
+/* (tests only) a text box of the menus' XML (its tag pc\...) whose text its
+box cuts - wider than it, or more lines than it is tall - said in halo.log
+once ("menus: text cut: ..."), as it is drawn: the screenshots' tests of
+Menu style Classic+ look for it. A text with the game's button icons in it
+is not measured (the icons are not letters) */
+void ui_widget_port_text_check(
+	struct widget_instance *widget,
+	wchar_t const *text)
+{
+	static unsigned long said[512];
+	static short said_count;
+	char const *name = tag_get_name(widget->definition_tag_index);
+	unsigned long hash = 2166136261u ^ (unsigned long)widget->definition_tag_index;
+	short room_width, room_height, text_width, text_height;
+	long index;
+
+	if (!name || strncmp(name, "pc\\", 3) || !text || !*text || string_has_icons_to_draw((wchar_t *)text))
+		return;
+	for (index = 0; text[index]; index++)
+		hash = (hash ^ (unsigned short)text[index]) * 16777619u;
+	for (index = 0; index < said_count; index++)
+	{
+		if (said[index] == hash)
+			return;
+	}
+	if (said_count < (short)NUMBEROF(said))
+		said[said_count++] = hash;
+	if (!ui_widget_port_text_measure(widget, text, &room_width, &room_height, &text_width, &text_height))
+		return;
+	if (text_width > room_width || text_height > room_height)
+	{
+		void platform_log(char const *format, ...);
+		char ascii[160];
+
+		for (index = 0; text[index] && index < (long)sizeof(ascii) - 1; index++)
+			ascii[index] = text[index] == '\n' || text[index] == '\r' ? '|' : text[index] < 0x80 ? (char)text[index] : '~';
+		ascii[index] = 0;
+		platform_log("menus: text cut: %s \"%s\" takes %dx%d, its box %dx%d", name, ascii, text_width, text_height,
+			room_width, room_height);
+	}
+}
+#endif
+
+/* port: a text box's left (its bounds' and its text's offset) and right in its parent */
+void ui_widget_port_text_box_span(
+	struct widget_instance *widget,
+	short *left,
+	short *right)
+{
+	struct ui_widget_definition *definition = ui_widget_definition_get(widget->definition_tag_index);
+
+	*left = (short)(definition->bounds.x0 + definition->horizontal_offset);
+	*right = definition->bounds.x1;
+}
+
 /* port: the width of a text box (its definition's bounds), which a line
 of its text fits in */
 short ui_widget_port_text_box_width(
@@ -5759,6 +5856,16 @@ static void widget_instance_render_text_box(
 		{
 			widget->parameters.text_box.text = L"<out of memory>";
 		}
+#ifdef HALO_LINUX
+		/* (Menu style Classic+'s screens: the string fitted to the box, port/linux/game/menu_functions.c) */
+		if (widget->parameters.text_box.text && widget != ui_widget_port_error_text_box &&
+			!string_has_icons_to_draw(widget->parameters.text_box.text))
+		{
+			void ui_widget_port_classic_fit(struct widget_instance *widget);
+
+			ui_widget_port_classic_fit(widget);
+		}
+#endif
 	}
 	text = &widget->parameters.text_box.text;
 	if (!*text || !**text)
@@ -5852,6 +5959,14 @@ static void widget_instance_render_text_box(
 			widget_globals.current_system_milliseconds *
 				SECONDS_PER_MILLISECOND * 3.0f) + 1.5f) * 0.4f) * color.alpha;
 	}
+#if defined(HALO_LINUX) && !defined(HALO_RELEASE)
+	/* (tests: a text of the port's screens that its box cuts, said once) */
+	{
+		void ui_widget_port_text_check(struct widget_instance *widget, wchar_t const *text);
+
+		ui_widget_port_text_check(widget, *text);
+	}
+#endif
 	draw_string_set_draw_mode(font_index, NONE, justification, 0, &color);
 	if (string_has_icons_to_draw(*text))
 		draw_string_and_hack_in_icons(&bounds, &clip, NULL, 0, *text, FALSE);

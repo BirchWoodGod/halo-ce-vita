@@ -581,8 +581,8 @@ static void map_entry_check(
 		{
 			if (csstrcasecmp(inside, name))
 			{
-				snprintf(entry->why, sizeof(entry->why), T("It's named %.31s inside: rename the file %.31s.map"), inside,
-					inside);
+				/* (the file's name whole, in its 96 bytes: the menus show it whole) */
+				snprintf(entry->why, sizeof(entry->why), T("Rename the file %.31s.map: that is its name inside"), inside);
 			}
 			else
 			{

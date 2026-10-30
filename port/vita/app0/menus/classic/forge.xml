@@ -17,41 +17,55 @@
 	</bitmap>
 
 	<!-- the lobby -->
-	<widget name="cp/forge/header" left="35" top="11" width="512" height="64" bitmap="cp/forge/header_art"/>
-	<widget name="cp/forge/network_row" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<!-- (a row's words: the large font, or its smaller twin for a long one - menu_functions.c
+	     classic_text_fit) -->
+	<widget name="cp/forge/row_name" type="text" left="13" top="5" width="199" height="24" font="ui\large_ui" color="#FF2896FF"/>
+	<widget name="cp/forge/row_tag" type="text" left="92" top="9" width="120" height="18" align="right" font="ui\small_ui" color="#FF2896FF"/>
+		<widget name="cp/forge/header" left="35" top="11" width="512" height="64" bitmap="cp/forge/header_art"/>
+	<widget name="cp/forge/network_row" left="0" width="224" height="32" bitmap="list_item_bkd">
+		<child widget="cp/forge/row_name"/>
+		<child widget="cp/forge/row_tag"/>
 		<on event="a" open="h3/network/screen"/>
 	</widget>
-	<widget name="cp/forge/map_row" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="cp/forge/map_row" left="0" width="224" height="32" bitmap="list_item_bkd">
+		<child widget="cp/forge/row_name"/>
+		<child widget="cp/forge/row_tag"/>
 		<on event="a" open="h3/forge/maps/screen"/>
 	</widget>
-	<widget name="cp/forge/packs_row" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="cp/forge/packs_row" left="0" width="224" height="32" bitmap="list_item_bkd">
+		<child widget="cp/forge/row_name"/>
+		<child widget="cp/forge/row_tag"/>
 		<on event="a" open="h3/forge/packs/screen"/>
 	</widget>
-	<widget name="cp/forge/start_row" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/forge_text" string_index="2">
+	<widget name="cp/forge/start_row/row_name" type="text" left="13" top="5" width="197" height="24" font="ui\large_ui" color="#FF2896FF" string_list="h3/forge_text" string_index="2"/>
+	<widget name="cp/forge/start_row" left="0" width="224" height="32" bitmap="list_item_bkd">
 		<on event="a start" run="port forge start"/>
+		<child widget="cp/forge/start_row/row_name"/>
 	</widget>
-	<widget name="cp/forge/start_live" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/forge_text" string_index="2">
+	<widget name="cp/forge/start_live/row_name" type="text" left="13" top="5" width="197" height="24" font="ui\large_ui" color="#FF2896FF" string_list="h3/forge_text" string_index="2"/>
+	<widget name="cp/forge/start_live" left="0" width="224" height="32" bitmap="list_item_bkd">
 		<on event="a start" run="port forge start live" open="ui\shell\main_menu\multiplayer_type_select\connected\4way_profile_select\4way_start2join_screen"/>
+		<child widget="cp/forge/start_live/row_name"/>
 	</widget>
 	<widget name="cp/forge/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<on event="y" open="h3/friends/screen"/>
 		<on event="left_trigger" run="port h3 invite ask" open="h3/invite/screen"/>
-		<child widget="cp/forge/network_row" y="92"/>
-		<child widget="cp/forge/map_row" y="125"/>
-		<child widget="cp/forge/packs_row" y="158"/>
-		<child widget="cp/forge/start_row" y="191"/>
-		<child widget="cp/forge/start_live" y="191"/>
+		<child widget="cp/forge/network_row" x="51" y="78"/>
+		<child widget="cp/forge/map_row" x="51" y="110"/>
+		<child widget="cp/forge/packs_row" x="51" y="142"/>
+		<child widget="cp/forge/start_row" x="51" y="174"/>
+		<child widget="cp/forge/start_live" x="51" y="174"/>
 	</widget>
-	<widget name="cp/forge/map_picture" left="315" top="92" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix"/>
-	<widget name="cp/forge/caption" type="text" left="315" top="212" width="290" height="20" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/forge/ready" type="text" left="315" top="236" width="290" height="22" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/forge/ready_sub" type="text" left="315" top="260" width="290" height="34" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/forge/note" type="text" left="315" top="296" width="290" height="44" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/forge/network_status" type="text" left="315" top="344" width="290" height="16" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test">
+	<widget name="cp/forge/map_picture" left="290" top="92" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix"/>
+	<widget name="cp/forge/caption" type="text" left="290" top="212" width="280" height="20" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/forge/ready" type="text" left="290" top="236" width="280" height="22" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/forge/ready_sub" type="text" left="290" top="260" width="280" height="34" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/forge/note" type="text" left="290" top="296" width="280" height="44" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/forge/network_status" type="text" left="290" top="344" width="280" height="16" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test">
 		<data input="port h3 network status"/>
 	</widget>
-	<widget name="cp/forge/players" type="text" left="315" top="364" width="290" height="16" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/forge/description" left="300" top="78" width="320" height="322" bitmap="list_field">
+	<widget name="cp/forge/players" type="text" left="290" top="364" width="280" height="16" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/forge/description" left="275" top="78" width="320" height="322" bitmap="list_field">
 		<child widget="cp/forge/map_picture"/>
 		<child widget="cp/forge/caption"/>
 		<child widget="cp/forge/ready"/>
@@ -68,49 +82,69 @@
 		<child widget="cp/forge/header"/>
 		<child widget="cp/forge/description"/>
 		<child widget="cp/forge/list"/>
-		<child widget="ui\shell\main_menu\button_key"/>
+		<child widget="cp/key/b_butn"/>
+		<child widget="cp/key/back"/>
+		<child widget="cp/key/a_butn"/>
+		<child widget="cp/key/select"/>
 	</widget>
 
 	<!-- the map picker (port forge maps: the maps, then the chosen one's variants in the same rows;
 	     the triggers a page), its title the C code's words in the game's font -->
-	<widget name="cp/forge/maps/title" type="text" left="51" top="34" width="520" height="30" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/forge/maps/item_0" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<bitmap name="cp/forge/maps/header_art">
+		<frame png="classic/{lang}/header_select_map.png" width="512" height="64"/>
+	</bitmap>
+	<widget name="cp/forge/maps/header" left="35" top="11" width="512" height="64" bitmap="cp/forge/maps/header_art"/>
+	<widget name="cp/forge/maps/row_name" type="text" left="13" top="2" width="199" height="22" font="ui\large_ui" color="#FF2896FF"/>
+		<widget name="cp/forge/maps/item_0" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_1" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_1" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_2" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_2" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_3" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_3" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_4" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_4" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_5" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_5" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_6" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_6" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_7" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_7" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_8" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_8" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_9" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_9" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_10" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_10" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_11" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_11" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
-	<widget name="cp/forge/maps/item_12" type="text" left="51" width="254" height="24" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="2">
+	<widget name="cp/forge/maps/item_12" left="0" width="224" height="24" bitmap="list_item_bkd">
+		<child widget="cp/forge/maps/row_name"/>
 		<on event="a" run="port forge map pick" back="true"/>
 	</widget>
 	<widget name="cp/forge/maps/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
@@ -118,25 +152,25 @@
 		<on event="left_trigger" run="port forge variant page up"/>
 		<on event="right_trigger" run="port forge variant page down"/>
 		<data input="port forge maps"/>
-		<child widget="cp/forge/maps/item_0" y="80"/>
-		<child widget="cp/forge/maps/item_1" y="104"/>
-		<child widget="cp/forge/maps/item_2" y="128"/>
-		<child widget="cp/forge/maps/item_3" y="152"/>
-		<child widget="cp/forge/maps/item_4" y="176"/>
-		<child widget="cp/forge/maps/item_5" y="200"/>
-		<child widget="cp/forge/maps/item_6" y="224"/>
-		<child widget="cp/forge/maps/item_7" y="248"/>
-		<child widget="cp/forge/maps/item_8" y="272"/>
-		<child widget="cp/forge/maps/item_9" y="296"/>
-		<child widget="cp/forge/maps/item_10" y="320"/>
-		<child widget="cp/forge/maps/item_11" y="344"/>
-		<child widget="cp/forge/maps/item_12" y="368"/>
+		<child widget="cp/forge/maps/item_0" x="51" y="78"/>
+		<child widget="cp/forge/maps/item_1" x="51" y="102"/>
+		<child widget="cp/forge/maps/item_2" x="51" y="126"/>
+		<child widget="cp/forge/maps/item_3" x="51" y="150"/>
+		<child widget="cp/forge/maps/item_4" x="51" y="174"/>
+		<child widget="cp/forge/maps/item_5" x="51" y="198"/>
+		<child widget="cp/forge/maps/item_6" x="51" y="222"/>
+		<child widget="cp/forge/maps/item_7" x="51" y="246"/>
+		<child widget="cp/forge/maps/item_8" x="51" y="270"/>
+		<child widget="cp/forge/maps/item_9" x="51" y="294"/>
+		<child widget="cp/forge/maps/item_10" x="51" y="318"/>
+		<child widget="cp/forge/maps/item_11" x="51" y="342"/>
+		<child widget="cp/forge/maps/item_12" x="51" y="366"/>
 	</widget>
-	<widget name="cp/forge/maps/maps_picture" left="315" top="92" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix"/>
-	<widget name="cp/forge/maps/maps_text" type="text" left="315" top="216" width="290" height="170" font="ui\small_ui" color="#FF2896FF" string_list="ui\shell\main_menu\multiplayer_type_select\mp_map_select\map_data"/>
-	<widget name="cp/forge/maps/variant_name" type="text" left="315" top="216" width="290" height="22" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/forge/maps/variant_text" type="text" left="315" top="240" width="290" height="140" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/forge/maps/description" left="300" top="78" width="320" height="322" bitmap="list_field">
+	<widget name="cp/forge/maps/maps_picture" left="290" top="92" width="140" height="114" bitmap="ui\shell\bitmaps\mp_map_grafix"/>
+	<widget name="cp/forge/maps/maps_text" type="text" left="290" top="216" width="280" height="170" font="ui\small_ui" color="#FF2896FF" string_list="ui\shell\main_menu\multiplayer_type_select\mp_map_select\map_data"/>
+	<widget name="cp/forge/maps/variant_name" type="text" left="290" top="216" width="280" height="22" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/forge/maps/variant_text" type="text" left="290" top="240" width="280" height="140" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/forge/maps/description" left="275" top="78" width="320" height="322" bitmap="list_field">
 		<child widget="cp/forge/maps/maps_picture"/>
 		<child widget="cp/forge/maps/maps_text"/>
 		<child widget="cp/forge/maps/variant_name"/>
@@ -144,58 +178,81 @@
 	</widget>
 	<widget name="cp/forge/maps/screen" flags="pass_unhandled_to_focused_child" bitmap="gradient">
 		<on event="b back" run="port forge maps back" back="true"/>
-		<child widget="cp/forge/maps/title"/>
+		<child widget="cp/forge/maps/header"/>
 		<child widget="cp/forge/maps/description"/>
 		<child widget="cp/forge/maps/list"/>
-		<child widget="ui\shell\main_menu\button_key"/>
+		<child widget="cp/key/b_butn"/>
+		<child widget="cp/key/back"/>
+		<child widget="cp/key/a_butn"/>
+		<child widget="cp/key/select"/>
 	</widget>
 
-	<!-- EXTRA OBJECTS: the scene packs Forge brings (port forge packs: A turns one on or off) -->
+	<!-- EXTRA OBJECTS: the scene packs Forge brings (port forge packs: A turns one on or off), on the
+	     settings rows of CUSTOMIZATION and the game type editor (the pack at the left, ON or OFF at the right:
+	     menu_functions.c's text_show splits "PACK: ON"), the chosen one's words under them -->
 	<widget name="cp/forge/packs/header" left="35" top="11" width="512" height="64" bitmap="cp/forge/packs_header_art"/>
-	<widget name="cp/forge/packs/item_0" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="cp/forge/packs/label" type="text" left="0" top="0" width="270" height="17" font="ui\small_ui" color="#FF2896FF" text_x="44" text_y="1"/>
+	<widget name="cp/forge/packs/value" type="text" left="291" top="0" width="220" height="17" align="center" font="ui\small_ui" color="#FF2896FF" text_y="1" text_flags="no_focus_test"/>
+	<widget name="cp/forge/packs/item_0" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a" run="port forge pack toggle"/>
+		<child widget="cp/forge/packs/label"/>
+		<child widget="cp/forge/packs/value"/>
 	</widget>
-	<widget name="cp/forge/packs/item_1" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="cp/forge/packs/item_1" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a" run="port forge pack toggle"/>
+		<child widget="cp/forge/packs/label"/>
+		<child widget="cp/forge/packs/value"/>
 	</widget>
-	<widget name="cp/forge/packs/item_2" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="cp/forge/packs/item_2" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a" run="port forge pack toggle"/>
+		<child widget="cp/forge/packs/label"/>
+		<child widget="cp/forge/packs/value"/>
 	</widget>
-	<widget name="cp/forge/packs/item_3" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="cp/forge/packs/item_3" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a" run="port forge pack toggle"/>
+		<child widget="cp/forge/packs/label"/>
+		<child widget="cp/forge/packs/value"/>
 	</widget>
-	<widget name="cp/forge/packs/item_4" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="cp/forge/packs/item_4" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a" run="port forge pack toggle"/>
+		<child widget="cp/forge/packs/label"/>
+		<child widget="cp/forge/packs/value"/>
 	</widget>
-	<widget name="cp/forge/packs/item_5" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="cp/forge/packs/item_5" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a" run="port forge pack toggle"/>
+		<child widget="cp/forge/packs/label"/>
+		<child widget="cp/forge/packs/value"/>
 	</widget>
-	<widget name="cp/forge/packs/item_6" type="text" left="51" width="254" height="32" bitmap="list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="cp/forge/packs/item_6" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a" run="port forge pack toggle"/>
+		<child widget="cp/forge/packs/label"/>
+		<child widget="cp/forge/packs/value"/>
 	</widget>
 	<widget name="cp/forge/packs/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port forge packs"/>
-		<child widget="cp/forge/packs/item_0" y="92"/>
-		<child widget="cp/forge/packs/item_1" y="125"/>
-		<child widget="cp/forge/packs/item_2" y="158"/>
-		<child widget="cp/forge/packs/item_3" y="191"/>
-		<child widget="cp/forge/packs/item_4" y="224"/>
-		<child widget="cp/forge/packs/item_5" y="257"/>
-		<child widget="cp/forge/packs/item_6" y="290"/>
+		<child widget="cp/forge/packs/item_0" x="20" y="100"/>
+		<child widget="cp/forge/packs/item_1" x="20" y="119"/>
+		<child widget="cp/forge/packs/item_2" x="20" y="138"/>
+		<child widget="cp/forge/packs/item_3" x="20" y="157"/>
+		<child widget="cp/forge/packs/item_4" x="20" y="176"/>
+		<child widget="cp/forge/packs/item_5" x="20" y="195"/>
+		<child widget="cp/forge/packs/item_6" x="20" y="214"/>
 	</widget>
-	<widget name="cp/forge/packs/info_name" type="text" left="315" top="92" width="290" height="22" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/forge/packs/info_text" type="text" left="315" top="118" width="290" height="120" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/forge/packs/info_state" type="text" left="315" top="244" width="290" height="80" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/forge/packs/description" left="300" top="78" width="320" height="322" bitmap="list_field">
-		<child widget="cp/forge/packs/info_name"/>
-		<child widget="cp/forge/packs/info_text"/>
-		<child widget="cp/forge/packs/info_state"/>
-	</widget>
+	<widget name="cp/forge/packs/blueline" left="24" top="244" width="592" height="2" bitmap="ui\shell\bitmaps\blue"/>
+	<widget name="cp/forge/packs/info_name" type="text" left="64" top="252" width="512" height="22" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="cp/forge/packs/info_text" type="text" left="64" top="278" width="512" height="70" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/forge/packs/info_state" type="text" left="64" top="352" width="512" height="54" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
 	<widget name="cp/forge/packs/screen" flags="pass_unhandled_to_focused_child" bitmap="gradient">
 		<on event="b back" back="true"/>
 		<child widget="cp/forge/packs/header"/>
-		<child widget="cp/forge/packs/description"/>
+		<child widget="cp/forge/packs/blueline"/>
+		<child widget="cp/forge/packs/info_name"/>
+		<child widget="cp/forge/packs/info_text"/>
+		<child widget="cp/forge/packs/info_state"/>
 		<child widget="cp/forge/packs/list"/>
-		<child widget="ui\shell\main_menu\button_key"/>
+		<child widget="cp/key/b_butn"/>
+		<child widget="cp/key/back"/>
+		<child widget="cp/key/a_butn"/>
+		<child widget="cp/key/select"/>
 	</widget>
 </menus>
