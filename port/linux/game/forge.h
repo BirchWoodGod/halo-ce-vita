@@ -142,6 +142,9 @@ struct forge_properties
 	/* (not a character's) its physics: _forge_physics_* */
 	boolean has_physics;
 	short physics;
+	/* where the object or marker is, metres (x, y, z) */
+	boolean has_position;
+	real position[3];
 	/* a player spawn point's (forge_spawns.inc): its kind
 	(_forge_spawn_*) and its game type, named */
 	boolean spawn;
@@ -377,6 +380,18 @@ void forge_level_name(
 	short size);
 void forge_clear_ai_request(
 	boolean all);
+/* (the settings panel's Forge and File Share page, vita_settings.c, of
+another ABI: plain types only; forge_precision.inc) the magnets on (1) or
+off, set; the nudge's step in centimetres, stepped (1 or -1) */
+int forge_panel_magnets(
+	void);
+void forge_panel_magnets_set(
+	int on);
+int forge_panel_nudge_centimetres(
+	void);
+void forge_panel_nudge_step(
+	int step);
+
 /* (the settings panel's Forge and File Share page, vita_settings.c, of
 another ABI: plain types only) the layout's characters alive and dead, and
 whether a Forge game is played (its rows shown); the clearing asked */

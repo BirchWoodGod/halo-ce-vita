@@ -2716,6 +2716,20 @@
 "PHASED" = "FANTASMA"
 "The host's game has no physics settings" = "La partida del anfitrión no tiene ajustes de física"
 
+# ---------- Forge's precision: nudge, magnets, position (forge_precision.inc, menu_functions.c, vita_settings.c; 1.1.2)
+"Nudge: %d cm. L + D-pad up: rotate" = "Ajuste fino: %d cm. L + cruceta arriba: girar"
+"L: nudge" = "L: ajuste fino"
+"L: rotate" = "L: girar"
+"Nudge: %d cm" = "Ajuste fino: %d cm"
+"X %.2f  Y %.2f  Z %.2f m" = "X %.2f  Y %.2f  Z %.2f m"
+"Nudge: L + D-pad up, then L + sticks." = "Ajuste fino: L + cruceta arriba, luego L + palancas."
+"Nudge: LT + right stick click, then LT + sticks." = "Ajuste fino: LT + clic palanca der., luego LT + palancas."
+"Nudge: L2 + R3, then L2 + sticks." = "Ajuste fino: L2 + R3, luego L2 + palancas."
+"A block held near another snaps flush to its edges" = "Un bloque cerca de otro se ajusta a sus bordes"
+"Each nudge's move: hold L, click the right stick, flick" = "Cada ajuste fino: mantén L, pulsa la palanca derecha, mueve"
+"Magnets" = "Imanes"
+"Nudge step" = "Paso de ajuste"
+
 # ---------- Menu style Halo CE's additions (menus/classic: the Xbox screens with the port's rows)
 "No network: wait for it, or choose\nNETWORK: LOCAL." = "Sin red: espérala, o elige\nRED: LOCAL."
 "GAMETYPES PLUS" = "TIPOS DE JUEGO+"

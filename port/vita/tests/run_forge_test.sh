@@ -180,6 +180,14 @@
 #               screenshot) and a Warthog FIXED let go in the air (it stays there; a NORMAL one
 #               falls); the properties window's PHYSICS row (screenshot); saved as version 7
 #               (forge_files_test --dump: fixed and phased as set)
+#   precision   nudge, magnets, the position readout (forge_precision.inc, 1.1.2): in a Forge
+#               game of Blood Gulch, snapping off, a large platform; a second held a tenth
+#               of a world unit off its side: the magnets draw it flush (4 world units
+#               apart, centre to centre); taken again, nudged up twice (5 cm each), the step
+#               made 10 cm, nudged right once: let go 2 x 5 cm higher and 10 cm to the
+#               camera's right; the properties window with its PHYSICS row and the
+#               position in metres (screenshot; precision-es: the same in Spanish); the
+#               magnets turned off: a third held off the side stays where it is held
 #   spawnplay   the spawn points played (players.c player_spawn, forge_spawns.inc
 #               forge_spawn_location): spawns' variant (made by the console) played offline
 #               with 5 bots (network test local:, HALO_NETWORK_TEST_MAP_VARIANT, a kill every
@@ -313,7 +321,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives physics allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives physics precision allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -1038,6 +1046,24 @@ physics_runs() {
 	"$out/forge_files_test" --dump "$store/forge/bloodgulch/physics_test.hmv" > "$out/physics/dump.txt" 2>&1
 }
 
+precision_commands() { # the properties' shot's name
+	local c="L240:forge snap off;L250:forge camera 75 -152 2 0 0;L262:forge spawn platform_large;L263:forge distance 5"
+	c="$c;L272:forge drop;L280:forge camera 79.1 -152 2 0 0;L292:forge spawn platform_large;L293:forge distance 5"
+	c="$c;L302:forge drop;L305:forge objects;L310:forge grab #2;L315:forge nudge up 2;L316:forge nudgestep"
+	c="$c;L317:forge nudge right;L320:forge press x;L340:@shot $1;L345:forge closemenus;L350:forge drop"
+	c="$c;L355:forge objects;L360:forge magnets off;L365:forge camera 75 -147.9 2 0 0;L377:forge spawn platform_large"
+	c="$c;L378:forge distance 5;L387:forge drop;L390:forge objects"
+	echo "$c"
+}
+
+precision_runs() {
+	run precision 25 "" "$(precision_commands 00-properties-position)" "" HALO_MENU_STYLE=classic \
+		HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	run precision-es 25 "" "$(precision_commands 00-properties-position-es)" "" HALO_MENU_STYLE=classic \
+		HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1 \
+		HALO_LANGUAGE=es "HALO_TEST_LANG_DIR=$root/port/vita/app0/lang"
+}
+
 spawnplay_runs() {
 	local store="$out/spawnplay-store"
 	rm -rf "$store"
@@ -1366,6 +1392,8 @@ for c in $cases; do
 		teleport_runs & ;;
 	physics)
 		physics_runs & ;;
+	precision)
+		precision_runs & ;;
 	objectives)
 		objectives_runs & ;;
 	mpvariant)
@@ -1711,6 +1739,37 @@ for c in $cases; do
 			fail "objectives-mapctf: Forge's flags in a game with no map variant"
 		[ "$(sed -n '/test command at tick 450: forge netflags$/,/test command at tick/p' "$out/objectives-mapctf/run.log" | grep -ac "forge: the game type's flag at")" = 2 ] &&
 			echo "  ok: objectives-mapctf: the map's two flags" || fail "objectives-mapctf: the map's flags"
+		continue
+	fi
+	if [ "$c" = precision ]; then
+		checked precision || continue
+		log="$out/precision/run.log"
+		at() { # TICK ID: the layout's object's x y z at that "forge objects"
+			sed -n "/test command at tick $1: forge objects\$/,/test command at tick/p" "$log" | grep -a "(id $2)" |
+				sed 's/.*) [a-z]* at \([-0-9.]*\) \([-0-9.]*\) \([-0-9.]*\),.*/\1 \2 \3/'
+		}
+		first=$(at 305 1); second=$(at 305 2); nudged=$(at 355 2); third=$(at 390 3)
+		echo "  (the first platform at $first, the second at $second, nudged to $nudged; the third, no magnets, at $third)"
+		expect precision "the magnets drew it" "forge: magnets: drawn -0\\.1[0-9]+ -?0\\.00[0-9] -?0\\.00[0-9] to the blocks near it, at 8(3\\.99|4\\.00)"
+		awk -v a="$first" -v b="$second" 'BEGIN { split(a, p, " "); split(b, q, " "); d = q[1] - p[1];
+			exit !(d > 3.995 && d < 4.005 && q[2] - p[2] < 0.005 && p[2] - q[2] < 0.005) }' &&
+			echo "  ok: precision: the second platform flush against the first (4 world units apart)" ||
+			fail "precision: the magnets did not put the second platform flush"
+		expect precision "nudged up twice by 5 cm" "forge: nudged up by 5 cm \\(0.0164 world units\\)"
+		expect precision "the step made 10 cm" "forge: nudge step 10 cm"
+		expect precision "nudged right by 10 cm" "forge: nudged right by 10 cm \\(0.0328 world units\\)"
+		awk -v a="$second" -v b="$nudged" 'BEGIN { split(a, p, " "); split(b, q, " ");
+			dz = q[3] - p[3]; dy = q[2] - p[2]; dx = q[1] - p[1];
+			exit !(dz > 0.025 && dz < 0.04 && dy < -0.025 && dy > -0.04 && dx < 0.006 && dx > -0.006) }' &&
+			echo "  ok: precision: let go 10 cm higher and 10 cm to the right, as nudged" ||
+			fail "precision: the nudge did not move it by its steps"
+		expect precision "the position readout" "menus: forge properties: at [-0-9.]+ [-0-9.]+ [-0-9.]+ m"
+		expect precision "magnets off" "forge: magnets off"
+		awk -v a="$first" -v c="$third" 'BEGIN { split(a, p, " "); split(c, r, " "); d = r[2] - p[2];
+			exit !(d > 4.05 && d < 4.15) }' &&
+			echo "  ok: precision: with the magnets off, the third stays where it is held" ||
+			fail "precision: the third platform moved with the magnets off"
+		checked precision-es && expect precision-es "the position readout in Spanish too" "menus: forge properties: at "
 		continue
 	fi
 	if [ "$c" = physics ]; then

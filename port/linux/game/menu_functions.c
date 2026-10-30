@@ -3252,6 +3252,8 @@ an Xbox pad's or a PlayStation's, by SDL's names for its buttons) */
 static void h3_forge_controls_update(struct widget_instance *widget)
 {
 	char const *controls;
+	/* (1.1.2: the nudge, a pad's: forge_precision.inc) */
+	char const *nudge = "";
 	char text[640];
 
 #ifdef HALO_VITA
@@ -3259,6 +3261,7 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 		"Grab, drop: R. Copy: Circle. Delete: Triangle.\nObjects: Square. Holding one: its properties.\n"
 		"Rotate: hold L + right stick; with R: roll.\nL + left stick: distance. L + D-pad right: snap.\n"
 		"Upright: D-pad left. Speed: D-pad right.\nSpartan: Select + D-pad up.");
+	nudge = T("Nudge: L + D-pad up, then L + sticks.");
 #elif defined(H3_BUTTON_ICONS)
 	switch (halo_button_icons_shown())
 	{
@@ -3267,12 +3270,14 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 			"Grab, drop: RT. Copy: B. Delete: Y.\nObjects: X. Holding one: its properties.\n"
 			"Rotate: hold LT + right stick; with RT: roll.\nLT + left stick: distance. LT + LB: snap.\n"
 			"Upright: RB. Speed: LB.\nSpartan: Back + right stick click.");
+		nudge = T("Nudge: LT + right stick click, then LT + sticks.");
 		break;
 	case _halo_button_icons_playstation:
 		controls = T("Fly: left stick. Up: Cross. Down: L3.\nFaster: hold L2. Look: right stick.\n"
 			"Grab, drop: R2. Copy: Circle. Delete: Triangle.\nObjects: Square. Holding one: its properties.\n"
 			"Rotate: hold L2 + right stick; with R2: roll.\nL2 + left stick: distance. L2 + L1: snap.\n"
 			"Upright: R1. Speed: L1.\nSpartan: Share + R3.");
+		nudge = T("Nudge: L2 + R3, then L2 + sticks.");
 		break;
 	default:
 		controls = T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
@@ -3290,8 +3295,8 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 	/* (and a character's RESPAWN, Oct 22 2026: dead, it comes back; the
 	player spawn points, the browser's SPAWNING; the teleporters, its
 	TELEPORTERS, 1.1.2) */
-	snprintf(text, sizeof(text), "%s\n%s\n%s", controls, T("AI respawn: a character's properties, RESPAWN."),
-		T("Spawns, teleporters: Objects. Held: team, channel."));
+	snprintf(text, sizeof(text), "%s\n%s\n%s%s%s", controls, T("AI respawn: a character's properties, RESPAWN."),
+		T("Spawns, teleporters: Objects. Held: team, channel."), nudge[0] ? "\n" : "", nudge);
 	text_show(widget, text);
 }
 
@@ -10808,6 +10813,13 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		return;
 	}
 	text_show(named(screen, "name"), properties.name);
+	/* (1.1.2: where it is, metres) */
+	if (properties.has_position)
+		snprintf(text, sizeof(text), T("X %.2f  Y %.2f  Z %.2f m"), properties.position[0], properties.position[1],
+			properties.position[2]);
+	else
+		text[0] = 0;
+	text_show(named(screen, "position"), text);
 	for (row = 0, child = list->child; child; child = child->next, row++)
 	{
 		/* (a player spawn point's four rows: its team, game type, kind and
@@ -10971,6 +10983,9 @@ static void h3_forge_properties_update(struct widget_instance *list)
 	{
 		snprintf(said, sizeof(said), "%s", text);
 		platform_log("menus: forge properties: %s", said);
+		if (properties.has_position)
+			platform_log("menus: forge properties: at %.2f %.2f %.2f m", properties.position[0], properties.position[1],
+				properties.position[2]);
 	}
 }
 

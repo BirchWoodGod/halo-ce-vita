@@ -220,6 +220,28 @@ void forge_blocks_snap(
 	}
 }
 
+boolean forge_blocks_extents(
+	long object_index,
+	real_vector3d const *forward,
+	real_vector3d const *up,
+	real_vector3d *half)
+{
+	struct object_datum *object = object_try_and_get(object_index);
+	struct scene_pack_block_info const *info;
+	real_vector3d left;
+	short axis;
+
+	if (!object || !(info = scene_pack_blocks_info(forge_blocks_of_tag(object->definition_index))))
+		return FALSE;
+	cross_product3d(up, forward, &left);
+	for (axis = 0; axis < 3; axis++)
+	{
+		half->n[axis] = 0.5f * (info->size[0] * (real)fabs(forward->n[axis]) + info->size[1] * (real)fabs(left.n[axis]) +
+			info->size[2] * (real)fabs(up->n[axis]));
+	}
+	return TRUE;
+}
+
 /* (tests) the console's "forge blocks ...": "ray" - a projectile's line
 (collision_test_line, the projectiles' flags) 50 world units along the
 first local player's view (the monitor's or the Spartan's), and what it

@@ -346,6 +346,29 @@ exact angles' step with no snapping (degrees) */
 #define FORGE_ROTATE_MOUSE_STEP 0.1f
 #define FORGE_ANGLE_STEP 15
 
+/* (forge_precision.inc) */
+#define FORGE_METRES_PER_WORLD_UNIT 3.048f
+/* a block's face drawn to another's within this (world units: 45 cm) */
+#define FORGE_MAGNET_RANGE 0.15f
+/* the blocks looked at for the magnets: within this of the held one's
+middle (world units) */
+#define FORGE_MAGNET_REACH 12.f
+
+/* the nudge's steps, centimetres */
+static short const forge_nudge_steps[] = { 5, 10, 25, 1 };
+
+enum
+{
+	_forge_nudge_ahead,
+	_forge_nudge_back,
+	_forge_nudge_left,
+	_forge_nudge_right,
+	_forge_nudge_up,
+	_forge_nudge_down,
+	NUMBER_OF_FORGE_NUDGES
+};
+
+
 /* the in-game set's screens (halo3/forge.xml) */
 #define FORGE_BROWSER_SCREEN "h3/forge/browser/screen"
 #define FORGE_MENU_SCREEN "h3/forge/pause/screen"
@@ -926,6 +949,16 @@ static struct
 	long spawn_wait_since[FORGE_SPAWN_PLAYERS];
 	/* (the console's forge spawns) the map's own spawns the last frame drew */
 	short map_markers_drawn;
+	/* (forge_precision.inc) L's mode nudges instead of turning; the nudge's
+	step (forge_nudge_steps' index), the hold's offset and the object it is
+	of, each axis's stick flicked; the magnets off; their last pull said */
+	boolean nudge_mode;
+	short nudge_step;
+	real_vector3d held_nudge;
+	long nudge_object;
+	boolean nudge_flicked[3];
+	boolean magnets_off;
+	boolean magnet_said;
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -983,6 +1016,11 @@ static short forge_marker_new_index(short kind);
 static short forge_teleporters_count(short kind, short channel);
 static short forge_teleporter_new_channel(short kind);
 static void forge_netgame_update(void);
+static void forge_nudge_update(struct forge_pad const *pad);
+static void forge_nudge_step_next(void);
+static void forge_nudge(short direction);
+static void forge_magnets_apply(long object_index, real_point3d *position, real_vector3d const *forward,
+	real_vector3d const *up);
 static short forge_physics_mode(struct forge_placed const *placed);
 static unsigned char forge_physics_flags(short mode);
 static void forge_physics_apply(struct forge_placed *placed);
@@ -2292,6 +2330,17 @@ static void forge_held_object_place(
 		real_vector3d up = forge_globals.held_up;
 
 		forge_snapped(&position, &facing, &up);
+		/* (forge_precision.inc: a block drawn flush to its neighbours, then
+		the hold's nudge - a new hold's none) */
+		forge_magnets_apply(forge_globals.held_object_index, &position, &facing, &up);
+		if (forge_globals.nudge_object != forge_globals.held_object_index)
+		{
+			forge_globals.nudge_object = forge_globals.held_object_index;
+			forge_globals.held_nudge = *global_zero_vector3d;
+		}
+		position.x += forge_globals.held_nudge.i;
+		position.y += forge_globals.held_nudge.j;
+		position.z += forge_globals.held_nudge.k;
 		object_set_position(forge_globals.held_object_index, &position, &facing, &up);
 	}
 	/* (it hangs where it is held: what the physics gave it this tick
@@ -3152,7 +3201,12 @@ static void forge_hud_update(
 
 		forge_rotate_snap_text(snap, sizeof(snap));
 		snprintf(snapping, sizeof(snapping), T("Rotation snap: %s"), snap);
-		if (forge_globals.rotating)
+		if (forge_globals.rotating && forge_globals.nudge_mode)
+		{
+			snprintf(forge_globals.hud_rotate, sizeof(forge_globals.hud_rotate), T("Nudge: %d cm. L + D-pad up: rotate"),
+				forge_nudge_steps[PIN(forge_globals.nudge_step, 0, 3)]);
+		}
+		else if (forge_globals.rotating)
 		{
 			float angles[3];
 
@@ -5156,10 +5210,32 @@ boolean forge_properties_get(
 	if (spawn)
 	{
 		forge_spawn_properties_get(spawn, properties);
+		/* (where it stands, metres: forge_precision.inc) */
+		{
+			real_point3d const *at = spawn->id == forge_globals.held_marker_id ? &forge_globals.held_marker_position :
+				&spawn->home.position;
+
+			properties->has_position = TRUE;
+			properties->position[0] = at->x * FORGE_METRES_PER_WORLD_UNIT;
+			properties->position[1] = at->y * FORGE_METRES_PER_WORLD_UNIT;
+			properties->position[2] = at->z * FORGE_METRES_PER_WORLD_UNIT;
+		}
 		return TRUE;
 	}
 	if (!placed)
 		return FALSE;
+	{
+		struct object_datum *object = object_try_and_get(placed->object_index);
+		real_point3d const *at = object ? &object->object.position : placed->has_home ? &placed->home.position : NULL;
+
+		if (at)
+		{
+			properties->has_position = TRUE;
+			properties->position[0] = at->x * FORGE_METRES_PER_WORLD_UNIT;
+			properties->position[1] = at->y * FORGE_METRES_PER_WORLD_UNIT;
+			properties->position[2] = at->z * FORGE_METRES_PER_WORLD_UNIT;
+		}
+	}
 	forge_object_name(placed->object_index, properties->name, sizeof(properties->name));
 	properties->team = placed->team;
 	/* (a character's: 0, never, unless it respawns) */
@@ -6025,9 +6101,21 @@ void forge_update(
 		}
 		boolean rotating = pad.down[_forge_button_alternate] && object_try_and_get(forge_globals.held_object_index);
 
-		/* (D-pad right: in rotate mode its snapping, else the movement
-		speed) */
-		if (pressed[_forge_button_speed] && rotating)
+		/* (L + D-pad up, the right stick's click: rotate mode and nudge mode
+		flipped - forge_precision.inc) */
+		if (pressed[_gamepad_binary_button_right_thumb] && rotating && !pad.toggle)
+		{
+			forge_globals.nudge_mode = !forge_globals.nudge_mode;
+			forge_notice("%s", forge_globals.nudge_mode ? T("L: nudge") : T("L: rotate"));
+			platform_log("forge: L's mode %s", forge_globals.nudge_mode ? "nudge" : "rotate");
+		}
+		/* (D-pad right: in rotate mode its snapping, in nudge mode its step,
+		else the movement speed) */
+		if (pressed[_forge_button_speed] && rotating && forge_globals.nudge_mode)
+		{
+			forge_nudge_step_next();
+		}
+		else if (pressed[_forge_button_speed] && rotating)
 		{
 			char snap[16];
 
@@ -6097,7 +6185,11 @@ void forge_update(
 			}
 		}
 		rotating = rotating && object_try_and_get(forge_globals.held_object_index);
-		if (rotating)
+		if (rotating && forge_globals.nudge_mode)
+		{
+			forge_nudge_update(&pad);
+		}
+		else if (rotating)
 		{
 			forge_rotate_update(&pad, seconds);
 		}
@@ -6110,6 +6202,8 @@ void forge_update(
 				forge_globals.rotate_flicked[axis] = FALSE;
 				forge_globals.rotate_mouse[axis] = 0.f;
 			}
+			for (axis = 0; axis < 3; axis++)
+				forge_globals.nudge_flicked[axis] = FALSE;
 		}
 		forge_globals.rotating = rotating;
 		if (object_try_and_get(forge_globals.held_object_index))
@@ -6995,6 +7089,44 @@ boolean forge_command(
 		platform_log("forge: turned %s by %s degrees", forge_tag_leaf(object_get(object_index)->definition_index), rest);
 		return TRUE;
 	}
+	/* (forge_precision.inc) "nudge ahead|back|left|right|up|down [count]",
+	"nudgestep", "nudgemode", "magnets [on|off]" */
+	if (!strcmp(word, "nudge"))
+	{
+		static char const *const names[NUMBER_OF_FORGE_NUDGES] = { "ahead", "back", "left", "right", "up", "down" };
+		short direction;
+		int count = 1;
+		char name[16] = "";
+
+		sscanf(rest, "%15s %d", name, &count);
+		for (direction = 0; direction < NUMBER_OF_FORGE_NUDGES; direction++)
+		{
+			if (!strcmp(name, names[direction]))
+				break;
+		}
+		if (direction == NUMBER_OF_FORGE_NUDGES || !object_try_and_get(forge_globals.held_object_index))
+			return FALSE;
+		for (; count > 0 && count <= 100; count--)
+			forge_nudge(direction);
+		return TRUE;
+	}
+	if (!strcmp(word, "nudgestep"))
+	{
+		forge_nudge_step_next();
+		return TRUE;
+	}
+	if (!strcmp(word, "nudgemode"))
+	{
+		forge_globals.nudge_mode = !forge_globals.nudge_mode;
+		platform_log("forge: L's mode %s", forge_globals.nudge_mode ? "nudge" : "rotate");
+		return TRUE;
+	}
+	if (!strcmp(word, "magnets"))
+	{
+		forge_globals.magnets_off = !strcmp(rest, "off") ? TRUE : !strcmp(rest, "on") ? FALSE : !forge_globals.magnets_off;
+		platform_log("forge: magnets %s", forge_globals.magnets_off ? "off" : "on");
+		return TRUE;
+	}
 	if (!strcmp(word, "distance"))
 	{
 		forge_globals.held_distance = PIN((real)atof(rest), FORGE_MINIMUM_HOLD_DISTANCE, FORGE_MAXIMUM_HOLD_DISTANCE);
@@ -7110,3 +7242,4 @@ boolean forge_command(
 #include "forge_spawns.inc"
 #include "forge_netgame.inc"
 #include "forge_physics.inc"
+#include "forge_precision.inc"

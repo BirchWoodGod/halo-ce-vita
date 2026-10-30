@@ -223,6 +223,11 @@ int forge_panel_ai_counts(int *alive, int *dead)
 	return test_forge_playing;
 }
 void forge_panel_clear_ai(int all) { test_forge_cleared = all; }
+static int test_forge_magnets = 1, test_forge_nudge = 5;
+int forge_panel_magnets(void) { return test_forge_magnets; }
+void forge_panel_magnets_set(int on) { test_forge_magnets = on; }
+int forge_panel_nudge_centimetres(void) { return test_forge_nudge; }
+void forge_panel_nudge_step(int step) { test_forge_nudge = step > 0 ? (test_forge_nudge == 25 ? 1 : test_forge_nudge == 1 ? 5 : test_forge_nudge * 2) : 5; }
 static struct forge_store_entry test_forge_entries[4];
 static int test_forge_count, test_forge_deleted;
 int forge_store_list(const char *map_name, struct forge_store_entry *entries, int capacity)
