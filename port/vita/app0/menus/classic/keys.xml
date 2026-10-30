@@ -123,6 +123,9 @@
 		<child widget="ce/keys/list"/>
 		<child widget="ce/keys/keys_status"/>
 		<child widget="ce/keys/keys_help"/>
-		<child widget="ui\shell\main_menu\button_key"/>
+		<child widget="cp/key/b_butn"/>
+		<child widget="cp/key/back"/>
+		<child widget="cp/key/a_butn"/>
+		<child widget="cp/key/select"/>
 	</widget>
 </menus>

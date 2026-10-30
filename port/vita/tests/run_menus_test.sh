@@ -3421,8 +3421,8 @@ PY
 		grep -aE "ui: screen|menus: h3 gametypes" "$log" | head -8
 		[ "$(cat "$out/ceplusmp_gametypes/exit")" = 0 ] || fail ceplusmp "gametypes: exit $(cat "$out/ceplusmp_gametypes/exit")"
 		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail ceplusmp "gametypes: an assertion, exception or halt"
-		grep -aq "ui: screen pc.h3.gametypes.screen" "$log" || fail ceplusmp "GAMETYPES PLUS did not open GAME TYPES"
-		sed -n '/ui: screen pc.h3.gametypes.screen/,$p' "$log" | grep -aq "ui: screen pc.mp.screen" ||
+		grep -aq "ui: screen pc.cp.gametypes.screen" "$log" || fail ceplusmp "GAMETYPES PLUS did not open GAME TYPES (Classic+'s: classic/standins.xml)"
+		sed -n '/ui: screen pc.cp.gametypes.screen/,$p' "$log" | grep -aq "ui: screen pc.mp.screen" ||
 			fail ceplusmp "B did not go back to the Multiplayer screen"
 		# (Create Game Internet, the fourth row: Server Setup; down five to BOTS - OFF, the tests' -,
 		# right: 1; down, START GAME)
@@ -3504,8 +3504,8 @@ PY
 			fail cepluspregame "MAP VARIANT did not step through Blood Gulch's variants"
 		grep -aq "forge net: hosting a game of a map variant of levels.test.bloodgulch.bloodgulch" "$log" ||
 			fail cepluspregame "the map variant was not hosted (the joiners asked to play it)"
-		sed -n '/ui: screen pc.ce.lobby.screen/,$p' "$log" | grep -aq "ui: screen pc.h3.players.screen" ||
-			fail cepluspregame "PLAYERS did not open the players' screen"
+		sed -n '/ui: screen pc.ce.lobby.screen/,$p' "$log" | grep -aq "ui: screen pc.cp.players.screen" ||
+			fail cepluspregame "PLAYERS did not open the players' screen (Classic+'s: classic/players.xml)"
 		grep -a "ui: screen" "$log" | tail -1 | grep -q "connected_pregame_screen" ||
 			fail cepluspregame "B, B did not go back to the pregame" ;;
 	cepluspause)
@@ -3525,9 +3525,9 @@ PY
 		grep -aqE "menus: Menu style Halo CE: the Xbox screens' [0-9]+ widgets with the port's rows" <(sed -n '/new map: loading/,$p' "$log") ||
 			fail cepluspause "the level's Xbox pause was not given the port's rows"
 		grep -aq "ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game" "$log" || fail cepluspause "Start did not open the Xbox's pause"
-		sed -n '/ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game/,$p' "$log" | grep -aq "ui: screen pc.h3.players.screen" ||
-			fail cepluspause "PLAYERS did not open the players' screen"
-		sed -n '/ui: screen pc.h3.players.screen/,$p' "$log" | grep -aq "ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game" ||
+		sed -n '/ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game/,$p' "$log" | grep -aq "ui: screen pc.cp.players.screen" ||
+			fail cepluspause "PLAYERS did not open the players' screen (Classic+'s: classic/players.xml, over the level)"
+		sed -n '/ui: screen pc.cp.players.screen/,$p' "$log" | grep -aq "ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game" ||
 			fail cepluspause "B did not go back to the pause"
 		grep -aq "menus: h3 mp pause: the Party page asked for" "$log" || fail cepluspause "PARTY did not ask for the Party page"
 		grep -aq "requesting a player removal" "$out/cepluspause/data/debug.txt" 2>/dev/null &&

@@ -850,13 +850,290 @@ static boolean classic_text_wraps(struct widget_instance *widget)
 	return FALSE;
 }
 
+static void h3_capitals(char *text);
+long menu_tags_stand_in(long tag_index);
+
+/* a list's rows (its children named row_... or item_...), at most maximum: the screens of
+Menu style Classic+ show fewer than the Halo 3 set's */
+static int list_rows(struct widget_instance *list, int maximum)
+{
+	struct widget_instance *child;
+	int rows = 0;
+
+	for (child = list ? list->child : NULL; child; child = child->next)
+	{
+		if (child->name && (!strncmp(child->name, "row_", 4) || !strncmp(child->name, "item_", 5)))
+			rows++;
+	}
+	return rows > 0 && rows < maximum ? rows : maximum;
+}
+
+/* (Menu style Classic+: menus/classic, the port's screens in the original menus' look) whether a
+text box is one of theirs (pc\ce\..., pc\cp\..., pc\classic\...) */
+static boolean classic_widget(struct widget_instance *widget)
+{
+	static char const *const prefixes[] = { "pc\\ce\\", "pc\\cp\\", "pc\\classic\\" };
+	char const *name = widget && widget->definition_tag_index != NONE ? tag_get_name(widget->definition_tag_index) : NULL;
+	int index;
+
+	for (index = 0; name && index < (int)NUMBEROF(prefixes); index++)
+	{
+		if (!strncmp(name, prefixes[index], strlen(prefixes[index])))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* a text box's text, UTF-16 (length with its end) */
+static void text_set(struct widget_instance *widget, unsigned short const *characters, long length)
+{
+	widget->parameters.text_box.text = ui_widget_realloc(widget->parameters.text_box.text,
+		(word)(length * sizeof(wchar_t)), __FILE__, __LINE__);
+	if (widget->parameters.text_box.text)
+		memcpy(widget->parameters.text_box.text, characters, length * sizeof(wchar_t));
+}
+
+/* (classic_text_fit) a row's name's room when its tag at the right of the row takes some of it:
+the width it may have, 0 none */
+static short classic_room_limit;
+
+/* whether the text (UTF-16) fits the box: its widest line and its lines within it */
+static boolean text_fits(struct widget_instance *widget, unsigned short const *characters)
+{
+	short room_width, room_height, text_width, text_height;
+
+	if (!ui_widget_port_text_measure(widget, (wchar_t const *)characters, &room_width, &room_height, &text_width,
+		&text_height))
+	{
+		return TRUE;
+	}
+	if (classic_room_limit > 0 && classic_room_limit < room_width)
+		room_width = classic_room_limit;
+	return text_width <= room_width && text_height <= room_height;
+}
+
+/* (Menu style Classic+) a row's name's room: up to its tag's words at the right of the row
+(row_tag, right-aligned), with a gap; 0 when the row has no tag shown */
+static short classic_name_room(struct widget_instance *widget)
+{
+	struct widget_instance *tag = NULL, *sibling;
+	short room_width, room_height, text_width = 0, text_height, name_left, name_right, tag_left, tag_right;
+
+	if (!widget->parent || !widget->name || strcmp(widget->name, "row_name"))
+		return 0;
+	for (sibling = widget->parent->child; sibling; sibling = sibling->next)
+	{
+		if (sibling->name && (!strcmp(sibling->name, "row_tag") || !strcmp(sibling->name, "row_note")) &&
+			sibling->type == _ui_widget_type_text_box)
+			tag = sibling;
+	}
+	if (!tag || !tag->parameters.text_box.text || !tag->parameters.text_box.text[0] ||
+		(tag->parameters.text_box.text[0] == ' ' && !tag->parameters.text_box.text[1]))
+	{
+		return 0;
+	}
+	ui_widget_port_text_measure(tag, tag->parameters.text_box.text, &room_width, &room_height, &text_width, &text_height);
+	ui_widget_port_text_box_span(widget, &name_left, &name_right);
+	ui_widget_port_text_box_span(tag, &tag_left, &tag_right);
+	return (short)MAX(tag_right - text_width - 10 - name_left, 16);
+}
+
+/* (Menu style Classic+) a button key's words, as the Xbox's: "=" and the word in capitals
+(=ACCEPT); the keys' text boxes a_label, x_label, y_label, toggle */
+static boolean classic_key_words(struct widget_instance *widget, char const *text, char *words, int size)
+{
+	static char const *const keys[] = { "a_label", "b_label", "x_label", "y_label", "toggle" };
+	int index;
+
+	if (!widget->name || !text || !*text || text[0] == '=')
+		return FALSE;
+	for (index = 0; index < (int)NUMBEROF(keys); index++)
+	{
+		if (!strcmp(widget->name, keys[index]))
+		{
+			/* (the controller's buttons' names stay English in a translation - Select, Back -: the
+			Xbox's key words are the port's own, translated) */
+			if (!strcmp(text, T("Select")))
+				snprintf(words, (size_t)size, "%s", T("=SELECT"));
+			else if (!strcmp(text, T("Back")))
+				snprintf(words, (size_t)size, "%s", T("=BACK"));
+			else
+			{
+				snprintf(words, (size_t)size, "=%s", text);
+				h3_capitals(words);
+			}
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+/* (Menu style Classic+) a text shown whole, never cut nor ended in "...": in its box if it fits
+there; else in the box's smaller twin (<name>_small beside it, ui.map's small_ui: the original
+menus' smaller font) if it has one, on one line or broken into lines there; else broken into
+lines in the box itself - at the spaces, and a word wider than the box at the letter that
+fits (a text box draws a line as long as it is, cut at its edge: the line breaks are the
+game's "\r"). A text that fits nowhere is said ("menus: classic text does not fit") */
+static void classic_text_fit(struct widget_instance *widget, char const *text)
+{
+	static unsigned short const empty[1] = { 0 };
+	unsigned short characters[481], lines[481 + 64];
+	struct widget_instance *twin = NULL, *target, *sibling;
+	long length, index, kept, line_start;
+	char twin_name[96];
+
+	if (!widget || widget->type != _ui_widget_type_text_box)
+		return;
+	length = halo_menus_utf16(text ? text : "", characters, (long)NUMBEROF(characters));
+	/* (the menus' fonts draw Latin-1: a character beyond it a "?") */
+	for (index = 0; index < length - 1; index++)
+	{
+		if (characters[index] > 0xFF)
+			characters[index] = '?';
+	}
+	if (widget->name && widget->parent)
+	{
+		snprintf(twin_name, sizeof(twin_name), "%s_small", widget->name);
+		for (sibling = widget->parent->child; sibling; sibling = sibling->next)
+		{
+			if (sibling->name && !strcmp(sibling->name, twin_name) && sibling->type == _ui_widget_type_text_box)
+				twin = sibling;
+		}
+	}
+	if (twin)
+		text_set(twin, empty, 1);
+	classic_room_limit = classic_name_room(widget);
+	if (length <= 1 || text_fits(widget, characters))
+	{
+		text_set(widget, characters, length);
+		classic_room_limit = 0;
+		return;
+	}
+	text_set(widget, empty, 1);
+	target = twin ? twin : widget;
+	if (twin && text_fits(twin, characters))
+	{
+		text_set(twin, characters, length);
+		classic_room_limit = 0;
+		return;
+	}
+	/* (a line break of the text's own inside a sentence - its words broken for the Halo 3 set's
+	wider lines - a space again, so the sentence is broken for this box; a short line's break - a
+	list's, "Objects: 5" - and a blank line kept) */
+	{
+		long line_length = 0;
+
+		for (index = 0; index < length - 1; index++)
+		{
+			if (characters[index] == '\r' && characters[index + 1] == '\n')
+			{
+				boolean blank_before = index >= 2 && characters[index - 1] == '\n';
+				boolean blank_after = index + 2 < length - 1 && characters[index + 2] == '\r';
+
+				if (line_length > 30 && !blank_before && !blank_after)
+				{
+					characters[index] = ' ';
+					memmove(&characters[index + 1], &characters[index + 2], (length - index - 2) * sizeof(*characters));
+					length--;
+					continue;
+				}
+				line_length = 0;
+				index++;
+				continue;
+			}
+			line_length++;
+		}
+	}
+	/* (broken into lines: each as many words as fit, a word too wide for a line at its letter) */
+	kept = 0;
+	line_start = 0;
+	index = 0;
+	while (index < length - 1 && kept < (long)NUMBEROF(lines) - 66)
+	{
+		long word_end = index, before = kept;
+
+		/* (the next word, with the spaces before it) */
+		while (word_end < length - 1 && characters[word_end] == ' ')
+			word_end++;
+		while (word_end < length - 1 && characters[word_end] != ' ')
+			word_end++;
+		memcpy(&lines[kept], &characters[index], (word_end - index) * sizeof(*lines));
+		kept += word_end - index;
+		lines[kept] = 0;
+		if (before > line_start && !text_fits(target, &lines[line_start]))
+		{
+			/* (onto a new line, without its spaces) */
+			long from = index;
+
+			while (from < word_end && characters[from] == ' ')
+				from++;
+			kept = before;
+			lines[kept++] = '\r';
+			line_start = kept;
+			memcpy(&lines[kept], &characters[from], (word_end - from) * sizeof(*lines));
+			kept += word_end - from;
+			lines[kept] = 0;
+		}
+		/* (a word wider than a line alone: broken at the letter that fits) */
+		while (kept - line_start > 1 && !text_fits(target, &lines[line_start]))
+		{
+			long fit = kept - 1;
+
+			while (fit > line_start + 1)
+			{
+				unsigned short held = lines[fit];
+				boolean fits;
+
+				lines[fit] = 0;
+				fits = text_fits(target, &lines[line_start]);
+				lines[fit] = held;
+				if (fits)
+					break;
+				fit--;
+			}
+			memmove(&lines[fit + 1], &lines[fit], (kept - fit + 1) * sizeof(*lines));
+			lines[fit] = '\r';
+			kept++;
+			line_start = fit + 1;
+		}
+		index = word_end;
+	}
+	lines[kept] = 0;
+	text_set(target, lines, kept + 1);
+	if (!text_fits(target, lines))
+		platform_log("menus: classic text does not fit: %s \"%s\"", tag_get_name(target->definition_tag_index), text ? text : "");
+	classic_room_limit = 0;
+}
+
 static void text_show(struct widget_instance *widget, char const *text)
 {
 	unsigned short characters[481];
 	long length;
 
+	/* (Menu style Classic+: a row of the classic set's whose words are its row_name's or option_name's) */
+	if (widget && widget->type != _ui_widget_type_text_box && halo_menu_style_classic_plus() && classic_widget(widget))
+	{
+		struct widget_instance *child;
+
+		for (child = widget->child; child; child = child->next)
+		{
+			if (child->name && (!strcmp(child->name, "row_name") || !strcmp(child->name, "option_name")))
+			{
+				text_show(child, text);
+				return;
+			}
+		}
+	}
 	if (!widget || widget->type != _ui_widget_type_text_box)
 		return;
+	/* (Menu style Classic+'s screens: shown whole, in the box's smaller twin or on lines) */
+	if (halo_menu_style_classic_plus() && classic_widget(widget) && text && *text)
+	{
+		char words[128];
+
+		classic_text_fit(widget, classic_key_words(widget, text, words, (int)sizeof(words)) ? words : text);
+		return;
+	}
 	if (classic_text_wraps(widget))
 	{
 		h3_dialog_text_wrapped(widget, text ? text : "");
@@ -1443,6 +1720,14 @@ static void h3_capitals(char *text)
 	{
 		if (*text >= 'a' && *text <= 'z')
 			*text = (char)(*text - 'a' + 'A');
+		/* (UTF-8's Latin-1 small letters too, \xc3\xa0 to \xc3\xbe but the division sign: a
+		translation's "RÁPIDO", not "RáPIDO") */
+		else if ((unsigned char)text[0] == 0xC3 && (unsigned char)text[1] >= 0xA0 && (unsigned char)text[1] <= 0xBE &&
+			(unsigned char)text[1] != 0xB7)
+		{
+			text[1] = (char)((unsigned char)text[1] - 0x20);
+			text++;
+		}
 	}
 }
 
@@ -2798,17 +3083,15 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 		h3_forge_lobby_initialize();
 	/* ("MAP: BLOOD GULCH - MY FORT", Halo 3's: the map and its variant) */
 	if (h3_forge.variant_file[0] && halo_menu_style_classic_plus())
-		/* (Menu style Halo CE: its bars are narrower than Halo 3's: the variant's name; its map is in the description) */
-		snprintf(text, sizeof(text), "%s: %s", T("MAP"), h3_forge.variant_title);
+		/* (Menu style Classic+: its rows are narrower than Halo 3's: the map; the variant's name, as long
+		as it may be, in the description's caption - "<variant> on <map>") */
+		snprintf(text, sizeof(text), "%s: %s", T("MAP"), T(forge_map_name(h3_forge.map)));
 	else if (h3_forge.variant_file[0])
 		snprintf(text, sizeof(text), "%s: %s - %s", T("MAP"), T(forge_map_name(h3_forge.map)), h3_forge.variant_title);
 	else
 		snprintf(text, sizeof(text), "%s: %s", T("MAP"), T(forge_map_name(h3_forge.map)));
 	h3_capitals(text);
-	if (halo_menu_style_classic_plus())
-		row_column(screen, "map_row", text); /* (Menu style Halo CE: a long variant's name ends in "...", short of the description) */
-	else
-		text_show(named(screen, "map_row"), text);
+	text_show(named(screen, "map_row"), text);
 	/* (EXTRA OBJECTS: how many of the packs it brings; those built in the
 	background meanwhile) */
 	{
@@ -8207,7 +8490,7 @@ static void h3_gametype_bases_update(struct widget_instance *list)
 		if (child == list->focused_child)
 			focused_row = index;
 	}
-	target = browser_view_follow(&h3_gametypes.base_view, H3_GAMETYPE_BASE_ROWS, bases, (int)focused_row,
+	target = browser_view_follow(&h3_gametypes.base_view, list_rows(list, H3_GAMETYPE_BASE_ROWS), bases, (int)focused_row,
 		h3_gametypes.base_cursor, h3_gametypes.page);
 	h3_gametypes.page = 0;
 	h3_gametypes.base_cursor = (short)MAX(target, 0);
@@ -8386,7 +8669,8 @@ static void h3_gametypes_main_loop(void)
 	index--;
 	if (h3_gametypes.open_pending != _h3_gametype_open_none)
 	{
-		long list = tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\gametypes\\screen");
+		/* (Menu style Classic+: the classic set's screens standing for them, menu_tags_stand_in) */
+		long list = menu_tags_stand_in(tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\gametypes\\screen"));
 		long next = tag_loaded(UI_WIDGET_DEFINITION_TAG, h3_gametypes.open_pending == _h3_gametype_open_editor ?
 			"pc\\h3\\gtedit\\screen" : "pc\\h3\\gtdel\\screen");
 
@@ -8399,7 +8683,7 @@ static void h3_gametypes_main_loop(void)
 	}
 	if (h3_gametypes.leave_pending)
 	{
-		long editor = tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\gtedit\\screen");
+		long editor = menu_tags_stand_in(tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\gtedit\\screen"));
 
 		h3_gametypes.leave_pending = FALSE;
 		if (active && editor != NONE && active->definition_tag_index == editor)
@@ -8794,6 +9078,13 @@ static boolean row_column(struct widget_instance *row, char const *name, char co
 
 	if (!widget || widget->type != _ui_widget_type_text_box)
 		return FALSE;
+	/* (Menu style Classic+'s screens: never cut nor ended in "...": shown whole, in the box's
+	smaller twin or on lines) */
+	if (halo_menu_style_classic_plus() && classic_widget(widget))
+	{
+		classic_text_fit(widget, text && *text ? text : "-");
+		return FALSE;
+	}
 	length = halo_menus_utf16(text && *text ? text : "-", characters, (long)NUMBEROF(characters));
 	for (index = 0; index < length - 1; index++)
 	{
@@ -10352,7 +10643,8 @@ static void h3_variant_details(struct forge_store_entry const *entry, boolean in
 	int length = 0;
 
 	text[0] = 0;
-	if (in_fileshare)
+	/* (Menu style Classic+'s File Share: the map is in the row's column) */
+	if (in_fileshare && !halo_menu_style_classic_plus())
 		length += snprintf(text + length, (size_t)(size - length), T("Map: %s\n"), h3_variant_map_name(entry->map_name));
 	if (entry->damaged)
 	{
@@ -10443,7 +10735,9 @@ static void h3_forge_variants_update(struct widget_instance *list)
 			continue;
 		h3_forge_pick_rows((int)shown_index, &entry);
 		snprintf(text, sizeof(text), "%s", entry ? entry->title : T(forge_map_name(h3_forge.pick_map)));
-		h3_capitals(text);
+		/* (Menu style Classic+: a variant's name as it was typed, the map's in capitals) */
+		if (!entry || !halo_menu_style_classic_plus())
+			h3_capitals(text);
 		text_show(child, text);
 		if (index == h3_forge.variant_view.row)
 			focus = child;
@@ -10941,8 +11235,7 @@ static void h3_forge_packs_update(struct widget_instance *list)
 		child->disabled = !shown;
 		if (!shown)
 			continue;
-		snprintf(text, sizeof(text), "%s: %s", halo_menu_style_classic_plus() ? forge_pack_row_label(pack) : forge_pack_label(pack),
-			forge_pack_enabled(pack) ? T("ON") : T("OFF"));
+		snprintf(text, sizeof(text), "%s: %s", forge_pack_label(pack), forge_pack_enabled(pack) ? T("ON") : T("OFF"));
 		h3_capitals(text);
 		text_show(child, text);
 		if (child == list->focused_child)
@@ -11039,7 +11332,7 @@ static void h3_fileshare_update(struct widget_instance *list)
 			focused_row = index;
 		index++;
 	}
-	target = browser_view_follow(&h3_fileshare.view, VARIANT_ROWS, count, (int)focused_row, h3_fileshare.chosen,
+	target = browser_view_follow(&h3_fileshare.view, list_rows(list, VARIANT_ROWS), count, (int)focused_row, h3_fileshare.chosen,
 		h3_fileshare.page);
 	h3_fileshare.page = 0;
 	h3_fileshare.chosen = target;
@@ -11062,7 +11355,10 @@ static void h3_fileshare_update(struct widget_instance *list)
 		{
 			struct forge_store_entry const *entry = &h3_variants.entries[shown];
 
-			if (entry->damaged)
+			/* (Menu style Classic+: a damaged file by its file's name too - two would look alike) */
+			if (entry->damaged && halo_menu_style_classic_plus())
+				snprintf(text, sizeof(text), "%s: %s", T("Damaged file"), entry->file_name);
+			else if (entry->damaged)
 				snprintf(text, sizeof(text), "%s", T("DAMAGED FILE"));
 			else
 				snprintf(text, sizeof(text), "%s", entry->title);
@@ -11073,15 +11369,16 @@ static void h3_fileshare_update(struct widget_instance *list)
 			snprintf(text, sizeof(text), "%s", h3_mp.gametype_names[shown]);
 			line[0] = 0;
 		}
-		h3_capitals(text);
 		if (halo_menu_style_classic_plus())
 		{
-			/* (Menu style Halo CE: a name or map wider than its column ends in "...", not cut mid-letter) */
-			row_column(child, "row_name", text);
-			row_column(child, "row_map", line[0] ? line : " ");
+			/* (Menu style Classic+: the name as it was typed, as the original menus' list of games
+			shows a game's, whole: classic_text_fit) */
+			text_show(named(child, "row_name"), text);
+			text_show(named(child, "row_map"), line[0] ? line : " ");
 		}
 		else
 		{
+			h3_capitals(text);
 			text_show(named(child, "row_name"), text);
 			text_show(named(child, "row_map"), line);
 		}
@@ -11097,8 +11394,13 @@ static void h3_fileshare_update(struct widget_instance *list)
 			child->animation.current_frame_index = child == focus ? 1 : 0;
 	}
 	/* (the kind, the count, the pane, the status) */
-	snprintf(text, sizeof(text), "%s  \xc2\xb7  %s", h3_fileshare.kind == _fileshare_map_variants ? T("MAP VARIANTS") :
-		T("map variants"), h3_fileshare.kind == _fileshare_game_variants ? T("GAME VARIANTS") : T("game variants"));
+	if (halo_menu_style_classic_plus())
+		/* (Menu style Classic+: the kind shown, between the spinners' arrows) */
+		snprintf(text, sizeof(text), "%s", h3_fileshare.kind == _fileshare_map_variants ? T("MAP VARIANTS") :
+			T("GAME VARIANTS"));
+	else
+		snprintf(text, sizeof(text), "%s  \xc2\xb7  %s", h3_fileshare.kind == _fileshare_map_variants ? T("MAP VARIANTS") :
+			T("map variants"), h3_fileshare.kind == _fileshare_game_variants ? T("GAME VARIANTS") : T("game variants"));
 	text_show(named(screen, "kind"), text);
 	snprintf(text, sizeof(text), h3_fileshare.kind == _fileshare_map_variants ? T("%d map variants") :
 		T("%d game variants"), count);
@@ -12170,8 +12472,7 @@ static void h3_friends_update(struct widget_instance *list)
 				row_column(child, "row_tag", config_boolean_live("friends.join", "HALO_FRIENDS_JOIN") ? T("YES") : T("NO"));
 				break;
 			case _h3_friends_row_backup:
-				/* (Menu style Halo CE: its list's rows are narrower than Halo 3's: the row says CODE BACKUP) */
-				row_column(child, "row_name", halo_menu_style_classic_plus() ? T("CODE BACKUP") : T("FRIEND CODE BACKUP"));
+				row_column(child, "row_name", T("FRIEND CODE BACKUP"));
 				row_column(child, "row_state", T("Save your code to a file, or restore it"));
 				row_column(child, "row_tag", h3_backup.step == _h3_backup_working ? T("WORKING") : " ");
 				break;

@@ -8,6 +8,8 @@ halo3/forge.xml
 halo3/players.xml
 halo3/mppause.xml
 classic/pause.xml
+# (Menu style Classic+: PLAYERS in the original look)
+classic/players.xml
 halo3/carnage.xml
 halo3/scoreboard.xml
 # (the Halo 3 dialog: the game's message boxes and questions)

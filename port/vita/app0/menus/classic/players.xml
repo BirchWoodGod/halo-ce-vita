@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Classic+: PLAYERS (a game's pause, the pregame's LOBBY OPTIONS) in the original menus' look,
+     standing for the Halo 3 set's (a cp/<name> widget for h3/<name>: menu_tags.c, the classic set); read with
+     the menus and with a level's (ingame.txt). Written by tools/classic_standins_xml.py, which says how it is
+     laid out. -->
+<menus>
+	<bitmap name="cp/players/art_gradient" resource="ui\shell\bitmaps\gradient"/>
+	<bitmap name="cp/players/art_semi_transparent_grey" resource="ui\shell\bitmaps\semi_transparent_grey"/>
+	<bitmap name="cp/players/art_list_item_bkd" resource="ui\shell\bitmaps\list_item_bkd"/>
+	<bitmap name="cp/players/art_list_item_bkd_top" resource="ui\shell\bitmaps\list_item_bkd_top"/>
+	<bitmap name="cp/players/art_list_field" resource="ui\shell\bitmaps\list_field"/>
+	<bitmap name="cp/players/art_server_item_bkds" resource="ui\shell\bitmaps\server_item_bkds"/>
+	<bitmap name="cp/players/art_blue" resource="ui\shell\bitmaps\blue"/>
+	<bitmap name="cp/players/art_a_butn" resource="ui\shell\bitmaps\a_butn"/>
+	<bitmap name="cp/players/art_b_butn" resource="ui\shell\bitmaps\b_butn"/>
+	<strings name="cp/players_keys">
+		<string text="=BACK"/>
+		<string text="=SELECT"/>
+		<string text="=OPTIONS"/>
+	</strings>
+
+	<!-- PLAYERS (a game's pause, the pregame's LOBBY OPTIONS): the players on the server browser's rows
+	     (name, team, what they are to this PS Vita), the chosen one's words under them -->
+	<bitmap name="cp/players/header_art">
+		<frame png="classic/{lang}/header_players.png" width="512" height="64"/>
+	</bitmap>
+	<widget name="cp/players/header" left="35" top="11" width="512" height="64" bitmap="cp/players/header_art"/>
+	<widget name="cp/players/players_status" type="text" left="24" top="336" width="592" height="20" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/players/header_name" type="text" left="32" top="82" width="250" height="16" font="ui\small_ui" color="#FFCCCCCC" text_flags="no_focus_test" string_list="h3/players_text" string_index="1"/>
+	<widget name="cp/players/header_team" type="text" left="330" top="82" width="120" height="16" font="ui\small_ui" color="#FFCCCCCC" text_flags="no_focus_test" string_list="h3/players_text" string_index="2"/>
+	<widget name="cp/players/header_friend" type="text" left="470" top="82" width="140" height="16" font="ui\small_ui" color="#FFCCCCCC" text_flags="no_focus_test" string_list="h3/players_text" string_index="3"/>
+	<widget name="cp/players/row_name" type="text" left="12" top="1" width="296" height="16" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/players/row_team" type="text" left="310" top="1" width="136" height="16" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/players/row_state" type="text" left="450" top="1" width="146" height="16" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/players/row_1" width="600" height="17" bitmap="cp/players/art_server_item_bkds">
+		<on event="a start" run="port h3 players act" open="h3/players/options"/>
+		<child widget="cp/players/row_name"/>
+		<child widget="cp/players/row_team"/>
+		<child widget="cp/players/row_state"/>
+	</widget>
+	<widget name="cp/players/row_2" width="600" height="17" bitmap="cp/players/art_server_item_bkds">
+		<on event="a start" run="port h3 players act" open="h3/players/options"/>
+		<child widget="cp/players/row_name"/>
+		<child widget="cp/players/row_team"/>
+		<child widget="cp/players/row_state"/>
+	</widget>
+	<widget name="cp/players/row_3" width="600" height="17" bitmap="cp/players/art_server_item_bkds">
+		<on event="a start" run="port h3 players act" open="h3/players/options"/>
+		<child widget="cp/players/row_name"/>
+		<child widget="cp/players/row_team"/>
+		<child widget="cp/players/row_state"/>
+	</widget>
+	<widget name="cp/players/row_4" width="600" height="17" bitmap="cp/players/art_server_item_bkds">
+		<on event="a start" run="port h3 players act" open="h3/players/options"/>
+		<child widget="cp/players/row_name"/>
+		<child widget="cp/players/row_team"/>
+		<child widget="cp/players/row_state"/>
+	</widget>
+	<widget name="cp/players/row_5" width="600" height="17" bitmap="cp/players/art_server_item_bkds">
+		<on event="a start" run="port h3 players act" open="h3/players/options"/>
+		<child widget="cp/players/row_name"/>
+		<child widget="cp/players/row_team"/>
+		<child widget="cp/players/row_state"/>
+	</widget>
+	<widget name="cp/players/row_6" width="600" height="17" bitmap="cp/players/art_server_item_bkds">
+		<on event="a start" run="port h3 players act" open="h3/players/options"/>
+		<child widget="cp/players/row_name"/>
+		<child widget="cp/players/row_team"/>
+		<child widget="cp/players/row_state"/>
+	</widget>
+	<widget name="cp/players/row_7" width="600" height="17" bitmap="cp/players/art_server_item_bkds">
+		<on event="a start" run="port h3 players act" open="h3/players/options"/>
+		<child widget="cp/players/row_name"/>
+		<child widget="cp/players/row_team"/>
+		<child widget="cp/players/row_state"/>
+	</widget>
+	<widget name="cp/players/row_8" width="600" height="17" bitmap="cp/players/art_server_item_bkds">
+		<on event="a start" run="port h3 players act" open="h3/players/options"/>
+		<child widget="cp/players/row_name"/>
+		<child widget="cp/players/row_team"/>
+		<child widget="cp/players/row_state"/>
+	</widget>
+	<widget name="cp/players/row_9" width="600" height="17" bitmap="cp/players/art_server_item_bkds">
+		<on event="a start" run="port h3 players act" open="h3/players/options"/>
+		<child widget="cp/players/row_name"/>
+		<child widget="cp/players/row_team"/>
+		<child widget="cp/players/row_state"/>
+	</widget>
+	<widget name="cp/players/row_10" width="600" height="17" bitmap="cp/players/art_server_item_bkds">
+		<on event="a start" run="port h3 players act" open="h3/players/options"/>
+		<child widget="cp/players/row_name"/>
+		<child widget="cp/players/row_team"/>
+		<child widget="cp/players/row_state"/>
+	</widget>
+	<widget name="cp/players/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 players"/>
+		<on event="left_trigger" run="port h3 players page up"/>
+		<on event="right_trigger" run="port h3 players page down"/>
+		<child widget="cp/players/row_1" x="0" y="0"/>
+		<child widget="cp/players/row_2" x="0" y="18"/>
+		<child widget="cp/players/row_3" x="0" y="36"/>
+		<child widget="cp/players/row_4" x="0" y="54"/>
+		<child widget="cp/players/row_5" x="0" y="72"/>
+		<child widget="cp/players/row_6" x="0" y="90"/>
+		<child widget="cp/players/row_7" x="0" y="108"/>
+		<child widget="cp/players/row_8" x="0" y="126"/>
+		<child widget="cp/players/row_9" x="0" y="144"/>
+		<child widget="cp/players/row_10" x="0" y="162"/>
+	</widget>
+	<widget name="cp/players/blueline" left="24" top="286" width="592" height="2" bitmap="cp/players/art_blue"/>
+	<widget name="cp/players/detail" type="text" left="24" top="294" width="592" height="40" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/players/players_message" type="text" left="24" top="358" width="592" height="46" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
+	<widget name="cp/players/b_butn" left="371" top="414" width="21" height="26" bitmap="cp/players/art_b_butn"/>
+	<widget name="cp/players/back" type="text" left="392" top="414" width="86" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/players_keys" string_index="0"/>
+	<widget name="cp/players/a_butn" left="481" top="414" width="21" height="26" bitmap="cp/players/art_a_butn"/>
+	<widget name="cp/players/a_label" type="text" left="502" top="414" width="134" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/players_keys" string_index="2"/>
+	<widget name="cp/players/backdrop" left="0" top="0" width="640" height="480" bitmap="cp/players/art_gradient"/>
+	<widget name="cp/players/screen" flags="pass_unhandled_to_focused_child" bitmap="cp/players/art_semi_transparent_grey">
+		<on event="created" run="port h3 players init"/>
+		<on event="b back" back="true"/>
+		<child widget="cp/players/backdrop"/>
+		<child widget="cp/players/header"/>
+		<child widget="cp/players/players_status"/>
+		<child widget="cp/players/header_name"/>
+		<child widget="cp/players/header_team"/>
+		<child widget="cp/players/header_friend"/>
+		<child widget="cp/players/list" x="20" y="100"/>
+		<child widget="cp/players/blueline"/>
+		<child widget="cp/players/detail"/>
+		<child widget="cp/players/players_message"/>
+		<child widget="cp/players/b_butn"/>
+		<child widget="cp/players/back"/>
+		<child widget="cp/players/a_butn"/>
+		<child widget="cp/players/a_label"/>
+	</widget>
+
+	<!-- a player's options: the rows at the left (BACK first; those that do not apply hidden), the player
+	     and what they are in the field -->
+	<widget name="cp/players/option_back" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd_top" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="13">
+		<on event="a" back="true"/>
+	</widget>
+	<widget name="cp/players/option_add" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="6">
+		<on event="a" run="port h3 players option" back="true"/>
+	</widget>
+	<widget name="cp/players/option_block" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="7">
+		<on event="a" run="port h3 players option" back="true"/>
+	</widget>
+	<widget name="cp/players/option_mute" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="12">
+		<on event="a" run="port h3 players option" back="true"/>
+	</widget>
+	<widget name="cp/players/option_party" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="9">
+		<on event="a" run="port h3 players option" back="true"/>
+	</widget>
+	<widget name="cp/players/option_kick" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="10">
+		<on event="a" run="port h3 players option" back="true"/>
+	</widget>
+	<widget name="cp/players/option_ban" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="11">
+		<on event="a" run="port h3 players option" back="true"/>
+	</widget>
+	<widget name="cp/players/options_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port h3 players options"/>
+		<child widget="cp/players/option_back" x="0" y="0"/>
+		<child widget="cp/players/option_add" x="0" y="32"/>
+		<child widget="cp/players/option_block" x="0" y="64"/>
+		<child widget="cp/players/option_mute" x="0" y="96"/>
+		<child widget="cp/players/option_party" x="0" y="128"/>
+		<child widget="cp/players/option_kick" x="0" y="160"/>
+		<child widget="cp/players/option_ban" x="0" y="192"/>
+	</widget>
+	<widget name="cp/players/options_field" left="275" top="78" width="320" height="322" bitmap="cp/players/art_list_field"/>
+	<widget name="cp/players/options_title" type="text" left="290" top="88" width="290" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="cp/players/options_text" type="text" left="290" top="118" width="290" height="270" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/players/options/b_butn" left="371" top="414" width="21" height="26" bitmap="cp/players/art_b_butn"/>
+	<widget name="cp/players/options/options_back" type="text" left="392" top="414" width="86" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/players_keys" string_index="0"/>
+	<widget name="cp/players/options/a_butn" left="481" top="414" width="21" height="26" bitmap="cp/players/art_a_butn"/>
+	<widget name="cp/players/options/options_a_label" type="text" left="502" top="414" width="134" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/players_keys" string_index="1"/>
+	<widget name="cp/players/options" flags="pass_unhandled_to_focused_child" bitmap="cp/players/art_semi_transparent_grey">
+		<on event="b back" back="true"/>
+		<child widget="cp/players/backdrop"/>
+		<child widget="cp/players/header"/>
+		<child widget="cp/players/options_field"/>
+		<child widget="cp/players/options_title"/>
+		<child widget="cp/players/options_text"/>
+		<child widget="cp/players/options/b_butn"/>
+		<child widget="cp/players/options/options_back"/>
+		<child widget="cp/players/options/a_butn"/>
+		<child widget="cp/players/options/options_a_label"/>
+		<child widget="cp/players/options_list" x="51" y="78"/>
+	</widget>
+</menus>

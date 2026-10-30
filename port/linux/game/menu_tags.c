@@ -2948,6 +2948,16 @@ boolean menu_tags_bitmap_fits_widget(
 	return FALSE;
 }
 
+static long menu_tags_online(long tag_index);
+
+/* the widget standing for a Halo 3 one in the Menu style chosen (the classic set's for Classic+,
+the online set's for Online), else the tag itself: what opens in its place */
+long menu_tags_stand_in(
+	long tag_index)
+{
+	return menu_tags_online(tag_index);
+}
+
 /* (Menu style Online) the online set's widget for a Halo 3 one, when it has
 one; else the tag itself. Read each time, as the Menu style is */
 static long menu_tags_online(
