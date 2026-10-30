@@ -43,67 +43,56 @@
 	<!-- FRIENDS: the own rows (ADD FRIEND, APPEAR OFFLINE, FRIENDS CAN JOIN, PARTY, FRIEND CODE BACKUP),
 	     then the requests, invites, friends, requests sent and the blocked; the chosen one's facts
 	     in the field at the right with this Vita's friend code -->
-	<widget name="ce/friends/row_name" type="text" left="13" top="5" width="205" height="24" font="ui\large_ui" color="#FF2896FF"/>
-	<widget name="ce/friends/row_name_small" type="text" left="13" top="9" width="205" height="18" font="ui\small_ui" color="#FF2896FF"/>
-	<widget name="ce/friends/row_tag" type="text" left="98" top="9" width="120" height="18" align="right" font="ui\small_ui" color="#FF2896FF"/>
-	<widget name="ce/friends/row_1" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd_top">
+	<widget name="ce/friends/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/friends/row_tag" type="text" left="92" top="5" width="120" height="18" align="right" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/friends/row_1" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top">
 		<on event="a start" run="port h3 friends act"/>
 		<child widget="ce/friends/row_name"/>
-		<child widget="ce/friends/row_name_small"/>
 		<child widget="ce/friends/row_tag"/>
 	</widget>
-	<widget name="ce/friends/row_2" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/row_2" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 friends act"/>
 		<child widget="ce/friends/row_name"/>
-		<child widget="ce/friends/row_name_small"/>
 		<child widget="ce/friends/row_tag"/>
 	</widget>
-	<widget name="ce/friends/row_3" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/row_3" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 friends act"/>
 		<child widget="ce/friends/row_name"/>
-		<child widget="ce/friends/row_name_small"/>
 		<child widget="ce/friends/row_tag"/>
 	</widget>
-	<widget name="ce/friends/row_4" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/row_4" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 friends act"/>
 		<child widget="ce/friends/row_name"/>
-		<child widget="ce/friends/row_name_small"/>
 		<child widget="ce/friends/row_tag"/>
 	</widget>
-	<widget name="ce/friends/row_5" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/row_5" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 friends act"/>
 		<child widget="ce/friends/row_name"/>
-		<child widget="ce/friends/row_name_small"/>
 		<child widget="ce/friends/row_tag"/>
 	</widget>
-	<widget name="ce/friends/row_6" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/row_6" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 friends act"/>
 		<child widget="ce/friends/row_name"/>
-		<child widget="ce/friends/row_name_small"/>
 		<child widget="ce/friends/row_tag"/>
 	</widget>
-	<widget name="ce/friends/row_7" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/row_7" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 friends act"/>
 		<child widget="ce/friends/row_name"/>
-		<child widget="ce/friends/row_name_small"/>
 		<child widget="ce/friends/row_tag"/>
 	</widget>
-	<widget name="ce/friends/row_8" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/row_8" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 friends act"/>
 		<child widget="ce/friends/row_name"/>
-		<child widget="ce/friends/row_name_small"/>
 		<child widget="ce/friends/row_tag"/>
 	</widget>
-	<widget name="ce/friends/row_9" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/row_9" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 friends act"/>
 		<child widget="ce/friends/row_name"/>
-		<child widget="ce/friends/row_name_small"/>
 		<child widget="ce/friends/row_tag"/>
 	</widget>
-	<widget name="ce/friends/row_10" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/row_10" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 friends act"/>
 		<child widget="ce/friends/row_name"/>
-		<child widget="ce/friends/row_name_small"/>
 		<child widget="ce/friends/row_tag"/>
 	</widget>
 	<widget name="ce/friends/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
@@ -113,15 +102,15 @@
 		<on event="left_trigger" run="port h3 friends page up"/>
 		<on event="right_trigger" run="port h3 friends page down"/>
 		<child widget="ce/friends/row_1" x="51" y="78"/>
-		<child widget="ce/friends/row_2" x="51" y="110"/>
-		<child widget="ce/friends/row_3" x="51" y="142"/>
-		<child widget="ce/friends/row_4" x="51" y="174"/>
-		<child widget="ce/friends/row_5" x="51" y="206"/>
-		<child widget="ce/friends/row_6" x="51" y="238"/>
-		<child widget="ce/friends/row_7" x="51" y="270"/>
-		<child widget="ce/friends/row_8" x="51" y="302"/>
-		<child widget="ce/friends/row_9" x="51" y="334"/>
-		<child widget="ce/friends/row_10" x="51" y="366"/>
+		<child widget="ce/friends/row_2" x="51" y="102"/>
+		<child widget="ce/friends/row_3" x="51" y="126"/>
+		<child widget="ce/friends/row_4" x="51" y="150"/>
+		<child widget="ce/friends/row_5" x="51" y="174"/>
+		<child widget="ce/friends/row_6" x="51" y="198"/>
+		<child widget="ce/friends/row_7" x="51" y="222"/>
+		<child widget="ce/friends/row_8" x="51" y="246"/>
+		<child widget="ce/friends/row_9" x="51" y="270"/>
+		<child widget="ce/friends/row_10" x="51" y="294"/>
 	</widget>
 	<widget name="ce/friends/field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
 	<widget name="ce/friends/code_label" type="text" left="290" top="88" width="290" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="0"/>
@@ -164,32 +153,28 @@
 	<widget name="ce/friends/options_field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
 	<widget name="ce/friends/options_title" type="text" left="290" top="88" width="290" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
 	<widget name="ce/friends/options_text" type="text" left="290" top="118" width="290" height="270" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="ce/friends/option_name" type="text" left="13" top="5" width="205" height="24" font="ui\large_ui" color="#FF2896FF"/>
-	<widget name="ce/friends/option_name_small" type="text" left="13" top="9" width="205" height="18" font="ui\small_ui" color="#FF2896FF"/>
-	<widget name="ce/friends/option_1" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/option_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/friends/option_1" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 friends option" back="true"/>
 		<child widget="ce/friends/option_name"/>
-		<child widget="ce/friends/option_name_small"/>
 	</widget>
-	<widget name="ce/friends/option_2" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/option_2" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 friends option" back="true"/>
 		<child widget="ce/friends/option_name"/>
-		<child widget="ce/friends/option_name_small"/>
 	</widget>
-	<widget name="ce/friends/option_3" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/friends/option_3" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 friends option" back="true"/>
 		<child widget="ce/friends/option_name"/>
-		<child widget="ce/friends/option_name_small"/>
 	</widget>
-	<widget name="ce/friends/option_back" type="text" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd_top" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/back_text" string_index="0">
+	<widget name="ce/friends/option_back" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/back_text" string_index="0">
 		<on event="a" back="true"/>
 	</widget>
 	<widget name="ce/friends/options_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 friends options"/>
 		<child widget="ce/friends/option_back" y="0"/>
-		<child widget="ce/friends/option_1" y="32"/>
-		<child widget="ce/friends/option_2" y="64"/>
-		<child widget="ce/friends/option_3" y="96"/>
+		<child widget="ce/friends/option_1" y="24"/>
+		<child widget="ce/friends/option_2" y="48"/>
+		<child widget="ce/friends/option_3" y="72"/>
 	</widget>
 	<widget name="ce/friends/options_a_butn" left="481" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>
 	<widget name="ce/friends/options_select" type="text" left="502" top="414" width="134" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="3"/>
@@ -208,13 +193,11 @@
 
 	<!-- ADD FRIEND: this Vita's code to give, and the row that types a friend's (the FRIENDS list's
 	     data: its first row is ADD FRIEND); the outcome under it -->
-	<widget name="ce/add/row_name" type="text" left="13" top="5" width="205" height="24" font="ui\large_ui" color="#FF2896FF"/>
-	<widget name="ce/add/row_name_small" type="text" left="13" top="9" width="205" height="18" font="ui\small_ui" color="#FF2896FF"/>
-	<widget name="ce/add/row_tag" type="text" left="98" top="9" width="120" height="18" align="right" font="ui\small_ui" color="#FF2896FF"/>
-	<widget name="ce/add/row_1" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd_top">
+	<widget name="ce/add/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/add/row_tag" type="text" left="92" top="5" width="120" height="18" align="right" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/add/row_1" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top">
 		<on event="a start" run="port h3 friends act"/>
 		<child widget="ce/add/row_name"/>
-		<child widget="ce/add/row_name_small"/>
 		<child widget="ce/add/row_tag"/>
 	</widget>
 	<widget name="ce/add/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
@@ -248,67 +231,56 @@
 
 	<!-- PARTY: the members (the leader marked), the party invites, LEAVE PARTY; the chosen one, the
 	     outcome and the party's chat in the field -->
-	<widget name="ce/party/row_name" type="text" left="13" top="5" width="205" height="24" font="ui\large_ui" color="#FF2896FF"/>
-	<widget name="ce/party/row_name_small" type="text" left="13" top="9" width="205" height="18" font="ui\small_ui" color="#FF2896FF"/>
-	<widget name="ce/party/row_tag" type="text" left="98" top="9" width="120" height="18" align="right" font="ui\small_ui" color="#FF2896FF"/>
-	<widget name="ce/party/row_1" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd_top">
+	<widget name="ce/party/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/party/row_tag" type="text" left="92" top="5" width="120" height="18" align="right" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/party/row_1" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top">
 		<on event="a start" run="port h3 party act" open="h3/party/options"/>
 		<child widget="ce/party/row_name"/>
-		<child widget="ce/party/row_name_small"/>
 		<child widget="ce/party/row_tag"/>
 	</widget>
-	<widget name="ce/party/row_2" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/party/row_2" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 party act" open="h3/party/options"/>
 		<child widget="ce/party/row_name"/>
-		<child widget="ce/party/row_name_small"/>
 		<child widget="ce/party/row_tag"/>
 	</widget>
-	<widget name="ce/party/row_3" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/party/row_3" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 party act" open="h3/party/options"/>
 		<child widget="ce/party/row_name"/>
-		<child widget="ce/party/row_name_small"/>
 		<child widget="ce/party/row_tag"/>
 	</widget>
-	<widget name="ce/party/row_4" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/party/row_4" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 party act" open="h3/party/options"/>
 		<child widget="ce/party/row_name"/>
-		<child widget="ce/party/row_name_small"/>
 		<child widget="ce/party/row_tag"/>
 	</widget>
-	<widget name="ce/party/row_5" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/party/row_5" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 party act" open="h3/party/options"/>
 		<child widget="ce/party/row_name"/>
-		<child widget="ce/party/row_name_small"/>
 		<child widget="ce/party/row_tag"/>
 	</widget>
-	<widget name="ce/party/row_6" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/party/row_6" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 party act" open="h3/party/options"/>
 		<child widget="ce/party/row_name"/>
-		<child widget="ce/party/row_name_small"/>
 		<child widget="ce/party/row_tag"/>
 	</widget>
-	<widget name="ce/party/row_7" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/party/row_7" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 party act" open="h3/party/options"/>
 		<child widget="ce/party/row_name"/>
-		<child widget="ce/party/row_name_small"/>
 		<child widget="ce/party/row_tag"/>
 	</widget>
-	<widget name="ce/party/row_8" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/party/row_8" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 party act" open="h3/party/options"/>
 		<child widget="ce/party/row_name"/>
-		<child widget="ce/party/row_name_small"/>
 		<child widget="ce/party/row_tag"/>
 	</widget>
-	<widget name="ce/party/row_9" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/party/row_9" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 party act" open="h3/party/options"/>
 		<child widget="ce/party/row_name"/>
-		<child widget="ce/party/row_name_small"/>
 		<child widget="ce/party/row_tag"/>
 	</widget>
-	<widget name="ce/party/row_10" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/party/row_10" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 party act" open="h3/party/options"/>
 		<child widget="ce/party/row_name"/>
-		<child widget="ce/party/row_name_small"/>
 		<child widget="ce/party/row_tag"/>
 	</widget>
 	<widget name="ce/party/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
@@ -318,15 +290,15 @@
 		<on event="left_trigger" run="port h3 party page up"/>
 		<on event="right_trigger" run="port h3 party page down"/>
 		<child widget="ce/party/row_1" x="51" y="78"/>
-		<child widget="ce/party/row_2" x="51" y="110"/>
-		<child widget="ce/party/row_3" x="51" y="142"/>
-		<child widget="ce/party/row_4" x="51" y="174"/>
-		<child widget="ce/party/row_5" x="51" y="206"/>
-		<child widget="ce/party/row_6" x="51" y="238"/>
-		<child widget="ce/party/row_7" x="51" y="270"/>
-		<child widget="ce/party/row_8" x="51" y="302"/>
-		<child widget="ce/party/row_9" x="51" y="334"/>
-		<child widget="ce/party/row_10" x="51" y="366"/>
+		<child widget="ce/party/row_2" x="51" y="102"/>
+		<child widget="ce/party/row_3" x="51" y="126"/>
+		<child widget="ce/party/row_4" x="51" y="150"/>
+		<child widget="ce/party/row_5" x="51" y="174"/>
+		<child widget="ce/party/row_6" x="51" y="198"/>
+		<child widget="ce/party/row_7" x="51" y="222"/>
+		<child widget="ce/party/row_8" x="51" y="246"/>
+		<child widget="ce/party/row_9" x="51" y="270"/>
+		<child widget="ce/party/row_10" x="51" y="294"/>
 	</widget>
 	<widget name="ce/party/field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
 	<widget name="ce/party/party_status" type="text" left="290" top="88" width="290" height="54" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
@@ -381,26 +353,23 @@
 	<widget name="ce/party/options_field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
 	<widget name="ce/party/options_title" type="text" left="290" top="88" width="290" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
 	<widget name="ce/party/options_text" type="text" left="290" top="118" width="290" height="270" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="ce/party/option_name" type="text" left="13" top="5" width="205" height="24" font="ui\large_ui" color="#FF2896FF"/>
-	<widget name="ce/party/option_name_small" type="text" left="13" top="9" width="205" height="18" font="ui\small_ui" color="#FF2896FF"/>
-	<widget name="ce/party/option_1" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/party/option_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/party/option_1" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 party option" back="true"/>
 		<child widget="ce/party/option_name"/>
-		<child widget="ce/party/option_name_small"/>
 	</widget>
-	<widget name="ce/party/option_2" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/party/option_2" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 party option" back="true"/>
 		<child widget="ce/party/option_name"/>
-		<child widget="ce/party/option_name_small"/>
 	</widget>
-	<widget name="ce/party/option_back" type="text" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd_top" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/back_text" string_index="0">
+	<widget name="ce/party/option_back" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/back_text" string_index="0">
 		<on event="a" back="true"/>
 	</widget>
 	<widget name="ce/party/options_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 party options"/>
 		<child widget="ce/party/option_back" y="0"/>
-		<child widget="ce/party/option_1" y="32"/>
-		<child widget="ce/party/option_2" y="64"/>
+		<child widget="ce/party/option_1" y="24"/>
+		<child widget="ce/party/option_2" y="48"/>
 	</widget>
 	<widget name="ce/party/options_a_butn" left="481" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>
 	<widget name="ce/party/options_select" type="text" left="502" top="414" width="134" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="3"/>
@@ -418,44 +387,44 @@
 	</widget>
 
 	<!-- QUICK CHAT (Square): the presets, Cross sends one to the party -->
-	<widget name="ce/party/preset_1" type="text" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_1" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
 		<on event="a" run="port h3 party preset" back="true"/>
 	</widget>
-	<widget name="ce/party/preset_2" type="text" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_2" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
 		<on event="a" run="port h3 party preset" back="true"/>
 	</widget>
-	<widget name="ce/party/preset_3" type="text" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_3" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
 		<on event="a" run="port h3 party preset" back="true"/>
 	</widget>
-	<widget name="ce/party/preset_4" type="text" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_4" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
 		<on event="a" run="port h3 party preset" back="true"/>
 	</widget>
-	<widget name="ce/party/preset_5" type="text" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_5" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
 		<on event="a" run="port h3 party preset" back="true"/>
 	</widget>
-	<widget name="ce/party/preset_6" type="text" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_6" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
 		<on event="a" run="port h3 party preset" back="true"/>
 	</widget>
-	<widget name="ce/party/preset_7" type="text" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_7" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
 		<on event="a" run="port h3 party preset" back="true"/>
 	</widget>
-	<widget name="ce/party/preset_8" type="text" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_8" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
 		<on event="a" run="port h3 party preset" back="true"/>
 	</widget>
-	<widget name="ce/party/quick_back" type="text" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd_top" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/back_text" string_index="0">
+	<widget name="ce/party/quick_back" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/back_text" string_index="0">
 		<on event="a" back="true"/>
 	</widget>
 	<widget name="ce/party/quick_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 party quick"/>
 		<child widget="ce/party/quick_back" y="0"/>
-		<child widget="ce/party/preset_1" y="32"/>
-		<child widget="ce/party/preset_2" y="64"/>
-		<child widget="ce/party/preset_3" y="96"/>
-		<child widget="ce/party/preset_4" y="128"/>
-		<child widget="ce/party/preset_5" y="160"/>
-		<child widget="ce/party/preset_6" y="192"/>
-		<child widget="ce/party/preset_7" y="224"/>
-		<child widget="ce/party/preset_8" y="256"/>
+		<child widget="ce/party/preset_1" y="24"/>
+		<child widget="ce/party/preset_2" y="48"/>
+		<child widget="ce/party/preset_3" y="72"/>
+		<child widget="ce/party/preset_4" y="96"/>
+		<child widget="ce/party/preset_5" y="120"/>
+		<child widget="ce/party/preset_6" y="144"/>
+		<child widget="ce/party/preset_7" y="168"/>
+		<child widget="ce/party/preset_8" y="192"/>
 	</widget>
 	<bitmap name="ce/header/quick_art">
 		<frame png="classic/{lang}/header_quick_chat.png" width="512" height="64"/>
@@ -476,81 +445,70 @@
 	</widget>
 
 	<!-- INVITE FRIENDS (LOBBY OPTIONS, the host online): the friends online, Cross invites the chosen one -->
-	<widget name="ce/invite/row_name" type="text" left="13" top="5" width="205" height="24" font="ui\large_ui" color="#FF2896FF"/>
-	<widget name="ce/invite/row_name_small" type="text" left="13" top="9" width="205" height="18" font="ui\small_ui" color="#FF2896FF"/>
-	<widget name="ce/invite/row_tag" type="text" left="98" top="9" width="120" height="18" align="right" font="ui\small_ui" color="#FF2896FF"/>
-	<widget name="ce/invite/row_1" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd_top">
+	<widget name="ce/invite/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/invite/row_tag" type="text" left="92" top="5" width="120" height="18" align="right" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/invite/row_1" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top">
 		<on event="a start" run="port h3 invite act"/>
 		<child widget="ce/invite/row_name"/>
-		<child widget="ce/invite/row_name_small"/>
 		<child widget="ce/invite/row_tag"/>
 	</widget>
-	<widget name="ce/invite/row_2" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/invite/row_2" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 invite act"/>
 		<child widget="ce/invite/row_name"/>
-		<child widget="ce/invite/row_name_small"/>
 		<child widget="ce/invite/row_tag"/>
 	</widget>
-	<widget name="ce/invite/row_3" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/invite/row_3" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 invite act"/>
 		<child widget="ce/invite/row_name"/>
-		<child widget="ce/invite/row_name_small"/>
 		<child widget="ce/invite/row_tag"/>
 	</widget>
-	<widget name="ce/invite/row_4" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/invite/row_4" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 invite act"/>
 		<child widget="ce/invite/row_name"/>
-		<child widget="ce/invite/row_name_small"/>
 		<child widget="ce/invite/row_tag"/>
 	</widget>
-	<widget name="ce/invite/row_5" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/invite/row_5" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 invite act"/>
 		<child widget="ce/invite/row_name"/>
-		<child widget="ce/invite/row_name_small"/>
 		<child widget="ce/invite/row_tag"/>
 	</widget>
-	<widget name="ce/invite/row_6" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/invite/row_6" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 invite act"/>
 		<child widget="ce/invite/row_name"/>
-		<child widget="ce/invite/row_name_small"/>
 		<child widget="ce/invite/row_tag"/>
 	</widget>
-	<widget name="ce/invite/row_7" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/invite/row_7" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 invite act"/>
 		<child widget="ce/invite/row_name"/>
-		<child widget="ce/invite/row_name_small"/>
 		<child widget="ce/invite/row_tag"/>
 	</widget>
-	<widget name="ce/invite/row_8" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/invite/row_8" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 invite act"/>
 		<child widget="ce/invite/row_name"/>
-		<child widget="ce/invite/row_name_small"/>
 		<child widget="ce/invite/row_tag"/>
 	</widget>
-	<widget name="ce/invite/row_9" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/invite/row_9" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 invite act"/>
 		<child widget="ce/invite/row_name"/>
-		<child widget="ce/invite/row_name_small"/>
 		<child widget="ce/invite/row_tag"/>
 	</widget>
-	<widget name="ce/invite/row_10" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+	<widget name="ce/invite/row_10" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 invite act"/>
 		<child widget="ce/invite/row_name"/>
-		<child widget="ce/invite/row_name_small"/>
 		<child widget="ce/invite/row_tag"/>
 	</widget>
 	<widget name="ce/invite/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 invite"/>
 		<child widget="ce/invite/row_1" x="51" y="78"/>
-		<child widget="ce/invite/row_2" x="51" y="110"/>
-		<child widget="ce/invite/row_3" x="51" y="142"/>
-		<child widget="ce/invite/row_4" x="51" y="174"/>
-		<child widget="ce/invite/row_5" x="51" y="206"/>
-		<child widget="ce/invite/row_6" x="51" y="238"/>
-		<child widget="ce/invite/row_7" x="51" y="270"/>
-		<child widget="ce/invite/row_8" x="51" y="302"/>
-		<child widget="ce/invite/row_9" x="51" y="334"/>
-		<child widget="ce/invite/row_10" x="51" y="366"/>
+		<child widget="ce/invite/row_2" x="51" y="102"/>
+		<child widget="ce/invite/row_3" x="51" y="126"/>
+		<child widget="ce/invite/row_4" x="51" y="150"/>
+		<child widget="ce/invite/row_5" x="51" y="174"/>
+		<child widget="ce/invite/row_6" x="51" y="198"/>
+		<child widget="ce/invite/row_7" x="51" y="222"/>
+		<child widget="ce/invite/row_8" x="51" y="246"/>
+		<child widget="ce/invite/row_9" x="51" y="270"/>
+		<child widget="ce/invite/row_10" x="51" y="294"/>
 	</widget>
 	<widget name="ce/invite/field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
 	<widget name="ce/invite/invite_status" type="text" left="290" top="88" width="290" height="54" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>

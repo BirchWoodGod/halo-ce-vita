@@ -2912,3 +2912,4 @@
 "=NEW" = "=NUEVO"
 "%a-button =DELETE   %b-button =CANCEL" = "%a-button =BORRAR   %b-button =CANCELAR"
 "%y-button =PLAYERS   %right-trigger =LOBBY OPTIONS" = "%y-button =JUGADORES   %right-trigger =OPCIONES DEL LOBBY"
+"ADD GAME TYPE" = "AÑADIR TIPO"

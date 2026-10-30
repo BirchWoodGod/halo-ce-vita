@@ -46,7 +46,7 @@
 		<child widget="cp/network/item_3" x="0" y="96"/>
 	</widget>
 	<widget name="cp/network/field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
-	<widget name="cp/network/network_text" type="text" left="290" top="90" width="290" height="200" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="h3/network_text"/>
+	<widget name="cp/network/network_text" type="text" left="286" top="90" width="300" height="200" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="h3/network_text"/>
 	<widget name="cp/network/b_butn" left="371" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\b_butn"/>
 	<widget name="cp/network/back" type="text" left="392" top="414" width="86" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/standin_keys" string_index="0"/>
 	<widget name="cp/network/a_butn" left="481" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>
@@ -77,77 +77,66 @@
 		<frame png="classic/{lang}/header_edit_game_type.png" width="512" height="64"/>
 	</bitmap>
 	<widget name="cp/gtedit/header" left="35" top="11" width="512" height="64" bitmap="cp/gtedit/header_art"/>
-	<widget name="cp/gametypes/row_name" type="text" left="13" top="5" width="205" height="24" font="ui\large_ui" color="#FF2896FF"/>
-	<widget name="cp/gametypes/row_name_small" type="text" left="13" top="9" width="205" height="18" font="ui\small_ui" color="#FF2896FF"/>
-	<widget name="cp/gametypes/row_note" type="text" left="98" top="9" width="120" height="18" align="right" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="cp/gametypes/row_name" type="text" left="13" top="5" width="199" height="24" font="ui\large_ui" color="#FF2896FF"/>
+	<widget name="cp/gametypes/row_note" type="text" left="92" top="9" width="120" height="18" align="right" font="ui\small_ui" color="#FF2896FF"/>
 	<widget name="cp/gametypes/row_1" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd_top">
 		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
 		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
 		<child widget="cp/gametypes/row_name"/>
-		<child widget="cp/gametypes/row_name_small"/>
 		<child widget="cp/gametypes/row_note"/>
 	</widget>
 	<widget name="cp/gametypes/row_2" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
 		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
 		<child widget="cp/gametypes/row_name"/>
-		<child widget="cp/gametypes/row_name_small"/>
 		<child widget="cp/gametypes/row_note"/>
 	</widget>
 	<widget name="cp/gametypes/row_3" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
 		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
 		<child widget="cp/gametypes/row_name"/>
-		<child widget="cp/gametypes/row_name_small"/>
 		<child widget="cp/gametypes/row_note"/>
 	</widget>
 	<widget name="cp/gametypes/row_4" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
 		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
 		<child widget="cp/gametypes/row_name"/>
-		<child widget="cp/gametypes/row_name_small"/>
 		<child widget="cp/gametypes/row_note"/>
 	</widget>
 	<widget name="cp/gametypes/row_5" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
 		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
 		<child widget="cp/gametypes/row_name"/>
-		<child widget="cp/gametypes/row_name_small"/>
 		<child widget="cp/gametypes/row_note"/>
 	</widget>
 	<widget name="cp/gametypes/row_6" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
 		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
 		<child widget="cp/gametypes/row_name"/>
-		<child widget="cp/gametypes/row_name_small"/>
 		<child widget="cp/gametypes/row_note"/>
 	</widget>
 	<widget name="cp/gametypes/row_7" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
 		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
 		<child widget="cp/gametypes/row_name"/>
-		<child widget="cp/gametypes/row_name_small"/>
 		<child widget="cp/gametypes/row_note"/>
 	</widget>
 	<widget name="cp/gametypes/row_8" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
 		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
 		<child widget="cp/gametypes/row_name"/>
-		<child widget="cp/gametypes/row_name_small"/>
 		<child widget="cp/gametypes/row_note"/>
 	</widget>
 	<widget name="cp/gametypes/row_9" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
 		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
 		<child widget="cp/gametypes/row_name"/>
-		<child widget="cp/gametypes/row_name_small"/>
 		<child widget="cp/gametypes/row_note"/>
 	</widget>
 	<widget name="cp/gametypes/row_10" width="226" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a start" run="port h3 gametypes choose" open="h3/gtact/screen"/>
 		<on event="a start" run="port h3 gametypes new" open="h3/gtbase/screen"/>
 		<child widget="cp/gametypes/row_name"/>
-		<child widget="cp/gametypes/row_name_small"/>
 		<child widget="cp/gametypes/row_note"/>
 	</widget>
 	<widget name="cp/gametypes/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
@@ -388,89 +377,71 @@
 
 	<!-- the editor: NAME, GAME, the groups of settings, SAVE on Halo PC's option rows; what the game type
 	     is under the heading, the focused row's help and the outcome under the rows -->
-	<widget name="cp/gtedit/label" type="text" left="0" top="0" width="262" height="24" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4"/>
-	<widget name="cp/gtedit/label_small" type="text" left="0" top="0" width="262" height="24" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="7"/>
-	<widget name="cp/gtedit/value" type="text" left="262" top="3" width="220" height="22" align="center" font="ui\large_ui" color="#FF2896FF" text_y="1" text_flags="no_focus_test"/>
-	<widget name="cp/gtedit/value_small" type="text" left="262" top="3" width="220" height="22" align="center" font="ui\small_ui" color="#FF2896FF" text_y="4" text_flags="no_focus_test"/>
-	<widget name="cp/gtedit/arrow_left" left="252" top="6" width="12" height="16" bitmap="arrow_sm_left"/>
-	<widget name="cp/gtedit/arrow_right" left="482" top="6" width="12" height="16" bitmap="arrow_sm_right"/>
-	<widget name="cp/gtedit/op_name" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtedit/label" type="text" left="0" top="0" width="270" height="17" font="ui\small_ui" color="#FF2896FF" text_x="44" text_y="1"/>
+	<widget name="cp/gtedit/value" type="text" left="291" top="0" width="220" height="17" align="center" font="ui\small_ui" color="#FF2896FF" text_y="1" text_flags="no_focus_test"/>
+	<widget name="cp/gtedit/arrow_left" left="279" top="1" width="12" height="16" bitmap="arrow_sm_left"/>
+	<widget name="cp/gtedit/arrow_right" left="511" top="1" width="12" height="16" bitmap="arrow_sm_right"/>
+	<widget name="cp/gtedit/op_name" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start" run="port h3 gametype next"/>
 		<child widget="cp/gtedit/label"/>
-		<child widget="cp/gtedit/label_small"/>
 		<child widget="cp/gtedit/value"/>
-		<child widget="cp/gtedit/value_small"/>
 	</widget>
-	<widget name="cp/gtedit/op_game" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtedit/op_game" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a right stick_right" run="port h3 gametype next"/>
 		<on event="left stick_left" run="port h3 gametype previous"/>
 		<child widget="cp/gtedit/label"/>
-		<child widget="cp/gtedit/label_small"/>
 		<child widget="cp/gtedit/value"/>
-		<child widget="cp/gtedit/value_small"/>
 		<child widget="cp/gtedit/arrow_left"/>
 		<child widget="cp/gtedit/arrow_right"/>
 	</widget>
-	<widget name="cp/gtedit/op_general" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtedit/op_general" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
 		<child widget="cp/gtedit/label"/>
-		<child widget="cp/gtedit/label_small"/>
 		<child widget="cp/gtedit/value"/>
-		<child widget="cp/gtedit/value_small"/>
 	</widget>
-	<widget name="cp/gtedit/op_respawn" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtedit/op_respawn" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
 		<child widget="cp/gtedit/label"/>
-		<child widget="cp/gtedit/label_small"/>
 		<child widget="cp/gtedit/value"/>
-		<child widget="cp/gtedit/value_small"/>
 	</widget>
-	<widget name="cp/gtedit/op_player" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtedit/op_player" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
 		<child widget="cp/gtedit/label"/>
-		<child widget="cp/gtedit/label_small"/>
 		<child widget="cp/gtedit/value"/>
-		<child widget="cp/gtedit/value_small"/>
 	</widget>
-	<widget name="cp/gtedit/op_items" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtedit/op_items" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
 		<child widget="cp/gtedit/label"/>
-		<child widget="cp/gtedit/label_small"/>
 		<child widget="cp/gtedit/value"/>
-		<child widget="cp/gtedit/value_small"/>
 	</widget>
-	<widget name="cp/gtedit/op_team" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtedit/op_team" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
 		<child widget="cp/gtedit/label"/>
-		<child widget="cp/gtedit/label_small"/>
 		<child widget="cp/gtedit/value"/>
-		<child widget="cp/gtedit/value_small"/>
 	</widget>
-	<widget name="cp/gtedit/op_rules" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtedit/op_rules" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start" run="port h3 gametype category" open="h3/gtopt/screen"/>
 		<child widget="cp/gtedit/label"/>
-		<child widget="cp/gtedit/label_small"/>
 		<child widget="cp/gtedit/value"/>
-		<child widget="cp/gtedit/value_small"/>
 	</widget>
-	<widget name="cp/gtedit/op_save" type="text" width="512" height="28" bitmap="option_bkds" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4" string_list="h3/gametype_text" string_index="12">
+	<widget name="cp/gtedit/op_save" type="text" width="600" height="17" bitmap="server_item_bkds" font="ui\small_ui" color="#FF2896FF" text_x="44" text_y="1" string_list="h3/gametype_text" string_index="12">
 		<on event="a start" run="port h3 gametype save" back="true"/>
 	</widget>
 	<widget name="cp/gtedit/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 gametype editor"/>
 		<child widget="cp/gtedit/op_name" x="0" y="0"/>
-		<child widget="cp/gtedit/op_game" x="0" y="26"/>
-		<child widget="cp/gtedit/op_general" x="0" y="52"/>
-		<child widget="cp/gtedit/op_respawn" x="0" y="78"/>
-		<child widget="cp/gtedit/op_player" x="0" y="104"/>
-		<child widget="cp/gtedit/op_items" x="0" y="130"/>
-		<child widget="cp/gtedit/op_team" x="0" y="156"/>
-		<child widget="cp/gtedit/op_rules" x="0" y="182"/>
-		<child widget="cp/gtedit/op_save" x="0" y="208"/>
+		<child widget="cp/gtedit/op_game" x="0" y="19"/>
+		<child widget="cp/gtedit/op_general" x="0" y="38"/>
+		<child widget="cp/gtedit/op_respawn" x="0" y="57"/>
+		<child widget="cp/gtedit/op_player" x="0" y="76"/>
+		<child widget="cp/gtedit/op_items" x="0" y="95"/>
+		<child widget="cp/gtedit/op_team" x="0" y="114"/>
+		<child widget="cp/gtedit/op_rules" x="0" y="133"/>
+		<child widget="cp/gtedit/op_save" x="0" y="152"/>
 	</widget>
-	<widget name="cp/gtedit/subtitle" type="text" left="64" top="78" width="512" height="20" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="cp/gtedit/help" type="text" left="64" top="338" width="512" height="40" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="cp/gtedit/status" type="text" left="64" top="380" width="512" height="26" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
+	<widget name="cp/gtedit/subtitle" type="text" left="64" top="80" width="512" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/gtedit/help" type="text" left="64" top="300" width="512" height="54" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="cp/gtedit/status" type="text" left="64" top="360" width="512" height="46" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
 	<widget name="cp/gtedit/b_butn" left="371" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\b_butn"/>
 	<widget name="cp/gtedit/back" type="text" left="392" top="414" width="86" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/standin_keys" string_index="0"/>
 	<widget name="cp/gtedit/a_butn" left="481" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>
@@ -486,111 +457,93 @@
 		<child widget="cp/gtedit/back"/>
 		<child widget="cp/gtedit/a_butn"/>
 		<child widget="cp/gtedit/change"/>
-		<child widget="cp/gtedit/list" x="64" y="100"/>
+		<child widget="cp/gtedit/list" x="20" y="100"/>
 	</widget>
 
 	<!-- a group of settings: up to eight rows (port h3 gametype options names and fills them, the others
 	     hidden), the group's name under the heading, the focused row's help and a note under the rows -->
-	<widget name="cp/gtopt/label" type="text" left="0" top="0" width="262" height="24" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4"/>
-	<widget name="cp/gtopt/label_small" type="text" left="0" top="0" width="262" height="24" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="7"/>
-	<widget name="cp/gtopt/value" type="text" left="262" top="3" width="220" height="22" align="center" font="ui\large_ui" color="#FF2896FF" text_y="1" text_flags="no_focus_test"/>
-	<widget name="cp/gtopt/value_small" type="text" left="262" top="3" width="220" height="22" align="center" font="ui\small_ui" color="#FF2896FF" text_y="4" text_flags="no_focus_test"/>
-	<widget name="cp/gtopt/arrow_left" left="252" top="6" width="12" height="16" bitmap="arrow_sm_left"/>
-	<widget name="cp/gtopt/arrow_right" left="482" top="6" width="12" height="16" bitmap="arrow_sm_right"/>
-	<widget name="cp/gtopt/op_1" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtopt/label" type="text" left="0" top="0" width="270" height="17" font="ui\small_ui" color="#FF2896FF" text_x="44" text_y="1"/>
+	<widget name="cp/gtopt/value" type="text" left="291" top="0" width="220" height="17" align="center" font="ui\small_ui" color="#FF2896FF" text_y="1" text_flags="no_focus_test"/>
+	<widget name="cp/gtopt/arrow_left" left="279" top="1" width="12" height="16" bitmap="arrow_sm_left"/>
+	<widget name="cp/gtopt/arrow_right" left="511" top="1" width="12" height="16" bitmap="arrow_sm_right"/>
+	<widget name="cp/gtopt/op_1" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start right stick_right" run="port h3 gametype next"/>
 		<on event="left stick_left" run="port h3 gametype previous"/>
 		<child widget="cp/gtopt/label"/>
-		<child widget="cp/gtopt/label_small"/>
 		<child widget="cp/gtopt/value"/>
-		<child widget="cp/gtopt/value_small"/>
 		<child widget="cp/gtopt/arrow_left"/>
 		<child widget="cp/gtopt/arrow_right"/>
 	</widget>
-	<widget name="cp/gtopt/op_2" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtopt/op_2" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start right stick_right" run="port h3 gametype next"/>
 		<on event="left stick_left" run="port h3 gametype previous"/>
 		<child widget="cp/gtopt/label"/>
-		<child widget="cp/gtopt/label_small"/>
 		<child widget="cp/gtopt/value"/>
-		<child widget="cp/gtopt/value_small"/>
 		<child widget="cp/gtopt/arrow_left"/>
 		<child widget="cp/gtopt/arrow_right"/>
 	</widget>
-	<widget name="cp/gtopt/op_3" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtopt/op_3" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start right stick_right" run="port h3 gametype next"/>
 		<on event="left stick_left" run="port h3 gametype previous"/>
 		<child widget="cp/gtopt/label"/>
-		<child widget="cp/gtopt/label_small"/>
 		<child widget="cp/gtopt/value"/>
-		<child widget="cp/gtopt/value_small"/>
 		<child widget="cp/gtopt/arrow_left"/>
 		<child widget="cp/gtopt/arrow_right"/>
 	</widget>
-	<widget name="cp/gtopt/op_4" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtopt/op_4" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start right stick_right" run="port h3 gametype next"/>
 		<on event="left stick_left" run="port h3 gametype previous"/>
 		<child widget="cp/gtopt/label"/>
-		<child widget="cp/gtopt/label_small"/>
 		<child widget="cp/gtopt/value"/>
-		<child widget="cp/gtopt/value_small"/>
 		<child widget="cp/gtopt/arrow_left"/>
 		<child widget="cp/gtopt/arrow_right"/>
 	</widget>
-	<widget name="cp/gtopt/op_5" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtopt/op_5" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start right stick_right" run="port h3 gametype next"/>
 		<on event="left stick_left" run="port h3 gametype previous"/>
 		<child widget="cp/gtopt/label"/>
-		<child widget="cp/gtopt/label_small"/>
 		<child widget="cp/gtopt/value"/>
-		<child widget="cp/gtopt/value_small"/>
 		<child widget="cp/gtopt/arrow_left"/>
 		<child widget="cp/gtopt/arrow_right"/>
 	</widget>
-	<widget name="cp/gtopt/op_6" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtopt/op_6" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start right stick_right" run="port h3 gametype next"/>
 		<on event="left stick_left" run="port h3 gametype previous"/>
 		<child widget="cp/gtopt/label"/>
-		<child widget="cp/gtopt/label_small"/>
 		<child widget="cp/gtopt/value"/>
-		<child widget="cp/gtopt/value_small"/>
 		<child widget="cp/gtopt/arrow_left"/>
 		<child widget="cp/gtopt/arrow_right"/>
 	</widget>
-	<widget name="cp/gtopt/op_7" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtopt/op_7" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start right stick_right" run="port h3 gametype next"/>
 		<on event="left stick_left" run="port h3 gametype previous"/>
 		<child widget="cp/gtopt/label"/>
-		<child widget="cp/gtopt/label_small"/>
 		<child widget="cp/gtopt/value"/>
-		<child widget="cp/gtopt/value_small"/>
 		<child widget="cp/gtopt/arrow_left"/>
 		<child widget="cp/gtopt/arrow_right"/>
 	</widget>
-	<widget name="cp/gtopt/op_8" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="#FF2896FF">
+	<widget name="cp/gtopt/op_8" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="#FF2896FF">
 		<on event="a start right stick_right" run="port h3 gametype next"/>
 		<on event="left stick_left" run="port h3 gametype previous"/>
 		<child widget="cp/gtopt/label"/>
-		<child widget="cp/gtopt/label_small"/>
 		<child widget="cp/gtopt/value"/>
-		<child widget="cp/gtopt/value_small"/>
 		<child widget="cp/gtopt/arrow_left"/>
 		<child widget="cp/gtopt/arrow_right"/>
 	</widget>
 	<widget name="cp/gtopt/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 gametype options"/>
 		<child widget="cp/gtopt/op_1" x="0" y="0"/>
-		<child widget="cp/gtopt/op_2" x="0" y="26"/>
-		<child widget="cp/gtopt/op_3" x="0" y="52"/>
-		<child widget="cp/gtopt/op_4" x="0" y="78"/>
-		<child widget="cp/gtopt/op_5" x="0" y="104"/>
-		<child widget="cp/gtopt/op_6" x="0" y="130"/>
-		<child widget="cp/gtopt/op_7" x="0" y="156"/>
-		<child widget="cp/gtopt/op_8" x="0" y="182"/>
+		<child widget="cp/gtopt/op_2" x="0" y="19"/>
+		<child widget="cp/gtopt/op_3" x="0" y="38"/>
+		<child widget="cp/gtopt/op_4" x="0" y="57"/>
+		<child widget="cp/gtopt/op_5" x="0" y="76"/>
+		<child widget="cp/gtopt/op_6" x="0" y="95"/>
+		<child widget="cp/gtopt/op_7" x="0" y="114"/>
+		<child widget="cp/gtopt/op_8" x="0" y="133"/>
 	</widget>
 	<widget name="cp/gtopt/title" type="text" left="64" top="74" width="300" height="24" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
 	<widget name="cp/gtopt/subtitle" type="text" left="370" top="80" width="206" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" align="right"/>
-	<widget name="cp/gtopt/help" type="text" left="64" top="318" width="512" height="40" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="cp/gtopt/help" type="text" left="64" top="300" width="512" height="54" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
 	<widget name="cp/gtopt/note" type="text" left="64" top="360" width="512" height="46" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="cp/gtopt/b_butn" left="371" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\b_butn"/>
 	<widget name="cp/gtopt/back" type="text" left="392" top="414" width="86" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/standin_keys" string_index="0"/>
@@ -607,6 +560,6 @@
 		<child widget="cp/gtopt/back"/>
 		<child widget="cp/gtopt/a_butn"/>
 		<child widget="cp/gtopt/change"/>
-		<child widget="cp/gtopt/list" x="64" y="100"/>
+		<child widget="cp/gtopt/list" x="20" y="100"/>
 	</widget>
 </menus>

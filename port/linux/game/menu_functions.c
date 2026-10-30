@@ -935,7 +935,7 @@ static short classic_name_room(struct widget_instance *widget)
 	ui_widget_port_text_measure(tag, tag->parameters.text_box.text, &room_width, &room_height, &text_width, &text_height);
 	ui_widget_port_text_box_span(widget, &name_left, &name_right);
 	ui_widget_port_text_box_span(tag, &tag_left, &tag_right);
-	return (short)MAX(tag_right - text_width - 10 - name_left, 16);
+	return (short)MAX(tag_right - text_width - 12 - name_left, 16);
 }
 
 /* (Menu style Classic+) a button key's words, as the Xbox's: "=" and the word in capitals
@@ -1002,6 +1002,34 @@ static void classic_text_fit(struct widget_instance *widget, char const *text)
 	}
 	if (twin)
 		text_set(twin, empty, 1);
+	/* (a row's tag - ONLINE, REQUEST - beside a name that needs its room - a friend's of 16 letters -:
+	left out, the name whole; the description's panel says the same) */
+	if (widget->name && widget->parent && (!strcmp(widget->name, "row_tag") || !strcmp(widget->name, "row_note")) &&
+		length > 1)
+	{
+		struct widget_instance *row_name = NULL;
+
+		for (sibling = widget->parent->child; sibling; sibling = sibling->next)
+		{
+			if (sibling->name && !strcmp(sibling->name, "row_name") && sibling->type == _ui_widget_type_text_box)
+				row_name = sibling;
+		}
+		text_set(widget, characters, length);
+		if (row_name && row_name->parameters.text_box.text && row_name->parameters.text_box.text[0])
+		{
+			short room = classic_name_room(row_name), room_width, room_height, text_width, text_height;
+
+			ui_widget_port_text_measure(row_name, row_name->parameters.text_box.text, &room_width, &room_height,
+				&text_width, &text_height);
+			if (room > 0 && text_width > room)
+			{
+				static unsigned short const space[2] = { ' ', 0 };
+
+				text_set(widget, space, 2);
+			}
+		}
+		return;
+	}
 	classic_room_limit = classic_name_room(widget);
 	if (length <= 1 || text_fits(widget, characters))
 	{
@@ -1110,18 +1138,41 @@ static void text_show(struct widget_instance *widget, char const *text)
 	unsigned short characters[481];
 	long length;
 
-	/* (Menu style Classic+: a row of the classic set's whose words are its row_name's or option_name's) */
+	/* (Menu style Classic+: a row of the classic set's whose words are its row_name's, option_name's
+	or label's; a row with a value's box too - row_tag, value - "LABEL: VALUE" split between them,
+	the value at the right, as the original menus' settings show theirs) */
 	if (widget && widget->type != _ui_widget_type_text_box && halo_menu_style_classic_plus() && classic_widget(widget))
 	{
-		struct widget_instance *child;
+		struct widget_instance *child, *name = NULL, *value = NULL;
 
 		for (child = widget->child; child; child = child->next)
 		{
-			if (child->name && (!strcmp(child->name, "row_name") || !strcmp(child->name, "option_name")))
+			if (!child->name || child->type != _ui_widget_type_text_box)
+				continue;
+			if (!strcmp(child->name, "row_name") || !strcmp(child->name, "option_name") || !strcmp(child->name, "label"))
+				name = child;
+			else if (!strcmp(child->name, "row_tag") || !strcmp(child->name, "value"))
+				value = child;
+		}
+		if (name)
+		{
+			char const *colon = value && text ? strstr(text, ": ") : NULL;
+
+			if (colon)
 			{
-				text_show(child, text);
-				return;
+				char label[160];
+
+				snprintf(label, sizeof(label), "%.*s", (int)MIN((long)(colon - text), (long)sizeof(label) - 1), text);
+				text_show(value, colon + 2);
+				text_show(name, label);
 			}
+			else
+			{
+				if (value)
+					text_show(value, " ");
+				text_show(name, text);
+			}
+			return;
 		}
 	}
 	if (!widget || widget->type != _ui_widget_type_text_box)
@@ -8347,7 +8398,9 @@ static void h3_gametypes_update(struct widget_instance *list)
 		type = h3_gametypes_item_type((short)item);
 		if (type == NONE)
 		{
-			snprintf(text, sizeof(text), "%s", T("CREATE NEW GAME TYPE"));
+			/* (Menu style Classic+: the words that fit its rows in their large font) */
+			snprintf(text, sizeof(text), "%s", halo_menu_style_classic_plus() ? T("ADD GAME TYPE") :
+				T("CREATE NEW GAME TYPE"));
 			line[0] = 0;
 		}
 		else
@@ -8356,7 +8409,9 @@ static void h3_gametypes_update(struct widget_instance *list)
 			h3_capitals(text);
 			if (h3_gametypes.damaged[type])
 				snprintf(line, sizeof(line), "%s", T("DAMAGED"));
-			else if (type >= h3_gametypes.saved_count)
+			/* (Menu style Classic+: no BUILT-IN column - the original list has none -; the
+			description's panel says whose it is) */
+			else if (type >= h3_gametypes.saved_count && !halo_menu_style_classic_plus())
 				snprintf(line, sizeof(line), "%s", T("BUILT-IN"));
 			else
 				line[0] = 0;

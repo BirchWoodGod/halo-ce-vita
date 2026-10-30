@@ -135,9 +135,10 @@ def tab_rows(prefix, h3_prefix, names, columns=(), string_list=None, first_index
 
 
 def row_columns(prefix, tag='row_tag'):
-    w(f'\t<widget name="{prefix}/row_name" type="text" left="13" top="5" width="205" height="24" font="ui\\large_ui" color="{BLUE}"/>')
-    w(f'\t<widget name="{prefix}/row_name_small" type="text" left="13" top="9" width="205" height="18" font="ui\\small_ui" color="{BLUE}"/>')
-    w(f'\t<widget name="{prefix}/{tag}" type="text" left="98" top="9" width="120" height="18" align="right" font="ui\\small_ui" color="{BLUE}"/>')
+    """a row's name in the large font, its tag in the small one at the right, ending well short of
+    the description's field"""
+    w(f'\t<widget name="{prefix}/row_name" type="text" left="13" top="5" width="199" height="24" font="ui\\large_ui" color="{BLUE}"/>')
+    w(f'\t<widget name="{prefix}/{tag}" type="text" left="92" top="9" width="120" height="18" align="right" font="ui\\small_ui" color="{BLUE}"/>')
 
 
 def column_list(name, h3_name, rows, x=0, y=0, step=ROW_STEP):
@@ -150,33 +151,29 @@ def column_list(name, h3_name, rows, x=0, y=0, step=ROW_STEP):
 
 
 def option_rows(prefix, h3_prefix, names):
-    """Halo PC's option_bkds rows (512 x 28, its Server Setup's): the label at the left, the value
-    between the spinners' arrows at the right (each its smaller twin for a long one)"""
-    w(f'\t<widget name="{prefix}/label" type="text" left="0" top="0" width="262" height="24" font="ui\\large_ui" color="{BLUE}" text_x="13" text_y="4"/>')
-    w(f'\t<widget name="{prefix}/label_small" type="text" left="0" top="0" width="262" height="24" font="ui\\small_ui" color="{BLUE}" text_x="13" text_y="7"/>')
-    w(f'\t<widget name="{prefix}/value" type="text" left="262" top="3" width="220" height="22" align="center" font="ui\\large_ui" color="{BLUE}" text_y="1" text_flags="no_focus_test"/>')
-    w(f'\t<widget name="{prefix}/value_small" type="text" left="262" top="3" width="220" height="22" align="center" font="ui\\small_ui" color="{BLUE}" text_y="4" text_flags="no_focus_test"/>')
-    w(f'\t<widget name="{prefix}/arrow_left" left="252" top="6" width="12" height="16" bitmap="arrow_sm_left"/>')
-    w(f'\t<widget name="{prefix}/arrow_right" left="482" top="6" width="12" height="16" bitmap="arrow_sm_right"/>')
+    """the settings' rows as classic/customize.xml's (CUSTOMIZATION): Halo PC's server browser rows
+    across the screen, the setting at the left and its value between the spinners' arrows, both in
+    ui.map's small font (one size for every row: the translations' longest labels fit it)"""
+    w(f'\t<widget name="{prefix}/label" type="text" left="0" top="0" width="270" height="17" font="ui\\small_ui" color="{BLUE}" text_x="44" text_y="1"/>')
+    w(f'\t<widget name="{prefix}/value" type="text" left="291" top="0" width="220" height="17" align="center" font="ui\\small_ui" color="{BLUE}" text_y="1" text_flags="no_focus_test"/>')
+    w(f'\t<widget name="{prefix}/arrow_left" left="279" top="1" width="12" height="16" bitmap="arrow_sm_left"/>')
+    w(f'\t<widget name="{prefix}/arrow_right" left="511" top="1" width="12" height="16" bitmap="arrow_sm_right"/>')
     for row in names:
         h3_row = H3[f'{h3_prefix}/{row}']
         if h3_row.get('type') == 'text':
             extra = ''
             if h3_row.get('string_list'):
                 extra = f' string_list="{h3_row.get("string_list")}" string_index="{h3_row.get("string_index")}"'
-            w(f'\t<widget name="{prefix}/{row}" type="text" width="512" height="28" bitmap="option_bkds" font="ui\\large_ui" color="{BLUE}" text_x="13" text_y="4"{extra}>')
+            w(f'\t<widget name="{prefix}/{row}" type="text" width="600" height="17" bitmap="server_item_bkds" font="ui\\small_ui" color="{BLUE}" text_x="44" text_y="1"{extra}>')
             for line in handlers(f'{h3_prefix}/{row}'):
                 w(line)
             w('\t</widget>')
             continue
-        w(f'\t<widget name="{prefix}/{row}" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="option_bkds" color="{BLUE}">')
+        w(f'\t<widget name="{prefix}/{row}" width="600" height="17" flags="pass_unhandled_to_focused_child" bitmap="server_item_bkds" color="{BLUE}">')
         for line in handlers(f'{h3_prefix}/{row}'):
             w(line)
-        children = [c.get('widget').split('/')[-1] for c in H3[f'{h3_prefix}/{row}'] if c.tag == 'child']
-        for child in children:
+        for child in [c.get('widget').split('/')[-1] for c in H3[f'{h3_prefix}/{row}'] if c.tag == 'child']:
             w(f'\t\t<child widget="{prefix}/{child}"/>')
-            if child in ('label', 'value'):
-                w(f'\t\t<child widget="{prefix}/{child}_small"/>')
         w('\t</widget>')
 
 
@@ -201,7 +198,8 @@ heading('cp/network/header', 'header_select_network')
 tab_rows('cp/network', 'h3/network', ['item_0', 'item_1', 'item_2', 'item_3'], string_list='h3/networks')
 column_list('cp/network/list', 'h3/network/list', [f'cp/network/item_{i}' for i in range(4)])
 field('cp/network/field')
-text('cp/network/network_text', IN_X, 90, IN_W, 200, extra=' string_list="h3/network_text"')
+# (the Halo 3 set's words, broken into lines for its own font: a little wider here for ui.map's)
+text('cp/network/network_text', IN_X - 4, 90, IN_W + 10, 200, extra=' string_list="h3/network_text"')
 footer = keys('cp/network', {'b': ('back', K, 0), 'a': ('select', K, 1)})
 screen('cp/network/screen', ['cp/network/header', 'cp/network/field', 'cp/network/network_text'] + footer +
        [('cp/network/list', ROW_X, ROW_Y)], 'h3/network/screen')
@@ -212,7 +210,7 @@ heading('cp/gametypes/header', 'header_game_types')
 heading('cp/gtbase/header', 'header_choose_a_base')
 heading('cp/gtedit/header', 'header_edit_game_type')
 row_columns('cp/gametypes', 'row_note')
-tab_rows('cp/gametypes', 'h3/gametypes', [f'row_{i}' for i in range(1, 11)], columns=('row_name', 'row_name_small', 'row_note'))
+tab_rows('cp/gametypes', 'h3/gametypes', [f'row_{i}' for i in range(1, 11)], columns=('row_name', 'row_note'))
 column_list('cp/gametypes/list', 'h3/gametypes/list', [f'cp/gametypes/row_{i}' for i in range(1, 11)])
 field('cp/gametypes/field')
 text('cp/gametypes/info_name', IN_X, 88, IN_W, 26, 'large', WHITE)
@@ -292,24 +290,24 @@ screen('cp/gtbase/screen', ['cp/gtbase/header', 'cp/gtbase/field', 'cp/gtbase/ba
 w('\n\t<!-- the editor: NAME, GAME, the groups of settings, SAVE on Halo PC\'s option rows; what the game type\n\t     is under the heading, the focused row\'s help and the outcome under the rows -->')
 editor = ['op_name', 'op_game', 'op_general', 'op_respawn', 'op_player', 'op_items', 'op_team', 'op_rules', 'op_save']
 option_rows('cp/gtedit', 'h3/gtedit', editor)
-column_list('cp/gtedit/list', 'h3/gtedit/list', [f'cp/gtedit/{r}' for r in editor], step=26)
-text('cp/gtedit/subtitle', 64, 78, 512, 20)
-text('cp/gtedit/help', 64, 338, 512, 40, color=WHITE)
-text('cp/gtedit/status', 64, 380, 512, 26, color=YELLOW)
+column_list('cp/gtedit/list', 'h3/gtedit/list', [f'cp/gtedit/{r}' for r in editor], step=19)
+text('cp/gtedit/subtitle', 64, 80, 512, 18)
+text('cp/gtedit/help', 64, 300, 512, 54, color=WHITE)
+text('cp/gtedit/status', 64, 360, 512, 46, color=YELLOW)
 footer = keys('cp/gtedit', {'b': ('back', K, 0), 'a': ('change', K, 3)})
 screen('cp/gtedit/screen', ['cp/gtedit/header', 'cp/gtedit/subtitle', 'cp/gtedit/help', 'cp/gtedit/status'] + footer +
-       [('cp/gtedit/list', 64, 100)], 'h3/gtedit/screen')
+       [('cp/gtedit/list', 20, 100)], 'h3/gtedit/screen')
 
 w('\n\t<!-- a group of settings: up to eight rows (port h3 gametype options names and fills them, the others\n\t     hidden), the group\'s name under the heading, the focused row\'s help and a note under the rows -->')
 option_rows('cp/gtopt', 'h3/gtopt', [f'op_{i}' for i in range(1, 9)])
-column_list('cp/gtopt/list', 'h3/gtopt/list', [f'cp/gtopt/op_{i}' for i in range(1, 9)], step=26)
+column_list('cp/gtopt/list', 'h3/gtopt/list', [f'cp/gtopt/op_{i}' for i in range(1, 9)], step=19)
 text('cp/gtopt/title', 64, 74, 300, 24, 'large', WHITE)
 text('cp/gtopt/subtitle', 370, 80, 206, 18, extra=' align="right"')
-text('cp/gtopt/help', 64, 318, 512, 40, color=WHITE)
+text('cp/gtopt/help', 64, 300, 512, 54, color=WHITE)
 text('cp/gtopt/note', 64, 360, 512, 46)
 footer = keys('cp/gtopt', {'b': ('back', K, 0), 'a': ('change', K, 3)})
 screen('cp/gtopt/screen', ['cp/gtedit/header', 'cp/gtopt/title', 'cp/gtopt/subtitle', 'cp/gtopt/help', 'cp/gtopt/note'] + footer +
-       [('cp/gtopt/list', 64, 100)], 'h3/gtopt/screen')
+       [('cp/gtopt/list', 20, 100)], 'h3/gtopt/screen')
 w('</menus>')
 open(os.path.join(sys.argv[1], 'standins.xml'), 'w').write('\n'.join(out) + '\n')
 

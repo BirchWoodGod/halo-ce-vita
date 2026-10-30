@@ -14,6 +14,8 @@ FIELD = r'ui\shell\bitmaps\list_field'
 # description's field at 275,78 320 x 322, its words inside it from 290; the button key's keys at
 # 40, 196 (the further ones), 371 (B) and 481 (A), each key's words after it: "=" and the word)
 ROW_X = 51
+# (the lists' rows: list_item_bkd's tab, 24 high for the small font)
+ROW_H = 24
 FIELD_X, FIELD_Y, FIELD_W, FIELD_H = 275, 78, 320, 322
 IN_X, IN_W = 290, 290
 ITEM = r'ui\shell\bitmaps\list_item_bkd'
@@ -44,22 +46,21 @@ def keys(prefix, a=True, x=False, y=False, ylist=None, yindex=None):
         names += ['a_butn', 'a_label']
     return lines, [f'{prefix}/{n}' for n in names]
 
-def rows(prefix, run, count, open_=None, cols=('row_name', 'row_name_small', 'row_tag')):
+def rows(prefix, run, count, open_=None, cols=('row_name', 'row_tag')):
     """a list's rows: list_item_bkd (the first list_item_bkd_top, as the Xbox's lists), the name in the large font, the tag at the right"""
     for i in range(1, count + 1):
         handler = f'<on event="a start" run="{run}"' + (f' open="{open_}"' if open_ else '') + '/>'
-        w(f'\t<widget name="{prefix}/row_{i}" width="226" height="32" bitmap="{ITEM_TOP if i == 1 else ITEM}">')
+        w(f'\t<widget name="{prefix}/row_{i}" width="226" height="{ROW_H}" bitmap="{ITEM_TOP if i == 1 else ITEM}">')
         w(f'\t\t{handler}')
         for c in cols:
             w(f'\t\t<child widget="{prefix}/{c}"/>')
         w('\t</widget>')
 
 def row_columns(prefix):
-    """a row's name in the large font (its smaller twin, row_name_small, when the name is too long for
-    it: menu_functions.c classic_text_fit) and its tag at the right of the tab, both inside it"""
-    w(f'\t<widget name="{prefix}/row_name" type="text" left="13" top="5" width="205" height="24" font="ui\\large_ui" color="{BLUE}"/>')
-    w(f'\t<widget name="{prefix}/row_name_small" type="text" left="13" top="9" width="205" height="18" font="ui\\small_ui" color="{BLUE}"/>')
-    w(f'\t<widget name="{prefix}/row_tag" type="text" left="98" top="9" width="120" height="18" align="right" font="ui\\small_ui" color="{BLUE}"/>')
+    """a row's name and its tag at the right, both in ui.map's small font (the original menus' font for
+    a dense list: one size for every row of the screen), the tag ending well short of the field"""
+    w(f'\t<widget name="{prefix}/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\\small_ui" color="{BLUE}"/>')
+    w(f'\t<widget name="{prefix}/row_tag" type="text" left="92" top="5" width="120" height="18" align="right" font="ui\\small_ui" color="{BLUE}"/>')
 
 w('<?xml version="1.0" encoding="UTF-8"?>')
 w('''<!-- Menu style Halo CE: FRIENDS, ADD FRIEND, PARTY and INVITE FRIENDS in the look of the original
@@ -101,7 +102,7 @@ w('\t\t<on event="y" run="port h3 friends options ask" open="h3/friends/options"
 w('\t\t<on event="left_trigger" run="port h3 friends page up"/>')
 w('\t\t<on event="right_trigger" run="port h3 friends page down"/>')
 for i in range(10):
-    w(f'\t\t<child widget="classic/friends/row_{i + 1}" x="{ROW_X}" y="{78 + 32 * i}"/>')
+    w(f'\t\t<child widget="classic/friends/row_{i + 1}" x="{ROW_X}" y="{78 + ROW_H * i}"/>')
 w('\t</widget>')
 w(f'\t<widget name="classic/friends/field" left="{FIELD_X}" top="{FIELD_Y}" width="{FIELD_W}" height="{FIELD_H}" bitmap="{FIELD}"/>')
 w(text('classic/friends/code_label', IN_X, 88, IN_W, 18, extra=' string_list="classic/friends_text" string_index="0"'))
@@ -134,22 +135,20 @@ def options(prefix, run, count, header):
     w(text(f'{prefix}/options_text', IN_X, 118, IN_W, 270))
     # (each option's words in its row_name, a long one's in its smaller twin: menu_functions.c's
     # text_show gives a row's words to its row_name)
-    w(f'\t<widget name="{prefix}/option_name" type="text" left="13" top="5" width="205" height="24" font="ui\\large_ui" color="{BLUE}"/>')
-    w(f'\t<widget name="{prefix}/option_name_small" type="text" left="13" top="9" width="205" height="18" font="ui\\small_ui" color="{BLUE}"/>')
+    w(f'\t<widget name="{prefix}/option_name" type="text" left="13" top="5" width="199" height="18" font="ui\\small_ui" color="{BLUE}"/>')
     for i in range(1, count + 1):
-        w(f'\t<widget name="{prefix}/option_{i}" width="226" height="32" bitmap="{ITEM}">')
+        w(f'\t<widget name="{prefix}/option_{i}" width="226" height="{ROW_H}" bitmap="{ITEM}">')
         w(f'\t\t<on event="a" run="{run}" back="true"/>')
         w(f'\t\t<child widget="{prefix}/option_name"/>')
-        w(f'\t\t<child widget="{prefix}/option_name_small"/>')
         w('\t</widget>')
-    w(f'\t<widget name="{prefix}/option_back" type="text" width="226" height="32" bitmap="{ITEM_TOP}" font="ui\\large_ui" color="{BLUE}" text_x="13" text_y="5" string_list="classic/back_text" string_index="0">')
+    w(f'\t<widget name="{prefix}/option_back" type="text" width="226" height="{ROW_H}" bitmap="{ITEM_TOP}" font="ui\\small_ui" color="{BLUE}" text_x="13" text_y="5" string_list="classic/back_text" string_index="0">')
     w('\t\t<on event="a" back="true"/>')
     w('\t</widget>')
     w(f'\t<widget name="{prefix}/options_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">')
     w(f'\t\t<data input="{run}s"/>')
     w(f'\t\t<child widget="{prefix}/option_back" y="0"/>')
     for i in range(1, count + 1):
-        w(f'\t\t<child widget="{prefix}/option_{i}" y="{32 * i}"/>')
+        w(f'\t\t<child widget="{prefix}/option_{i}" y="{ROW_H * i}"/>')
     w('\t</widget>')
     w(f'\t<widget name="{prefix}/options_a_butn" left="481" top="414" width="21" height="26" bitmap="ui\\shell\\bitmaps\\a_butn"/>')
     w(text(f'{prefix}/options_select', 502, 414, 134, 24, 'large', BLUE, ' string_list="classic/friends_text" string_index="3"'))
@@ -205,7 +204,7 @@ w('\t\t<on event="y" run="port h3 party type"/>')
 w('\t\t<on event="left_trigger" run="port h3 party page up"/>')
 w('\t\t<on event="right_trigger" run="port h3 party page down"/>')
 for i in range(10):
-    w(f'\t\t<child widget="classic/party/row_{i + 1}" x="{ROW_X}" y="{78 + 32 * i}"/>')
+    w(f'\t\t<child widget="classic/party/row_{i + 1}" x="{ROW_X}" y="{78 + ROW_H * i}"/>')
 w('\t</widget>')
 w(f'\t<widget name="classic/party/field" left="{FIELD_X}" top="{FIELD_Y}" width="{FIELD_W}" height="{FIELD_H}" bitmap="{FIELD}"/>')
 w(text('classic/party/party_status', IN_X, 88, IN_W, 54, 'large', WHITE))
@@ -242,17 +241,17 @@ options('classic/party', 'port h3 party option', 2, 'classic/header/party')
 # ---- QUICK CHAT
 w('\n\t<!-- QUICK CHAT (Square): the presets, Cross sends one to the party -->')
 for i in range(1, 9):
-    w(f'\t<widget name="classic/party/preset_{i}" type="text" width="226" height="32" bitmap="{ITEM}" font="ui\\large_ui" color="{BLUE}" text_x="13" text_y="5">')
+    w(f'\t<widget name="classic/party/preset_{i}" type="text" width="226" height="{ROW_H}" bitmap="{ITEM}" font="ui\\small_ui" color="{BLUE}" text_x="13" text_y="5">')
     w('\t\t<on event="a" run="port h3 party preset" back="true"/>')
     w('\t</widget>')
-w(f'\t<widget name="classic/party/quick_back" type="text" width="226" height="32" bitmap="{ITEM_TOP}" font="ui\\large_ui" color="{BLUE}" text_x="13" text_y="5" string_list="classic/back_text" string_index="0">')
+w(f'\t<widget name="classic/party/quick_back" type="text" width="226" height="{ROW_H}" bitmap="{ITEM_TOP}" font="ui\\small_ui" color="{BLUE}" text_x="13" text_y="5" string_list="classic/back_text" string_index="0">')
 w('\t\t<on event="a" back="true"/>')
 w('\t</widget>')
 w('\t<widget name="classic/party/quick_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">')
 w('\t\t<data input="port h3 party quick"/>')
 w('\t\t<child widget="classic/party/quick_back" y="0"/>')
 for i in range(1, 9):
-    w(f'\t\t<child widget="classic/party/preset_{i}" y="{32 * i}"/>')
+    w(f'\t\t<child widget="classic/party/preset_{i}" y="{ROW_H * i}"/>')
 w('\t</widget>')
 w('\t<bitmap name="classic/header/quick_art">')
 w('\t\t<frame png="classic/{lang}/header_quick_chat.png" width="512" height="64"/>')
@@ -279,7 +278,7 @@ rows('classic/invite', 'port h3 invite act', 10)
 w('\t<widget name="classic/invite/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">')
 w('\t\t<data input="port h3 invite"/>')
 for i in range(10):
-    w(f'\t\t<child widget="classic/invite/row_{i + 1}" x="{ROW_X}" y="{78 + 32 * i}"/>')
+    w(f'\t\t<child widget="classic/invite/row_{i + 1}" x="{ROW_X}" y="{78 + ROW_H * i}"/>')
 w('\t</widget>')
 w(f'\t<widget name="classic/invite/field" left="{FIELD_X}" top="{FIELD_Y}" width="{FIELD_W}" height="{FIELD_H}" bitmap="{FIELD}"/>')
 w(text('classic/invite/invite_status', IN_X, 88, IN_W, 54, 'large', WHITE))
