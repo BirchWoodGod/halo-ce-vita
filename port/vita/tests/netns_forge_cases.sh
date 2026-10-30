@@ -99,7 +99,22 @@
 #   forgeold112 a joiner that does not say the 1.1.2 Forge features (HALO_FORGE_NET_FEATURES=0,
 #              as a 1.1.1 build) is refused from a Forge game whose layout has a
 #              teleporter ("This Forge map needs version 1.1.2" on the host; the joiner
-#              told its Halo CE is too old), and the host goes on to its game
+#              told its Halo CE is too old), and the host goes on to its game.
+#              HALO_TEST_VITA_JOINER: another joiner's build (a 1.1.1 one), refused the same
+#   forgeold111 a joiner that does not say the 1.1.2 Forge features (HALO_FORGE_NET_FEATURES=0,
+#              or HALO_TEST_VITA_JOINER's build: a 1.1.1 one) plays a Forge game whose map
+#              variant is of 1.1.1's format (forge_files_test --write's good.hmv: no
+#              teleporter, game type object or physics): not refused, has its 5 objects
+#   forgelate112 1.1.2's game type objects and physics to a joiner in the game and to one that
+#              joins it in progress (two machines: the joiner leaves, HALO_NETWORK_TEST_REJOIN,
+#              and joins again): the host places a CTF flag, a hill point, a boulder PHASED
+#              and a Warthog FIXED - the joiner has all four (its boulder without collision,
+#              its Warthog fixed); it places a race checkpoint and a boulder it sets PHASED
+#              (asked of the host: the host's copy without collision); the host places an
+#              oddball spawn and sets its boulder NORMAL: the joiner has the oddball spawn and
+#              its copy of the boulder collides again. Back in the game in progress, the
+#              joiner is given all of it as it was. (A rejoined machine's game ends a few
+#              seconds after it is back, on 1.1.1 too: its look is right after it joins)
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
 #              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
 #              System Link screen's profile, then a network Forge game of Blood Gulch
@@ -770,9 +785,12 @@ forge_case() {
 		host_cmds="$host_cmds;L900:forge spawns;L1000:forge camera 60 -100 1.2 90 0;L1030:forge off;L1100:forge where"
 		host_cmds="$host_cmds;L1500:forge spawns"
 		join_cmds="L250:forge spawns;L260:forge camera 60 -100 6 0 -89;L272:forge spawnpoint sender;L285:forge marker #last"
-		join_cmds="$join_cmds;L287:forge property channel;L290:forge drop;L300:forge camera 76 -112 6 0 -89"
+		join_cmds="$join_cmds;L287:forge property channel;L290:forge drop;L300:forge camera 67 -100 6 0 -89"
 		join_cmds="$join_cmds;L312:forge spawnpoint receiver;L330:forge spawns;L700:forge camera 70 -118 4 140 -15"
-		join_cmds="$join_cmds;L900:forge spawns;L910:forge objects"
+		# (a look at the host's Spartan where the joiner's receiver put it, the
+		# sender behind: HALO_TEST_SHOTS)
+		join_cmds="$join_cmds;L900:forge spawns;L910:forge objects;L1150:forge camera 63.6 -107.5 3 90 -12"
+		join_cmds="$join_cmds;L1200:@shot forgetele-joiner-sees-receiver"
 		forge_host "$host_cmds" $(forge_shots mpforge-shots/forgetele-host)
 		sleep 5
 		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join "HALO_TEST_COMMANDS=$join_cmds" \
@@ -812,16 +830,117 @@ forge_case() {
 			fail "the sample map variants could not be written"
 		forge_host "" HALO_NETWORK_TEST_FORGE_VARIANT=teleport.hmv
 		sleep 5
-		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join HALO_FORGE_NET_FEATURES=0 \
-			HALO_EXIT_AFTER=60
+		[ -n "${HALO_TEST_VITA_JOINER:-}" ] && echo "the joiner's build: $HALO_TEST_VITA_JOINER"
+		run_copy joiner "$lan" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+			HALO_FORGE_NET_FEATURES=0 HALO_EXIT_AFTER=60
 		join_pid=$last_pid
 		wait $join_pid $host_pid 2>/dev/null
 		forge_check_clean "$hl" "$jl"
-		grep -aE "forge net: machine|forge net: refused|needs version" "$hl" "$jl" | head
+		grep -aE "forge net: machine|forge net: refused|needs version|cannot join this Forge game" "$hl" "$jl" | head
 		grep -aq "forge net: machine 1 refused: This Forge map needs version 1.1.2" "$hl" ||
 			fail "the host did not refuse the joiner without the 1.1.2 features"
 		grep -aq "forge net: refused from the host's Forge game (3)" "$jl" || fail "the joiner was not told it was refused"
+		grep -aq "Halo: cannot join this Forge game: This Forge game needs a newer Halo CE." "$jl" ||
+			fail "the joiner was not shown why"
+		grep -a "network test: tick" "$jl" | grep -aq "| playing" && fail "the refused joiner played the Forge game"
 		sed -n '/needs version 1.1.2/,$p' "$hl" | grep -aq "network test: starting the game" || fail "the host did not go on to its game"
+		;;
+	forgeold111)
+		# (the host's Forge game plays a map variant of 1.1.1's format:
+		# forge_files_test --write's good.hmv, its version said)
+		mkdir -p "$out/host/save/forge/bloodgulch"
+		${CC:-cc} -O1 -D_GNU_SOURCE -I"$root/port/linux/game" -o "$out/forge_files_test" "$here/forge_files_test.c" \
+			"$root/port/linux/game/forge_files.c" && "$out/forge_files_test" --write "$out/host/save/forge/bloodgulch" > /dev/null ||
+			fail "the sample map variants could not be written"
+		"$out/forge_files_test" --dump "$out/host/save/forge/bloodgulch/good.hmv" 2>&1 | grep -aiE -m1 "version" || true
+		forge_host "L300:forge objects" HALO_NETWORK_TEST_FORGE_VARIANT=good.hmv
+		sleep 5
+		[ -n "${HALO_TEST_VITA_JOINER:-}" ] && echo "the joiner's build: $HALO_TEST_VITA_JOINER"
+		run_copy joiner "$lan" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join \
+			HALO_FORGE_NET_FEATURES=0 "HALO_TEST_COMMANDS=L600:forge objects"
+		join_pid=$last_pid
+		wait $join_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl"
+		echo "--- host"; grep -aE "forge net: machine|forge net: refused|needs version" "$hl" | head
+		echo "--- joiner"; grep -aE "forge net: (refused|the host's layout read|the host's Forge game had)|cannot join" "$jl" | head
+		grep -aq "forge net: machine 1 plays the 1.1.2 Forge features" "$hl" && fail "the joiner said the 1.1.2 features"
+		grep -aq "forge net: machine 1 refused" "$hl" && fail "the joiner was refused"
+		grep -aq "forge net: machine 1 plays the Forge game" "$hl" || fail "the host did not let the joiner play"
+		sed -n '/test command at tick 600: forge objects$/,/test command at tick/p' "$jl" |
+			grep -aq "forge: objects listed: 5 objects" || fail "the joiner does not have the map variant's 5 objects"
+		local playing
+		playing=$(grep -a "network test: tick" "$jl" | grep -ac "| playing")
+		echo "the joiner's lines playing the Forge game: $playing"
+		[ "$playing" -ge 10 ] || fail "the joiner did not play the Forge game"
+		;;
+	forgelate112)
+		# (the host: a CTF flag (#1), a hill point (#2), a boulder PHASED (#3), a
+		# Warthog FIXED (#4) as the game begins; later, the joiner in it, an
+		# oddball spawn, and the boulder set NORMAL (PHASED -> NORMAL: one step))
+		host_cmds="L150:forge camera 70 -80 6 0 -89;L162:forge spawnpoint flag;L166:forge drop"
+		host_cmds="$host_cmds;L170:forge camera 64 -80 6 0 -89;L182:forge spawnpoint hill;L186:forge drop"
+		host_cmds="$host_cmds;L210:forge camera 66 -88 1.6 0 0;L220:forge spawn boulder;L221:forge distance 6"
+		host_cmds="$host_cmds;L222:forge property physics;L223:forge property physics;L230:forge drop"
+		host_cmds="$host_cmds;L240:forge camera 60 -100 1.6 130 0;L250:forge spawn warthog;L252:forge distance 8"
+		host_cmds="$host_cmds;L254:forge property physics;L260:forge drop"
+		host_cmds="$host_cmds;L600:forge camera 74 -94 6 0 -89;L612:forge spawnpoint oddball;L616:forge drop"
+		host_cmds="$host_cmds;L630:forge grab #3;L632:forge property physics;L640:forge drop;L800:forge spawns;L810:forge objects"
+		# (the joiner: what it has; a race checkpoint and a boulder it sets
+		# PHASED (asked of the host); the host's later edits; then it leaves
+		# (HALO_NETWORK_TEST_REJOIN, its seconds in the game) and joins the game
+		# in progress again: what it is given (the ticks are the host's game's))
+		join_cmds="L400:forge spawns;L410:forge objects;L500:forge camera 60 -110 6 0 -89;L512:forge spawnpoint race"
+		join_cmds="$join_cmds;L516:forge drop;L530:forge camera 62 -104 1.6 90 0;L540:forge spawn boulder"
+		join_cmds="$join_cmds;L550:forge distance 6;L560:forge property physics;L562:forge property physics;L580:forge drop"
+		join_cmds="$join_cmds;L800:forge spawns;L810:forge objects"
+		join_cmds="$join_cmds;L${HALO_TEST_LATE_CHECK:-960}:forge spawns;L$((${HALO_TEST_LATE_CHECK:-960} + 10)):forge objects"
+		forge_host "$host_cmds" HALO_EXIT_AFTER=120
+		sleep 5
+		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join "HALO_TEST_COMMANDS=$join_cmds" \
+			HALO_NETWORK_TEST_REJOIN=${HALO_TEST_REJOIN_SECONDS:-36} HALO_EXIT_AFTER=110
+		join_pid=$last_pid
+		wait $join_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl"
+		echo "--- host"; grep -aE "forge net: machine|forge: #[0-9]+'s physics" "$hl" | head -30
+		echo "--- joiner"; grep -aE "forge net: (asked|the host's layout read|the host's Forge game had)|forge: spawns: |forge: object [0-9]+: |network test: (leaving|joining)|test command at tick [0-9]+: forge (spawns|objects)" "$jl" | cut -c1-160 | head -70
+		grep -aq "forge net: machine 1 plays the 1.1.2 Forge features (7)" "$hl" || fail "the joiner did not say its 1.1.2 features"
+		grep -aqE "forge net: machine [0-9]+ refused" "$hl" && fail "the joiner was refused"
+		local first live joined late
+		# (in the game: what the host placed, its own asked of the host, the host's later edits)
+		first=$(sed -n '/test command at tick 400: forge spawns$/,/test command at tick 500/p' "$jl")
+		grep -aq "the ctf flag #1 (index 0)" <<< "$first" || fail "the joiner did not have the host's CTF flag"
+		grep -aq "the hill point #2 (index 0)" <<< "$first" || fail "the joiner did not have the host's hill point"
+		grep -aq "Boulder (id 3) .*physics phased (no collision)" <<< "$first" ||
+			fail "the joiner's copy of the phased boulder has its collision"
+		grep -aqE "Warthog \(id 4\) .*physics fixed" <<< "$first" || fail "the joiner's Warthog is not fixed"
+		grep -aqE "forge net: machine 1 placed the race checkpoint #[0-9]+" "$hl" || fail "the joiner's race checkpoint was not placed"
+		live=$(sed -n '/test command at tick 800: forge spawns$/,$p' "$hl")
+		grep -aqE "Boulder \(id [5-9]\) .*physics phased \(no collision\)" <<< "$live" ||
+			fail "the joiner's boulder is not phased on the host"
+		grep -aqE "Boulder \(id 3\) .*physics normal$" <<< "$live" || fail "the host's boulder was not set normal"
+		live=$(sed -n '/test command at tick 800: forge spawns$/,/test command at tick 8[2-9][0-9]\|network test: leaving/p' "$jl")
+		grep -aqE "the oddball spawn #[0-9]+ \(index 0\)" <<< "$live" || fail "the joiner did not get the host's oddball spawn"
+		grep -aqE "the race checkpoint #[0-9]+ \(index 0\)" <<< "$live" || fail "the joiner does not have its race checkpoint"
+		grep -aqE "Boulder \(id 3\) .*physics normal$" <<< "$live" ||
+			fail "the joiner's copy of the host's boulder did not become normal (collision back)"
+		grep -aqE "Boulder \(id [5-9]\) .*physics phased \(no collision\)" <<< "$live" || fail "the joiner's own boulder is not phased"
+		# (joined again, the game in progress: given all of it)
+		joined=$(grep -acE "forge net: machine [0-9]+ joined the Forge game" "$hl")
+		[ "$joined" -ge 2 ] && grep -aq "network test: joining again" "$jl" ||
+			fail "the joiner did not leave and join the game in progress again"
+		sed -n '/network test: joining again/,$p' "$jl" | grep -aqE "forge net: the host's layout read: 3 objects, .*checked\)" ||
+			fail "the late joiner was not given the layout (checked)"
+		late=$(sed -n '/network test: joining again/,$p' "$jl" |
+			sed -n '/test command at tick [0-9]*: forge spawns$/,$p')
+		[ -n "$late" ] || fail "the late joiner's look came before it was back (HALO_TEST_LATE_CHECK, HALO_TEST_REJOIN_SECONDS)"
+		grep -aq "the ctf flag #1 (index 0)" <<< "$late" || fail "the late joiner did not have the host's CTF flag"
+		grep -aq "the hill point #2 (index 0)" <<< "$late" || fail "the late joiner did not have the host's hill point"
+		grep -aqE "the oddball spawn #[0-9]+ \(index 0\)" <<< "$late" || fail "the late joiner did not have the oddball spawn"
+		grep -aqE "the race checkpoint #[0-9]+ \(index 0\)" <<< "$late" || fail "the late joiner did not have the race checkpoint"
+		grep -aqE "Boulder \(id 3\) .*physics normal$" <<< "$late" || fail "the late joiner's boulder #3 is not normal"
+		grep -aqE "Boulder \(id [5-9]\) .*physics phased \(no collision\)" <<< "$late" ||
+			fail "the late joiner's copy of the phased boulder has its collision"
+		grep -aqE "Warthog \(id 4\) .*physics fixed" <<< "$late" || fail "the late joiner's Warthog is not fixed"
 		;;
 	forgeleave)
 		host_cmds="L150:forge camera 60 -100 1.6 130 0;L160:forge spawn warthog;L165:forge distance 8;L170:forge drop;L600:@menu"

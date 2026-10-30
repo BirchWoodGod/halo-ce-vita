@@ -2096,9 +2096,9 @@ for c in $cases; do
 		expect rotate "dropped, saved" "forge: map variant \"Rotate Test\" saved as bloodgulch/rotate_test.hmv, 1 objects"
 		# (its placed facing: before the round, after it, and loaded)
 		want="0.500 0.500 0.707 up 0.146 -0.854 0.500"
-		before=$(grep -a "forge: object 0: Boulder" "$log" | head -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //')
-		after=$(grep -a "forge: object 0: Boulder" "$log" | tail -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //')
-		loaded=$(grep -a "forge: object 0: Boulder" "$out/rotate-load/run.log" | tail -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //')
+		before=$(grep -a "forge: object 0: Boulder" "$log" | head -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //; s/, physics .*//')
+		after=$(grep -a "forge: object 0: Boulder" "$log" | tail -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //; s/, physics .*//')
+		loaded=$(grep -a "forge: object 0: Boulder" "$out/rotate-load/run.log" | tail -1 | sed 's/.*placed at [^ ]* [^ ]* [^ ]* facing //; s/, physics .*//')
 		expect rotate "a new round" "forge: new round 1: 1 placed again, 0 skipped"
 		for pair in "dropped:$before" "after the new round:$after" "loaded from the map variant:$loaded"; do
 			got=${pair#*:}
