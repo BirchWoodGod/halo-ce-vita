@@ -450,6 +450,9 @@ enum
 	_function_online_host_edit,
 	/* (Menu style Online: CUSTOMIZATION's colour grid) */
 	_function_online_custom_grid,
+	/* (1.1.2, the Forge menu's MAGNETS and NUDGE: forge.c forge_precision.inc) */
+	_function_forge_magnets,
+	_function_forge_nudge_step,
 };
 
 /* in port_game_data_input_names' order */
@@ -3204,6 +3207,11 @@ static void h3_forge_title_update(struct widget_instance *widget)
 		text_show(named(screen, "redo"), text);
 		snprintf(text, sizeof(text), "%s: %s", T("SNAP"), forge_snap_enabled() ? T("ON") : T("OFF"));
 		text_show(named(screen, "snap"), text);
+		/* (1.1.2: the blocks' magnets, the nudge's step) */
+		snprintf(text, sizeof(text), "%s: %s", T("MAGNETS"), forge_panel_magnets() ? T("ON") : T("OFF"));
+		text_show(named(screen, "magnets"), text);
+		snprintf(text, sizeof(text), T("NUDGE: %d CM"), forge_panel_nudge_centimetres());
+		text_show(named(screen, "nudge"), text);
 		snprintf(text, sizeof(text), "%s: %s", T("ALL AI"), forge_ai_all_state() == _forge_ai_all_on ? T("ON") : forge_ai_all_state() == _forge_ai_all_off ? T("OFF") : T("MIXED"));
 		text_show(named(screen, "allai"), text);
 		/* (CLEAR DEAD AI and CLEAR ALL AI with how many each takes) */
@@ -19831,6 +19839,13 @@ boolean pc_menu_event_function_invoke(
 		return TRUE;
 	case _function_forge_snap:
 		forge_snap_toggle_request();
+		return TRUE;
+	case _function_forge_magnets:
+		forge_panel_magnets_set(!forge_panel_magnets());
+		return TRUE;
+	case _function_forge_nudge_step:
+		/* (A, left or right: the next of 5, 10, 25, 1 cm) */
+		forge_panel_nudge_step(1);
 		return TRUE;
 	case _function_forge_property_next:
 	case _function_forge_property_previous:

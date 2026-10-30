@@ -478,12 +478,12 @@ forge_case() {
 		# of the host, which moves where it is placed again)
 		join2_cmds="$join2_cmds;L1950:forge marker #4;L1952:forge markers;L1960:forge camera 50 -95 3 135 -8;L1970:forge distance 5"
 		join2_cmds="$join2_cmds;L1980:forge drop;L2300:forge spawns;L2420:forge spawns"
-		# (Start: the Forge menu; down seven to CLEAR DEAD AI, A; B closes it)
+		# (Start: the Forge menu; down nine to CLEAR DEAD AI, A; B closes it)
 		local menu_pad="start:150:3000 @MENU-open:0:300 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
-		menu_pad="$menu_pad down:150:500 down:150:500 a:150:3000 @MENU-cleared:0:300 b:150:2000"
-		# (the first joiner's NEW ROUND, later: down nine, A, the menu closed by it)
+		menu_pad="$menu_pad down:150:500 down:150:500 down:150:500 down:150:500 a:150:3000 @MENU-cleared:0:300 b:150:2000"
+		# (the first joiner's NEW ROUND, later: down eleven, A, the menu closed by it)
 		local round_pad="start:150:3000" step
-		for step in 1 2 3 4 5 6 7 8 9; do round_pad="$round_pad down:150:500"; done
+		for step in 1 2 3 4 5 6 7 8 9 10 11; do round_pad="$round_pad down:150:500"; done
 		round_pad="$round_pad @forgemp-joiner-round:0:300 a:150:3000"
 		HALO_TEST_DATA_HOST=$menus_data forge_host "$host_cmds" HALO_UI_LOG=1 $(forge_shots mpforge-shots/forgemp-host)
 		sleep 5

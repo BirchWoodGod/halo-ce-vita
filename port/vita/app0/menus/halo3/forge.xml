@@ -9,7 +9,7 @@ pause screen (ingame.txt; its fonts and pictures are halo3/pause.xml's, the same
   (closing it from the categories), Square closes it;
 - the Forge menu, Start in a Forge game (menu_tags.c opens it for the level's pause screen): resume,
   the monitor or the Spartan, save the map variant (its name typed on the system's keyboard: port
-  forge save), undo and redo (forge.c's history), snapping on or off, every placed character's AI
+  forge save), undo and redo (forge.c's history), snapping on or off, the blocks' magnets on or off and the nudge's step (1.1.2), every placed character's AI
   on or off, the dead characters cleared out of the layout (they hold their places in the AI
   budget until then), every character cleared (asked first), a new round (Halo 3's Restart Round: the map reset, the layout placed again), leave
   (asked first), the controls at the right; what the last of them came to said under the menu;
@@ -202,6 +202,12 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	<widget name="h3/forge/pause/snap" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
 		<on event="a left right" run="port forge snap"/>
 	</widget>
+	<widget name="h3/forge/pause/magnets" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a left right" run="port forge magnets"/>
+	</widget>
+	<widget name="h3/forge/pause/nudge" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
+		<on event="a left right" run="port forge nudge step"/>
+	</widget>
 	<widget name="h3/forge/pause/allai" type="text" width="220" height="20" bitmap="h3/item" font="h3/font_item" color="#FFC5D0DD" text_x="8" text_y="3">
 		<on event="a left right" run="port forge all ai"/>
 	</widget>
@@ -219,23 +225,25 @@ The art is this folder's own (tools/halo3_menu_art.py). -->
 	</widget>
 	<widget name="h3/forge/pause/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<child widget="h3/forge/pause/resume" x="0" y="0"/>
-		<child widget="h3/forge/pause/toggle" x="0" y="22"/>
-		<child widget="h3/forge/pause/save" x="0" y="44"/>
-		<child widget="h3/forge/pause/undo" x="0" y="66"/>
-		<child widget="h3/forge/pause/redo" x="0" y="88"/>
-		<child widget="h3/forge/pause/snap" x="0" y="110"/>
-		<child widget="h3/forge/pause/allai" x="0" y="132"/>
-		<child widget="h3/forge/pause/cleardead" x="0" y="154"/>
-		<child widget="h3/forge/pause/clearall" x="0" y="176"/>
-		<child widget="h3/forge/pause/newround" x="0" y="198"/>
-		<child widget="h3/forge/pause/leave" x="0" y="220"/>
+		<child widget="h3/forge/pause/toggle" x="0" y="20"/>
+		<child widget="h3/forge/pause/save" x="0" y="40"/>
+		<child widget="h3/forge/pause/undo" x="0" y="60"/>
+		<child widget="h3/forge/pause/redo" x="0" y="80"/>
+		<child widget="h3/forge/pause/snap" x="0" y="100"/>
+		<child widget="h3/forge/pause/magnets" x="0" y="120"/>
+		<child widget="h3/forge/pause/nudge" x="0" y="140"/>
+		<child widget="h3/forge/pause/allai" x="0" y="160"/>
+		<child widget="h3/forge/pause/cleardead" x="0" y="180"/>
+		<child widget="h3/forge/pause/clearall" x="0" y="200"/>
+		<child widget="h3/forge/pause/newround" x="0" y="220"/>
+		<child widget="h3/forge/pause/leave" x="0" y="240"/>
 	</widget>
 	<widget name="h3/forge/pause/title" type="text" left="56" top="49" width="540" height="26" font="h3/font_title" color="#FFF4F4F4">
 		<data input="port forge title"/>
 	</widget>
-	<widget name="h3/forge/pause/column" left="48" top="112" width="236" height="256" bitmap="h3/column"/>
+	<widget name="h3/forge/pause/column" left="48" top="112" width="236" height="268" bitmap="h3/column"/>
 	<!-- (what the last thing asked came to, and the map variant played: port forge title writes it) -->
-	<widget name="h3/forge/pause/status" type="text" left="56" top="372" width="236" height="64" font="h3/font_small" color="#FF9FD8FF"/>
+	<widget name="h3/forge/pause/status" type="text" left="56" top="384" width="236" height="52" font="h3/font_small" color="#FF9FD8FF"/>
 	<widget name="h3/forge/pause/controls_panel" left="300" top="140" width="320" height="194" bitmap="h3/panel"/>
 	<widget name="h3/forge/pause/controls_caption" type="text" left="312" top="146" width="296" height="16" font="h3/font_small" color="#FF9FB6CC" string_list="h3/forge_menu" string_index="6"/>
 	<widget name="h3/forge/pause/controls_rule" left="312" top="164" width="296" height="2" bitmap="h3/rule"/>

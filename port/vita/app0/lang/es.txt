@@ -2729,6 +2729,8 @@
 "Each nudge's move: hold L, click the right stick, flick" = "Cada ajuste fino: mantén L, pulsa la palanca derecha, mueve"
 "Magnets" = "Imanes"
 "Nudge step" = "Paso de ajuste"
+"MAGNETS" = "IMANES"
+"NUDGE: %d CM" = "AJUSTE FINO: %d CM"
 
 # ---------- Menu style Halo CE's additions (menus/classic: the Xbox screens with the port's rows)
 "No network: wait for it, or choose\nNETWORK: LOCAL." = "Sin red: espérala, o elige\nRED: LOCAL."

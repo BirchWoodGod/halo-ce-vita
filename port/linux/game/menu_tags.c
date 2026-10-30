@@ -442,6 +442,7 @@ static char const *const port_function_names[] =
 	"port host multiplayer", "port host forge", "port host campaign", "port host next", "port host previous",
 	"port host edit",
 	"port online custom grid",
+	"port forge magnets", "port forge nudge step",
 };
 
 /* the port's game data functions (menu_functions.c), from

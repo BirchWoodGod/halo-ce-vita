@@ -428,7 +428,7 @@ v1pad="$v1pad @13-boulder-dropped:0:300 rt:150:1000 lleft:700:600 @14-boulder-ca
 v1pad="$v1pad y:150:1500 @15-deleted:0:300 rs:150:1500 back+rs:150:2500 @16-spartan:0:300 lup:800:1500"
 v1pad="$v1pad back:150:600 rs:150:1200 back+rs:150:2500"
 v1pad="$v1pad @17-monitor-again:0:300 start:150:2000 @18-forge-menu:0:300 down:150:600 down:150:600 down:150:600"
-v1pad="$v1pad down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 a:150:1500"
+v1pad="$v1pad down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 down:150:600 a:150:1500"
 v1pad="$v1pad @19-leave-forge:0:300 a:150:9000 @20-main-menu-again:0:300"
 
 # (variants: the main menu's FORGE, the lobby; START FORGE (the map, no
@@ -1117,12 +1117,12 @@ allai_runs() {
 
 allaimenu_runs() {
 	# (an Elite and a grunt, ALL AI off, the grunt's on again: MIXED; the
-	# Forge menu by the pad: Start, down six to ALL AI, A, A)
+	# Forge menu by the pad: Start, down eight to ALL AI, A, A)
 	local c="L300:forge camera 60 -100 1.6 120 0;L302:forge spawn elite major plasma rifle;L303:forge distance 7;L304:forge drop"
 	c="$c;L306:forge camera 60 -100 1.6 140 0;L308:forge spawn grunt minor plasma pistol;L309:forge distance 6;L310:forge drop"
 	c="$c;L314:forge allai;L320:forge grab #2;L322:forge brain on;L324:forge drop;L326:forge ai"
-	local pad="level:150:12000 start:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:800"
-	pad="$pad @00-menu-mixed:0:300 a:150:1500 @01-menu-off:0:300 a:150:1500 @02-menu-on:0:300 b:150:1500"
+	local pad="level:150:12000 start:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
+	pad="$pad down:150:500 down:150:800 @00-menu-mixed:0:300 a:150:1500 @01-menu-off:0:300 a:150:1500 @02-menu-on:0:300 b:150:1500"
 	ai_run allaimenu 45 "$c" "HALO_TEST_PAD=$pad"
 }
 
@@ -1171,7 +1171,7 @@ clearaimenu_runs() {
 	c="$c;L306:forge camera 60 -100 1.6 140 0;L308:forge spawn grunt minor plasma pistol;L309:forge distance 6;L310:forge drop"
 	c="$c;L312:forge allai off;L314:forge kill #1;L345:forge budget"
 	local pad="level:150:12000 start:150:2000 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 down:150:500"
-	pad="$pad down:150:800 @00-menu-clear-dead:0:300 a:150:1500 @01-dead-cleared:0:300 down:150:800 a:150:1500"
+	pad="$pad down:150:500 down:150:500 down:150:800 @00-menu-clear-dead:0:300 a:150:1500 @01-dead-cleared:0:300 down:150:800 a:150:1500"
 	pad="$pad @02-clear-all-asked:0:300 b:150:1500 @03-kept:0:300 a:150:1500 a:150:1500 @04-all-cleared:0:300 b:150:1500"
 	ai_run clearaimenu 45 "$c" "HALO_TEST_PAD=$pad"
 }
