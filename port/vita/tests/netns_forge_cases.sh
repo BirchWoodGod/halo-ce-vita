@@ -92,7 +92,14 @@
 #              its channel (asked), places a receiver (the host gives it the sender's
 #              channel); the host plays the Spartan put down on the joiner's sender: its
 #              engine sends it to the joiner's receiver, and the joiner sees it sent (a
-#              joiner's Spartan stands where its unit is, the host's to move: 1.1.1's)
+#              joiner's Spartan stands where its unit is, the host's to move: 1.1.1's).
+#              The host's red CTF flag and a boulder set PHASED, placed before the joiner
+#              came, are the joiner's too (its boulder without collision); the joiner,
+#              saying the 1.1.2 features, plays the host's layout that needs them
+#   forgeold112 a joiner that does not say the 1.1.2 Forge features (HALO_FORGE_NET_FEATURES=0,
+#              as a 1.1.1 build) is refused from a Forge game whose layout has a
+#              teleporter ("This Forge map needs version 1.1.2" on the host; the joiner
+#              told its Halo CE is too old), and the host goes on to its game
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
 #              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
 #              System Link screen's profile, then a network Forge game of Blood Gulch
@@ -757,12 +764,15 @@ forge_case() {
 	forgetele)
 		host_cmds="L150:forge camera 50 -90 6 0 -89;L162:forge spawnpoint sender;L166:forge drop"
 		host_cmds="$host_cmds;L170:forge camera 56 -84 6 0 -89;L182:forge spawnpoint receiver;L186:forge drop"
+		host_cmds="$host_cmds;L190:forge camera 70 -80 6 0 -89;L202:forge spawnpoint flag;L206:forge drop"
+		host_cmds="$host_cmds;L210:forge camera 66 -88 1.6 0 0;L220:forge spawn boulder;L221:forge distance 6"
+		host_cmds="$host_cmds;L222:forge property physics;L223:forge property physics;L230:forge drop"
 		host_cmds="$host_cmds;L900:forge spawns;L1000:forge camera 60 -100 1.2 90 0;L1030:forge off;L1100:forge where"
 		host_cmds="$host_cmds;L1500:forge spawns"
 		join_cmds="L250:forge spawns;L260:forge camera 60 -100 6 0 -89;L272:forge spawnpoint sender;L285:forge marker #last"
 		join_cmds="$join_cmds;L287:forge property channel;L290:forge drop;L300:forge camera 76 -112 6 0 -89"
 		join_cmds="$join_cmds;L312:forge spawnpoint receiver;L330:forge spawns;L700:forge camera 70 -118 4 140 -15"
-		join_cmds="$join_cmds;L900:forge spawns"
+		join_cmds="$join_cmds;L900:forge spawns;L910:forge objects"
 		forge_host "$host_cmds" $(forge_shots mpforge-shots/forgetele-host)
 		sleep 5
 		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join "HALO_TEST_COMMANDS=$join_cmds" \
@@ -776,15 +786,42 @@ forge_case() {
 		grep -aq "the teleporter sender #1 (channel 0)" "$out/joiner-late.txt" &&
 			grep -aq "the teleporter receiver #2 (channel 0)" "$out/joiner-late.txt" ||
 			fail "the joiner, joining late, was not given the host's teleporters"
-		grep -aq "forge net: machine 1 placed the teleporter sender #3" "$hl" || fail "the joiner's sender was not placed by the host"
-		grep -aq "forge net: machine 1 changed the spawn point #3" "$hl" || fail "the joiner's channel step was not made by the host"
-		grep -aq "forge net: machine 1 placed the teleporter receiver #4" "$hl" || fail "the joiner's receiver was not placed by the host"
-		sed -n '/test command at tick 900: forge spawns$/,/test command at tick/p' "$hl" | grep -aq "the teleporter receiver #4 (channel 2)" ||
+		grep -aqE "forge net: machine 1 placed the teleporter sender #[0-9]+" "$hl" || fail "the joiner's sender was not placed by the host"
+		grep -aqE "forge net: machine 1 changed the spawn point #[0-9]+" "$hl" || fail "the joiner's channel step was not made by the host"
+		grep -aqE "forge net: machine 1 placed the teleporter receiver #[0-9]+" "$hl" || fail "the joiner's receiver was not placed by the host"
+		sed -n '/test command at tick 900: forge spawns$/,/test command at tick/p' "$hl" | grep -aqE "the teleporter receiver #[0-9]+ \(channel 2\)" ||
 			fail "the joiner's receiver did not take its sender's channel"
 		grep -aq "forge: player 0 teleported on channel 2: " "$hl" || fail "the host's Spartan was not sent by the joiner's teleporter"
 		grep -aq "forge: player 0 teleported on channel 2: " "$jl" || fail "the joiner did not see the host's Spartan sent"
 		grep -aqE "forge: netgame flags: the map's [0-9]+ and 4 teleporters \(2 senders, 2 receivers\)" "$jl" ||
 			fail "the joiner's engine was not given the four teleporters"
+		# (1.1.2's game type objects and physics on the joiner; its features said)
+		grep -aq "forge net: machine 1 plays the 1.1.2 Forge features (7)" "$hl" || fail "the joiner did not say its 1.1.2 features"
+		sed -n '/test command at tick 900: forge spawns$/,/test command at tick/p' "$jl" | grep -aq "the ctf flag #[0-9]* (index 0)" ||
+			fail "the joiner did not have the host's CTF flag"
+		sed -n '/test command at tick 910: forge objects$/,/test command at tick/p' "$jl" | grep -aq "Boulder.*physics phased (no collision)" ||
+			fail "the joiner's copy of the phased boulder has its collision"
+		grep -aq "forge net: machine 1 refused" "$hl" && fail "the joiner was refused"
+		;;
+	forgeold112)
+		# (the host's Forge game plays a map variant with a teleporter pair:
+		# forge_files_test --write-teleport)
+		mkdir -p "$out/host/save/forge/bloodgulch"
+		${CC:-cc} -O1 -D_GNU_SOURCE -I"$root/port/linux/game" -o "$out/forge_files_test" "$here/forge_files_test.c" \
+			"$root/port/linux/game/forge_files.c" && "$out/forge_files_test" --write-teleport "$out/host/save/forge/bloodgulch" > /dev/null ||
+			fail "the sample map variants could not be written"
+		forge_host "" HALO_NETWORK_TEST_FORGE_VARIANT=teleport.hmv
+		sleep 5
+		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join HALO_FORGE_NET_FEATURES=0 \
+			HALO_EXIT_AFTER=60
+		join_pid=$last_pid
+		wait $join_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl"
+		grep -aE "forge net: machine|forge net: refused|needs version" "$hl" "$jl" | head
+		grep -aq "forge net: machine 1 refused: This Forge map needs version 1.1.2" "$hl" ||
+			fail "the host did not refuse the joiner without the 1.1.2 features"
+		grep -aq "forge net: refused from the host's Forge game (3)" "$jl" || fail "the joiner was not told it was refused"
+		sed -n '/needs version 1.1.2/,$p' "$hl" | grep -aq "network test: starting the game" || fail "the host did not go on to its game"
 		;;
 	forgeleave)
 		host_cmds="L150:forge camera 60 -100 1.6 130 0;L160:forge spawn warthog;L165:forge distance 8;L170:forge drop;L600:@menu"

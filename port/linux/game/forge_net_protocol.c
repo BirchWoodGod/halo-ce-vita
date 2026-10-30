@@ -472,6 +472,15 @@ int forge_net_lobby_valid(
 		if (message->capabilities != 0 || message->packs_ready != 0)
 			return 0;
 	}
+	else if (message->command == _forge_net_lobby_features)
+	{
+		/* (its features' bits, known ones, at least one; nothing else) */
+		if (!message->capabilities || (message->capabilities & ~FORGE_NET_FEATURES_KNOWN) || message->packs_ready ||
+			message->flags || message->reason != _forge_net_refusal_none || message->pack_count != 0 || message->title[0])
+		{
+			return 0;
+		}
+	}
 	else if (message->command == _forge_net_lobby_building)
 	{
 		/* (the packs still building, bits of the hello's; flags its

@@ -1614,6 +1614,20 @@ static int write_samples(char const *folder)
 	return status;
 }
 
+/* (1.1.2, the network tests) a teleporter pair's variant (version 5):
+teleport.hmv */
+static int write_teleport_sample(char const *folder)
+{
+	struct forge_file_layout layout;
+	int result;
+	int size;
+
+	sample_layout_5(&layout);
+	snprintf(layout.title, sizeof(layout.title), "Teleport Sample");
+	size = forge_file_encode(&layout, work, sizeof(work), &result);
+	return size <= 0 || write_file(folder, "teleport.hmv", work, size);
+}
+
 /* a file read through the validator, its header and records printed */
 static int dump(char const *path)
 {
@@ -1668,6 +1682,8 @@ int main(int argc, char **argv)
 
 	if (argc == 3 && !strcmp(argv[1], "--write"))
 		return write_samples(argv[2]);
+	if (argc == 3 && !strcmp(argv[1], "--write-teleport"))
+		return write_teleport_sample(argv[2]);
 	if (argc == 3 && !strcmp(argv[1], "--dump"))
 		return dump(argv[2]);
 	if (argc == 2)

@@ -251,6 +251,12 @@ static struct
 		long machine_index;
 		boolean answered;
 		boolean refused;
+		/* (1.1.2) the features it said it plays (_forge_net_lobby_features);
+		its answer held until it says them, when the layout needs them, and
+		since when */
+		uint32_t features;
+		boolean answer_pending;
+		unsigned long answer_time;
 		unsigned long joined_time;
 		unsigned long hello_time;
 		uint32_t packs_ready;
@@ -354,6 +360,60 @@ static boolean forge_net_capable(
 {
 #ifndef HALO_RELEASE
 	char const *setting = getenv("HALO_FORGE_NET");
+
+	if (setting && setting[0] == '0')
+		return FALSE;
+#endif
+	return TRUE;
+}
+
+/* (1.1.2) the Forge features the layout uses now (FORGE_NET_FEATURE_*): a
+teleporter, a game type object, an object's physics - what a joiner must
+play to have the host's map -, and those of the map variant its game is to
+place (asked in the lobby, before the map loads) */
+static uint32_t forge_net_layout_features(
+	void)
+{
+	uint32_t features = 0;
+	short index;
+
+	if (forge_globals.variant_pending)
+	{
+		for (index = 0; index < forge_variant_layout.record_count && index < FORGE_FILE_MAXIMUM_RECORDS; index++)
+		{
+			struct forge_file_record const *record = &forge_variant_layout.records[index];
+
+			if (record->kind == _forge_record_teleporter_in || record->kind == _forge_record_teleporter_out)
+				features |= FORGE_NET_FEATURE_MARKERS;
+			else if (record->kind == _forge_record_flag)
+				features |= FORGE_NET_FEATURE_OBJECTIVES;
+			if (record->flags & FORGE_RECORD_PHYSICS_MASK)
+				features |= FORGE_NET_FEATURE_PHYSICS;
+		}
+	}
+
+	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+	{
+		if (forge_spawn_is_teleporter(&forge_globals.spawns[index]))
+			features |= FORGE_NET_FEATURE_MARKERS;
+		else if (forge_spawn_is_objective(&forge_globals.spawns[index]))
+			features |= FORGE_NET_FEATURE_OBJECTIVES;
+	}
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		if (forge_globals.placed[index].flags & FORGE_RECORD_PHYSICS_MASK)
+			features |= FORGE_NET_FEATURE_PHYSICS;
+	}
+	return features;
+}
+
+/* (tests) a joiner that says no 1.1.2 features, as a 1.1.1 build:
+HALO_FORGE_NET_FEATURES=0 */
+static boolean forge_net_says_features(
+	void)
+{
+#ifndef HALO_RELEASE
+	char const *setting = getenv("HALO_FORGE_NET_FEATURES");
 
 	if (setting && setting[0] == '0')
 		return FALSE;
@@ -902,6 +962,19 @@ static void forge_net_host_lobby_update(
 		}
 		if (forge_net.machines[slot].answered)
 			continue;
+		/* (1.1.2: answered, the layout needing what it has not said it
+		plays: refused once its features are overdue - an older build) */
+		if (forge_net.machines[slot].answer_pending)
+		{
+			if (now - forge_net.machines[slot].answer_time >= FORGE_NET_FEATURES_MILLISECONDS)
+			{
+				platform_log("forge net: machine %ld refused: This Forge map needs version 1.1.2 (it said no 1.1.2 Forge "
+					"features: an older build)", machine_index);
+				forge_notice("%s", T("A player on an older Halo CE was refused: this Forge map needs version 1.1.2"));
+				forge_net_refuse_machine(slot, _forge_net_refusal_incapable, _rejection_code_version_too_old);
+			}
+			continue;
+		}
 		if (now - forge_net.machines[slot].joined_time >= FORGE_NET_HELLO_MILLISECONDS)
 		{
 			platform_log("forge net: machine %ld did not answer the Forge hello in %d ms (a build without network Forge): "
@@ -978,7 +1051,21 @@ void forge_net_server_handle_lobby_message(
 		forge_net.machines[slot].building_time = system_milliseconds();
 		return;
 	}
-	if (forge_net.machines[slot].answered)
+	/* (1.1.2: the features it plays, after its answer) */
+	if (answer.command == _forge_net_lobby_features)
+	{
+		forge_net.machines[slot].features = answer.capabilities;
+		platform_log("forge net: machine %ld plays the 1.1.2 Forge features (%x)", machine_index, (unsigned)answer.capabilities);
+		if (forge_net.machines[slot].answer_pending && (answer.capabilities & forge_net_layout_features()) == forge_net_layout_features())
+		{
+			forge_net.machines[slot].answer_pending = FALSE;
+			forge_net.machines[slot].answered = TRUE;
+			platform_log("forge net: machine %ld plays the Forge game (packs ready %x)", machine_index,
+				(unsigned)forge_net.machines[slot].packs_ready);
+		}
+		return;
+	}
+	if (forge_net.machines[slot].answered || forge_net.machines[slot].answer_pending)
 		return;
 	if (answer.version != FORGE_NET_VERSION || !(answer.capabilities & FORGE_NET_CAPABILITY_FORGE))
 	{
@@ -988,8 +1075,18 @@ void forge_net_server_handle_lobby_message(
 			_forge_net_refusal_incapable, _rejection_code_version_too_old);
 		return;
 	}
-	forge_net.machines[slot].answered = TRUE;
 	forge_net.machines[slot].packs_ready = answer.packs_ready;
+	/* (1.1.2: a layout that needs features it has not said it plays: held
+	until it says them, refused if it never does) */
+	if ((forge_net.machines[slot].features & forge_net_layout_features()) != forge_net_layout_features())
+	{
+		forge_net.machines[slot].answer_pending = TRUE;
+		forge_net.machines[slot].answer_time = system_milliseconds();
+		platform_log("forge net: machine %ld answered: the layout needs the 1.1.2 Forge features (%x), waiting for its",
+			machine_index, (unsigned)forge_net_layout_features());
+		return;
+	}
+	forge_net.machines[slot].answered = TRUE;
 	platform_log("forge net: machine %ld plays the Forge game (packs ready %x)", machine_index, (unsigned)answer.packs_ready);
 }
 
@@ -1163,6 +1260,21 @@ void forge_net_client_handle_lobby_message(
 
 		if (!reply || !network_game_client_send_to_server(client, reply))
 			network_event("forge net: the answer could not be sent");
+	}
+	/* (1.1.2: the features this build plays, to a host that has them) */
+	if (hello.version >= FORGE_NET_HOST_VERSION_MARKERS && forge_net_says_features())
+	{
+		struct forge_net_lobby_message features;
+		void *reply;
+
+		csmemset(&features, 0, sizeof(features));
+		features.command = _forge_net_lobby_features;
+		features.version = FORGE_NET_VERSION;
+		features.capabilities = FORGE_NET_FEATURES_KNOWN;
+		features.session = hello.session;
+		reply = create_network_game_message(_message_client_forge, &features, sizeof(features));
+		if (!reply || !network_game_client_send_to_server(client, reply))
+			network_event("forge net: the features could not be sent");
 	}
 	/* (the packs it brings, and the building blocks of the host's map,
 	built meanwhile in the lobby, at the main menu's pace: what is not

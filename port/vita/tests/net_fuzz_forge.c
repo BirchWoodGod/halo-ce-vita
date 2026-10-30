@@ -789,6 +789,38 @@ int net_fuzz_checks(void)
 		CHECK(!forge_net_request_valid(&record, 0), "a spawn of kind 8 refused");
 	}
 
+	/* (1.1.2: a joiner's features, after its answer) */
+	{
+		struct forge_net_lobby_message features;
+
+		memset(&features, 0, sizeof(features));
+		features.command = _forge_net_lobby_features;
+		features.version = FORGE_NET_VERSION;
+		features.capabilities = FORGE_NET_FEATURES_KNOWN;
+		features.session = 7;
+		CHECK(forge_net_lobby_valid(&features, 0), "a joiner's features taken");
+		CHECK(!forge_net_lobby_valid(&features, 1), "features from the host refused");
+		features.capabilities = 0;
+		CHECK(!forge_net_lobby_valid(&features, 0), "features of none refused");
+		features.capabilities = 0x08;
+		CHECK(!forge_net_lobby_valid(&features, 0), "an unknown feature refused");
+		features.capabilities = FORGE_NET_FEATURE_MARKERS;
+		features.packs_ready = 1;
+		CHECK(!forge_net_lobby_valid(&features, 0), "features with packs refused");
+		features.packs_ready = 0;
+		features.flags = 1;
+		CHECK(!forge_net_lobby_valid(&features, 0), "features with flags refused");
+		features.flags = 0;
+		features.title[0] = 'x';
+		CHECK(!forge_net_lobby_valid(&features, 0), "features with a title refused");
+		features.title[0] = 0;
+		features.reason = _forge_net_refusal_version;
+		CHECK(!forge_net_lobby_valid(&features, 0), "features with a refusal refused");
+		features.reason = 0;
+		features.pack_count = 1;
+		CHECK(!forge_net_lobby_valid(&features, 0), "features naming packs refused");
+	}
+
 	/* palette entries */
 	memset(&entry, 0, sizeof(entry));
 	entry.total = 4;

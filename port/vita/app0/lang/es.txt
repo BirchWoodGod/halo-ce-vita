@@ -2730,6 +2730,7 @@
 "Magnets" = "Imanes"
 "Nudge step" = "Paso de ajuste"
 "MAGNETS" = "IMANES"
+"A player on an older Halo CE was refused: this Forge map needs version 1.1.2" = "Se rechazó a un jugador con un Halo CE antiguo: este mapa de Forja necesita la versión 1.1.2"
 "NUDGE: %d CM" = "AJUSTE FINO: %d CM"
 
 # ---------- Menu style Halo CE's additions (menus/classic: the Xbox screens with the port's rows)

@@ -6636,10 +6636,12 @@ boolean forge_command(
 			else
 			{
 				platform_log("forge: object %d: %s (id %ld) %s at %.2f %.2f %.2f, placed at %.2f %.2f %.2f facing %.3f %.3f %.3f "
-					"up %.3f %.3f %.3f", index, name, placed->id, state, object ? object->object.position.x : 0.f,
+					"up %.3f %.3f %.3f, physics %s%s", index, name, placed->id, state, object ? object->object.position.x : 0.f,
 					object ? object->object.position.y : 0.f, object ? object->object.position.z : 0.f, placed->home.position.x,
 					placed->home.position.y, placed->home.position.z, placed->home.forward.i, placed->home.forward.j,
-					placed->home.forward.k, placed->home.up.i, placed->home.up.j, placed->home.up.k);
+					placed->home.forward.k, placed->home.up.i, placed->home.up.j, placed->home.up.k,
+					forge_physics_log_names[forge_physics_mode(placed)],
+					object && TEST_FLAG(object->object.flags, _object_no_collisions_bit) ? " (no collision)" : "");
 			}
 		}
 		if (characters)

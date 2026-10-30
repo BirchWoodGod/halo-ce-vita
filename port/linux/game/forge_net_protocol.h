@@ -187,8 +187,26 @@ enum
 	host waits for a machine's load, and was dropped. An older host drops it
 	unread (an invalid answer), as before */
 	_forge_net_lobby_building,
+	/* (a joiner's, right after its answer, to a host of version 5 or more;
+	1.1.2) the Forge features it plays, FORGE_NET_FEATURE_* bits in
+	capabilities, nothing else: a host whose layout uses one of them
+	refuses a joiner that does not say it plays them (an older build, which
+	never sends it) - its map would not be the host's. An older host drops
+	it unread (an unknown command): the answer's capabilities are never
+	changed, so a 1.1.2 joiner still plays a 1.1.1 host's games */
+	_forge_net_lobby_features,
 	NUMBER_OF_FORGE_NET_LOBBY_COMMANDS
 };
+
+/* (_forge_net_lobby_features) the 1.1.2 Forge features a joiner plays:
+the markers (teleporters), the game type objects, an object's physics */
+#define FORGE_NET_FEATURE_MARKERS 0x00000001u
+#define FORGE_NET_FEATURE_OBJECTIVES 0x00000002u
+#define FORGE_NET_FEATURE_PHYSICS 0x00000004u
+#define FORGE_NET_FEATURES_KNOWN 0x00000007u
+/* how long a host waits for an answered joiner's features before it
+refuses it from a layout that needs them */
+#define FORGE_NET_FEATURES_MILLISECONDS 2500
 
 /* why a joiner is refused */
 enum
