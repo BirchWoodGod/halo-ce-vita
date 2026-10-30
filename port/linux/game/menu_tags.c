@@ -442,6 +442,9 @@ static char const *const port_function_names[] =
 	"port host multiplayer", "port host forge", "port host campaign", "port host next", "port host previous",
 	"port host edit",
 	"port online custom grid",
+	"port fileshare share ask", "port fileshare share option", "port fileshare send init", "port fileshare send act",
+	"port fileshare friend init", "port fileshare friend ask", "port fileshare friend download",
+	"port fileshare friend refresh", "port fileshare friend page up", "port fileshare friend page down",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -475,6 +478,7 @@ static char const *const port_game_data_input_names[] =
 	"port online version", "port online custom", "port online switch", "port online lobby",
 	"port host",
 	"port h3 content notice",
+	"port fileshare share", "port fileshare send", "port fileshare friend", "port fileshare friend question",
 };
 
 static struct

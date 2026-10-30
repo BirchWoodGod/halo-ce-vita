@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Menu style Classic+: File Share with friends (port/linux/src/p2p_fileshare.h;
+     docs/fileshare-friends.md) in the look of the Xbox's list screens: a cp/<name> screen stands for
+     halo3/fileshare_friends.xml's h3/<name> (menu_tags.c's classic set), its rows and texts named as
+     those are, so menu_functions.c's "port fileshare share ...", "port fileshare send ..." and "port
+     fileshare friend ..." fill them alike: SHARING (Start on a file of FILE SHARE), SEND TO A FRIEND,
+     a friend's FILE SHARE (FRIENDS, Triangle on a friend online) and its DOWNLOAD? question. ui.map's
+     gradient, list_item_bkd rows, list_field, alert_bkd and fonts (tag paths: the player's
+     ui.map's); the headings are text in its large_ui font. No Bungie picture or line of text here. -->
+<menus>
+	<strings name="cp/fsfriends_text">
+		<string text="SHARING"/>
+		<string text="SEND TO A FRIEND"/>
+		<string text="%a-button SEND"/>
+		<string text="%a-button DOWNLOAD"/>
+		<string text="%y-button ASK AGAIN"/>
+		<string text="DOWNLOAD?"/>
+		<string text="%a-button SELECT   %b-button BACK"/>
+		<string text="%a-button DOWNLOAD   %b-button CANCEL"/>
+		<string text="%b-button BACK"/>
+		<string text="BACK"/>
+	</strings>
+
+	<!-- SHARING: the file, whether it is shared; SHARE WITH FRIENDS or STOP SHARING, SEND TO A
+	     FRIEND (words written by port fileshare share), in the pregame's field -->
+	<widget name="cp/fileshare/share/field" left="150" top="78" width="340" height="320" bitmap="ui\shell\main_menu\multiplayer_type_select\connected\pregame\pregame_list_field"/>
+	<widget name="cp/fileshare/share/heading" type="text" left="51" top="30" width="520" height="30" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/fsfriends_text" string_index="0"/>
+	<widget name="cp/fileshare/share/share_title" type="text" left="166" top="88" width="308" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="cp/fileshare/share/share_text" type="text" left="166" top="116" width="308" height="100" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/fileshare/share/option_1" type="text" width="232" height="32" bitmap="ui\shell\bitmaps\list_item_bkd_top" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+		<on event="a" run="port fileshare share option" back="true"/>
+	</widget>
+	<widget name="cp/fileshare/share/option_2" type="text" width="232" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+		<on event="a" run="port fileshare share option" back="true"/>
+	</widget>
+	<widget name="cp/fileshare/share/option_3" type="text" width="232" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
+		<on event="a" run="port fileshare share option" back="true"/>
+	</widget>
+	<widget name="cp/fileshare/share/option_back" type="text" width="232" height="32" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="cp/fsfriends_text" string_index="9">
+		<on event="a" back="true"/>
+	</widget>
+	<widget name="cp/fileshare/share/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port fileshare share"/>
+		<child widget="cp/fileshare/share/option_1" y="0"/>
+		<child widget="cp/fileshare/share/option_2" y="32"/>
+		<child widget="cp/fileshare/share/option_3" y="64"/>
+		<child widget="cp/fileshare/share/option_back" y="96"/>
+	</widget>
+	<widget name="cp/fileshare/share/keys" type="text" left="40" top="414" width="560" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/fsfriends_text" string_index="6"/>
+	<widget name="cp/fileshare/share/screen" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\gradient">
+		<on event="b back" back="true"/>
+		<child widget="cp/fileshare/share/heading"/>
+		<child widget="cp/fileshare/share/field"/>
+		<child widget="cp/fileshare/share/share_title"/>
+		<child widget="cp/fileshare/share/share_text"/>
+		<child widget="cp/fileshare/share/keys"/>
+		<child widget="cp/fileshare/share/list" x="204" y="230"/>
+	</widget>
+
+	<!-- SEND TO A FRIEND: the friends online at the left, what the press does in the field -->
+	<widget name="cp/fileshare/send/row_name" type="text" left="13" top="5" width="230" height="24" font="ui\large_ui" color="#FF2896FF"/>
+	<widget name="cp/fileshare/send/row_state" type="text" left="0" top="0" width="1" height="1" font="ui\small_ui" color="#00000000"/>
+	<widget name="cp/fileshare/send/row_1" width="256" height="32" bitmap="ui\shell\bitmaps\list_item_bkd_top">
+		<on event="a start" run="port fileshare send act" back="true"/>
+		<child widget="cp/fileshare/send/row_name"/>
+		<child widget="cp/fileshare/send/row_state"/>
+	</widget>
+	<widget name="cp/fileshare/send/row_2" width="256" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port fileshare send act" back="true"/>
+		<child widget="cp/fileshare/send/row_name"/>
+		<child widget="cp/fileshare/send/row_state"/>
+	</widget>
+	<widget name="cp/fileshare/send/row_3" width="256" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port fileshare send act" back="true"/>
+		<child widget="cp/fileshare/send/row_name"/>
+		<child widget="cp/fileshare/send/row_state"/>
+	</widget>
+	<widget name="cp/fileshare/send/row_4" width="256" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port fileshare send act" back="true"/>
+		<child widget="cp/fileshare/send/row_name"/>
+		<child widget="cp/fileshare/send/row_state"/>
+	</widget>
+	<widget name="cp/fileshare/send/row_5" width="256" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port fileshare send act" back="true"/>
+		<child widget="cp/fileshare/send/row_name"/>
+		<child widget="cp/fileshare/send/row_state"/>
+	</widget>
+	<widget name="cp/fileshare/send/row_6" width="256" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port fileshare send act" back="true"/>
+		<child widget="cp/fileshare/send/row_name"/>
+		<child widget="cp/fileshare/send/row_state"/>
+	</widget>
+	<widget name="cp/fileshare/send/row_7" width="256" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port fileshare send act" back="true"/>
+		<child widget="cp/fileshare/send/row_name"/>
+		<child widget="cp/fileshare/send/row_state"/>
+	</widget>
+	<widget name="cp/fileshare/send/row_8" width="256" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port fileshare send act" back="true"/>
+		<child widget="cp/fileshare/send/row_name"/>
+		<child widget="cp/fileshare/send/row_state"/>
+	</widget>
+	<widget name="cp/fileshare/send/row_9" width="256" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port fileshare send act" back="true"/>
+		<child widget="cp/fileshare/send/row_name"/>
+		<child widget="cp/fileshare/send/row_state"/>
+	</widget>
+	<widget name="cp/fileshare/send/row_10" width="256" height="32" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a start" run="port fileshare send act" back="true"/>
+		<child widget="cp/fileshare/send/row_name"/>
+		<child widget="cp/fileshare/send/row_state"/>
+	</widget>
+	<widget name="cp/fileshare/send/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<data input="port fileshare send"/>
+		<child widget="cp/fileshare/send/row_1" x="40" y="78"/>
+		<child widget="cp/fileshare/send/row_2" x="40" y="110"/>
+		<child widget="cp/fileshare/send/row_3" x="40" y="142"/>
+		<child widget="cp/fileshare/send/row_4" x="40" y="174"/>
+		<child widget="cp/fileshare/send/row_5" x="40" y="206"/>
+		<child widget="cp/fileshare/send/row_6" x="40" y="238"/>
+		<child widget="cp/fileshare/send/row_7" x="40" y="270"/>
+		<child widget="cp/fileshare/send/row_8" x="40" y="302"/>
+		<child widget="cp/fileshare/send/row_9" x="40" y="334"/>
+		<child widget="cp/fileshare/send/row_10" x="40" y="366"/>
+	</widget>
+	<widget name="cp/fileshare/send/heading" type="text" left="51" top="30" width="520" height="30" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/fsfriends_text" string_index="1"/>
+	<widget name="cp/fileshare/send/field" left="304" top="78" width="292" height="320" bitmap="ui\shell\main_menu\multiplayer_type_select\connected\pregame\pregame_list_field"/>
+	<widget name="cp/fileshare/send/send_status" type="text" left="320" top="88" width="262" height="36" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="cp/fileshare/send/send_help" type="text" left="320" top="130" width="262" height="160" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/fileshare/send/a_label" type="text" left="40" top="414" width="200" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/fsfriends_text" string_index="2"/>
+	<widget name="cp/fileshare/send/back" type="text" left="426" top="414" width="160" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/fsfriends_text" string_index="8"/>
+	<widget name="cp/fileshare/send/screen" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\gradient">
+		<on event="created" run="port fileshare send init"/>
+		<on event="b back" back="true"/>
+		<child widget="cp/fileshare/send/heading"/>
+		<child widget="cp/fileshare/send/field"/>
+		<child widget="cp/fileshare/send/send_status"/>
+		<child widget="cp/fileshare/send/send_help"/>
+		<child widget="cp/fileshare/send/list"/>
+		<child widget="cp/fileshare/send/a_label"/>
+		<child widget="cp/fileshare/send/back"/>
+	</widget>
+
+	<!-- a friend's FILE SHARE: their files at the left (name, map), the chosen one's description
+	     in list_field at the right, what came of the ask and the downloads under it -->
+	<widget name="cp/fileshare/friend/row_1" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd_top">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/row_2" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/row_3" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/row_4" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/row_5" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/row_6" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/row_7" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/row_8" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/row_9" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/row_10" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/row_11" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/row_12" width="232" height="25" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port fileshare friend ask" open="h3/fileshare/friend/download/screen"/>
+		<child widget="ce/fileshare/row_name"/>
+		<child widget="ce/fileshare/row_map"/>
+	</widget>
+	<widget name="cp/fileshare/friend/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
+		<on event="created" run="port fileshare friend init"/>
+		<on event="left_trigger" run="port fileshare friend page up"/>
+		<on event="right_trigger" run="port fileshare friend page down"/>
+		<on event="y" run="port fileshare friend refresh"/>
+		<data input="port fileshare friend"/>
+		<child widget="cp/fileshare/friend/row_1" x="0" y="0"/>
+		<child widget="cp/fileshare/friend/row_2" x="0" y="26"/>
+		<child widget="cp/fileshare/friend/row_3" x="0" y="52"/>
+		<child widget="cp/fileshare/friend/row_4" x="0" y="78"/>
+		<child widget="cp/fileshare/friend/row_5" x="0" y="104"/>
+		<child widget="cp/fileshare/friend/row_6" x="0" y="130"/>
+		<child widget="cp/fileshare/friend/row_7" x="0" y="156"/>
+		<child widget="cp/fileshare/friend/row_8" x="0" y="182"/>
+		<child widget="cp/fileshare/friend/row_9" x="0" y="208"/>
+		<child widget="cp/fileshare/friend/row_10" x="0" y="234"/>
+		<child widget="cp/fileshare/friend/row_11" x="0" y="260"/>
+		<child widget="cp/fileshare/friend/row_12" x="0" y="286"/>
+	</widget>
+	<widget name="cp/fileshare/friend/friend_title" type="text" left="51" top="30" width="520" height="30" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/fileshare/friend/friend_count" type="text" left="51" top="66" width="520" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/fileshare/friend/picture" left="290" top="92" width="140" height="114" bitmap="h3/mp_maps"/>
+	<widget name="cp/fileshare/friend/info_name" type="text" left="290" top="214" width="300" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/fileshare/friend/info_text" type="text" left="290" top="240" width="300" height="100" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/fileshare/friend/status" type="text" left="290" top="344" width="300" height="50" font="ui\small_ui" color="#FFCCCCCC" text_flags="no_focus_test"/>
+	<widget name="cp/fileshare/friend/description" left="275" top="88" width="320" height="312" bitmap="ui\shell\bitmaps\list_field">
+		<child widget="cp/fileshare/friend/picture"/>
+		<child widget="cp/fileshare/friend/info_name"/>
+		<child widget="cp/fileshare/friend/info_text"/>
+		<child widget="cp/fileshare/friend/status"/>
+	</widget>
+	<widget name="cp/fileshare/friend/download" type="text" left="40" top="414" width="200" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/fsfriends_text" string_index="3"/>
+	<widget name="cp/fileshare/friend/again" type="text" left="240" top="414" width="186" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/fsfriends_text" string_index="4"/>
+	<widget name="cp/fileshare/friend/back" type="text" left="426" top="414" width="160" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/fsfriends_text" string_index="8"/>
+	<widget name="cp/fileshare/friend/screen" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\gradient">
+		<on event="b back" back="true"/>
+		<child widget="cp/fileshare/friend/friend_title"/>
+		<child widget="cp/fileshare/friend/friend_count"/>
+		<child widget="cp/fileshare/friend/description"/>
+		<child widget="cp/fileshare/friend/download"/>
+		<child widget="cp/fileshare/friend/again"/>
+		<child widget="cp/fileshare/friend/back"/>
+		<child widget="cp/fileshare/friend/list" x="51" y="96"/>
+	</widget>
+
+	<!-- DOWNLOAD?: the Xbox's question (the grey over the screen, alert_bkd's box), its words
+	     written by port fileshare friend question -->
+	<widget name="cp/fileshare/friend/download/title" type="text" left="56" top="160" width="528" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/fsfriends_text" string_index="5"/>
+	<widget name="cp/fileshare/friend/download/text" type="text" left="56" top="192" width="528" height="90" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test">
+		<data input="port fileshare friend question"/>
+	</widget>
+	<widget name="cp/fileshare/friend/download/keys" type="text" left="56" top="290" width="528" height="24" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/fsfriends_text" string_index="7"/>
+	<widget name="cp/fileshare/friend/download/box" left="40" top="150" width="560" height="170" bitmap="ui\shell\bitmaps\alert_bkd">
+		<child widget="cp/fileshare/friend/download/title"/>
+		<child widget="cp/fileshare/friend/download/text"/>
+		<child widget="cp/fileshare/friend/download/keys"/>
+	</widget>
+	<widget name="cp/fileshare/friend/download/screen" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\semi_transparent_grey">
+		<on event="a" run="port fileshare friend download" back="true"/>
+		<on event="b back" back="true"/>
+		<child widget="cp/fileshare/friend/download/box"/>
+	</widget>
+</menus>

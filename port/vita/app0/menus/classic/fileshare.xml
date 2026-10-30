@@ -9,7 +9,7 @@
      details under them, the button key at the foot as the Xbox's (the key, "=" and the word in
      large_ui). Every function is Halo 3's File Share's (halo3/fileshare.xml, menu_functions.c's port
      fileshare: the widgets found by their last name - row_<n>'s row_name and row_map, kind, count,
-     picture, info_name, info_text, status, open, rename, delete); only the look is this file's. No
+     picture, info_name, info_text, status, open, rename, delete; Start opens SHARING, classic/fileshare_friends.xml's cp/ screen); only the look is this file's. No
      picture or line of text of Bungie's here: the pictures and fonts are the player's ui.map's and
      bitmaps.map's (art.xml), read as the menus load -->
 <menus>
@@ -78,6 +78,7 @@
 		<on event="right" run="port fileshare kind"/>
 		<on event="x" run="port fileshare rename"/>
 		<on event="y" open="ce/fileshare/delete/screen" run="port fileshare ask delete"/>
+		<on event="start" open="h3/fileshare/share/screen" run="port fileshare share ask"/>
 		<data input="port fileshare"/>
 		<child widget="ce/fileshare/row_0" x="0" y="0"/>
 		<child widget="ce/fileshare/row_1" x="0" y="18"/>

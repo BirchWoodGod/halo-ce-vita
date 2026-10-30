@@ -336,6 +336,32 @@
 #   friendsplayersoff  as friendsplayers, the host appearing offline: no card, no
 #            request, the joiner told none came
 #   friendsplayersnone  as friendsplayers, the host's friends off: the same
+#   fsbrowse File Share with friends (port/linux/src/p2p_fileshare.h): the host
+#            (Alpha) has map variants (forge_files_test --write's) and makes a game
+#            type (HALO_TEST_FILESHARE make-gametype=), marks them all shared, and is
+#            friends with the joiner (Bravo, codes through files), who browses its
+#            File Share and downloads every file listed (the question answered yes):
+#            each must arrive whole, pass the validator (forge_file_decode; the game
+#            variant checks) and be saved - a map variant under a name of the
+#            receiver's own, r<hash>.hmv - and the host told; a damaged file is never
+#            listed; the broker must carry nothing of a file's name or title
+#   fsbrowseui fsbrowse through the Halo 3 menus (HALO_TEST_PAD): the joiner opens FRIENDS,
+#            Triangle on the host (a friend online), FILE SHARE, Cross on the first file and
+#            DOWNLOAD's Cross; the file must be saved as fsbrowse's are
+#   fssend   send to friend: the host sends a map variant, then a game variant, to
+#            the joiner, who is asked (HALO_TEST_FILESHARE_ANSWER: accept) and saves
+#            both; nothing pulled before the answer
+#   fsrefuse the refusals: the joiner browses (listed), then again once the host's
+#            Share with friends is off (not sharing), then once the host appears
+#            offline (asked nothing: the friend is offline), and the host's send
+#            while appearing offline is refused; a third copy (Charlie), whose
+#            friend request the host blocked, sends the host a file-share ask
+#            sealed and signed as if friends: dropped unopened, nothing sent back
+#   fsbad    the joiner refuses an offer past the size cap before asking anything,
+#            a damaged map variant (accepted, downloaded whole) is refused by its
+#            validator and never written (the host told), an offer signed by
+#            another key and one of another sender are dropped as forged; none
+#            asked of the player
 #   party    the party (p2p_party.h): the host (Alpha, its game private) is friends
 #            with the joiner (Bravo) and a second joiner (Charlie, behind a third
 #            NAT); it invites both to a party (HALO_TEST_PARTY), each accepts at
@@ -907,6 +933,7 @@ case $mode in lan|adhoc|h3lan|h3adhoc) export HALO_TEST_ENV_host="HALO_BOTS_ONLI
 [ "$mode" = party ] && seconds=${HALO_TEST_SECONDS:-210}
 [ "$mode" = partyfollow ] && seconds=${HALO_TEST_SECONDS:-210}
 [ "$mode" = friendsbackup ] && seconds=${HALO_TEST_SECONDS:-200}
+case $mode in fsbrowse|fsbrowseui|fssend|fsbad) seconds=${HALO_TEST_SECONDS:-130} ;; fsrefuse) seconds=${HALO_TEST_SECONDS:-150} ;; esac
 [ "$mode" = chat ] && seconds=${HALO_TEST_SECONDS:-250}
 # (chat: a team game, long enough for every line)
 if [ "$mode" = chat ]; then
@@ -1022,7 +1049,7 @@ side join 10.10.2 192.168.2
 	[ "$mode" = partyfollow ] ||
 	[ "$mode" = partyserver ] ||
 	[ "$mode" = hostbots ] || [ "$mode" = h3scoreboard ] ||
-	[ "$mode" = friendsbackup ] ||
+	[ "$mode" = friendsbackup ] || [ "$mode" = fsrefuse ] ||
 	[ "$mode" = h3forgeonline ] || [ "$mode" = vitapc ] || [ "$mode" = vitaonly ] ||
 	[ "$mode" = onlinebrowser ] || [ "$mode" = onlinebrowserded ] || [ "$mode" = onlinebrowsertab ]; } &&
 	side join2 10.10.3 192.168.3
@@ -5577,6 +5604,143 @@ friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|f
 		[ "$two" -ge 20 ] || fail "the joiner played the host's game for $two s with two players (20 wanted)"
 	fi
 	;;
+fsbrowse|fsbrowseui|fssend|fsrefuse|fsbad)
+	# (File Share with friends: Alpha the host's copy, at the menus, its map variants
+	# forge_files_test's and a game type of its own; Bravo its friend)
+	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code hk=$out/host.key
+	if ! ${CC:-cc} -O1 -D_GNU_SOURCE -I"$root/port/linux/game" -o "$out/forge_files_test" "$here/forge_files_test.c" \
+		"$root/port/linux/game/forge_files.c" > "$out/forge_files_test.log" 2>&1; then
+		fail "forge_files_test does not build"
+		exit 1
+	fi
+	mkdir -p "$out/host/save/forge/bloodgulch"
+	"$out/forge_files_test" --write "$out/host/save/forge/bloodgulch" > /dev/null
+	host_friends="code-file=$hc,add-file=$jc" join_friends="code-file=$jc,accept"
+	host_files="share-all,make-gametype=Swords,key-file=$hk" join_files=
+	host_more= join_more=HALO_TEST_FILESHARE_ANSWER=accept
+	join_pad="wait:150:$((seconds * 1000))"
+	case $mode in
+	fsbrowse) join_files="browse-at=35,download=all" ;;
+	fsbrowseui)
+		# (FRIENDS: the main menu's seventh row; the host the first entry after the screen's
+		# five rows of its own; Triangle's options: INVITE TO PARTY, REMOVE FRIEND, BLOCK, FILE SHARE)
+		d="down:150:500"
+		# (the Halo 3 menus with the Halo PC files, as the other h3 modes play them)
+		export HALO_TEST_DATA_JOINER=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
+		join_more="$join_more HALO_MENU_STYLE=halo3 HALO_UI_LOG=1 HALO_SCREENSHOT_DIR=$out/joiner/shots"
+		mkdir -p "$out/joiner/shots"
+		join_pad="wait:150:45000 @pre:0:300 $d $d $d $d $d $d a:150:4000 $d $d $d $d $d @00-friends:0:300 y:150:2500 @01-options:0:300"
+		join_pad="$join_pad $d $d $d $d a:150:6000 @02-fileshare:0:300 a:150:2500 @03-download:0:300 a:150:9000 @04-after:0:300"
+		join_pad="$join_pad wait:150:$((seconds * 1000))" ;;
+	fssend) host_files="$host_files,send-at=35,send-at=60:game" ;;
+	fsrefuse)
+		# (Alpha blocks every request it hears: Charlie's)
+		host_friends="$host_friends,block,appear-offline-at=${HALO_TEST_OFFLINE_AT:-95}"
+		host_files="$host_files,sharing-off-at=60,send-at=115"
+		join_files="browse-at=35:75:120" ;;
+	fsbad) host_files="$host_files,bad=40:oversize,corrupt,send-at=55,bad=85:forged,bad=95:sender" ;;
+	esac
+	run_copy host "$host_machine" "$vita" "$cpu_a" HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch HALO_NET_LOBBY_NAME=Alpha \
+		HALO_NET_PLAYER_NAME=Alpha "HALO_TEST_FRIENDS=$host_friends" "HALO_TEST_FILESHARE=$host_files" \
+		"HALO_TEST_PAD=wait:150:$((seconds * 1000))" $host_more ${HALO_TEST_HOST_ENV:-}; host_pid=$last_pid
+	run_copy joiner "$join_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_b" HALO_NET_ONLINE=true HALO_NETWORK_TEST=watch \
+		HALO_NET_LOBBY_NAME=Bravo HALO_NET_PLAYER_NAME=Bravo "HALO_TEST_FRIENDS=$join_friends" "HALO_TEST_FILESHARE=$join_files" \
+		"HALO_TEST_PAD=$join_pad" $join_more; join_pid=$last_pid
+	join2_pid=
+	if [ $mode = fsrefuse ]; then
+		run_copy joiner2 "$join2_machine" "${HALO_TEST_VITA_JOINER:-$vita}" "$cpu_c" HALO_NET_ONLINE=true \
+			HALO_NETWORK_TEST=watch HALO_NET_LOBBY_NAME=Charlie HALO_NET_PLAYER_NAME=Charlie \
+			"HALO_TEST_FRIENDS=code-file=$j2c,add-file=$hc" "HALO_TEST_FILESHARE=stranger-ask=50:$hk" \
+			"HALO_TEST_PAD=wait:150:$((seconds * 1000))"; join2_pid=$last_pid
+	fi
+	wait $join_pid $host_pid $join2_pid 2>/dev/null
+	hl=$out/host/run.log jl=$out/joiner/run.log
+	for side in host joiner $([ $mode = fsrefuse ] && echo joiner2); do
+		echo "--- $side"; grep -a "fileshare:" "$out/$side/run.log" | head -30
+	done
+	grep -aq "friends: .* accepted the friend request; now friends" "$hl" || fail "Alpha and Bravo did not become friends"
+	grep -aq "fileshare: test: game type \"Swords\" made" "$hl" || fail "the host did not make its game type"
+	grep -aq "fileshare: test: [0-9]* files marked shared" "$hl" || fail "the host marked nothing shared"
+	grep -aqE "fileshare: this machine's list: [0-9]+ files, [1-9][0-9]* of them shared" "$hl" ||
+		fail "the host's list held no shared file"
+	# (the broker: nothing of a file's name or title; no friends' message retained)
+	grep -aqE "Sample Gulch|Missing Tag|Swords|good\.hmv" "$out/broker.log" && fail "the broker's log shows a file's name"
+	grep -a "retained" "$out/broker.log" | grep -aq "/f1/" && fail "the broker kept a friends' message"
+	case $mode in
+	fsbrowse)
+		grep -aq "fileshare: test: Alpha shares map variant \"Sample Gulch\" (bloodgulch," "$jl" ||
+			fail "Bravo did not see Alpha's Sample Gulch"
+		grep -aq "fileshare: test: Alpha shares game variant \"Swords\"" "$jl" || fail "Bravo did not see Alpha's game variant"
+		grep -aq "fileshare: test: Alpha shares .*\"Damaged\"" "$jl" && fail "a damaged file was listed"
+		grep -aq "fileshare: test: Alpha shares .*\"Wrong Map\"" "$jl" && fail "a file of another map's folder was listed"
+		n=$(grep -ac "fileshare: .* passed the validator: saved as bloodgulch/r[0-9a-f]\{8\}\.hmv" "$jl")
+		echo "map variants Bravo saved: $n"
+		[ "$n" -ge 2 ] || fail "Bravo saved $n map variants (2 wanted: Sample Gulch, Missing Tag)"
+		grep -aq "fileshare: game variant from Alpha passed the checks: saved as \"Swords\"" "$jl" ||
+			fail "Bravo did not save the game variant"
+		ls "$out/joiner/save/forge/bloodgulch/"r*.hmv > /dev/null 2>&1 || fail "no received map variant in Bravo's Forge folder"
+		ls "$out/joiner/save/forge/bloodgulch/" 2>/dev/null | grep -q "good.hmv" && fail "a file was saved under the sender's name"
+		for f in "$out"/joiner/save/forge/bloodgulch/r*.hmv; do
+			[ -f "$f" ] || continue
+			"$out/forge_files_test" --dump "$f" > /dev/null 2>&1 || fail "a saved map variant does not pass the validator: $f"
+		done
+		grep -aq "fileshare: Bravo saved \"Sample Gulch\"" "$hl" || fail "Alpha was not told Bravo saved Sample Gulch"
+		;;
+	fsbrowseui)
+		grep -aq "menus: fileshare friends: h3/fileshare/friend/screen opens" "$jl" || fail "FILE SHARE did not open the friend's"
+		grep -aq "menus: fileshare friends: Alpha: state 2, [1-9]" "$jl" || fail "the friend's File Share listed nothing"
+		grep -aq "fileshare: .* passed the validator: saved as bloodgulch/r[0-9a-f]\{8\}\.hmv" "$jl" ||
+			fail "the file chosen in the menus was not saved"
+		;;
+	fssend)
+		grep -aq "fileshare: Alpha offered you \".*\" (the test answers)" "$jl" || fail "Bravo was not asked"
+		grep -aq "fileshare: .*passed the validator: saved as bloodgulch/r[0-9a-f]\{8\}\.hmv" "$jl" ||
+			fail "Bravo did not save the map variant sent"
+		grep -aq "fileshare: game variant from Alpha passed the checks: saved as \"Swords\"" "$jl" ||
+			fail "Bravo did not save the game variant sent"
+		[ "$(grep -ac "fileshare: Bravo saved \"" "$hl")" -ge 2 ] || fail "Alpha was not told Bravo saved both"
+		# (nothing pulled before the answer: the first chunk after the question)
+		awk '/fileshare: Alpha offered you / { asked = 1 } /arrived whole/ && !asked { exit 1 } END { exit !asked }' "$jl" ||
+			fail "a file arrived before its question"
+		;;
+	fsrefuse)
+		grep -aq "fileshare: Alpha's File Share: [1-9]" "$jl" || fail "Bravo's first browse listed nothing"
+		grep -aq "fileshare: Alpha's File Share: not sharing" "$jl" || fail "Bravo was not told Alpha is not sharing"
+		grep -aq "fileshare: test: browsing Alpha: Your friend is offline" "$jl" ||
+			grep -aq "fileshare: test: no friend online to browse" "$jl" ||
+			fail "Bravo asked Alpha while Alpha appeared offline"
+		grep -aq "fileshare: test: sending .*: You're appearing offline\|fileshare: test: no friend online to send to" "$hl" ||
+			fail "the host's send while appearing offline was not refused"
+		grep -aq "friends: blocked " "$hl" || fail "Alpha did not block Charlie"
+		grep -aq "fileshare: test: an ask sent, sealed and signed, to a key that is not a friend's: queued" \
+			"$out/joiner2/run.log" || fail "Charlie sent no ask"
+		grep -a "fileshare: .*\(browsed\|asked for\|is downloading\) this machine's File Share" "$hl" | grep -aqv "Bravo" &&
+			fail "Alpha answered a blocked player's ask"
+		grep -aq "fileshare: Alpha's File Share" "$out/joiner2/run.log" && fail "Charlie heard Alpha's File Share"
+		forged=$(grep -a "friends: dropped: " "$hl" | sed 's/.* replayed, \([0-9]*\) forged.*/\1/' | awk '{ s += $1 } END { print s + 0 }')
+		echo "Alpha dropped $forged messages no key of a friend opened (Charlie's ask among them)"
+		[ "$forged" -ge 1 ] || fail "Alpha did not drop Charlie's ask unopened"
+		;;
+	fsbad)
+		grep -aq "fileshare: refused Alpha's offer of \"Bad oversize\": a map variant of 70000 bytes" "$jl" ||
+			fail "the oversized offer was not refused"
+		grep -aq "fileshare: Alpha offered you \"Bad" "$jl" && fail "a bad offer was asked of the player"
+		grep -aq "fileshare: test: the file sent damaged" "$hl" || fail "the host did not send the damaged file"
+		grep -aq "refused by the validator: " "$jl" || fail "the damaged map variant was not refused by the validator"
+		grep -aq "passed the validator: saved" "$jl" && fail "a damaged map variant was saved"
+		ls "$out/joiner/save/forge/bloodgulch/"*.hmv > /dev/null 2>&1 && fail "something was written to Bravo's Forge folder"
+		grep -aq "fileshare: Bravo's game refused \"" "$hl" || fail "Alpha was not told its file was refused"
+		grep -aq "fileshare: dropped a message from Alpha whose signature is not theirs" "$jl" ||
+			fail "the offer signed by another key was not dropped"
+		forged=$(grep -a "friends: dropped: " "$jl" | sed 's/.* replayed, \([0-9]*\) forged.*/\1/' | awk '{ s += $1 } END { print s + 0 }')
+		echo "Bravo dropped $forged forged messages"
+		[ "$forged" -ge 2 ] || fail "Bravo dropped $forged forged messages (2 wanted)"
+		;;
+	esac
+	if grep -aiE "segmentation|fatal signal|assertion|ASSERT" "$out"/*/run.log | grep -av "assertions" | head -3 | grep -q .; then
+		fail "a copy crashed or asserted"
+	fi
+	;;
 friendsbackup)
 	# (Alpha and Bravo friends; Bravo's backup, then Bravo gone; Charlie restores it)
 	hc=$out/host.code jc=$out/joiner.code j2c=$out/joiner2.code
@@ -6118,7 +6282,7 @@ forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forge
 	forge_case
 	;;
 *)
-	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menusjoinpress|onlinebrowser|onlinebrowserded|onlinebrowsertab|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3livebots|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin" >&2
+	echo "usage: $0 code|infection|infectionold|relay|latency|lobby|lobbypw|lobbyflap|lobbydns|menus|menuspw|menusjoinpress|onlinebrowser|onlinebrowserded|onlinebrowsertab|browserscroll|menushost|pickjoin|lan|pc|pchost|adhoc|many|solo|coop|coopstarts|coopmenu|h3coopmenu|h3lan|h3adhoc|h3mppause|carnage|carnageold|h3scoreboard|h3live|h3liveleave|h3liveagain|h3liveonline|h3liveinvite|h3livebots|h3liveprivate|h3online|h3onlinelan|h3pickjoin|netswitch|coopmenuonline|busyport|dedicated|dedicatedpc|dedicatedban|dedicatedfill|dedicatedbots|dedicatedcompat|partyserver|hostbots|dedicatedcoop|fullcache|badmap|dedicatedmulti|scoreboard|dedicatedfullcache|dedicatedreload|splitscreen|pings|pingsmixed|unjoinable|mapmid|mapmidmixed|swat|swatmixed|friends|friendsdecline|friendsblock|friendsinvite|friendsoffline|friendsforged|friendsplayers|friendsplayersoff|friendsplayersnone|friendsbackup|fsbrowse|fsbrowseui|fssend|fsrefuse|fsbad|party|partyfollow|chat|friendsprivate|friendsprivatepw|forge|forge3|forgemp|forgeold|forgeleave|h3forge|h3forgeadhoc|forgepanel|h3forgeonline|h3forgeslow|h3forgeskip|h3variant|vitapc|vitaonly|hostfuzz|hostfuzzforge|hostfuzzmap|hostfuzzjoin" >&2
 	exit 2
 	;;
 esac

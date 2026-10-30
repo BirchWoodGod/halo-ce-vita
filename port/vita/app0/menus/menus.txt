@@ -18,6 +18,7 @@ halo3/customize.xml
 halo3/keys.xml
 halo3/forge_lobby.xml
 halo3/fileshare.xml
+halo3/fileshare_friends.xml
 halo3/multiplayer.xml
 halo3/gametypes.xml
 halo3/network.xml
@@ -37,6 +38,7 @@ classic/forge.xml
 classic/customize.xml
 classic/standins.xml
 classic/players.xml
+classic/fileshare_friends.xml
 # Menu style Online (a preview: menus/online, menu_tags.c menu_tags_online)
 online/main.xml
 online/customize.xml

@@ -166,6 +166,10 @@
 		<on event="a" run="port h3 friends option" back="true"/>
 		<child widget="ce/friends/option_name"/>
 	</widget>
+	<widget name="ce/friends/option_4" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
+		<on event="a" run="port h3 friends option" back="true"/>
+		<child widget="ce/friends/option_name"/>
+	</widget>
 	<widget name="ce/friends/option_back/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF" string_list="ce/back_text" string_index="0"/>
 	<widget name="ce/friends/option_back" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top">
 		<on event="a" back="true"/>
@@ -177,6 +181,7 @@
 		<child widget="ce/friends/option_1" y="24"/>
 		<child widget="ce/friends/option_2" y="48"/>
 		<child widget="ce/friends/option_3" y="72"/>
+		<child widget="ce/friends/option_4" y="96"/>
 	</widget>
 	<widget name="ce/friends/options_a_butn" left="481" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>
 	<widget name="ce/friends/options_select" type="text" left="502" top="414" width="134" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="3"/>

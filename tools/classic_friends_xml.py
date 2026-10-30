@@ -173,7 +173,7 @@ def options(prefix, run, count, header):
 
 
 w('\n\t<!-- FRIENDS\' Triangle: the chosen one\'s options (and FRIEND CODE BACKUP\'s question), in the field -->')
-options('classic/friends', 'port h3 friends option', 3, 'classic/header/friends')
+options('classic/friends', 'port h3 friends option', 4, 'classic/header/friends')
 
 # ---- ADD FRIEND
 w('\n\t<!-- ADD FRIEND: this Vita\'s code to give, and the row that types a friend\'s (the FRIENDS list\'s\n\t     data: its first row is ADD FRIEND); the outcome under it -->')

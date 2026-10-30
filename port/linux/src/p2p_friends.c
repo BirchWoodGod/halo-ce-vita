@@ -40,6 +40,7 @@ steps, comma-separated (test_steps below); everything is logged as
 #include "p2p_friends.h"
 #include <unistd.h>
 #include "p2p_party.h"
+#include "p2p_fileshare.h"
 #include "lang.h"
 #include "halo_port_limits.h"
 #include "tester_list.h"
@@ -86,9 +87,15 @@ enum
 
 	/* type, sender, recipient, epoch, counter */
 	PLAIN_HEADER_SIZE = 1 + P2P_KEY_SIZE + P2P_KEY_SIZE + 8 + 4,
-	/* the longest body: a party's roster (its id, serial, count, leader and
-	eight keys; presence's is 116 bytes, 188 with a password's sealed token) */
-	MAXIMUM_BODY_SIZE = PARTY_ID_LENGTH + 4 + 1 + 1 + P2P_PARTY_MAXIMUM * P2P_KEY_SIZE,
+	/* a party's roster (its id, serial, count, leader and eight keys;
+	presence's is 116 bytes, 188 with a password's sealed token) */
+	PARTY_ROSTER_BODY_SIZE = PARTY_ID_LENGTH + 4 + 1 + 1 + P2P_PARTY_MAXIMUM * P2P_KEY_SIZE,
+	/* the longest body: file share's chunk (its id, its index and 288 bytes:
+	p2p_fileshare.inc), all a message's room takes (P2P_FRIENDS_PAYLOAD_ROOM,
+	with a box's overhead: MAXIMUM_PAYLOAD_SIZE below). A build before file
+	share (its longest 278, the roster's) is never sent one: only answers to
+	its own asks are this long */
+	MAXIMUM_BODY_SIZE = 308,
 	MAXIMUM_PLAIN_SIZE = PLAIN_HEADER_SIZE + MAXIMUM_BODY_SIZE + P2P_SIGNATURE_SIZE,
 	/* a box's: the header, the ephemeral key, the nonce, the tag */
 	MAXIMUM_PAYLOAD_SIZE = ENVELOPE_HEADER_SIZE + P2P_KEY_SIZE + P2P_NONCE_SIZE + MAXIMUM_PLAIN_SIZE + P2P_TAG_SIZE,
@@ -263,6 +270,13 @@ struct budget
 	unsigned long time;
 };
 
+/* file share's (p2p_fileshare.inc) */
+#include "p2p_fileshare_types.inc"
+
+typedef char friends_files_chunk_room_assert[FILES_CHUNK_BODY_SIZE <= MAXIMUM_BODY_SIZE &&
+	PARTY_ROSTER_BODY_SIZE <= MAXIMUM_BODY_SIZE &&
+	FILES_ID_LENGTH + 3 + FILES_ENTRY_MAXIMUM_SIZE <= MAXIMUM_BODY_SIZE ? 1 : -1];
+
 /* a player's machine in the game this machine plays (p2p_friends_set_game):
 its address (the host's table), and its friend card once asked for */
 struct card_machine
@@ -384,6 +398,9 @@ struct friend_record
 	unsigned long party_invite_heard_time;
 	/* (their friend requests: a friend who lost this machine asks again) */
 	struct budget request_budget;
+	/* file share's (p2p_fileshare.inc): their messages' budget, the asks'
+	and offers' times */
+	struct files_friend files;
 };
 
 struct request_record
@@ -510,6 +527,19 @@ struct message
 	int party_value, party_code;
 	unsigned long party_follow;
 	char chat[P2P_PARTY_CHAT_SIZE];
+	/* (file share's, p2p_fileshare.inc: the transfer's id; an offer's flags,
+	kind, size, SHA-256, map and title; a list's page, pages and entries; a
+	pull's first chunk and count, a chunk's index and bytes; a download's
+	file id; an END's reason) */
+	unsigned char files_id[FILES_ID_LENGTH];
+	int files_flags, files_kind, files_page, files_pages, files_count, files_first, files_reason, files_data_size;
+	unsigned long files_size;
+	unsigned char files_file[FILES_FILE_ID_LENGTH];
+	unsigned char files_digest[P2P_SHA256_SIZE];
+	char files_map[FILES_MAP_LENGTH + 1];
+	char files_title[FILES_TITLE_LENGTH + 1];
+	struct files_entry files_entries[FILES_PAGE_ENTRIES];
+	unsigned char files_data[FILES_CHUNK_BYTES];
 };
 
 /* this machine's activity, as the game says (p2p_friends_set_activity) */
@@ -671,6 +701,9 @@ struct friends_state
 	int chat_count;
 	unsigned long chat_number;
 	struct budget chat_send_budget;
+
+	/* file share with friends (p2p_fileshare.inc) */
+	struct files_state files;
 
 	/* the list's file: to write (dirty: soon; counters: lazily) */
 	int dirty;
@@ -1831,6 +1864,14 @@ static void party_friend_entry(const struct friend_record *record, struct p2p_fr
 static void party_friend_new_run(struct friend_record *record);
 /* (p2p_friends_backup.inc) a backup opened and left let go */
 static void backup_expire(void);
+/* (file share's, p2p_fileshare.inc) */
+static int fileshare_body_encode(const struct message *message, unsigned char *bytes);
+static int fileshare_body_decode(struct message *message, const unsigned char *bytes, int offset, int body_end);
+static void fileshare_pair_heard(struct friend_record *record, const struct message *message, const unsigned char *plain,
+	int size);
+static void fileshare_update(void);
+static void fileshare_friend_gone(const unsigned char *key);
+static void fileshare_stop_all(const char *why);
 
 /* ---------- messages */
 
@@ -1975,7 +2016,8 @@ static int body_encode(const struct message *message, unsigned char *bytes)
 		size += FRIENDSHIP_LENGTH;
 		break;
 	default:
-		size = party_body_encode(message, bytes);
+		size = message->type >= TYPE_FILES_ASK && message->type <= TYPE_FILES_END ?
+			fileshare_body_encode(message, bytes) : party_body_encode(message, bytes);
 		break;
 	}
 	return size;
@@ -2153,6 +2195,14 @@ static int plain_decode(const unsigned char *bytes, int size, struct message *me
 	case TYPE_PARTY_CHAT:
 	case TYPE_PARTY_PRESENCE:
 		return party_body_decode(message, bytes, offset, body_end);
+	case TYPE_FILES_ASK:
+	case TYPE_FILES_LIST:
+	case TYPE_FILES_GET:
+	case TYPE_FILES_OFFER:
+	case TYPE_FILES_PULL:
+	case TYPE_FILES_CHUNK:
+	case TYPE_FILES_END:
+		return fileshare_body_decode(message, bytes, offset, body_end);
 	default:
 		return 0;
 	}
@@ -2611,6 +2661,7 @@ static void invites_of_remove(const unsigned char *key)
 static void friend_remove_index(int index)
 {
 	invites_of_remove(friends->friends[index].key);
+	fileshare_friend_gone(friends->friends[index].key);
 	memmove(&friends->friends[index], &friends->friends[index + 1],
 		sizeof(friends->friends[0]) * (size_t)(friends->friend_count - index - 1));
 	friends->friend_count--;
@@ -3115,6 +3166,14 @@ static void pair_heard(const unsigned char *payload, int size)
 			stone->reply_time = now_stamp();
 			send_remove(stone->key, stone->friendship);
 		}
+		return;
+	}
+	/* file share's (p2p_fileshare.inc: a friend's alone - never a tombstone's,
+	a party member's who is not a friend, a stranger's - checked there as
+	presence is, then its own way) */
+	if (message.type >= TYPE_FILES_ASK && message.type <= TYPE_FILES_END)
+	{
+		fileshare_pair_heard(record, &message, plain, opened);
 		return;
 	}
 	/* (the sender inside must be the friend whose key opened it, and the
@@ -4349,6 +4408,9 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 		friends->inbound_count = 0;
 		if (friends->party.active)
 			party_leave_now(was_on && friends->online, "friends turned off");
+		/* (file share's transfers dropped, nothing sent) */
+		if (was_on)
+			fileshare_stop_all(T("friends are off"));
 		pthread_mutex_unlock(&friends_lock);
 		save(0);
 		return;
@@ -4519,6 +4581,8 @@ void p2p_friends_update(const struct p2p_friends_host *host)
 	}
 	/* the party: its timeouts, hand-off, roster, status, follow, presence */
 	party_update();
+	/* file share: friends' asks answered, the transfers' chunks, timeouts */
+	fileshare_update();
 	/* drops, now and then */
 	if ((friends->dropped_replays || friends->dropped_forged || friends->dropped_blocked || friends->dropped_rate ||
 		friends->dropped_malformed) && (!friends->drops_logged_time || elapsed(friends->drops_logged_time, 10000)))
@@ -5470,6 +5534,9 @@ void p2p_friends_set_activity(int state, const char *map, const char *gametype, 
 /* ---------- the party (p2p_party.h) */
 
 #include "p2p_party.inc"
+
+/* file share with friends (p2p_fileshare.h) */
+#include "p2p_fileshare.inc"
 
 /* ---------- the flaming helmet (tester_list.h) */
 
