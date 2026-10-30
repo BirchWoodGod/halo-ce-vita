@@ -2679,7 +2679,21 @@
 "RESPAWN POINT" = "PUNTO DE REAPARICIÓN"
 "Spawn points full: %d. Delete one to place another." = "Puntos de aparición llenos: %d. Borra uno para colocar otro."
 "The host's game has no spawn points" = "La partida del anfitrión no tiene puntos de aparición"
-"Spawn points: Objects, SPAWNING. Held: team, game type." = "Apariciones: Objetos, APARICIONES. En mano: equipo y tipo."
+"Spawns, teleporters: Objects. Held: team, channel." = "Apariciones, teletransportes: Objetos. En mano: equipo, canal."
+
+# ---------- Forge's teleporters (forge_netgame.inc, forge_spawns.inc, menu_functions.c; 1.1.2)
+"TELEPORTERS" = "TELETRANSPORTES"
+"Teleporter Sender" = "Emisor de teletransporte"
+"Teleporter Receiver" = "Receptor de teletransporte"
+"%s, Channel %d" = "%s, canal %d"
+"The host's game has no teleporters" = "La partida del anfitrión no tiene teletransportes"
+"%d teleporter senders have no receiver: not saved" = "%d emisores de teletransporte sin receptor: no se guardan"
+"Teleporters full: %d. Delete one to place another." = "Teletransportes llenos: %d. Borra uno para colocar otro."
+"CHANNEL: %d" = "CANAL: %d"
+"LINKED" = "ENLAZADO"
+"TELEPORTER" = "TELETRANSPORTE"
+"SENDER" = "EMISOR"
+"RECEIVER" = "RECEPTOR"
 
 # ---------- Menu style Halo CE's additions (menus/classic: the Xbox screens with the port's rows)
 "No network: wait for it, or choose\nNETWORK: LOCAL." = "Sin red: espérala, o elige\nRED: LOCAL."

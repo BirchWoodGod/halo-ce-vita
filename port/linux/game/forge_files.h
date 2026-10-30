@@ -57,6 +57,17 @@ holds), any other as before, so a variant without spawn points stays readable
 by older builds; a version 4 file has one at least. The game reads player
 spawns of a version 4 file only (an older file's, never written by a build,
 are skipped as ever).
+
+Version 5 (Oct 30 2026) adds teleporters: a sender (_forge_record_teleporter_in)
+and a receiver (_forge_record_teleporter_out), no path, linked by their
+channel (the team byte: 0 to FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS - 1; the
+engine's netgame flags' team index, as a map's own teleporters pair theirs),
+their yaw (pitch and roll zero) and nothing else; at most
+FORGE_FILE_MAXIMUM_TELEPORTERS of them, every sender's channel with a
+receiver (a sender that leads nowhere is not one a writer makes). A file of
+version 4 or before holds none (the kinds were never written: refused there);
+a layout with a teleporter is written as version 5, and a version 5 file has
+one at least.
 */
 
 #ifndef __FORGE_FILES_H
@@ -66,7 +77,7 @@ are skipped as ever).
 
 #define FORGE_FILE_EXTENSION ".hmv"
 /* the version written when a layout needs it, and the oldest read */
-#define FORGE_FILE_VERSION 4
+#define FORGE_FILE_VERSION 5
 #define FORGE_FILE_FIRST_VERSION 1
 #define FORGE_FILE_HEADER_SIZE 64
 #define FORGE_FILE_MAXIMUM_SIZE 65536
@@ -109,6 +120,10 @@ player spawns: infection too), a bit each in the engine's order */
 #define FORGE_FILE_SPAWN_GAME_TYPES_MASK 0x3F
 /* a player spawn's teams: any (-1), red, blue */
 #define FORGE_FILE_MAXIMUM_SPAWN_TEAM 1
+/* (version 5) teleporters: their channels (a record's team), the most of
+them in a layout */
+#define FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS 16
+#define FORGE_FILE_MAXIMUM_TELEPORTERS 32
 /* a record's path index when its kind names no object */
 #define FORGE_FILE_NO_PATH 0xFFFF
 
@@ -167,6 +182,7 @@ enum
 	_forge_record_vehicle_spawn,
 	_forge_record_flag,
 	_forge_record_hill,
+	/* (version 5) a teleporter's sender and its receiver: team its channel */
 	_forge_record_teleporter_in,
 	_forge_record_teleporter_out,
 	_forge_record_kill_zone,
@@ -287,8 +303,8 @@ int forge_file_layout_check(
 	char const *expected_map);
 
 /* the version a layout is written as: its own when set, else the lowest
-that holds it (4 with a player spawn, 3 with a respawning character, 2 when
-a record has an AI setting) */
+that holds it (5 with a teleporter, 4 with a player spawn, 3 with a
+respawning character, 2 when a record has an AI setting) */
 int forge_file_layout_version(
 	struct forge_file_layout const *layout);
 

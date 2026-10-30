@@ -23,7 +23,10 @@ taken whole or not at all). The checks, in order:
   respawn, count, game types, variant and flags in range (version 2's AI
   team and brain flag only on a character's record, the team one of
   FORGE_AI_TEAM_*; both zero in version 1); every float finite, positions
-  within the world, angles within +-pi; reserved bytes zero;
+  within the world, angles within +-pi; reserved bytes zero; a teleporter
+  (version 5 only) no path, its channel below FORGE_FILE_MAXIMUM_TELEPORTER_
+  CHANNELS, its yaw alone, nothing else; at most FORGE_FILE_MAXIMUM_
+  TELEPORTERS, every sender's channel with a receiver;
 - the meta: four texts, each valid UTF-8 within its room with no control
   character, the title not empty, the date "YYYY-MM-DD HH:MM" or empty,
   and nothing after them.
@@ -482,17 +485,60 @@ static int forge_file_finite(
 	return (bits & 0x7F800000u) != 0x7F800000u;
 }
 
+/* a record's place and angles: every float finite, the place within the
+world, the angles within +-pi */
+static int forge_file_record_floats_check(
+	struct forge_file_record const *record)
+{
+	int index;
+
+	for (index = 0; index < 3; index++)
+	{
+		if (!forge_file_finite(record->position[index]) || !forge_file_finite(record->angles[index]) ||
+			!(record->position[index] > -FORGE_FILE_MAXIMUM_COORDINATE &&
+				record->position[index] < FORGE_FILE_MAXIMUM_COORDINATE) ||
+			!(record->angles[index] >= -FORGE_FILE_ANGLE_LIMIT && record->angles[index] <= FORGE_FILE_ANGLE_LIMIT))
+		{
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static int forge_file_kind_teleporter(
+	int kind)
+{
+	return kind == _forge_record_teleporter_in || kind == _forge_record_teleporter_out;
+}
+
 static int forge_file_record_check(
 	struct forge_file_layout const *layout,
 	int version,
 	struct forge_file_record const *record)
 {
-	int index;
 	int character;
 	int spawn;
 
 	if (record->kind >= NUMBER_OF_FORGE_RECORD_KINDS)
 		return 0;
+	/* (the kinds no build has written: a game type's flag, a hill, a kill
+	zone - refused in any version, as unknown kinds are) */
+	if (record->kind == _forge_record_flag || record->kind == _forge_record_hill || record->kind == _forge_record_kill_zone)
+		return 0;
+	/* (version 5's teleporter: no path, its channel in the team byte, its
+	yaw alone, nothing else of an object's; none before version 5) */
+	if (forge_file_kind_teleporter(record->kind))
+	{
+		if (version < 5 || record->path_index != FORGE_FILE_NO_PATH || record->team < 0 ||
+			record->team >= FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS || record->respawn_seconds || record->count ||
+			record->game_types || record->variant || record->flags || record->ai_team)
+		{
+			return 0;
+		}
+		if (!forge_file_record_floats_check(record) || record->angles[1] != 0.f || record->angles[2] != 0.f)
+			return 0;
+		return 1;
+	}
 	if (forge_file_kind_has_object(record->kind))
 	{
 		if (record->path_index >= layout->path_count ||
@@ -541,17 +587,7 @@ static int forge_file_record_check(
 	/* (version 3's respawn: a character's only, after a second or more) */
 	if ((record->flags & FORGE_RECORD_AI_RESPAWN) && (!character || record->respawn_seconds == 0))
 		return 0;
-	for (index = 0; index < 3; index++)
-	{
-		if (!forge_file_finite(record->position[index]) || !forge_file_finite(record->angles[index]) ||
-			!(record->position[index] > -FORGE_FILE_MAXIMUM_COORDINATE &&
-				record->position[index] < FORGE_FILE_MAXIMUM_COORDINATE) ||
-			!(record->angles[index] >= -FORGE_FILE_ANGLE_LIMIT && record->angles[index] <= FORGE_FILE_ANGLE_LIMIT))
-		{
-			return 0;
-		}
-	}
-	return 1;
+	return forge_file_record_floats_check(record);
 }
 
 /* the meta's texts each within its room, terminated (the struct's own
@@ -573,17 +609,22 @@ int forge_file_layout_version(
 
 	if (layout->version)
 		return layout->version;
+	/* (the highest any record needs) */
 	for (index = 0; index < layout->record_count && index < FORGE_FILE_MAXIMUM_RECORDS; index++)
 	{
-		if (layout->records[index].kind == _forge_record_player_spawn)
-			return 4;
-	}
-	for (index = 0; index < layout->record_count && index < FORGE_FILE_MAXIMUM_RECORDS; index++)
-	{
-		if (layout->records[index].flags & FORGE_RECORD_AI_RESPAWN)
-			return 3;
-		if (layout->records[index].ai_team || (layout->records[index].flags & FORGE_RECORD_AI_OFF))
-			version = 2;
+		struct forge_file_record const *record = &layout->records[index];
+		int needs = FORGE_FILE_FIRST_VERSION;
+
+		if (forge_file_kind_teleporter(record->kind))
+			needs = 5;
+		else if (record->kind == _forge_record_player_spawn)
+			needs = 4;
+		else if (record->flags & FORGE_RECORD_AI_RESPAWN)
+			needs = 3;
+		else if (record->ai_team || (record->flags & FORGE_RECORD_AI_OFF))
+			needs = 2;
+		if (needs > version)
+			version = needs;
 	}
 	return version;
 }
@@ -597,6 +638,9 @@ int forge_file_layout_check(
 	int netgame = 0;
 	int respawning = 0;
 	int player_spawns = 0;
+	int teleporters = 0;
+	unsigned int sender_channels = 0;
+	unsigned int receiver_channels = 0;
 	int version;
 
 	if (!layout || !forge_file_meta_terminated(layout))
@@ -649,12 +693,28 @@ int forge_file_layout_check(
 			respawning = 1;
 		if (layout->records[index].kind == _forge_record_player_spawn)
 			player_spawns = 1;
+		/* (version 5's teleporters: their channels, checked in range with
+		the record) */
+		if (forge_file_kind_teleporter(layout->records[index].kind))
+		{
+			teleporters++;
+			if (layout->records[index].kind == _forge_record_teleporter_in)
+				sender_channels |= 1u << layout->records[index].team;
+			else
+				receiver_channels |= 1u << layout->records[index].team;
+		}
 	}
 	/* (version 3 is written only for a respawning character, version 4 only
-	for a player spawn: a file of either without one is not one this writer
-	made) */
-	if ((version == 3 && !respawning) || (version >= 4 && !player_spawns))
+	for a player spawn, version 5 only for a teleporter: a file of one
+	without it is not one this writer made) */
+	if ((version == 3 && !respawning) || (version == 4 && !player_spawns) || (version == 5 && !teleporters))
 		return _forge_file_bad_version;
+	/* (the teleporters within their most, each sender's channel with a
+	receiver: a sender leads somewhere) */
+	if (teleporters > FORGE_FILE_MAXIMUM_TELEPORTERS)
+		return _forge_file_too_many;
+	if (sender_channels & ~receiver_channels)
+		return _forge_file_bad_record;
 	/* (the flag says whether any record is a netgame's) */
 	if (((layout->flags & FORGE_FILE_FLAG_NETGAME_SPAWNS) != 0) != netgame)
 		return _forge_file_bad_flags;

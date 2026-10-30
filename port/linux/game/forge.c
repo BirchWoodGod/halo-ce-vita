@@ -384,22 +384,36 @@ enum
 /* the browser's categories' names (forge.h's order) */
 static char const *const forge_category_names[NUMBER_OF_FORGE_CATEGORIES] =
 {
-	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("AI"), N_("BLOCKS"), N_("SPAWNING"),
+	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("AI"), N_("BLOCKS"), N_("TELEPORTERS"), N_("SPAWNING"),
 };
 /* (the log's) */
 static char const *const forge_category_log_names[NUMBER_OF_FORGE_CATEGORIES] =
 {
-	"vehicles", "weapons", "equipment", "scenery", "characters", "blocks", "spawning",
+	"vehicles", "weapons", "equipment", "scenery", "characters", "blocks", "teleporters", "spawning",
 };
-/* (forge_spawns.inc) the SPAWNING category's items, its kinds' names */
-static char const *const forge_spawn_kind_names[NUMBER_OF_FORGE_SPAWN_KINDS] =
+/* (forge_spawns.inc) the markers' categories' items (SPAWNING's,
+TELEPORTERS'), its kinds' names */
+static char const *const forge_spawn_kind_names[NUMBER_OF_FORGE_MARKER_KINDS] =
 {
-	N_("Respawn Point"), N_("Initial Spawn"),
+	N_("Respawn Point"), N_("Initial Spawn"), N_("Teleporter Sender"), N_("Teleporter Receiver"),
 };
-static char const *const forge_spawn_kind_log_names[NUMBER_OF_FORGE_SPAWN_KINDS] =
+static char const *const forge_spawn_kind_log_names[NUMBER_OF_FORGE_MARKER_KINDS] =
 {
-	"respawn point", "initial spawn",
+	"respawn point", "initial spawn", "teleporter sender", "teleporter receiver",
 };
+/* a markers' category's first kind and its kinds (NONE: not one) */
+static short forge_marker_category_first(
+	short category)
+{
+	return category == _forge_category_spawning ? _forge_spawn_respawn :
+		category == _forge_category_teleporters ? _forge_spawn_teleporter_sender : NONE;
+}
+static short forge_marker_category_count(
+	short category)
+{
+	return category == _forge_category_spawning ? NUMBER_OF_FORGE_SPAWN_KINDS :
+		category == _forge_category_teleporters ? FORGE_TELEPORTER_KINDS : 0;
+}
 
 /* the lobby's maps: the Xbox's multiplayer maps, in the order of ui.map's
 pictures of them (ui\shell\bitmaps\mp_map_grafix, as
@@ -690,6 +704,9 @@ struct forge_spawn
 	signed char team;
 	/* FORGE_FILE_GAME_TYPE_* bits, 0 for all */
 	unsigned short game_types;
+	/* (a teleporter's: forge_netgame.inc) its channel, 0 to
+	FORGE_TELEPORTER_CHANNELS - 1 */
+	short channel;
 	/* where, facing along the ground */
 	struct forge_transform home;
 };
@@ -948,7 +965,12 @@ static void forge_spawn_choose(short kind);
 static void forge_spawn_delete(long id);
 static void forge_spawn_log(char const *what, struct forge_spawn const *spawn);
 static struct forge_spawn *forge_spawn_add(long id, short kind, signed char team, unsigned short game_types,
-	struct forge_transform const *home);
+	short channel, struct forge_transform const *home);
+static void forge_netgame_changed(void);
+static boolean forge_spawn_is_teleporter(struct forge_spawn const *spawn);
+static short forge_teleporters_count(short kind, short channel);
+static short forge_teleporter_new_channel(short kind);
+static void forge_netgame_update(void);
 static void forge_spawn_remove(struct forge_spawn *spawn);
 static void forge_net_update(void);
 static void forge_net_monitor_pack_want(void);
@@ -4171,6 +4193,12 @@ static void forge_variant_apply(
 		/* (a player spawn: taken as the map loaded, forge_spawns_from_layout) */
 		if (record->kind == _forge_record_player_spawn && forge_file_layout_version(layout) >= 4)
 			continue;
+		/* (a teleporter: as the map loaded too, forge_spawns_from_layout) */
+		if ((record->kind == _forge_record_teleporter_in || record->kind == _forge_record_teleporter_out) &&
+			forge_file_layout_version(layout) >= 5)
+		{
+			continue;
+		}
 		if (record->kind != _forge_record_object)
 		{
 			other_kinds++;
@@ -5314,6 +5342,9 @@ void forge_map_loaded(
 	forge_spawns_clear();
 	if (forge_globals.game_active && forge_globals.variant_pending)
 		forge_spawns_from_layout(&forge_variant_layout);
+	/* (its teleporters the engine's netgame flags as its game starts:
+	forge_netgame.inc; any other game's the map's own) */
+	forge_netgame_changed();
 	/* (the session's packs, before the map's objects are placed; a network
 	Forge game's the Monitor's after them, for the other monitors) */
 	if (forge_globals.game_active)
@@ -5379,9 +5410,10 @@ short forge_category_item_count(
 {
 	if (category < 0 || category >= NUMBER_OF_FORGE_CATEGORIES)
 		return 0;
-	/* (SPAWNING: the respawn point and the initial spawn, in a Forge game) */
-	if (category == _forge_category_spawning)
-		return forge_globals.game_active && !forge_globals.playing ? NUMBER_OF_FORGE_SPAWN_KINDS : 0;
+	/* (SPAWNING: the respawn point and the initial spawn; TELEPORTERS: the
+	sender and the receiver; in a Forge game) */
+	if (forge_marker_category_first(category) != NONE)
+		return forge_globals.game_active && !forge_globals.playing ? forge_marker_category_count(category) : 0;
 	forge_palette_ready();
 	return forge_globals.palette_counts[category];
 }
@@ -5395,11 +5427,13 @@ boolean forge_category_item(
 
 	if (item_index < 0 || item_index >= forge_category_item_count(category))
 		return FALSE;
-	if (category == _forge_category_spawning)
+	if (forge_marker_category_first(category) != NONE)
 	{
+		short kind = (short)(forge_marker_category_first(category) + item_index);
+
 		csmemset(item, 0, sizeof(*item));
-		snprintf(item->name, sizeof(item->name), "%s", T(forge_spawn_kind_names[item_index]));
-		item->placed = forge_spawns_of_kind(item_index);
+		snprintf(item->name, sizeof(item->name), "%s", T(forge_spawn_kind_names[kind]));
+		item->placed = forge_spawns_of_kind(kind);
 		return TRUE;
 	}
 	entry = &forge_globals.palette[forge_globals.palette_first[category] + item_index];
@@ -5416,7 +5450,8 @@ void forge_browser_choose(
 {
 	if (item_index < 0 || item_index >= forge_category_item_count(category))
 		return;
-	forge_globals.browser_choice = category == _forge_category_spawning ? (short)(FORGE_BROWSER_SPAWN_CHOICE + item_index) :
+	forge_globals.browser_choice = forge_marker_category_first(category) != NONE ?
+		(short)(FORGE_BROWSER_SPAWN_CHOICE + forge_marker_category_first(category) + item_index) :
 		(short)(forge_globals.palette_first[category] + item_index);
 	forge_globals.browser_chosen = TRUE;
 }
@@ -5672,6 +5707,8 @@ void forge_update(
 	if (forge_globals.test_sticks_frames > 0)
 		forge_globals.test_sticks_frames--;
 	forge_session_update();
+	/* (the layout's teleporters the engine's flags, before the tick) */
+	forge_netgame_update();
 	forge_game_playing = forge_globals.active || (forge_globals.game_active && !forge_globals.playing);
 	/* (a map variant played: the layout kept and given to joiners, nothing
 	of Forge's asked for or shown - no monitor, menu, save, AI or round
@@ -5900,7 +5937,7 @@ void forge_update(
 
 		forge_globals.browser_chosen = FALSE;
 		if (forge_globals.held_marker_id && ((choice >= 0 && choice < forge_globals.palette_count) ||
-			(choice >= FORGE_BROWSER_SPAWN_CHOICE && choice < FORGE_BROWSER_SPAWN_CHOICE + NUMBER_OF_FORGE_SPAWN_KINDS)))
+			(choice >= FORGE_BROWSER_SPAWN_CHOICE && choice < FORGE_BROWSER_SPAWN_CHOICE + NUMBER_OF_FORGE_MARKER_KINDS)))
 		{
 			forge_marker_drop();
 		}
@@ -5910,8 +5947,9 @@ void forge_update(
 				forge_drop();
 			forge_spawn(forge_globals.palette[choice].tag_index);
 		}
-		/* (SPAWNING: a player spawn point, held as its marker) */
-		else if (choice >= FORGE_BROWSER_SPAWN_CHOICE && choice < FORGE_BROWSER_SPAWN_CHOICE + NUMBER_OF_FORGE_SPAWN_KINDS)
+		/* (SPAWNING, TELEPORTERS: a player spawn point, a teleporter, held as
+		its marker) */
+		else if (choice >= FORGE_BROWSER_SPAWN_CHOICE && choice < FORGE_BROWSER_SPAWN_CHOICE + NUMBER_OF_FORGE_MARKER_KINDS)
 		{
 			if (object_try_and_get(forge_globals.held_object_index))
 				forge_drop();
@@ -6690,6 +6728,9 @@ boolean forge_command(
 			property = _forge_property_respawn;
 		else if (!strcmp(rest, "kind"))
 			property = _forge_property_place_at_start;
+		/* (a teleporter's: "channel" - the team's row) */
+		else if (!strncmp(rest, "channel", 7))
+			property = _forge_property_team;
 		if (strchr(rest, '-'))
 			step = -1;
 		if (property == NONE || (!forge_properties_target() && !forge_properties_spawn()))
@@ -6838,7 +6879,8 @@ boolean forge_command(
 			forge_marker_drop();
 		if (object_try_and_get(forge_globals.held_object_index))
 			forge_drop();
-		forge_spawn_choose(!strcmp(rest, "initial") ? _forge_spawn_initial : _forge_spawn_respawn);
+		forge_spawn_choose(!strcmp(rest, "initial") ? _forge_spawn_initial : !strcmp(rest, "sender") ?
+			_forge_spawn_teleporter_sender : !strcmp(rest, "receiver") ? _forge_spawn_teleporter_receiver : _forge_spawn_respawn);
 		return TRUE;
 	}
 	/* (tests) "closemenus": the menus over the game closed, as B in them */
@@ -6861,9 +6903,13 @@ boolean forge_command(
 	{
 		short index;
 
-		platform_log("forge: %d player spawn points (%d initial, %d respawn), %d markers drawn (%d of the map's), budget %d/%d",
-			forge_globals.spawn_count, forge_spawns_of_kind(_forge_spawn_initial), forge_spawns_of_kind(_forge_spawn_respawn),
-			forge_globals.markers_drawn, forge_globals.map_markers_drawn, forge_objects_counted(), FORGE_MAXIMUM_OBJECTS);
+		platform_log("forge: %d player spawn points (%d initial, %d respawn), %d teleporters (%d senders, %d receivers), %d "
+			"markers drawn (%d of the map's), budget %d/%d", forge_spawns_of_kind(_forge_spawn_initial) +
+			forge_spawns_of_kind(_forge_spawn_respawn), forge_spawns_of_kind(_forge_spawn_initial),
+			forge_spawns_of_kind(_forge_spawn_respawn), forge_spawns_of_kind(_forge_spawn_teleporter_sender) +
+			forge_spawns_of_kind(_forge_spawn_teleporter_receiver), forge_spawns_of_kind(_forge_spawn_teleporter_sender),
+			forge_spawns_of_kind(_forge_spawn_teleporter_receiver), forge_globals.markers_drawn,
+			forge_globals.map_markers_drawn, forge_objects_counted(), FORGE_MAXIMUM_OBJECTS);
 		for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
 			forge_spawn_log("spawns:", &forge_globals.spawns[index]);
 		return TRUE;
@@ -6991,3 +7037,4 @@ boolean forge_command(
 #include "forge_net.inc"
 #include "forge_markers.inc"
 #include "forge_spawns.inc"
+#include "forge_netgame.inc"

@@ -649,7 +649,9 @@ static void test_version_2(void)
 	put_u16(work, 4, 4);
 	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 4 without a player spawn: refused");
 	put_u16(work, 4, 5);
-	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 5: refused");
+	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 5 without a teleporter: refused");
+	put_u16(work, 4, FORGE_FILE_VERSION + 1);
+	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "a version past the newest: refused");
 	put_u16(work, 4, 0);
 	CHECK(decode(work, good2_size, "bloodgulch") == _forge_file_bad_version, "version 0: refused");
 	memcpy(work, good2, (size_t)good2_size);
@@ -907,6 +909,205 @@ static void test_version_4(void)
 	}
 }
 
+/* a variant with teleporters (version 5): the sample's objects, a sender
+and a receiver on channel 3, a receiver alone on channel 7 */
+static unsigned char good5[FORGE_FILE_MAXIMUM_SIZE];
+static int good5_size;
+
+static void add_teleporter(struct forge_file_layout *layout, int sender, int channel, float x, float y, float yaw)
+{
+	struct forge_file_record *record = &layout->records[layout->record_count++];
+
+	memset(record, 0, sizeof(*record));
+	record->path_index = FORGE_FILE_NO_PATH;
+	record->kind = sender ? _forge_record_teleporter_in : _forge_record_teleporter_out;
+	record->team = (signed char)channel;
+	record->position[0] = x;
+	record->position[1] = y;
+	record->position[2] = 0.5f;
+	record->angles[0] = yaw;
+	layout->flags |= FORGE_FILE_FLAG_NETGAME_SPAWNS;
+}
+
+static void sample_layout_5(struct forge_file_layout *layout)
+{
+	sample_layout(layout);
+	add_teleporter(layout, 1, 3, 80.f, -140.f, 0.25f);
+	add_teleporter(layout, 0, 3, 40.f, -100.f, -1.5f);
+	add_teleporter(layout, 0, 7, 41.f, -101.f, 0.f);
+}
+
+static void test_version_5(void)
+{
+	struct forge_file_layout layout;
+	int result = -1;
+	int records;
+	int index;
+
+	sample_layout_5(&layout);
+	CHECK(forge_file_layout_version(&layout) == 5, "teleporters need version 5");
+	good5_size = forge_file_encode(&layout, good5, sizeof(good5), &result);
+	CHECK(good5_size > 0 && result == _forge_file_ok && good5[4] == 5 && good5[5] == 0, "written as version 5");
+	CHECK(decode(good5, good5_size, "bloodgulch") == _forge_file_ok && decoded.version == 5, "read back as version 5");
+	layout.version = 5;
+	CHECK(layouts_equal(&layout, &decoded), "the teleporters read back the same");
+	CHECK(decoded.records[5].kind == _forge_record_teleporter_in && decoded.records[5].team == 3 &&
+		decoded.records[6].kind == _forge_record_teleporter_out && decoded.records[6].team == 3 &&
+		decoded.records[7].team == 7, "a sender and a receiver on channel 3, a receiver on 7");
+	CHECK(decode(good5, good5_size, NULL) == _forge_file_ok && forge_file_encode(&decoded, work, sizeof(work), &result) ==
+		good5_size && !memcmp(work, good5, (size_t)good5_size), "a version 5 file writes back as itself");
+	/* (with player spawns too: still version 5, both read) */
+	sample_layout_5(&layout);
+	add_spawn(&layout, 90.f, -150.f, 0.5f, 0, 0, 0);
+	{
+		int written = forge_file_encode(&layout, work, sizeof(work), &result);
+
+		CHECK(forge_file_layout_version(&layout) == 5 && written > 0 && work[4] == 5 &&
+			decode(work, written, "bloodgulch") == _forge_file_ok && decoded.records[8].kind == _forge_record_player_spawn,
+			"teleporters and a player spawn: version 5");
+	}
+	/* (every channel taken; the most teleporters) */
+	sample_layout(&layout);
+	for (index = 0; index < FORGE_FILE_MAXIMUM_TELEPORTERS; index++)
+		add_teleporter(&layout, index % 2 == 0, (index / 2) % FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS, 10.f + index, 10.f, 0.f);
+	CHECK(forge_file_encode(&layout, work, sizeof(work), &result) > 0, "16 channels of a sender and a receiver: written");
+	add_teleporter(&layout, 0, 0, 5.f, 5.f, 0.f);
+	CHECK(encode_refused(&layout), "33 teleporters: not written");
+	/* (the writer's refusals: each field of a teleporter's) */
+	{
+		static struct
+		{
+			int field;
+			int value;
+			char const *what;
+		} const cases[] =
+		{
+			{ 0, 16, "channel 16" },
+			{ 0, -1, "channel -1" },
+			{ 0, 4, "a sender whose channel has no receiver" },
+			{ 1, 1, "a path" },
+			{ 2, 30, "a respawn time" },
+			{ 3, 1, "a count" },
+			{ 4, FORGE_FILE_GAME_TYPE_CTF, "a game type" },
+			{ 5, 1, "a variant" },
+			{ 6, FORGE_RECORD_PLACE_AT_START, "a flag" },
+			{ 7, 1, "an AI team" },
+			{ 8, 1, "a pitch" },
+			{ 9, 1, "a roll" },
+			{ 10, 1, "a place outside the world" },
+		};
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			struct forge_file_record *record;
+			char what[96];
+
+			sample_layout_5(&layout);
+			record = &layout.records[5];
+			switch (cases[index].field)
+			{
+			case 0: record->team = (signed char)cases[index].value; break;
+			case 1: record->path_index = 0; break;
+			case 2: record->respawn_seconds = (unsigned short)cases[index].value; break;
+			case 3: record->count = (unsigned char)cases[index].value; break;
+			case 4: record->game_types = (unsigned short)cases[index].value; break;
+			case 5: record->variant = (unsigned char)cases[index].value; break;
+			case 6: record->flags = (unsigned char)cases[index].value; break;
+			case 7: record->ai_team = (unsigned char)cases[index].value; break;
+			case 8: record->angles[1] = 0.5f; break;
+			case 9: record->angles[2] = -0.5f; break;
+			case 10: record->position[2] = 6000.f; break;
+			}
+			snprintf(what, sizeof(what), "a teleporter's %s is not written", cases[index].what);
+			CHECK(encode_refused(&layout), what);
+		}
+	}
+	sample_layout_5(&layout);
+	layout.version = 4;
+	CHECK(encode_refused(&layout), "teleporters in a version 4 layout are not written");
+	sample_layout_5(&layout);
+	layout.flags = 0;
+	CHECK(encode_refused(&layout), "teleporters without the netgame flag are not written");
+	/* (the reader's: each field of a teleporter's record, checksum right) */
+	records = good5_size - (FORGE_FILE_RECORD_SIZE * 8) -
+		(int)(strlen(layout.title) + strlen(layout.author) + strlen(layout.description) + strlen(layout.date) + 4);
+	{
+		static struct
+		{
+			int record;
+			int offset;
+			unsigned char value;
+			char const *what;
+		} const cases[] =
+		{
+			{ 5, 3, 16, "channel 16" },
+			{ 5, 3, 0xFF, "channel -1" },
+			{ 5, 3, 7, "nothing: channel 7 has a receiver" },
+			{ 5, 3, 4, "a sender whose channel has no receiver" },
+			{ 6, 2, _forge_record_teleporter_in, "channel 3's receiver made a sender" },
+			{ 5, 23, 0x3F, "a pitch" },
+			{ 5, 27, 0x3F, "a roll" },
+			{ 5, 28, 1, "a respawn time" },
+			{ 5, 30, 1, "a count" },
+			{ 5, 31, 1, "a game type" },
+			{ 5, 33, 1, "a variant" },
+			{ 5, 34, 0x01, "a flag" },
+			{ 5, 35, 1, "an AI team" },
+			{ 5, 36, 1, "the first reserved byte" },
+			{ 5, 0, 0, "a path" },
+			{ 5, 2, _forge_record_hill, "a kind no build writes (a hill)" },
+			{ 5, 2, _forge_record_kill_zone, "a kind no build writes (a kill zone)" },
+			{ 5, 2, NUMBER_OF_FORGE_RECORD_KINDS, "an unknown kind" },
+		};
+
+		for (index = 0; index < (int)(sizeof(cases) / sizeof(cases[0])); index++)
+		{
+			char what[96];
+			int expected = cases[index].value == 7 && cases[index].offset == 3 ? _forge_file_ok : _forge_file_bad_record;
+
+			memcpy(work, good5, (size_t)good5_size);
+			work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + cases[index].offset] = cases[index].value;
+			if (cases[index].offset == 0)
+				work[records + FORGE_FILE_RECORD_SIZE * cases[index].record + 1] = 0;
+			fix_checksum(work, good5_size);
+			snprintf(what, sizeof(what), "version 5: a teleporter's %s: %s", cases[index].what,
+				expected == _forge_file_ok ? "taken" : "refused");
+			CHECK(decode(work, good5_size, "bloodgulch") == expected, what);
+		}
+	}
+	/* (called version 4: its teleporters refused) */
+	memcpy(work, good5, (size_t)good5_size);
+	put_u16(work, 4, 4);
+	CHECK(decode(work, good5_size, "bloodgulch") == _forge_file_bad_record, "version 5's teleporters in a file called version 4: refused");
+	/* (a file of 33 teleporters, made by hand: refused) */
+	{
+		struct forge_file_layout many;
+		int written;
+
+		sample_layout(&many);
+		for (index = 0; index < FORGE_FILE_MAXIMUM_TELEPORTERS; index++)
+			add_teleporter(&many, 0, index % FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS, 10.f + index, 10.f, 0.f);
+		written = forge_file_encode(&many, work, sizeof(work), &result);
+		CHECK(written > 0, "32 receivers: written");
+		if (written > 0)
+		{
+			unsigned char *bigger = malloc((size_t)written + FORGE_FILE_RECORD_SIZE);
+			int at = written - (int)(strlen(many.title) + strlen(many.author) + strlen(many.description) + strlen(many.date) + 4);
+
+			/* (one more record, a copy of the last, the counts and checksum
+			made right) */
+			memcpy(bigger, work, (size_t)at);
+			memcpy(bigger + at, work + at - FORGE_FILE_RECORD_SIZE, FORGE_FILE_RECORD_SIZE);
+			memcpy(bigger + at + FORGE_FILE_RECORD_SIZE, work + at, (size_t)(written - at));
+			put_u16(bigger, 52, (unsigned int)(many.record_count + 1));
+			put_u32(bigger, 56, (unsigned int)(written + FORGE_FILE_RECORD_SIZE - FORGE_FILE_HEADER_SIZE));
+			fix_checksum(bigger, written + FORGE_FILE_RECORD_SIZE);
+			CHECK(decode(bigger, written + FORGE_FILE_RECORD_SIZE, "bloodgulch") == _forge_file_too_many, "33 teleporters: refused");
+			free(bigger);
+		}
+	}
+}
+
 static void test_names(void)
 {
 	char name[FORGE_FILE_NAME_SIZE];
@@ -976,8 +1177,12 @@ static void fuzz(long iterations)
 		{
 			/* (the version 1 sample, the version 2 one, or the version 4
 			one with player spawns) */
-			switch (next_random() % 3)
+			switch (next_random() % 4)
 			{
+			case 3:
+				size = good5_size;
+				memcpy(work, good5, (size_t)size);
+				break;
 			case 0:
 				size = good_size;
 				memcpy(work, good, (size_t)size);
@@ -1122,6 +1327,9 @@ static int dump(char const *path)
 		if (record->kind == _forge_record_player_spawn)
 			printf("record %d: a player spawn: %s, team %d, game types %d\n", index,
 				(record->flags & FORGE_RECORD_SPAWN_INITIAL) ? "initial" : "respawn", record->team, record->game_types);
+		if (record->kind == _forge_record_teleporter_in || record->kind == _forge_record_teleporter_out)
+			printf("record %d: a teleporter %s, channel %d\n", index,
+				record->kind == _forge_record_teleporter_in ? "sender" : "receiver", record->team);
 	}
 	return 0;
 }
@@ -1141,6 +1349,7 @@ int main(int argc, char **argv)
 	test_reader_refuses();
 	test_version_2();
 	test_version_4();
+	test_version_5();
 	test_names();
 	fuzz(iterations);
 	printf("%d checks, %d failed\n", checks, failures);

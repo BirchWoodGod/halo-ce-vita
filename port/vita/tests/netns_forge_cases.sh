@@ -86,6 +86,13 @@
 #              (asked) and carries it off (asked: the host moves it); the host and the second
 #              joiner have it, red, where it was let go; the first joiner deletes it (asked),
 #              gone on all three
+#   forgetele  teleporters online (forge_netgame.inc, 1.1.2): the host places a sender and a
+#              receiver before the joiner comes (the joiner, joining late, is given them);
+#              the joiner places a sender (asked of the host), takes its marker and steps
+#              its channel (asked), places a receiver (the host gives it the sender's
+#              channel); the host plays the Spartan put down on the joiner's sender: its
+#              engine sends it to the joiner's receiver, and the joiner sees it sent (a
+#              joiner's Spartan stands where its unit is, the host's to move: 1.1.1's)
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
 #              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
 #              System Link screen's profile, then a network Forge game of Blood Gulch
@@ -746,6 +753,38 @@ forge_case() {
 		grep -aq "forge net: machine 1 plays the Forge game" "$hl" || fail "the joiner did not play the panel's Forge game"
 		grep -aq "forge: levels.test.bloodgulch.bloodgulch loaded for a Forge game" "$jl" || fail "the joiner's Forge game did not start"
 		grep -aq "forge net: machine 1 spawned boulder" "$hl" || fail "the joiner's edit was not the host's"
+		;;
+	forgetele)
+		host_cmds="L150:forge camera 50 -90 6 0 -89;L162:forge spawnpoint sender;L166:forge drop"
+		host_cmds="$host_cmds;L170:forge camera 56 -84 6 0 -89;L182:forge spawnpoint receiver;L186:forge drop"
+		host_cmds="$host_cmds;L900:forge spawns;L1000:forge camera 60 -100 1.2 90 0;L1030:forge off;L1100:forge where"
+		host_cmds="$host_cmds;L1500:forge spawns"
+		join_cmds="L250:forge spawns;L260:forge camera 60 -100 6 0 -89;L272:forge spawnpoint sender;L285:forge marker #last"
+		join_cmds="$join_cmds;L287:forge property channel;L290:forge drop;L300:forge camera 76 -112 6 0 -89"
+		join_cmds="$join_cmds;L312:forge spawnpoint receiver;L330:forge spawns;L700:forge camera 70 -118 4 140 -15"
+		join_cmds="$join_cmds;L900:forge spawns"
+		forge_host "$host_cmds" $(forge_shots mpforge-shots/forgetele-host)
+		sleep 5
+		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join "HALO_TEST_COMMANDS=$join_cmds" \
+			$(forge_shots mpforge-shots/forgetele-joiner)
+		join_pid=$last_pid
+		wait $join_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl"
+		echo "--- host"; grep -aE "forge net: machine|forge: (player [0-9] teleported|netgame flags|spawns: )" "$hl" | head -30
+		echo "--- joiner"; grep -aE "forge net: asked|forge: (player [0-9] teleported|netgame flags|spawns: )" "$jl" | head -30
+		sed -n '/test command at tick 250: forge spawns$/,/test command at tick/p' "$jl" > "$out/joiner-late.txt"
+		grep -aq "the teleporter sender #1 (channel 0)" "$out/joiner-late.txt" &&
+			grep -aq "the teleporter receiver #2 (channel 0)" "$out/joiner-late.txt" ||
+			fail "the joiner, joining late, was not given the host's teleporters"
+		grep -aq "forge net: machine 1 placed the teleporter sender #3" "$hl" || fail "the joiner's sender was not placed by the host"
+		grep -aq "forge net: machine 1 changed the spawn point #3" "$hl" || fail "the joiner's channel step was not made by the host"
+		grep -aq "forge net: machine 1 placed the teleporter receiver #4" "$hl" || fail "the joiner's receiver was not placed by the host"
+		sed -n '/test command at tick 900: forge spawns$/,/test command at tick/p' "$hl" | grep -aq "the teleporter receiver #4 (channel 2)" ||
+			fail "the joiner's receiver did not take its sender's channel"
+		grep -aq "forge: player 0 teleported on channel 2: " "$hl" || fail "the host's Spartan was not sent by the joiner's teleporter"
+		grep -aq "forge: player 0 teleported on channel 2: " "$jl" || fail "the joiner did not see the host's Spartan sent"
+		grep -aqE "forge: netgame flags: the map's [0-9]+ and 4 teleporters \(2 senders, 2 receivers\)" "$jl" ||
+			fail "the joiner's engine was not given the four teleporters"
 		;;
 	forgeleave)
 		host_cmds="L150:forge camera 60 -100 1.6 130 0;L160:forge spawn warthog;L165:forge distance 8;L170:forge drop;L600:@menu"

@@ -44,19 +44,32 @@ enum
 	_forge_category_characters,
 	/* (the building blocks the game makes: forge_blocks.c) */
 	_forge_category_blocks,
+	/* (teleporters: SENDER and RECEIVER, linked by their channel, no tag of
+	the map's: forge_netgame.inc) */
+	_forge_category_teleporters,
 	/* (the player spawn points, Halo 3's: RESPAWN POINT and INITIAL SPAWN,
-	no tag of the map's: forge_spawns.inc) */
+	no tag of the map's: forge_spawns.inc; last, as the browser's L from
+	the first category reaches it) */
 	_forge_category_spawning,
 	NUMBER_OF_FORGE_CATEGORIES
 };
 
-/* a player spawn point's kind (the SPAWNING category's items, in its order) */
+/* a layout's marker's kind (no object: drawn as a marker, forge_spawns.inc):
+a player spawn point (the SPAWNING category's items, in its order), a
+teleporter's end (the TELEPORTERS category's) */
 enum
 {
 	_forge_spawn_respawn = 0,
 	_forge_spawn_initial,
-	NUMBER_OF_FORGE_SPAWN_KINDS
+	NUMBER_OF_FORGE_SPAWN_KINDS,
+	_forge_spawn_teleporter_sender = NUMBER_OF_FORGE_SPAWN_KINDS,
+	_forge_spawn_teleporter_receiver,
+	NUMBER_OF_FORGE_MARKER_KINDS
 };
+/* each category of markers: its first kind and how many */
+#define FORGE_TELEPORTER_KINDS 2
+/* (forge_netgame.inc) a teleporter's channels (forge_files.h's) */
+#define FORGE_TELEPORTER_CHANNELS 16
 
 /* an object's properties (the properties window's rows, in its order; a
 character's AI team and brain only for a character): its exact angles
@@ -105,6 +118,10 @@ struct forge_properties
 	boolean spawn;
 	short spawn_kind;
 	char game_type_name[32];
+	/* (a teleporter's: its kind is spawn_kind) its channel, and whether the
+	channel has the other end (a sender's receiver, a receiver's sender) */
+	short channel;
+	boolean linked;
 };
 
 /* what the monitor's controls ask of the flying camera this frame */

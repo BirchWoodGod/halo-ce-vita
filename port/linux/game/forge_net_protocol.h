@@ -63,7 +63,7 @@ which every host takes: a joiner reads any hello of version 1 or more):
 CLEAR DEAD AI, CLEAR ALL AI, ALL AI, NEW ROUND); a client sends them only
 to a host of 2 or more - one of 1 (insider.21 and before) would count the
 record as malformed - and says "Only the host can do that" to an older one */
-#define FORGE_NET_HOST_VERSION 4
+#define FORGE_NET_HOST_VERSION 5
 #define FORGE_NET_HOST_VERSION_COMMANDS 2
 /* 3: it takes a spawn marker's move and its character's properties
 (_forge_net_request_set and _forge_net_request_property with
@@ -77,6 +77,14 @@ delete (_forge_net_request_delete with FORGE_NET_FLAG_SPAWN); a client asks
 them only of a host of 4 or more. An older joiner drops the entries (an
 unknown flag): it shows none */
 #define FORGE_NET_HOST_VERSION_PLAYER_SPAWNS 4
+/* 5: markers past the player spawn points (forge.h _forge_spawn_*: the
+teleporters' sender and receiver, forge_netgame.inc): the host sends them as
+entries with FORGE_NET_FLAG_MARKER too (an older joiner drops them: an
+unknown flag) and takes a client's spawn of one (_forge_net_request_spawn
+with FORGE_NET_FLAG_PLAYER_SPAWN, its aux the kind, below FORGE_NET_MARKER_
+KINDS); a client asks for one only of a host of 5 or more. Its move, its
+properties and its delete are a spawn point's (version 4's) */
+#define FORGE_NET_HOST_VERSION_MARKERS 5
 /* a joiner's capabilities (its answer's bits) */
 #define FORGE_NET_CAPABILITY_FORGE 0x00000001u
 #define FORGE_NET_CAPABILITIES_KNOWN FORGE_NET_CAPABILITY_FORGE
@@ -253,7 +261,12 @@ enum
 	any, 0 red, 1 blue), record flags FORGE_NET_SPAWN_INITIAL alone, value
 	its game types (forge_files.h FORGE_FILE_GAME_TYPE_* bits, 0 all) */
 	FORGE_NET_FLAG_PLAYER_SPAWN = 1 << 6,
-	FORGE_NET_FLAGS_KNOWN = 0x7F,
+	/* (entry, with FORGE_NET_FLAG_PLAYER_SPAWN) a marker of a later kind than
+	a player spawn point's: aux its kind (FORGE_NET_SPAWN_KINDS to
+	FORGE_NET_MARKER_KINDS - 1), value its channel (a teleporter's: below
+	FORGE_NET_TELEPORTER_CHANNELS), team -1 */
+	FORGE_NET_FLAG_MARKER = 1 << 7,
+	FORGE_NET_FLAGS_KNOWN = 0xFF,
 };
 
 /* (a player spawn point's entry: forge_files.h FORGE_RECORD_SPAWN_INITIAL,
@@ -261,6 +274,11 @@ FORGE_FILE_SPAWN_GAME_TYPES_MASK) */
 #define FORGE_NET_SPAWN_INITIAL 0x08
 #define FORGE_NET_SPAWN_GAME_TYPES_MASK 0x3F
 #define FORGE_NET_SPAWN_KINDS 2
+/* every marker's kinds (forge.h NUMBER_OF_FORGE_MARKER_KINDS: the two
+teleporter ends after the spawn points) and a teleporter's channels
+(forge_files.h FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS) */
+#define FORGE_NET_MARKER_KINDS 4
+#define FORGE_NET_TELEPORTER_CHANNELS 16
 
 /* how a grant came */
 enum

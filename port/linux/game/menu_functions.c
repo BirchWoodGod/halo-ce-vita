@@ -3288,9 +3288,10 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 		"Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z.");
 #endif
 	/* (and a character's RESPAWN, Oct 22 2026: dead, it comes back; the
-	player spawn points, the browser's SPAWNING) */
+	player spawn points, the browser's SPAWNING; the teleporters, its
+	TELEPORTERS, 1.1.2) */
 	snprintf(text, sizeof(text), "%s\n%s\n%s", controls, T("AI respawn: a character's properties, RESPAWN."),
-		T("Spawn points: Objects, SPAWNING. Held: team, game type."));
+		T("Spawns, teleporters: Objects. Held: team, channel."));
 	text_show(widget, text);
 }
 
@@ -10813,10 +10814,27 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		yaw - forge_spawns.inc) */
 		if (properties.spawn)
 		{
+			boolean teleporter = properties.spawn_kind == _forge_spawn_teleporter_sender ||
+				properties.spawn_kind == _forge_spawn_teleporter_receiver;
 			boolean shown = row <= _forge_property_yaw;
 
-			switch (row)
+			switch (teleporter ? row + 100 : row)
 			{
+			/* (a teleporter's four: its channel, whether its channel has the
+			other end, sender or receiver, its yaw - forge_netgame.inc) */
+			case _forge_property_team + 100:
+				snprintf(text, sizeof(text), T("CHANNEL: %d"), properties.channel + 1);
+				break;
+			case _forge_property_respawn + 100:
+				snprintf(text, sizeof(text), "%s: %s", T("LINKED"), properties.linked ? T("YES") : T("NO"));
+				break;
+			case _forge_property_place_at_start + 100:
+				snprintf(text, sizeof(text), "%s: %s", T("TELEPORTER"), properties.spawn_kind == _forge_spawn_teleporter_sender ?
+					T("SENDER") : T("RECEIVER"));
+				break;
+			case _forge_property_yaw + 100:
+				snprintf(text, sizeof(text), "%s: %d\xc2\xb0", T("YAW"), properties.yaw);
+				break;
 			case _forge_property_team:
 				snprintf(text, sizeof(text), "%s: %s", T("TEAM"), properties.team == 0 ? T("RED") : properties.team == 1 ?
 					T("BLUE") : T("ANY"));
@@ -10890,7 +10908,11 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		text_show(child, text);
 		child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
 	}
-	if (properties.spawn)
+	if (properties.spawn && (properties.spawn_kind == _forge_spawn_teleporter_sender ||
+		properties.spawn_kind == _forge_spawn_teleporter_receiver))
+		snprintf(text, sizeof(text), "%s: teleporter %s, channel %d, yaw %d", properties.name,
+			properties.spawn_kind == _forge_spawn_teleporter_sender ? "sender" : "receiver", properties.channel, properties.yaw);
+	else if (properties.spawn)
 		snprintf(text, sizeof(text), "%s: spawn point, team %d, game type %s, %s, yaw %d", properties.name, properties.team,
 			properties.game_type_name, properties.spawn_kind == _forge_spawn_initial ? "initial spawn" : "respawn point",
 			properties.yaw);

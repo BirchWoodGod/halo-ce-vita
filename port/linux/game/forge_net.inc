@@ -1875,13 +1875,16 @@ static void forge_net_host_request(
 			struct forge_transform home;
 			struct forge_spawn *spawn;
 
-			if (forge_objects_counted() >= FORGE_MAXIMUM_OBJECTS || forge_globals.spawn_count >= FORGE_MAXIMUM_SPAWNS)
+			/* (a teleporter's end: within the teleporters' most too, its channel
+			the host's choice, as its own browser makes one) */
+			if (forge_objects_counted() >= FORGE_MAXIMUM_OBJECTS || forge_globals.spawn_count >= FORGE_MAXIMUM_SPAWNS ||
+				(request.aux >= NUMBER_OF_FORGE_SPAWN_KINDS && forge_teleporters_count(NONE, NONE) >= FORGE_FILE_MAXIMUM_TELEPORTERS))
 			{
 				forge_net_refuse(actor, &request, _forge_net_refuse_budget, FORGE_MAXIMUM_OBJECTS, 0);
 				return;
 			}
 			forge_net_transform_to(&request.transform, &home.position, &home.forward, &home.up);
-			spawn = forge_spawn_add(0, request.aux, NONE, 0, &home);
+			spawn = forge_spawn_add(0, request.aux, NONE, 0, forge_teleporter_new_channel(request.aux), &home);
 			if (!spawn)
 			{
 				forge_net_refuse(actor, &request, _forge_net_refuse_cannot_place, 0, 0);
@@ -2351,6 +2354,16 @@ static void forge_net_spawn_entry_fill(
 	record->team = (int8_t)(spawn->team == 0 || spawn->team == 1 ? spawn->team : -1);
 	record->record_flags = spawn->kind == _forge_spawn_initial ? FORGE_NET_SPAWN_INITIAL : 0;
 	record->value = (uint16_t)(spawn->game_types & FORGE_NET_SPAWN_GAME_TYPES_MASK);
+	/* (a later marker: its kind and channel, a joiner of version 4 or
+	before dropping it) */
+	if (spawn->kind >= NUMBER_OF_FORGE_SPAWN_KINDS)
+	{
+		record->flags = FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER;
+		record->aux = (uint8_t)spawn->kind;
+		record->team = -1;
+		record->record_flags = 0;
+		record->value = (uint16_t)spawn->channel;
+	}
 	forge_net_transform_from(&record->transform, &spawn->home.position, &spawn->home.forward, global_up3d);
 }
 
@@ -2389,6 +2402,7 @@ static void forge_net_shadow_entry(
 		before.sequence = entry->sequence = 0;
 		home_only = before.op == entry->op && before.object == entry->object && before.tag == entry->tag &&
 			before.player == entry->player && before.flags == entry->flags && before.team == entry->team &&
+			before.aux == entry->aux &&
 			before.record_flags == entry->record_flags && before.respawn_seconds == entry->respawn_seconds &&
 			before.ai_team == entry->ai_team && before.value == entry->value;
 		if (!home_only || (!forge_net_transforms_near(&before.transform, &entry->transform) &&
@@ -2489,11 +2503,14 @@ static void forge_net_host_broadcast(
 		}
 	}
 	/* (the player spawn points, to draw: a Forge game's, not a map variant
-	played) */
-	for (index = 0; !forge_net.host_play && index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+	played; the teleporters any game's: they are drawn, and the netgame
+	flags of every machine's game) */
+	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
 	{
 		struct forge_net_record entry;
 
+		if (forge_net.host_play && !forge_spawn_is_teleporter(&forge_globals.spawns[index]))
+			continue;
 		forge_net_spawn_entry_fill(&forge_globals.spawns[index], &entry);
 		if (forge_net_update_valid(&entry, forge_net.net_count))
 			forge_net_shadow_entry(forge_globals.spawns[index].id, &entry, now);
@@ -2643,9 +2660,12 @@ static void forge_net_host_sync(
 			forge_net_outgoing_add(&forge_net.direct, &record);
 		}
 	}
-	/* (the player spawn points: entries, taken before the end of the sync) */
-	for (index = 0; !forge_net.host_play && index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+	/* (the player spawn points: entries, taken before the end of the sync;
+	the teleporters in a map variant played too) */
+	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
 	{
+		if (forge_net.host_play && !forge_spawn_is_teleporter(&forge_globals.spawns[index]))
+			continue;
 		forge_net_spawn_entry_fill(&forge_globals.spawns[index], &record);
 		if (forge_net_update_valid(&record, forge_net.net_count))
 		{
@@ -3116,9 +3136,15 @@ static void forge_net_client_spawn_point(
 		forge_notice("%s", T("The host's game has no spawn points"));
 		return;
 	}
+	/* (a later marker - a teleporter's end: of a host of version 5) */
+	if (kind >= NUMBER_OF_FORGE_SPAWN_KINDS && forge_net.host_version < FORGE_NET_HOST_VERSION_MARKERS)
+	{
+		forge_notice("%s", T("The host's game has no teleporters"));
+		return;
+	}
 	forge_net_request_init(&record, _forge_net_request_spawn);
 	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
-	record.aux = (uint8_t)(kind == _forge_spawn_initial ? _forge_spawn_initial : _forge_spawn_respawn);
+	record.aux = (uint8_t)(kind >= 0 && kind < NUMBER_OF_FORGE_MARKER_KINDS ? kind : _forge_spawn_respawn);
 	forge_net_transform_from(&record.transform, &home->position, &home->forward, &home->up);
 	forge_net_request_send(&record);
 	platform_log("forge net: asked the host for a spawn point (%s) at %.2f %.2f %.2f", forge_spawn_kind_log_names[record.aux],
@@ -3414,15 +3440,21 @@ static void forge_net_client_update_take(
 			struct forge_spawn *spawn = forge_spawn_of_id((long)record->id);
 			struct forge_transform home;
 			short kind = (record->record_flags & FORGE_NET_SPAWN_INITIAL) ? _forge_spawn_initial : _forge_spawn_respawn;
+			/* (a later marker's: its kind and channel, checked in range) */
+			boolean marker = (record->flags & FORGE_NET_FLAG_MARKER) != 0;
+			short channel = marker ? (short)PIN(record->value, 0, FORGE_TELEPORTER_CHANNELS - 1) : 0;
 
+			if (marker)
+				kind = (short)PIN(record->aux, NUMBER_OF_FORGE_SPAWN_KINDS, NUMBER_OF_FORGE_MARKER_KINDS - 1);
 			forge_net_transform_to(&record->transform, &home.position, &home.forward, &home.up);
 			if (!spawn)
-				spawn = forge_spawn_add((long)record->id, kind, record->team, record->value, &home);
+				spawn = forge_spawn_add((long)record->id, kind, record->team, marker ? 0 : record->value, channel, &home);
 			if (!spawn)
 				return;
 			spawn->kind = kind;
-			spawn->team = (signed char)(record->team == 0 || record->team == 1 ? record->team : NONE);
-			spawn->game_types = (unsigned short)(record->value & FORGE_FILE_SPAWN_GAME_TYPES_MASK);
+			spawn->team = (signed char)(!marker && (record->team == 0 || record->team == 1) ? record->team : NONE);
+			spawn->game_types = (unsigned short)(marker ? 0 : record->value & FORGE_FILE_SPAWN_GAME_TYPES_MASK);
+			spawn->channel = channel;
 			/* (the one held here: where the host has it once let go) */
 			if (spawn->id != forge_globals.held_marker_id)
 			{

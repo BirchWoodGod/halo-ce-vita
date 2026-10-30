@@ -150,6 +150,17 @@
 #               saved as version 4 (forge_files_test --dump: eight player spawn records, each
 #               team, game type and kind as set); none drawn for the Spartan; the variant
 #               started again: the eight read back
+#   teleport    teleporters (forge_netgame.inc, 1.1.2): in a Forge game of Blood Gulch a
+#               SENDER and a RECEIVER placed by the console (forge spawnpoint sender,
+#               receiver: the receiver takes the sender's channel), the receiver turned;
+#               a second sender alone on channel 2; the properties window's rows (CHANNEL,
+#               LINKED, TELEPORTER, YAW); the Spartan put down on the sender: sent to the
+#               receiver by the engine's own rule (game_engine_update_teleporter: the
+#               layout's teleporters are netgame flags), facing turned by the receiver's
+#               yaw; saved as version 5 (forge_files_test --dump: the pair, the lone
+#               sender left out); the variant started again: read back, and the
+#               Spartan sent again; a multiplayer game of Blood Gulch with no Forge:
+#               the map's own netgame flags, no teleporter of ours
 #   spawnplay   the spawn points played (players.c player_spawn, forge_spawns.inc
 #               forge_spawn_location): spawns' variant (made by the console) played offline
 #               with 5 bots (network test local:, HALO_NETWORK_TEST_MAP_VARIANT, a kill every
@@ -283,7 +294,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -922,6 +933,24 @@ spawn_play() {
 	echo $? > "$dir/exit"
 }
 
+teleport_runs() {
+	local store="$out/teleport-store"
+	rm -rf "$store"
+	mkdir -p "$store"
+	local c="L300:forge camera 60 -100 6 0 -89;L312:forge spawnpoint sender;L316:forge drop"
+	c="$c;L330:forge camera 76 -112 6 0 -89;L342:forge spawnpoint receiver;L344:forge property yaw;L345:forge property yaw"
+	c="$c;L346:forge press x;L366:@shot 00-receiver-properties;L370:forge closemenus;L376:forge drop"
+	c="$c;L380:forge camera 66 -96 6 0 -89;L392:forge spawnpoint sender;L394:forge property channel"
+	c="$c;L397:forge drop;L400:forge spawns;L410:forge camera 54 -94 4.5 -40 -18;L430:@shot 01-teleporter-pair"
+	c="$c;L440:forge camera 60 -100 1.2 90 0;L470:forge off;L540:forge where;L555:@shot 02-spartan-at-receiver"
+	c="$c;L570:forge on;L580:forge save Teleport Test;L590:forge spawns"
+	run teleport 40 "" "$c" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none \
+		HALO_SAVE_ROOT="$store" HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1
+	"$out/forge_files_test" --dump "$store/forge/bloodgulch/teleport_test.hmv" > "$out/teleport/dump.txt" 2>&1
+	run teleport-load 30 "" "L400:forge spawns;L420:forge camera 60 -100 1.2 90 0;L450:forge off;L520:forge where" "" \
+		HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9:teleport_test.hmv HALO_TEST_FORGE_PACKS=none HALO_SAVE_ROOT="$store"
+}
+
 spawnplay_runs() {
 	local store="$out/spawnplay-store"
 	rm -rf "$store"
@@ -1246,6 +1275,8 @@ for c in $cases; do
 		spawns_runs & ;;
 	spawnplay)
 		spawnplay_runs & ;;
+	teleport)
+		teleport_runs & ;;
 	mpvariant)
 		if [ "$menus_files" = 0 ] || [ ! -r "$packcopy_profile" ]; then
 			echo "SKIP: mpvariant: no Halo PC bitmaps.map and loc.map in $data/maps, or no profile ($packcopy_profile)"
@@ -1543,6 +1574,26 @@ for c in $cases; do
 			echo "  ok: aicap: the fifth's body gone" || fail "aicap: the fifth's body not taken away"
 		budget_at 2200 | grep -aq "(4 alive, 1 dead)" && echo "  ok: aicap: its character still the layout's (dead, no body)" ||
 			fail "aicap: the fifth left the layout: $(budget_at 2200)"
+		continue
+	fi
+	if [ "$c" = teleport ]; then
+		checked teleport || continue
+		log="$out/teleport/run.log"
+		expect teleport "a sender placed" "forge: placed the teleporter sender #1 \\(channel 0\\)"
+		expect teleport "a receiver placed on the sender's channel" "forge: placed the teleporter receiver #2 \\(channel 0\\)"
+		expect teleport "the receiver's properties window" "menus: forge properties: Teleporter Receiver, Channel 1: teleporter receiver, channel 0, yaw"
+		expect teleport "a lone sender on channel 2" "forge: properties of the teleporter sender #3 \\(channel 2\\)"
+		expect teleport "the flags given to the engine" "forge: netgame flags: the map's [0-9]+ and 3 teleporters \\(2 senders, 1 receivers\\)"
+		expect teleport "the Spartan sent from the sender to the receiver" "forge: player 0 teleported on channel 0: "
+		expect teleport "saved" "forge: map variant \"Teleport Test\" saved as bloodgulch/teleport_test.hmv"
+		expect teleport "the lone sender not saved" "forge: 1 teleporter senders with no receiver on their channel not saved"
+		grep -q "^version 5 " "$out/teleport/dump.txt" && [ "$(grep -c ": a teleporter " "$out/teleport/dump.txt")" = 2 ] &&
+			grep -q ": a teleporter sender, channel 0$" "$out/teleport/dump.txt" &&
+			grep -q ": a teleporter receiver, channel 0$" "$out/teleport/dump.txt" &&
+			echo "  ok: teleport: the file: version 5, the pair" || fail "teleport: the file: $(cat "$out/teleport/dump.txt")"
+		checked teleport-load || continue
+		expect teleport-load "read back as the map loads" "forge: map variant \"Teleport Test\": 2 teleporters \\(1 senders, 1 receivers\\)"
+		expect teleport-load "the Spartan sent again" "forge: player 0 teleported on channel 0: "
 		continue
 	fi
 	if [ "$c" = spawns ]; then

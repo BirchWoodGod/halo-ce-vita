@@ -185,11 +185,12 @@ int forge_net_request_valid(
 	switch (record->op)
 	{
 	case _forge_net_request_spawn:
-		/* (a player spawn point: no tag, its kind, nothing held) */
+		/* (a player spawn point or a later marker - a teleporter's end: no
+		tag, its kind, nothing held) */
 		if (record->flags & FORGE_NET_FLAG_PLAYER_SPAWN)
 		{
 			if (record->flags != FORGE_NET_FLAG_PLAYER_SPAWN || record->tag != FORGE_NET_NO_TAG ||
-				record->aux >= FORGE_NET_SPAWN_KINDS)
+				record->aux >= FORGE_NET_MARKER_KINDS)
 			{
 				return 0;
 			}
@@ -263,6 +264,20 @@ int forge_net_update_valid(
 	switch (record->op)
 	{
 	case _forge_net_update_entry:
+		/* (a later marker - a teleporter's end: no tag or object, its kind,
+		its channel in range, nothing else) */
+		if (record->flags & FORGE_NET_FLAG_MARKER)
+		{
+			if (record->flags != (FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER) || record->id == 0 ||
+				record->tag != FORGE_NET_NO_TAG || record->object != FORGE_NET_NO_OBJECT ||
+				record->aux < FORGE_NET_SPAWN_KINDS || record->aux >= FORGE_NET_MARKER_KINDS || record->team != -1 ||
+				record->record_flags || record->respawn_seconds || record->ai_team || record->step || record->value2 ||
+				record->value >= FORGE_NET_TELEPORTER_CHANNELS)
+			{
+				return 0;
+			}
+			return forge_net_transform_valid(&record->transform);
+		}
 		/* (a player spawn point: no tag or object, its team any, red or blue,
 		its game types, an initial spawn's flag alone) */
 		if (record->flags & FORGE_NET_FLAG_PLAYER_SPAWN)
