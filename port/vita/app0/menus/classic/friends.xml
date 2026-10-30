@@ -113,13 +113,13 @@
 		<child widget="ce/friends/row_10" x="51" y="294"/>
 	</widget>
 	<widget name="ce/friends/field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
-	<widget name="ce/friends/code_label" type="text" left="290" top="88" width="290" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="0"/>
-	<widget name="ce/friends/code_value" type="text" left="290" top="104" width="290" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/friends/friends_status" type="text" left="290" top="132" width="290" height="54" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="ce/friends/detail_name" type="text" left="290" top="172" width="290" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/friends/detail_state" type="text" left="290" top="198" width="290" height="36" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="ce/friends/detail_help" type="text" left="290" top="238" width="290" height="80" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="ce/friends/friends_message" type="text" left="290" top="326" width="290" height="66" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
+	<widget name="ce/friends/code_label" type="text" left="290" top="88" width="280" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="0"/>
+	<widget name="ce/friends/code_value" type="text" left="290" top="104" width="280" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/friends/friends_status" type="text" left="290" top="132" width="280" height="54" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/friends/detail_name" type="text" left="290" top="172" width="280" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/friends/detail_state" type="text" left="290" top="198" width="280" height="36" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/friends/detail_help" type="text" left="290" top="238" width="280" height="80" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/friends/friends_message" type="text" left="290" top="326" width="280" height="66" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
 	<widget name="ce/friends/y_butn" left="40" top="414" width="20" height="25" bitmap="ui\shell\bitmaps\y_butn"/>
 	<widget name="ce/friends/y_label" type="text" left="61" top="414" width="132" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="1"/>
 	<widget name="ce/friends/x_butn" left="196" top="414" width="20" height="25" bitmap="ui\shell\bitmaps\x_butn"/>
@@ -151,8 +151,8 @@
 
 	<!-- FRIENDS' Triangle: the chosen one's options (and FRIEND CODE BACKUP's question), in the field -->
 	<widget name="ce/friends/options_field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
-	<widget name="ce/friends/options_title" type="text" left="290" top="88" width="290" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/friends/options_text" type="text" left="290" top="118" width="290" height="270" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/friends/options_title" type="text" left="290" top="88" width="280" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/friends/options_text" type="text" left="290" top="118" width="280" height="270" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/friends/option_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
 	<widget name="ce/friends/option_1" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 friends option" back="true"/>
@@ -166,8 +166,10 @@
 		<on event="a" run="port h3 friends option" back="true"/>
 		<child widget="ce/friends/option_name"/>
 	</widget>
-	<widget name="ce/friends/option_back" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/back_text" string_index="0">
+	<widget name="ce/friends/option_back/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF" string_list="ce/back_text" string_index="0"/>
+	<widget name="ce/friends/option_back" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top">
 		<on event="a" back="true"/>
+		<child widget="ce/friends/option_back/row_name"/>
 	</widget>
 	<widget name="ce/friends/options_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 friends options"/>
@@ -205,11 +207,11 @@
 		<child widget="ce/add/row_1" x="51" y="78"/>
 	</widget>
 	<widget name="ce/add/field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
-	<widget name="ce/add/code_label" type="text" left="290" top="88" width="290" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="0"/>
-	<widget name="ce/add/code_value" type="text" left="290" top="106" width="290" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/add/friends_status" type="text" left="290" top="136" width="290" height="54" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="ce/add/detail_help" type="text" left="290" top="180" width="290" height="100" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="ce/add/friends_message" type="text" left="290" top="300" width="290" height="80" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
+	<widget name="ce/add/code_label" type="text" left="290" top="88" width="280" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/friends_text" string_index="0"/>
+	<widget name="ce/add/code_value" type="text" left="290" top="106" width="280" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/add/friends_status" type="text" left="290" top="136" width="280" height="54" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/add/detail_help" type="text" left="290" top="180" width="280" height="100" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/add/friends_message" type="text" left="290" top="300" width="280" height="80" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
 	<widget name="ce/add/a_butn" left="481" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>
 	<widget name="ce/add/a_label" type="text" left="502" top="414" width="134" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="classic/friends/add" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\gradient">
@@ -301,19 +303,19 @@
 		<child widget="ce/party/row_10" x="51" y="294"/>
 	</widget>
 	<widget name="ce/party/field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
-	<widget name="ce/party/party_status" type="text" left="290" top="88" width="290" height="54" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/party/detail" type="text" left="290" top="128" width="290" height="52" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="ce/party/party_message" type="text" left="290" top="182" width="290" height="34" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
+	<widget name="ce/party/party_status" type="text" left="290" top="88" width="280" height="54" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/party/detail" type="text" left="290" top="128" width="280" height="52" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/party/party_message" type="text" left="290" top="182" width="280" height="34" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
 	<strings name="ce/party_text">
 		<string text="PARTY CHAT"/>
 		<string text="QUICK CHAT"/>
 	</strings>
-	<widget name="ce/party/chat_title" type="text" left="290" top="220" width="290" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/party_text" string_index="0"/>
-	<widget name="ce/party/chat_1" type="text" left="290" top="240" width="290" height="30" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/party/chat_2" type="text" left="290" top="270" width="290" height="30" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/party/chat_3" type="text" left="290" top="300" width="290" height="30" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/party/chat_4" type="text" left="290" top="330" width="290" height="30" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/party/chat_5" type="text" left="290" top="360" width="290" height="30" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/party/chat_title" type="text" left="290" top="220" width="280" height="18" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="ce/party_text" string_index="0"/>
+	<widget name="ce/party/chat_1" type="text" left="290" top="240" width="280" height="30" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/party/chat_2" type="text" left="290" top="270" width="280" height="30" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/party/chat_3" type="text" left="290" top="300" width="280" height="30" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/party/chat_4" type="text" left="290" top="330" width="280" height="30" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/party/chat_5" type="text" left="290" top="360" width="280" height="30" font="ui\small_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
 	<widget name="ce/party/chat">
 		<data input="port h3 party chat"/>
 		<child widget="ce/party/chat_title"/>
@@ -351,8 +353,8 @@
 
 	<!-- a member's options (MUTE or UNMUTE, REMOVE FROM PARTY, LEAVE PARTY: those that apply) -->
 	<widget name="ce/party/options_field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
-	<widget name="ce/party/options_title" type="text" left="290" top="88" width="290" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/party/options_text" type="text" left="290" top="118" width="290" height="270" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/party/options_title" type="text" left="290" top="88" width="280" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/party/options_text" type="text" left="290" top="118" width="280" height="270" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="ce/party/option_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
 	<widget name="ce/party/option_1" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 party option" back="true"/>
@@ -362,8 +364,10 @@
 		<on event="a" run="port h3 party option" back="true"/>
 		<child widget="ce/party/option_name"/>
 	</widget>
-	<widget name="ce/party/option_back" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/back_text" string_index="0">
+	<widget name="ce/party/option_back/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF" string_list="ce/back_text" string_index="0"/>
+	<widget name="ce/party/option_back" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top">
 		<on event="a" back="true"/>
+		<child widget="ce/party/option_back/row_name"/>
 	</widget>
 	<widget name="ce/party/options_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 party options"/>
@@ -387,32 +391,50 @@
 	</widget>
 
 	<!-- QUICK CHAT (Square): the presets, Cross sends one to the party -->
-	<widget name="ce/party/preset_1" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_1/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/party/preset_1" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 party preset" back="true"/>
+		<child widget="ce/party/preset_1/row_name"/>
 	</widget>
-	<widget name="ce/party/preset_2" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_2/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/party/preset_2" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 party preset" back="true"/>
+		<child widget="ce/party/preset_2/row_name"/>
 	</widget>
-	<widget name="ce/party/preset_3" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_3/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/party/preset_3" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 party preset" back="true"/>
+		<child widget="ce/party/preset_3/row_name"/>
 	</widget>
-	<widget name="ce/party/preset_4" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_4/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/party/preset_4" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 party preset" back="true"/>
+		<child widget="ce/party/preset_4/row_name"/>
 	</widget>
-	<widget name="ce/party/preset_5" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_5/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/party/preset_5" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 party preset" back="true"/>
+		<child widget="ce/party/preset_5/row_name"/>
 	</widget>
-	<widget name="ce/party/preset_6" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_6/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/party/preset_6" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 party preset" back="true"/>
+		<child widget="ce/party/preset_6/row_name"/>
 	</widget>
-	<widget name="ce/party/preset_7" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_7/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/party/preset_7" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 party preset" back="true"/>
+		<child widget="ce/party/preset_7/row_name"/>
 	</widget>
-	<widget name="ce/party/preset_8" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5">
+	<widget name="ce/party/preset_8/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF"/>
+	<widget name="ce/party/preset_8" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd">
 		<on event="a" run="port h3 party preset" back="true"/>
+		<child widget="ce/party/preset_8/row_name"/>
 	</widget>
-	<widget name="ce/party/quick_back" type="text" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top" font="ui\small_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="ce/back_text" string_index="0">
+	<widget name="ce/party/quick_back/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\small_ui" color="#FF2896FF" string_list="ce/back_text" string_index="0"/>
+	<widget name="ce/party/quick_back" width="226" height="24" bitmap="ui\shell\bitmaps\list_item_bkd_top">
 		<on event="a" back="true"/>
+		<child widget="ce/party/quick_back/row_name"/>
 	</widget>
 	<widget name="ce/party/quick_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 party quick"/>
@@ -511,9 +533,9 @@
 		<child widget="ce/invite/row_10" x="51" y="294"/>
 	</widget>
 	<widget name="ce/invite/field" left="275" top="78" width="320" height="322" bitmap="ui\shell\bitmaps\list_field"/>
-	<widget name="ce/invite/invite_status" type="text" left="290" top="88" width="290" height="54" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="ce/invite/invite_help" type="text" left="290" top="130" width="290" height="120" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
-	<widget name="ce/invite/invite_message" type="text" left="290" top="300" width="290" height="80" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
+	<widget name="ce/invite/invite_status" type="text" left="290" top="88" width="280" height="54" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="ce/invite/invite_help" type="text" left="290" top="130" width="280" height="120" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="ce/invite/invite_message" type="text" left="290" top="300" width="280" height="80" font="ui\small_ui" color="#FFF0D090" text_flags="no_focus_test"/>
 	<widget name="ce/invite/a_butn" left="481" top="414" width="21" height="26" bitmap="ui\shell\bitmaps\a_butn"/>
 	<widget name="ce/invite/a_label" type="text" left="502" top="414" width="134" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="classic/invite/screen" flags="pass_unhandled_to_focused_child" bitmap="ui\shell\bitmaps\gradient">

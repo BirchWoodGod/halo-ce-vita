@@ -17,7 +17,9 @@ ROW_X = 51
 # (the lists' rows: list_item_bkd's tab, 24 high for the small font)
 ROW_H = 24
 FIELD_X, FIELD_Y, FIELD_W, FIELD_H = 275, 78, 320, 322
-IN_X, IN_W = 290, 290
+# (the field's words: 15 in from its left, 25 short of its right - at least 16 pixels inside its
+# border at 960x544)
+IN_X, IN_W = 290, 280
 ITEM = r'ui\shell\bitmaps\list_item_bkd'
 ITEM_TOP = r'ui\shell\bitmaps\list_item_bkd_top'
 GRADIENT = r'ui\shell\bitmaps\gradient'
@@ -45,6 +47,15 @@ def keys(prefix, a=True, x=False, y=False, ylist=None, yindex=None):
         lines.append(text(f'{prefix}/a_label', 502, 414, 134, 24, 'large'))
         names += ['a_butn', 'a_label']
     return lines, [f'{prefix}/{n}' for n in names]
+
+def text_row(name, bitmap, extra, on):
+    """a row whose words are its own text box in the small font (row_name: 13 in, ending 14 short of the
+    tab's end, clear of the field the tab runs under)"""
+    w(f'\t<widget name="{name}/row_name" type="text" left="13" top="5" width="199" height="18" font="ui\\small_ui" color="{BLUE}"{extra}/>')
+    w(f'\t<widget name="{name}" width="226" height="{ROW_H}" bitmap="{bitmap}">')
+    w(f'\t\t{on}')
+    w(f'\t\t<child widget="{name}/row_name"/>')
+    w('\t</widget>')
 
 def rows(prefix, run, count, open_=None, cols=('row_name', 'row_tag')):
     """a list's rows: list_item_bkd (the first list_item_bkd_top, as the Xbox's lists), the name in the large font, the tag at the right"""
@@ -141,9 +152,7 @@ def options(prefix, run, count, header):
         w(f'\t\t<on event="a" run="{run}" back="true"/>')
         w(f'\t\t<child widget="{prefix}/option_name"/>')
         w('\t</widget>')
-    w(f'\t<widget name="{prefix}/option_back" type="text" width="226" height="{ROW_H}" bitmap="{ITEM_TOP}" font="ui\\small_ui" color="{BLUE}" text_x="13" text_y="5" string_list="classic/back_text" string_index="0">')
-    w('\t\t<on event="a" back="true"/>')
-    w('\t</widget>')
+    text_row(f'{prefix}/option_back', ITEM_TOP, ' string_list="classic/back_text" string_index="0"', '<on event="a" back="true"/>')
     w(f'\t<widget name="{prefix}/options_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">')
     w(f'\t\t<data input="{run}s"/>')
     w(f'\t\t<child widget="{prefix}/option_back" y="0"/>')
@@ -241,12 +250,8 @@ options('classic/party', 'port h3 party option', 2, 'classic/header/party')
 # ---- QUICK CHAT
 w('\n\t<!-- QUICK CHAT (Square): the presets, Cross sends one to the party -->')
 for i in range(1, 9):
-    w(f'\t<widget name="classic/party/preset_{i}" type="text" width="226" height="{ROW_H}" bitmap="{ITEM}" font="ui\\small_ui" color="{BLUE}" text_x="13" text_y="5">')
-    w('\t\t<on event="a" run="port h3 party preset" back="true"/>')
-    w('\t</widget>')
-w(f'\t<widget name="classic/party/quick_back" type="text" width="226" height="{ROW_H}" bitmap="{ITEM_TOP}" font="ui\\small_ui" color="{BLUE}" text_x="13" text_y="5" string_list="classic/back_text" string_index="0">')
-w('\t\t<on event="a" back="true"/>')
-w('\t</widget>')
+    text_row(f'classic/party/preset_{i}', ITEM, '', '<on event="a" run="port h3 party preset" back="true"/>')
+text_row('classic/party/quick_back', ITEM_TOP, ' string_list="classic/back_text" string_index="0"', '<on event="a" back="true"/>')
 w('\t<widget name="classic/party/quick_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">')
 w('\t\t<data input="port h3 party quick"/>')
 w('\t\t<child widget="classic/party/quick_back" y="0"/>')

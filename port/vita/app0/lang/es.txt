@@ -2321,7 +2321,7 @@
 "SAVE" = "GUARDAR"
 "SAVE CHANGES?" = "¿GUARDAR LOS CAMBIOS?"
 "SAVE CHANGES" = "GUARDAR CAMBIOS"
-"DISCARD CHANGES" = "DESCARTAR CAMBIOS"
+"DISCARD CHANGES" = "DESCARTAR"
 "The game type your new one starts as: its rules, which\nyou then change. The game's own are never changed." = "El tipo de juego del que parte el nuevo: sus reglas,\nque luego cambias. Los del juego no cambian nunca."
 "The game type your new one starts as: its\nrules, which you then change. The game's\nown are never changed." = "El tipo de juego del que parte el nuevo:\nsus reglas, que luego cambias. Los del\njuego no cambian nunca."
 "CREATE NEW GAME TYPE" = "CREAR TIPO DE JUEGO"

@@ -136,26 +136,40 @@
 
 	<!-- a player's options: the rows at the left (BACK first; those that do not apply hidden), the player
 	     and what they are in the field -->
-	<widget name="cp/players/option_back" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd_top" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="13">
+	<widget name="cp/players/option_back/row_name" type="text" left="13" top="5" width="199" height="24" font="ui\large_ui" color="#FF2896FF" string_list="h3/players_text" string_index="13"/>
+	<widget name="cp/players/option_back" width="226" height="32" bitmap="cp/players/art_list_item_bkd_top">
 		<on event="a" back="true"/>
+		<child widget="cp/players/option_back/row_name"/>
 	</widget>
-	<widget name="cp/players/option_add" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="6">
+	<widget name="cp/players/option_add/row_name" type="text" left="13" top="5" width="199" height="24" font="ui\large_ui" color="#FF2896FF" string_list="h3/players_text" string_index="6"/>
+	<widget name="cp/players/option_add" width="226" height="32" bitmap="cp/players/art_list_item_bkd">
 		<on event="a" run="port h3 players option" back="true"/>
+		<child widget="cp/players/option_add/row_name"/>
 	</widget>
-	<widget name="cp/players/option_block" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="7">
+	<widget name="cp/players/option_block/row_name" type="text" left="13" top="5" width="199" height="24" font="ui\large_ui" color="#FF2896FF" string_list="h3/players_text" string_index="7"/>
+	<widget name="cp/players/option_block" width="226" height="32" bitmap="cp/players/art_list_item_bkd">
 		<on event="a" run="port h3 players option" back="true"/>
+		<child widget="cp/players/option_block/row_name"/>
 	</widget>
-	<widget name="cp/players/option_mute" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="12">
+	<widget name="cp/players/option_mute/row_name" type="text" left="13" top="5" width="199" height="24" font="ui\large_ui" color="#FF2896FF" string_list="h3/players_text" string_index="12"/>
+	<widget name="cp/players/option_mute" width="226" height="32" bitmap="cp/players/art_list_item_bkd">
 		<on event="a" run="port h3 players option" back="true"/>
+		<child widget="cp/players/option_mute/row_name"/>
 	</widget>
-	<widget name="cp/players/option_party" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="9">
+	<widget name="cp/players/option_party/row_name" type="text" left="13" top="5" width="199" height="24" font="ui\large_ui" color="#FF2896FF" string_list="h3/players_text" string_index="9"/>
+	<widget name="cp/players/option_party" width="226" height="32" bitmap="cp/players/art_list_item_bkd">
 		<on event="a" run="port h3 players option" back="true"/>
+		<child widget="cp/players/option_party/row_name"/>
 	</widget>
-	<widget name="cp/players/option_kick" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="10">
+	<widget name="cp/players/option_kick/row_name" type="text" left="13" top="5" width="199" height="24" font="ui\large_ui" color="#FF2896FF" string_list="h3/players_text" string_index="10"/>
+	<widget name="cp/players/option_kick" width="226" height="32" bitmap="cp/players/art_list_item_bkd">
 		<on event="a" run="port h3 players option" back="true"/>
+		<child widget="cp/players/option_kick/row_name"/>
 	</widget>
-	<widget name="cp/players/option_ban" type="text" width="226" height="32" bitmap="cp/players/art_list_item_bkd" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5" string_list="h3/players_text" string_index="11">
+	<widget name="cp/players/option_ban/row_name" type="text" left="13" top="5" width="199" height="24" font="ui\large_ui" color="#FF2896FF" string_list="h3/players_text" string_index="11"/>
+	<widget name="cp/players/option_ban" width="226" height="32" bitmap="cp/players/art_list_item_bkd">
 		<on event="a" run="port h3 players option" back="true"/>
+		<child widget="cp/players/option_ban/row_name"/>
 	</widget>
 	<widget name="cp/players/options_list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">
 		<data input="port h3 players options"/>
@@ -168,8 +182,8 @@
 		<child widget="cp/players/option_ban" x="0" y="192"/>
 	</widget>
 	<widget name="cp/players/options_field" left="275" top="78" width="320" height="322" bitmap="cp/players/art_list_field"/>
-	<widget name="cp/players/options_title" type="text" left="290" top="88" width="290" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
-	<widget name="cp/players/options_text" type="text" left="290" top="118" width="290" height="270" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
+	<widget name="cp/players/options_title" type="text" left="290" top="88" width="280" height="26" font="ui\large_ui" color="#FFE0F0FF" text_flags="no_focus_test"/>
+	<widget name="cp/players/options_text" type="text" left="290" top="118" width="280" height="270" font="ui\small_ui" color="#FF2896FF" text_flags="no_focus_test"/>
 	<widget name="cp/players/options/b_butn" left="371" top="414" width="21" height="26" bitmap="cp/players/art_b_butn"/>
 	<widget name="cp/players/options/options_back" type="text" left="392" top="414" width="86" height="24" font="ui\large_ui" color="#FF2896FF" text_flags="no_focus_test" string_list="cp/players_keys" string_index="0"/>
 	<widget name="cp/players/options/a_butn" left="481" top="414" width="21" height="26" bitmap="cp/players/art_a_butn"/>

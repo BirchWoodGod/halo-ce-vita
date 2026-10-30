@@ -89,19 +89,27 @@ def pausebox():
     return image
 
 
+# (room over the capitals for a translation's marks - the Spanish N's tilde, an accent -: a share of
+# the capitals' height; before it the marks were cut off, "AÑADIR" drawn "ANADIR")
+MARK_ROOM = 0.4
+
+
 def letters(text, cap, scale=4):
     """the text's shape, white on black, capitals cap pixels high (drawn at
-    scale times and left so), its top row the capitals' top"""
+    scale times and left so), the capitals' top MARK_ROOM of their height
+    under its top row; with the rows over the capitals' top"""
     probe = ImageFont.truetype(FONT, 100)
     box = probe.getbbox('H')
     font = ImageFont.truetype(FONT, round(100 * cap * scale / (box[3] - box[1])))
     stroke = scale
+    # (only for a word with a mark: the others drawn as they always were)
+    room = scale * round(MARK_ROOM * cap) if any(ord(c) > 0x7F for c in text) else 0
     bounds = font.getbbox(text, stroke_width=stroke)
     top = font.getbbox('H')[1]
-    image = Image.new('L', (bounds[2] - bounds[0] + 2 * stroke, round(cap * scale) + 4 * stroke), 0)
-    ImageDraw.Draw(image).text((stroke - bounds[0], stroke - top), text, font=font, fill=255, stroke_width=stroke,
-                               stroke_fill=255)
-    return image, stroke
+    image = Image.new('L', (bounds[2] - bounds[0] + 2 * stroke, room + round(cap * scale) + 4 * stroke), 0)
+    ImageDraw.Draw(image).text((stroke - bounds[0], room + stroke - top), text, font=font, fill=255,
+                               stroke_width=stroke, stroke_fill=255)
+    return image, stroke + room
 
 
 def word_mask(text, cap, per_letter, most):

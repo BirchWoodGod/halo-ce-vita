@@ -974,17 +974,50 @@ menus' smaller font) if it has one, on one line or broken into lines there; else
 lines in the box itself - at the spaces, and a word wider than the box at the letter that
 fits (a text box draws a line as long as it is, cut at its edge: the line breaks are the
 game's "\r"). A text that fits nowhere is said ("menus: classic text does not fit") */
+static void classic_text_fit_characters(struct widget_instance *widget, unsigned short *characters, long length,
+	char const *text);
+
 static void classic_text_fit(struct widget_instance *widget, char const *text)
 {
-	static unsigned short const empty[1] = { 0 };
-	unsigned short characters[481], lines[481 + 64];
-	struct widget_instance *twin = NULL, *target, *sibling;
-	long length, index, kept, line_start;
-	char twin_name[96];
+	unsigned short characters[481];
+	long length;
 
 	if (!widget || widget->type != _ui_widget_type_text_box)
 		return;
 	length = halo_menus_utf16(text ? text : "", characters, (long)NUMBEROF(characters));
+	classic_text_fit_characters(widget, characters, length, text ? text : "");
+}
+
+/* (ui_widget.c, as a text box of a string list is drawn: its string copied in) the string fitted to
+the box as classic_text_fit fits the port's text - its own line breaks for the Halo 3 set's wider
+lines rejoined, broken again for this box -, on Menu style Classic+'s screens; a string that fits is
+left as it is */
+void ui_widget_port_classic_fit(struct widget_instance *widget)
+{
+	unsigned short characters[481];
+	long length;
+
+	if (!widget || widget->type != _ui_widget_type_text_box || !widget->parameters.text_box.text ||
+		!halo_menu_style_classic_plus() || !classic_widget(widget) ||
+		text_fits(widget, (unsigned short const *)widget->parameters.text_box.text))
+	{
+		return;
+	}
+	for (length = 0; length < (long)NUMBEROF(characters) - 1 && widget->parameters.text_box.text[length]; length++)
+		characters[length] = widget->parameters.text_box.text[length];
+	characters[length++] = 0;
+	classic_text_fit_characters(widget, characters, length, "(a string list's)");
+}
+
+static void classic_text_fit_characters(struct widget_instance *widget, unsigned short *characters, long length,
+	char const *text)
+{
+	static unsigned short const empty[1] = { 0 };
+	unsigned short lines[481 + 64];
+	struct widget_instance *twin = NULL, *target, *sibling;
+	long index, kept, line_start;
+	char twin_name[96];
+
 	/* (the menus' fonts draw Latin-1: a character beyond it a "?") */
 	for (index = 0; index < length - 1; index++)
 	{
@@ -1129,7 +1162,7 @@ static void classic_text_fit(struct widget_instance *widget, char const *text)
 	lines[kept] = 0;
 	text_set(target, lines, kept + 1);
 	if (!text_fits(target, lines))
-		platform_log("menus: classic text does not fit: %s \"%s\"", tag_get_name(target->definition_tag_index), text ? text : "");
+		platform_log("menus: classic text does not fit: %s \"%s\"", tag_get_name(target->definition_tag_index), text);
 	classic_room_limit = 0;
 }
 
@@ -20943,8 +20976,9 @@ static void ce_lobby_update(struct widget_instance *list)
 	text_show(named(screen, "map_name"), map != NONE ? T(forge_map_name(map)) : "");
 	if (variant)
 	{
-		snprintf(text, sizeof(text), "%s:\r\n%s", T("MAP VARIANT"), ce_pregame.note[0] ? ce_pregame.note :
-			ce_pregame.title[0] ? ce_pregame.title : T("NONE"));
+		/* (Menu style Classic+'s field: one run of words, broken for its box) */
+		snprintf(text, sizeof(text), halo_menu_style_classic_plus() ? "%s: %s" : "%s:\r\n%s", T("MAP VARIANT"),
+			ce_pregame.note[0] ? ce_pregame.note : ce_pregame.title[0] ? ce_pregame.title : T("NONE"));
 		text_show(named(screen, "variant_value"), text);
 	}
 	else

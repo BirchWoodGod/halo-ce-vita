@@ -34,7 +34,9 @@ ITEM_TOP = r'ui\shell\bitmaps\list_item_bkd_top'
 FIELD = r'ui\shell\bitmaps\list_field'
 ROW_X, ROW_Y, ROW_STEP = 51, 78, 32
 FIELD_X, FIELD_Y, FIELD_W, FIELD_H = 275, 78, 320, 322
-IN_X, IN_W = 290, 290
+# (the field's words: 15 in from its left, 25 short of its right - at least 16 pixels inside its border
+# at 960x544)
+IN_X, IN_W = 290, 280
 
 # the Halo 3 set's widgets: what each runs
 H3 = {}
@@ -115,6 +117,18 @@ def field(name):
     w(f'\t<widget name="{name}" left="{FIELD_X}" top="{FIELD_Y}" width="{FIELD_W}" height="{FIELD_H}" bitmap="{FIELD}"/>')
 
 
+def text_tab_row(name, bitmap, extra, handler_lines, font='large', width=226, height=32):
+    """a list_item_bkd row whose words are its own text box (row_name: 13 in, ending 14 short of the tab's
+    end, so clear of the description's field the tab runs under), the font's size"""
+    top, box = (5, 24) if font == 'large' else (5, 18)
+    w(f'\t<widget name="{name}/row_name" type="text" left="13" top="{top}" width="{width - 27}" height="{box}" font="ui\\{font}_ui" color="{BLUE}"{extra}/>')
+    w(f'\t<widget name="{name}" width="{width}" height="{height}" bitmap="{bitmap}">')
+    for line in handler_lines:
+        w(line)
+    w(f'\t\t<child widget="{name}/row_name"/>')
+    w('\t</widget>')
+
+
 def tab_rows(prefix, h3_prefix, names, columns=(), string_list=None, first_index=0, indexes=None):
     """list_item_bkd rows (the first list_item_bkd_top), each a text row (no columns) or a row of the
     columns' text boxes; their <on> the Halo 3 rows'"""
@@ -126,7 +140,8 @@ def tab_rows(prefix, h3_prefix, names, columns=(), string_list=None, first_index
             extra = ''
             if string_list:
                 extra = f' string_list="{string_list}" string_index="{indexes[i] if indexes else first_index + i}"'
-            w(f'\t<widget name="{prefix}/{row}" type="text" width="226" height="32" bitmap="{bitmap}" font="ui\\large_ui" color="{BLUE}" text_x="13" text_y="5"{extra}>')
+            text_tab_row(f'{prefix}/{row}', bitmap, extra, handlers(f'{h3_prefix}/{row}'))
+            continue
         for line in handlers(f'{h3_prefix}/{row}'):
             w(line)
         for column in columns:
@@ -198,8 +213,9 @@ heading('cp/network/header', 'header_select_network')
 tab_rows('cp/network', 'h3/network', ['item_0', 'item_1', 'item_2', 'item_3'], string_list='h3/networks')
 column_list('cp/network/list', 'h3/network/list', [f'cp/network/item_{i}' for i in range(4)])
 field('cp/network/field')
-# (the Halo 3 set's words, broken into lines for its own font: a little wider here for ui.map's)
-text('cp/network/network_text', IN_X - 4, 90, IN_W + 10, 200, extra=' string_list="h3/network_text"')
+# (the Halo 3 set's words, broken into lines for its own font: broken again for this field as drawn,
+# menu_functions.c ui_widget_port_classic_fit)
+text('cp/network/network_text', IN_X, 90, IN_W, 200, extra=' string_list="h3/network_text"')
 footer = keys('cp/network', {'b': ('back', K, 0), 'a': ('select', K, 1)})
 screen('cp/network/screen', ['cp/network/header', 'cp/network/field', 'cp/network/network_text'] + footer +
        [('cp/network/list', ROW_X, ROW_Y)], 'h3/network/screen')
@@ -256,10 +272,7 @@ def string_of(h3_name):
 def tab_text_rows(prefix, rows):
     for i, row in enumerate(rows):
         bitmap = ITEM_TOP if i == 0 else ITEM
-        w(f'\t<widget name="{prefix}/{row}" type="text" width="226" height="32" bitmap="{bitmap}" font="ui\\large_ui" color="{BLUE}" text_x="13" text_y="5"{string_of("h3/" + prefix[3:] + "/" + row)}>')
-        for line in handlers('h3/' + prefix[3:] + '/' + row):
-            w(line)
-        w('\t</widget>')
+        text_tab_row(f'{prefix}/{row}', bitmap, string_of('h3/' + prefix[3:] + '/' + row), handlers('h3/' + prefix[3:] + '/' + row))
 
 
 tab_rows = (lambda original: (lambda prefix, h3_prefix, names, **kw: tab_text_rows(prefix, names)
@@ -274,10 +287,7 @@ question('cp/gtquit', 'cp/gtedit/header', ['op_save', 'op_discard', 'op_cancel']
 
 w('\n\t<!-- CREATE NEW GAME TYPE: the bases (the game\'s own game types), ten shown, the chosen one\'s rules in the field -->')
 for i in range(1, 11):
-    w(f'\t<widget name="cp/gtbase/item_{i}" type="text" width="226" height="32" bitmap="{ITEM_TOP if i == 1 else ITEM}" font="ui\\large_ui" color="{BLUE}" text_x="13" text_y="5">')
-    for line in handlers(f'h3/gtbase/item_{i}'):
-        w(line)
-    w('\t</widget>')
+    text_tab_row(f'cp/gtbase/item_{i}', ITEM_TOP if i == 1 else ITEM, '', handlers(f'h3/gtbase/item_{i}'))
 column_list('cp/gtbase/list', 'h3/gtbase/list', [f'cp/gtbase/item_{i}' for i in range(1, 11)])
 field('cp/gtbase/field')
 text('cp/gtbase/base_help', IN_X, 88, IN_W, 60, extra=' string_list="cp/standin_text" string_index="0"')

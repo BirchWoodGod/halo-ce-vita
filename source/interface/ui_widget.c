@@ -5856,6 +5856,16 @@ static void widget_instance_render_text_box(
 		{
 			widget->parameters.text_box.text = L"<out of memory>";
 		}
+#ifdef HALO_LINUX
+		/* (Menu style Classic+'s screens: the string fitted to the box, port/linux/game/menu_functions.c) */
+		if (widget->parameters.text_box.text && widget != ui_widget_port_error_text_box &&
+			!string_has_icons_to_draw(widget->parameters.text_box.text))
+		{
+			void ui_widget_port_classic_fit(struct widget_instance *widget);
+
+			ui_widget_port_classic_fit(widget);
+		}
+#endif
 	}
 	text = &widget->parameters.text_box.text;
 	if (!*text || !**text)
