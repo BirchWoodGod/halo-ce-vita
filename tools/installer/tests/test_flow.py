@@ -989,6 +989,7 @@ def test_destination_on_the_vita_needs_an_address(root, tmp_path, monkeypatch):
     assert window._host_port() == ("192.168.1.20", hcv.FTP_PORT)
     bad = tmp_path / "bad.vpk"
     bad.write_bytes(b"not a zip")
+    window.download_vpk_box.set(False)
     window.vpk.set(str(bad))
     window.next_button.invoke()
     assert "not a VPK" in errors[-1]
@@ -1191,8 +1192,11 @@ def test_vita_end_to_end(root, tmp_path, monkeypatch):
     to_game_files(window, root, "vita")
     advance(window, root, "destination")
     window.host.set("ftp://192.168.1.20:1337")
+    window.download_vpk_box.set(False)
     window.vpk.set(str(vpk))
+    monkeypatch.setattr(hcv, "match_signed_vpk", lambda path, log=print: False)
     advance(window, root, "ready")
+    assert "(not signature-checked)" in window.summary_box.get("1.0", "end")
     assert "PS Vita at 192.168.1.20:1337" in window.summary_box.get("1.0", "end")
     window.next_button.invoke()
     wait_for_finish(window, root)

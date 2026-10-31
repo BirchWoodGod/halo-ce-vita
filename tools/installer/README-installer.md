@@ -27,8 +27,10 @@ files.
 - **Without the window:** `python3 halo_ce_vita_installer.py --help` lists
   the same work as commands (see below).
 
-Put the VPK next to the tool and Setup finds it by itself. The PC build comes
-from Setup's signed download; an archive of yours is only used if you choose it.
+Setup downloads the VPK and the PC build from the project's releases and
+checks their signature. A file of yours (a VPK or an archive, next to the tool or
+not) is only used if you choose it, after a "not signature-checked" warning;
+nothing next to the tool is picked up by itself.
 
 ## The wizard
 
@@ -216,7 +218,8 @@ Files page; on the command line, the commands below.
    line's `upload --replace` copies files already there again.
 5. **The VPK (Vita).** Download `halo-ce-vita-<version>-vita.vpk` from the
    [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
-   (a VPK next to the tool is picked up by itself). The tool copies it to
+   (Setup downloads and signature-checks it by itself; a VPK of your own is only
+   sent if you untick that and choose it). The tool copies it to
    `ux0:data/`. Then, on the Vita, leave FTP mode, open `ux0:data/` in
    VitaShell, press Cross on the VPK and confirm. The tool cannot install
    it: only VitaShell on the Vita can. Finish says so too.
@@ -252,7 +255,7 @@ python3 halo_ce_vita_installer.py [--out FOLDER] pc-files --folder FOLDER
 python3 halo_ce_vita_installer.py check-installer "any name.exe"
 python3 halo_ce_vita_installer.py [--out FOLDER] check
 python3 halo_ce_vita_installer.py [--out FOLDER] upload 192.168.1.20 [--replace]
-python3 halo_ce_vita_installer.py vpk 192.168.1.20 [halo.vpk]
+python3 halo_ce_vita_installer.py vpk 192.168.1.20 [your.vpk]   # no file: the signed download
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-copy [BUILD FOLDER] [--replace]
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-install [FOLDER] [--package ARCHIVE | --download] [--desktop-shortcut] [--start-menu]
 python3 halo_ce_vita_installer.py pc-uninstall [FOLDER]

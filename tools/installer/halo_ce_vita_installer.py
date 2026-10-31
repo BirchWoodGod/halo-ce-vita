@@ -2432,22 +2432,6 @@ def check_vpk(path: str) -> None:
         raise InstallerError("%s is not a Vita VPK (no eboot.bin and sce_sys/param.sfo)" % path)
 
 
-def find_local_vpks() -> List[str]:
-    """VPKs next to this tool (and in the current folder)."""
-    places = [os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__)),
-              os.getcwd()]
-    found = []
-    for place in places:
-        try:
-            for name in sorted(os.listdir(place)):
-                full = os.path.join(place, name)
-                if name.lower().endswith(".vpk") and os.path.isfile(full) and full not in found:
-                    found.append(full)
-        except OSError:
-            pass
-    return found
-
-
 def upload_vpk(host: str, vpk: str, port: int = FTP_PORT, progress: Progress = _no_progress,
                log: Callable[[str], None] = print, cancel: Optional[threading.Event] = None) -> str:
     """The VPK to ux0:data/ (VitaShell installs it: the Vita cannot
@@ -2970,6 +2954,131 @@ def download_pc_build(folder: str, progress: Progress = _no_progress, log: Calla
     package.version = download.version
     package.verified = True
     return package
+
+
+# The Vita's VPK, the same way: halo-update.txt and its signature (the Vita
+# updater's own manifest), then the VPK no longer than the manifest says, its
+# SHA-512 the manifest's. A VPK that is not that file is sent only when the user
+# chose it (NOT_SIGNATURE_CHECKED); nothing next to Setup is ever picked up.
+VITA_MANIFEST = "halo-update.txt"
+VITA_SIGNATURE = VITA_MANIFEST + ".sig"
+VITA_MANIFEST_MAXIMUM = 1024
+VPK_DOWNLOAD_MAXIMUM = 64 << 20  # (the game takes 1 byte to 64 MB)
+_VITA_MANIFEST_FORM = re.compile(
+    r"halo-ce-vita-update 1\nversion (?P<version>[0-9a-z.-]{1,63})\ntitle (?P<title>[A-Z0-9]{9})\n"
+    r"file (?P<file>[0-9a-z._-]{1,95})\nsize (?P<size>[1-9][0-9]{0,8})\nsha512 (?P<sha512>[0-9a-f]{128})\n")
+
+
+@dataclass
+class VpkDownload:
+    version: str
+    file: str
+    size: int
+    sha512: str
+
+
+def verify_vita_manifest(text: bytes, signature: bytes) -> VpkDownload:
+    """The VPK the release signed, from the manifest and its signature as they
+    came from the network: refused unless signed by the release key, exactly
+    the manifest's form, a file name the release uses, and a size the game takes."""
+    try:
+        signed = bytes.fromhex(signature.decode("ascii").rstrip("\r\n"))
+    except (UnicodeDecodeError, ValueError):
+        signed = b""
+    if not ed25519.verify(bytes.fromhex(RELEASE_PUBLIC_KEY), text, signed):
+        raise InstallerError("The download's signature is not the Halo CE project's, so Setup did not use it.")
+    form = _VITA_MANIFEST_FORM.fullmatch(text.decode("ascii", "replace"))
+    if not form:
+        raise InstallerError("The release's list for the Vita is not in the right form.")
+    version, file = form.group("version"), form.group("file")
+    if file not in ("halo-ce-vita-%s-vita.vpk" % version, "halo.vpk"):
+        raise InstallerError("The release's list for the Vita names another file (%s)." % file)
+    size = int(form.group("size"))
+    if size > VPK_DOWNLOAD_MAXIMUM:
+        raise InstallerError("The VPK the release lists is too large.")
+    if version_order(version) < version_order(VERSION):  # (an old signed list played back)
+        raise InstallerError("The download is version %s, older than %s, so Setup did not use it."
+                             % (version, VERSION))
+    return VpkDownload(version, file, size, form.group("sha512"))
+
+
+def signed_vpk_download() -> VpkDownload:
+    latest = RELEASE_DOWNLOADS + "/latest/download/"
+    text = _read_small(latest + VITA_MANIFEST, VITA_MANIFEST_MAXIMUM)
+    signature = _read_small(latest + VITA_SIGNATURE, PC_SIGNATURE_MAXIMUM)
+    return verify_vita_manifest(text, signature)
+
+
+def match_signed_vpk(path: str, log: Callable[[str], None] = print) -> bool:
+    """Whether a VPK the user chose is, byte for byte, the one the newest
+    release signed. Anything else, the network down too, is False: it is
+    still sent, as the user asked, after the warning."""
+    name = os.path.basename(path)
+    try:
+        download = signed_vpk_download()
+    except (InstallerError, urllib.error.URLError, ssl.SSLError, OSError, EOFError) as error:
+        log("%s could not be compared with the release's signed list (%s): not signature-checked" % (name, error))
+        return False
+    digest = hashlib.sha512()
+    size = 0
+    try:
+        with open(path, "rb") as file:
+            for block in iter(lambda: file.read(1 << 20), b""):
+                size += len(block)
+                digest.update(block)
+    except OSError as error:
+        log("%s could not be read to compare it: %s" % (name, error))
+        return False
+    if size != download.size or digest.hexdigest() != download.sha512:
+        log("%s is not the file release %s signed: not signature-checked" % (name, download.version))
+        return False
+    log("%s matches the SHA-512 release %s signed" % (name, download.version))
+    return True
+
+
+def download_vpk(folder: str, progress: Progress = _no_progress, log: Callable[[str], None] = print) -> str:
+    """The newest release's VPK in `folder`, its signature and SHA-512
+    checked; the path. Raises InstallerError and leaves no file otherwise."""
+    partial = ""
+    try:
+        download = signed_vpk_download()
+        log("Signed by the release key: %s %s, %s" % (download.file, download.version, human_size(download.size)))
+        if shutil.disk_usage(folder).free < download.size:
+            raise InstallerError("Not enough free space to download the VPK: %s needed." % human_size(download.size))
+        path = os.path.join(folder, download.file)
+        partial = path + ".part"
+        digest = hashlib.sha512()
+        done = 0
+        url = "%s/download/v%s/%s" % (RELEASE_DOWNLOADS, download.version, download.file)
+        try:
+            with open_download(url) as answer, open(partial, "wb") as file:
+                while True:
+                    block = answer.read(1 << 20)
+                    if not block:
+                        break
+                    done += len(block)
+                    if done > download.size:
+                        raise InstallerError("The download is longer than the release's list says, so Setup stopped.")
+                    digest.update(block)
+                    file.write(block)
+                    progress(download.file, done, download.size)
+        except BaseException:
+            if os.path.exists(partial):
+                os.remove(partial)
+            raise
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            raise InstallerError("This release has no signed VPK to download yet. Get it from %s and choose it "
+                                 "instead." % RELEASES_URL)
+        raise InstallerError("GitHub answered %d to the download. Try again later." % error.code)
+    except (urllib.error.URLError, ssl.SSLError, OSError, EOFError) as error:
+        raise InstallerError("The download could not finish (%s). Check your connection and try again." % (error,))
+    if done != download.size or digest.hexdigest() != download.sha512:
+        os.remove(partial)
+        raise InstallerError("The download is not the file the release signed, so Setup threw it away.")
+    os.replace(partial, path)
+    log("%s matches its signed SHA-512" % download.file)
+    return path
 
 
 def _package_readers(package: PcPackage):
@@ -3575,7 +3684,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     step.add_argument("--replace", action="store_true", help="copy files already on the Vita again")
     step = commands.add_parser("vpk", help="copy the VPK to ux0:data/ (install it with VitaShell)")
     step.add_argument("host")
-    step.add_argument("vpk", nargs="?", help="the VPK (default: one next to this tool)")
+    step.add_argument("vpk", nargs="?", help="a VPK of yours, not signature-checked (default: the release's signed "
+                                             "download)")
     step.add_argument("--port", type=int, default=FTP_PORT)
     step = commands.add_parser("pc-copy", help="copy the gathered files into a PC build's data folder")
     step.add_argument("build", nargs="?", help="the unpacked PC build (default: one found next to this tool or in "
@@ -3669,11 +3779,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result = upload_files(arguments.host, items, arguments.port, arguments.replace, progress, _console_log)
             _console_log("Done: %(copied)d copied, %(skipped)d already there" % result)
         elif arguments.command == "vpk":
-            vpk = arguments.vpk or (find_local_vpks() or [None])[0]
-            if not vpk:
-                raise InstallerError("No VPK given and none next to this tool. Download halo-ce-vita-<version>-vita.vpk from " +
-                                     RELEASES_URL)
-            name = upload_vpk(arguments.host, vpk, arguments.port, progress, _console_log)
+            with tempfile.TemporaryDirectory(prefix="halo-ce-setup-") as temporary:
+                if arguments.vpk:
+                    vpk = arguments.vpk
+                    check_vpk(vpk)
+                    _console_log("Warning: " + NOT_SIGNATURE_CHECKED % os.path.basename(vpk))
+                    match_signed_vpk(vpk, _console_log)
+                else:
+                    vpk = download_vpk(temporary, progress, _console_log)
+                name = upload_vpk(arguments.host, vpk, arguments.port, progress, _console_log)
             _console_log(VPK_INSTRUCTIONS.format(name=name))
         elif arguments.command == "pc-copy":
             build = arguments.build or (find_pc_builds() or [None])[0]
@@ -3988,7 +4102,10 @@ class InstallerWindow:
         self.quality = var(value="baseline")
         self.movies = tkinter.BooleanVar(value=bool(find_ffmpeg()))
         self.host = var()
-        self.vpk = var(value=(find_local_vpks() or [""])[0])
+        # (never a VPK found by itself: the signed download, or one the user chose)
+        self.vpk = var()
+        self.download_vpk_box = tkinter.BooleanVar(value=True)
+        self.sent_vpk = ""
         self.out = var(value=out)
         self.install_folder = var(value=self.existing or default_install_folder())
         self.package = var()
@@ -4461,11 +4578,17 @@ class InstallerWindow:
         self.test_button.pack(side="left", padx=(px(6), 0))
         self.test_result.set("")
         self.text("", textvariable=self.test_result, pady=(px(2), px(6)))
-        self.field("Game package (VPK):", self.vpk, pady=(0, 2),
-                   browse=lambda: self.browse_file(self.vpk, [("VPK", "*.vpk"), ("All files", "*")]))
-        if not self.vpk.get():
-            self.text("None found next to Setup. Leave it empty if the game is already on the Vita.", pady=(0, px(2)))
-            self.link("Download halo-ce-vita-<version>-vita.vpk from the releases page", RELEASES_URL)
+        ttk.Checkbutton(self.body, text="Download the game package (VPK) and check its signature",
+                        variable=self.download_vpk_box,
+                        command=lambda: self.show("destination")).pack(anchor="w", pady=(0, px(4)))
+        if self.download_vpk_box.get():
+            self.text("Setup will download the VPK from the project's GitHub releases.", pady=(0, px(2)))
+        else:
+            self.field("Game package (VPK):", self.vpk, pady=(0, 2),
+                       browse=lambda: self.browse_file(self.vpk, [("VPK", "*.vpk"), ("All files", "*")]))
+            self.text("A file you choose here is not signature-checked unless it matches the release's signed list. "
+                      "Leave it empty if the game is already on the Vita.", pady=(0, px(2)))
+            self.link("Download it from the releases page", RELEASES_URL)
         self.ttk.Frame(self.body, height=px(6)).pack()
         self.field("Folder for the files on their way to the Vita (about 2.5 GB):", self.out, pady=(0, 2),
                    browse=lambda: self.browse_folder(self.out))
@@ -4575,8 +4698,8 @@ class InstallerWindow:
     def leave_destination_vita(self) -> bool:
         try:
             self._host_port()
-            if self.vpk.get().strip():
-                check_vpk(self.vpk.get().strip())
+            if self.own_vpk():
+                check_vpk(self.own_vpk())
             if not self.out.get().strip():
                 raise InstallerError("Choose a folder for the files on their way to the Vita.")
             needed, free = self.game_bytes, self.free_bytes(self.out.get())
@@ -4586,7 +4709,19 @@ class InstallerWindow:
         except InstallerError as error:
             self.complain(str(error))
             return False
+        from tkinter import messagebox
+        if self.own_vpk() and not messagebox.askyesno(
+                "%s Setup" % APP_NAME,
+                (NOT_SIGNATURE_CHECKED + "\n\nSetup will compare it with the release's signed list, but if the two "
+                 "do not match it will still send it to the Vita.\n\nUse this file?")
+                % os.path.basename(self.own_vpk()),
+                icon="warning", default="no", parent=self.root):
+            return False
         return True
+
+    def own_vpk(self) -> str:
+        """The VPK the user chose, or "": the one field is ignored while the signed download is on."""
+        return "" if self.download_vpk_box.get() else self.vpk.get().strip()
 
     def leave_destination_pc(self) -> bool:
         from tkinter import messagebox
@@ -4675,7 +4810,9 @@ class InstallerWindow:
                 "Shortcuts: %s" % (", ".join(shortcuts) or "none")]
         host, port = self._host_port()
         return ["Install on: PS Vita at %s:%d, in %s" % (host, port, VITA_GAME_FOLDER)] + self.source_lines() + [
-            "Game package: %s" % (os.path.basename(self.vpk.get()) if self.vpk.get().strip() else "none chosen"),
+            "Game package: %s" % ("downloaded from the project's GitHub releases" if self.download_vpk_box.get() else
+                                  "%s (not signature-checked)" % os.path.basename(self.vpk.get()) if self.own_vpk()
+                                  else "none chosen"),
             "Files gathered in:", "    %s" % self.out.get()]
 
     def page_installing(self):
@@ -4730,7 +4867,7 @@ class InstallerWindow:
     def finish_vita(self):
         px = self.px
         self.text("The files are on your PS Vita. What is left, on the Vita:", pady=(0, px(6)))
-        vpk = os.path.basename(self.vpk.get().strip())
+        vpk = self.sent_vpk
         steps = ["In VitaShell, press Circle to leave FTP mode, open ux0:, then data, press Cross on %s and confirm. "
                  "The bubble is called Halo CE." % vpk if vpk else
                  "Install the VPK in VitaShell, if the game is not on the Vita yet.",
@@ -4782,7 +4919,8 @@ class InstallerWindow:
     def vita_tasks(self) -> List[InstallTask]:
         out = self.out.get()
         host, port = self._host_port()
-        vpk = self.vpk.get().strip()
+        vpk = self.own_vpk()
+        fetch = self.download_vpk_box.get()
         tasks = self.game_tasks(out)
 
         def send(step):
@@ -4796,9 +4934,17 @@ class InstallerWindow:
             self.log(log_line % (len(items), human_size(sum(item.size for item in items)), host, port))
             upload_files(host, items, port, False, step, self.log, self.cancel)
         tasks.append(InstallTask("Sending the files to the Vita", max(self.game_bytes, 1 << 30), send))
-        if vpk:
-            tasks.append(InstallTask("Sending the game package to the Vita", 64 << 20,
-                                     lambda step: upload_vpk(host, vpk, port, step, self.log, self.cancel)))
+        if fetch:
+            def send_signed(step):
+                self.download_folder = tempfile.mkdtemp(prefix="halo-ce-setup-")
+                path = download_vpk(self.download_folder, step, self.log)
+                self.sent_vpk = upload_vpk(host, path, port, step, self.log, self.cancel)
+            tasks.append(InstallTask("Downloading the game package and sending it to the Vita", 64 << 20, send_signed))
+        elif vpk:
+            def send_own(step):
+                match_signed_vpk(vpk, self.log)
+                self.sent_vpk = upload_vpk(host, vpk, port, step, self.log, self.cancel)
+            tasks.append(InstallTask("Sending the game package to the Vita", 64 << 20, send_own))
         return tasks
 
     def pc_tasks(self) -> List[InstallTask]:
