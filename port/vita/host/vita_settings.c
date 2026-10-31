@@ -230,7 +230,9 @@ Forge game is played, Clear dead AI and Clear all AI (asked first) do what
 the Forge menu's CLEAR DEAD AI and CLEAR ALL AI do, each with how many it
 takes (forge.c forge_panel_ai_counts, forge_panel_clear_ai); Magnets and Nudge
 step set the Forge game's blocks' magnets and its nudge (forge.c
-forge_precision.inc: 1.1.2).
+forge_precision.inc: 1.1.2). Touch in Forge (HALO_FORGE_TOUCH, on by
+default) is the monitor's front screen (forge_touch.inc); the page is there in
+any Menu style during a Forge game, its rows being that game's.
 
 Dev holds a few switches for testers (each a debug environment variable;
 most are read once, at start-up, and say so; the renderer's A/B ones on a

@@ -445,6 +445,8 @@ touch_check() {
 	expect "$n" "the properties opened over a carried object" "ui: screen pc.h3.forge.properties.screen"
 	sed -n '/test command at tick 49[89]:/,$p' "$log" | grep -aq "holding boulder" &&
 		echo "  ok: $n: it waited in the hand" || fail "$n: the properties lost what the finger carried"
+	sed -n '/test command at tick 5[01][0-9]: forge where/,$p' "$log" | grep -aq "holding nothing" &&
+		echo "  ok: $n: closed, the finger gone: let go" || fail "$n: still held after the menu closed"
 }
 
 # (v1: the main menu: down to FORGE; the lobby: Map, down, A: Wizard, its
@@ -1323,6 +1325,7 @@ touch_runs() {
 	c="$c;L460:forge touch 262 100;L462:forge touch up;L464:forge where;L466:forge drop;L470:forge camera 60 -100 2 12 0"
 	# (carried, the properties opened: it waits in the hand, the finger gone)
 	c="$c;L480:forge touch $at;L482:forge touch $from;L486:forge press x 2;L492:forge touch up;L498:forge where"
+	c="$c;L502:forge closemenus;L510:forge where"
 	ai_run "$name" 30 "$c" HALO_TEST_FORGE_PACKS=none HALO_SCREEN_WIDTH=$width
 }
 

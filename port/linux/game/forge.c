@@ -66,6 +66,9 @@ the keys of its own the layout has no room for: forge_keys):
   shows the scoreboard; the click alone is the Spartan's zoom, as in any
   game, and nothing for the monitor;
 - Start: the Forge menu (resume, monitor or Spartan, the controls, leave).
+The Vita's front screen does some of this too (forge_touch.inc): drag an
+object to carry it, tap one and drag the screen to turn it, or drag to turn
+the one held.
 
 The palette is every tag of the loaded map that the browser offers, with a
 readable name each (forge_names: our own names for the multiplayer maps'

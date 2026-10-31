@@ -19,6 +19,9 @@ The zones, in the screen's 960 x 544 pixels:
 	rear, right half    520..960 x all      (a strip between the two counts
 	                                         for neither)
 The bottom corners are left alone: the motion tracker is bottom left.
+Forge's monitor turns the zones off and takes the front screen for its
+fingers, but for a finger that comes down in a zone, which counts for nothing
+(vita_pad.c vita_pad_forge_touch, port/linux/game/forge_touch.inc).
 
 The rear pad is where the hands holding the Vita rest, so its fingers go
 through a guard (the panel's Rear touch guard): one that comes down in the
