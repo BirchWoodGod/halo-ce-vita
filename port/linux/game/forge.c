@@ -7070,6 +7070,44 @@ boolean forge_command(
 		platform_log("forge: filled %d of %d %s", placed, count, forge_globals.palette[index].name);
 		return TRUE;
 	}
+#ifndef HALO_RELEASE
+	if (!strcmp(word, "board"))
+	{
+		/* (tests) "board #<vehicle> #<unit>": the layout's unit in the first
+		seat of the layout's vehicle that takes it: run_forge_test.sh
+		phaserider */
+		long vehicle_id = 0, unit_id = 0, vehicle_index = NONE, unit_index = NONE;
+		short index;
+		short seat;
+		short seats;
+
+		if (sscanf(rest, "#%ld #%ld", &vehicle_id, &unit_id) != 2)
+			return FALSE;
+		for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+		{
+			if (forge_globals.placed[index].id == vehicle_id && forge_object_alive(forge_globals.placed[index].object_index))
+				vehicle_index = forge_globals.placed[index].object_index;
+			if (forge_globals.placed[index].id == unit_id && forge_object_alive(forge_globals.placed[index].object_index))
+				unit_index = forge_globals.placed[index].object_index;
+		}
+		if (vehicle_index == NONE || unit_index == NONE)
+		{
+			platform_log("forge: board: no such objects");
+			return FALSE;
+		}
+		seats = (short)unit_definition_get(unit_get(vehicle_index)->definition_index)->unit.seats.count;
+		for (seat = 0; seat < seats; seat++)
+		{
+			if (unit_enter_seat(unit_index, vehicle_index, seat))
+			{
+				platform_log("forge: board: #%ld in seat %d of #%ld", unit_id, (int)seat, vehicle_id);
+				return TRUE;
+			}
+		}
+		platform_log("forge: board: no seat of #%ld takes #%ld", vehicle_id, unit_id);
+		return FALSE;
+	}
+#endif
 	if (!strcmp(word, "grab"))
 	{
 		long object_index = forge_object_under_crosshair();

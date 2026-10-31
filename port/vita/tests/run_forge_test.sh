@@ -205,6 +205,11 @@
 #               finds the PHASED wall (it can be grabbed), a projectile's line meets the one
 #               behind; the Spartan fires a real weapon: every shot strikes the far wall; the
 #               near wall set NORMAL, the same shots strike it (HALO_TEST_SHOT_LOG)
+#   phaserider  a PHASED vehicle with a rider (collisions.c): a Warthog set PHASED, a NORMAL wall
+#               behind it; a line through the driver's seat meets the wall; a Marine put in
+#               the seat (forge board: a seated unit is the vehicle's child, reached only
+#               through it), the same line meets the Marine, and the Spartan's real shots
+#               strike him: PHASED lets the vehicle's own shape pass, never its rider
 #   precision   nudge, magnets, the position readout (forge_precision.inc, 1.1.2): in a Forge
 #               game of Blood Gulch, snapping off, a large platform; a second held a tenth
 #               of a world unit off its side: the magnets draw it flush (4 world units
@@ -346,7 +351,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch touch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives flagground flagswap physics phaseshot precision allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch touch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives flagground flagswap physics phaseshot phaserider precision allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -1170,6 +1175,19 @@ phaseshot_runs() {
 		HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1 HALO_TEST_SHOT_LOG=1
 }
 
+phaserider_runs() {
+	local spot="65 -130 1.5 0 0" line="65 -130.3 0.6 0 0"
+	local c="L240:forge snap off;L250:forge camera $spot;L262:forge spawn warthog;L263:forge distance 7"
+	c="$c;L264:forge turn 90;L265:forge property physics;L266:forge property physics;L272:forge drop"
+	c="$c;L274:forge camera $spot;L292:forge spawn wall_large;L293:forge distance 20;L294:forge turn 90;L302:forge drop"
+	c="$c;L304:forge camera $spot;L306:forge spawn marine\\marine assault rifle;L307:forge distance 3;L308:forge brain off;L310:forge drop"
+	c="$c;L320:forge objects;L325:forge camera $line;L335:forge blocks ray;L340:forge board #1 #3;L350:forge objects"
+	c="$c;L355:forge camera $line;L365:forge blocks ray;L370:forge camera 65 -130.3 1.5 0 0;L380:forge off"
+	c="$c;L450:@aim look 0 -11;L458:forge where;L465:@aim pad 0 0 0 0 1 40;L520:@shot 00-firing-at-the-rider"
+	run phaserider 40 "" "$c" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=marine_ai \
+		HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1 HALO_TEST_SHOT_LOG=1
+}
+
 precision_commands() { # the properties' shot's name
 	local c="L240:forge snap off;L250:forge camera 75 -152 2 0 0;L262:forge spawn platform_large;L263:forge distance 5"
 	c="$c;L272:forge drop;L280:forge camera 79.1 -152 2 0 0;L292:forge spawn platform_large;L293:forge distance 5"
@@ -1552,6 +1570,8 @@ for c in $cases; do
 		physics_runs & ;;
 	phaseshot)
 		phaseshot_runs & ;;
+	phaserider)
+		phaserider_runs & ;;
 	precision)
 		precision_runs & ;;
 	objectives)
@@ -2014,6 +2034,23 @@ for c in $cases; do
 		else
 			fail "phaseshot: fired shots: $shots"
 		fi
+		continue
+	fi
+	if [ "$c" = phaserider ]; then
+		checked phaserider || continue
+		log="$out/phaserider/run.log"
+		expect phaserider "the Warthog phased" "forge: #1's physics phased"
+		expect phaserider "the Marine in its seat" "forge: board: #3 in seat"
+		rays=$(grep -a "forge: blocks: ray from" "$log")
+		grep -aq "meets the object forge.blocks.wall_large at 84" <<< "$(sed -n 1p <<< "$rays")" &&
+			echo "  ok: phaserider: empty, the line passes the PHASED Warthog" ||
+			fail "phaserider: the empty Warthog: $rays"
+		grep -aq 'meets the object characters.marine.marine at 7[0-9]' <<< "$(sed -n 2p <<< "$rays")" &&
+			echo "  ok: phaserider: the same line meets the rider of the PHASED Warthog" ||
+			fail "phaserider: a rider of a PHASED vehicle is not met: $rays"
+		grep -aqE "shot test: struck an object at 7[0-9]\." "$log" &&
+			echo "  ok: phaserider: the Spartan's shots strike the rider" ||
+			fail "phaserider: no shot struck the rider: $(grep -a "shot test: struck" "$log" | head -5)"
 		continue
 	fi
 	if [ "$c" = physics ]; then
