@@ -803,7 +803,9 @@ pair() {
 		# (the client once the host's own player is in: else the client's is
 		# player 0, the network test's "first player" whose kills score, and
 		# with its leaving the scores are spread and the game never ends)
-		for i in $(seq 1 60); do
+		# (client_after: a stand-in host's lobby, joined before its game starts:
+		# a game under way lists as closed)
+		for i in $(seq 1 ${client_after:-60}); do
 			grep -aqE "network test: (player 0 is named|starting the game)" "$out/$name/host/run.log" 2>/dev/null && break
 			sleep 1
 		done
@@ -1010,7 +1012,9 @@ coop_game() {
 			HALO_NETWORK_TEST_START=$start_delay HALO_NET_LOBBY_NAME=XpCoop HALO_TELNET_CONSOLE=1 HALO_TEST_INPUT=bot:3 \
 			${coop_host_extra:-} ${XPPC_COOP_HOST_ENV:-}
 		mine=$last_pid; host_pid=$last_pid
-		for i in $(seq 1 60); do
+		# (client_after: a stand-in host's lobby, joined before its game starts:
+		# a game under way lists as closed)
+		for i in $(seq 1 ${client_after:-60}); do
 			grep -aqE "network test: (player 0 is named|starting the game)" "$out/$name/host/run.log" 2>/dev/null && break
 			sleep 1
 		done
@@ -1246,12 +1250,12 @@ crossstandin)
 	stand_in="HALO_TEST_CROSSPLAY_HOST=1 HALO_TEST_CROSSPLAY_HOST_VERSION=41"
 	# (the host's game starts late: a game under way lists as closed, and our
 	# client must find it open and join its lobby)
-	seconds=${XPPC_STANDIN_SECONDS:-70} start_delay=${XPPC_STANDIN_START:-25}
+	seconds=${XPPC_STANDIN_SECONDS:-85} start_delay=${XPPC_STANDIN_START:-50}
 	standin_case() { # standin_case NAME HOSTENV [HOSTGAME]
-		host_extra="$stand_in $2" host_variants=${3:-slayer} pair "lan-$1" lan ours ours
+		client_after=10 host_extra="$stand_in $2" host_variants=${3:-slayer} pair "lan-$1" lan ours ours
 	}
 	for code in 10 11 12 13 14 255 65535; do
-		standin_case "refuse$code" "HALO_TEST_HOST_REFUSE=$code HALO_TEST_RECORD_FURTHER=0:0:0"
+		seconds=60 standin_case "refuse$code" "HALO_TEST_HOST_REFUSE=$code HALO_TEST_RECORD_FURTHER=0:0:0"
 	done
 	standin_case "bit8" "HALO_TEST_RECORD_FURTHER=8:0:0"
 	standin_case "reserved11" "HALO_TEST_RECORD_FURTHER=0:0:1"
@@ -2076,7 +2080,9 @@ h3pcjoin)
 				$(start_delay=1000 host_env ours net) HALO_NET_HOST_CROSSPLAY=false HALO_NET_LOBBY_NAME=XpVita
 			pids_here="$pids_here $last_pid"
 		fi
-		for i in $(seq 1 60); do
+		# (client_after: a stand-in host's lobby, joined before its game starts:
+		# a game under way lists as closed)
+		for i in $(seq 1 ${client_after:-60}); do
 			grep -aqE "network test: (player 0 is named|starting the game)" "$out/$name/host/run.log" 2>/dev/null && break
 			sleep 1
 		done
