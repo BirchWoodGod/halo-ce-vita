@@ -4260,7 +4260,7 @@ static void forge_variant_save(
 	{
 		char both[FORGE_STORE_WHY_SIZE];
 
-		snprintf(both, sizeof(both), "%s  %s", forge_globals.save_status, warning);
+		snprintf(both, sizeof(both), "%s\n%s", forge_globals.save_status, warning);
 		forge_menu_notice("%s", both);
 		forge_warning_hud(warning);
 	}
