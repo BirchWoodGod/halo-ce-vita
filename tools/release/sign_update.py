@@ -67,6 +67,10 @@ def main():
     for system, path in (("windows", arguments.pc_windows), ("linux", arguments.pc_linux)):
         if path:
             common.check_pc_archive(path, system)
+            # (a test build, which may trust a test key, is never signed as a release by mistake)
+            if common.pc_archive_is_test_build(path) and not arguments.test_build:
+                common.fail(f"{path} is a TEST build (made without --release): make it with --release, or pass "
+                            "--test-build to sign it for a test")
             size, sha512 = common.file_digest(path)
             if not 0 < size <= common.PC_MAXIMUM:
                 common.fail(f"{path} is {size} bytes: Setup takes 1 byte to 1 GB")

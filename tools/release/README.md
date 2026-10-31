@@ -198,8 +198,11 @@ the build is a release build:
 | `--vita-version VERSION` | the version the build says it is, in place of `vita_version.h`'s: the Vita's and the PC builds' (Linux, Windows) alike; `tools/package_pc.py` names its files for it |
 
 `build.ninja` then says "TEST BUILD of the updater", and `sign_update.py`
-refuses that tree's `build/vita/halo.vpk` without `--test-build`. Files a
-test build downloads must still be signed by its key.
+refuses that tree's `build/vita/halo.vpk` without `--test-build`. A PC build
+made without `--release` (which is every build a test key can be in) logs
+`HALO-CE-VITA-TEST-BUILD` at start, and `sign_update.py` refuses an archive
+holding that text without `--test-build` too. Files a test build downloads
+must still be signed by its key.
 
 ### Making test builds A (1.1.0-beta.3) and B (1.1.0-beta.4)
 

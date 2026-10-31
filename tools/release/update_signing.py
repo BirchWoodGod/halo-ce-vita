@@ -151,6 +151,10 @@ def pc_name(version, system):
     return f"halo-ce-vita-{version}{PC_SYSTEMS[system][0]}"
 
 
+# (in every build made without --release, in its log line at start: sdl_platform.c)
+TEST_BUILD_MARK = b"HALO-CE-VITA-TEST-BUILD"
+
+
 def pc_archive_names(path):
     """the names in a PC build's archive; fails when it is no archive"""
     try:
@@ -171,6 +175,34 @@ def check_pc_archive(path, system):
     wanted = PC_SYSTEMS[system][1]
     if not any(name == wanted or name.split("/", 1)[-1] == wanted for name in pc_archive_names(path)):
         fail(f"{path} has no {wanted}: not the {system} PC build")
+
+
+def pc_archive_is_test_build(path):
+    """whether a file in a PC build's archive holds TEST_BUILD_MARK: a build
+    made without --release, which may trust a test key (sdl_platform.c)"""
+    def holds(reader):
+        tail = b""
+        for block in iter(lambda: reader.read(1 << 20), b""):
+            if TEST_BUILD_MARK in tail + block:
+                return True
+            tail = block[-len(TEST_BUILD_MARK):]
+        return False
+    try:
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as archive:
+                for info in archive.infolist():
+                    if not info.is_dir():
+                        with archive.open(info) as reader:
+                            if holds(reader):
+                                return True
+            return False
+        with tarfile.open(path, "r:*") as archive:
+            for info in archive:
+                if info.isreg() and holds(archive.extractfile(info)):
+                    return True
+    except (OSError, zipfile.BadZipFile, tarfile.TarError, EOFError) as error:
+        fail(f"{path} cannot be read: {error}")
+    return False
 
 
 def pc_manifest_text(version, rows):

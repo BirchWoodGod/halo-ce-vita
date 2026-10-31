@@ -17,7 +17,7 @@ import pytest
 
 import halo_ce_vita_installer as hcv
 from test_flow import advance, complaints, fake_steam, tar_release, to_game_files, wait_for_finish, wizard
-from test_flow import RELEASE, checks, choose_package, package_next_to_the_tool, texts
+from test_flow import RELEASE, RELEASE_FILES, checks, choose_package, package_next_to_the_tool, texts
 from test_window import root  # noqa: F401 (the fixture)
 
 REPOSITORY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -239,6 +239,29 @@ def test_the_tool_refuses_what_is_no_pc_build(tmp_path, key):
                              VERSION, "--out", str(tmp_path / "o")], capture_output=True, text=True)
     assert result.returncode != 0 and "no build/linux/halo" in result.stderr
     assert not (tmp_path / "o").exists()
+
+
+def test_the_tool_refuses_a_test_build(tmp_path, key):
+    files = dict(RELEASE_FILES)
+    files["build/linux/halo"] = b"\x7fELF..." + b"x" * (1 << 20) + b"HALO-CE-VITA-TEST-BUILD: not a release\0"
+    archive = tar_release(tmp_path / ARCHIVE, files=files, top=TOP)
+    command = [sys.executable, TOOL, "--key", str(key[0]), "--pc-linux", str(archive), "--version", VERSION,
+               "--out", str(tmp_path / "signed")]
+    done = subprocess.run(command, capture_output=True, text=True)
+    assert done.returncode != 0 and "TEST build" in done.stdout + done.stderr
+    assert not (tmp_path / "signed" / hcv.PC_MANIFEST).exists()
+    subprocess.run(command + ["--test-build"], check=True, capture_output=True)
+    assert (tmp_path / "signed" / hcv.PC_MANIFEST).exists()
+
+
+def test_the_test_build_mark_is_found_across_a_block(tmp_path):
+    sys.path.insert(0, os.path.join(REPOSITORY, "tools", "release"))
+    import update_signing
+    mark = update_signing.TEST_BUILD_MARK
+    files = dict(RELEASE_FILES)
+    files["build/linux/halo"] = b"x" * ((1 << 20) - 5) + mark
+    assert update_signing.pc_archive_is_test_build(str(tar_release(tmp_path / "a.tar.gz", files=files, top=TOP)))
+    assert not update_signing.pc_archive_is_test_build(str(tar_release(tmp_path / "b.tar.gz", top=TOP)))
 
 
 def test_the_tool_names_the_file_and_signs_both_systems(tmp_path, key):

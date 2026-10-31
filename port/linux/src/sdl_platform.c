@@ -145,6 +145,20 @@ BOOL platform_sdl_initialize(void)
 #if defined(HALO_PORT_VITA_NETWORK) && !defined(HALO_VITA) && !defined(HALO_DEDICATED_SERVER)
 	/* (the PC build of the Vita port: which one a report came from) */
 	platform_log("Halo CE Vita " HALO_VITA_VERSION_SHOWN " starting");
+#if !defined(HALO_RELEASE) || defined(HALO_UPDATE_TEST_SOURCES)
+	/* (every build without --release, so every one a test key can be in:
+	netversion_table.c and the tester list refuse those with it, and the
+	updater's test sources. This text in a build is what
+	tools/release/sign_update.py refuses to sign) */
+	platform_log("HALO-CE-VITA-TEST-BUILD: not a release"
+#ifdef HALO_NETVERSIONS_TEST_KEY
+		"; trusts a test key for the crossplay version table"
+#endif
+#ifdef HALO_TESTERS_TEST_KEY
+		"; trusts a test key for the tester list"
+#endif
+		);
+#endif
 #endif
 #ifndef HALO_NOT_DESKTOP
 	/* found (or offered to the player, platform_offer_game_data) before the
