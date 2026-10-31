@@ -714,15 +714,18 @@ static int p2p_lobby_listing_read(int crossplay, const unsigned char *bytes, int
 		return 0;
 	}
 	offset = 3;
-	listing->version = bytes[offset] << 8 | bytes[offset + 1];
+	listing->version = (int)network_wire_version_heard((unsigned int)(bytes[offset] << 8 | bytes[offset + 1]));
 	offset += 2;
 	listing->flags = bytes[offset++];
 	/* (OpenCE's flags; the rest are other projects' or none: not this
-	build's Halo PC map and co-op) */
+	build's Halo PC map and co-op. Their meanings by the rules the version
+	plays: a version the crossplay version table adds, by its built-in
+	one's, network_wire_rules_version) */
 	if (crossplay)
 		listing->flags &= _listing_open | _listing_in_progress | _listing_has_teams | _listing_closed |
 			_listing_password | _listing_dedicated | _listing_vita_host |
-			(listing->version >= LISTING_OPENCE_DEDICATED_VERSION ? _listing_opence_dedicated : 0);
+			(network_wire_rules_version((unsigned int)listing->version) >= LISTING_OPENCE_DEDICATED_VERSION ?
+				_listing_opence_dedicated : 0);
 	listing->sequence = get_long(bytes + offset);
 	offset += 4;
 	listing->time = get_long(bytes + offset);
@@ -1372,7 +1375,7 @@ static int listing_glance(int crossplay, const unsigned char *payload, int size,
 	{
 		return _drop_malformed;
 	}
-	if (!network_wire_version_accepted_on(crossplay, (unsigned int)(payload[3] << 8 | payload[4])))
+	if (!network_wire_version_accepted_on(crossplay, network_wire_version_heard((unsigned int)(payload[3] << 8 | payload[4]))))
 		return _drop_version;
 	sequence = get_long(payload + 6);
 	listed_time = get_long(payload + 10);
@@ -1617,7 +1620,8 @@ static void listing_fill(struct p2p_listing *shown, const unsigned char *key_has
 	shown->ping = -1;
 	shown->version = (unsigned short)listing->version;
 	shown->other_version = (unsigned char)!joinable;
-	shown->kind = (unsigned char)(listing->crossplay && listing->version >= 37 ? listing->stamp : 0);
+	shown->kind = (unsigned char)(listing->crossplay && network_wire_rules_version((unsigned int)listing->version) >= 37 ?
+		listing->stamp : 0);
 }
 
 /* a queued listing, its signature checked: taken or not */
@@ -1840,9 +1844,9 @@ tells which versions the public lists hold (insider.25: "dropped 642 of
 another version (16 hosts)", and nothing more) */
 static void other_version_heard(int crossplay, const unsigned char *key_hash, const unsigned char *payload, int size)
 {
-	unsigned int version = (unsigned int)(payload[3] << 8 | payload[4]);
+	unsigned int version = network_wire_version_heard((unsigned int)(payload[3] << 8 | payload[4]));
 	struct listing listing;
-	char hash[2 * P2P_KEY_HASH_SIZE + 1], joined[32];
+	char hash[2 * P2P_KEY_HASH_SIZE + 1], joined[96];
 	int index;
 
 	for (index = 0; index < lobby.other_version_count; index++)
@@ -3015,7 +3019,7 @@ int p2p_lobby_entries(struct p2p_lobby_entry *entries, int maximum_count)
 version, which side is older, and what to do) */
 static void other_version_reason(int crossplay, unsigned int version, char *text, int size)
 {
-	char joined[32];
+	char joined[96], refusal[96];
 
 	if (!crossplay)
 	{
@@ -3025,7 +3029,10 @@ static void other_version_reason(int crossplay, unsigned int version, char *text
 		return;
 	}
 	network_wire_crossplay_versions_text(joined, (int)sizeof(joined));
-	if (version > HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION)
+	/* (what the signed crossplay version table says of it, when it names it) */
+	if (network_wire_crossplay_refusal(version, refusal, (int)sizeof(refusal)))
+		snprintf(text, (size_t)size, T("Can't join: %s (network %u)"), refusal, version);
+	else if (version > HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION)
 		snprintf(text, (size_t)size, T("Can't join: a newer PC version (network %u); this build joins %s"), version, joined);
 	else if (version < HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION)
 		snprintf(text, (size_t)size, T("Can't join: an older PC version (network %u); this build joins %s"), version, joined);

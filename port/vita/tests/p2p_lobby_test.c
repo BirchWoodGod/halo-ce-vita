@@ -98,6 +98,16 @@ void network_wire_crossplay_versions_text(char *text, int size)
 	snprintf(text, (size_t)size, "%d and %d", HALO_PORT_CROSSPLAY_OLDER_NETWORK_VERSION, HALO_PORT_CROSSPLAY_NETWORK_VERSION);
 }
 int network_wire_host_pc_stand_in(void) { return test_pc_stand_in; }
+/* (no crossplay version table here: network_wire.c's with none) */
+unsigned int network_wire_version_heard(unsigned int version) { return version; }
+unsigned int network_wire_rules_version(unsigned int version) { return version; }
+int network_wire_crossplay_refusal(unsigned int version, char *reason, int size)
+{
+	(void)version;
+	if (reason && size > 0)
+		reason[0] = 0;
+	return 0;
+}
 /* (this machine's platform and who can join its game: the listing's stamp,
 network_wire.h; a Vita for Vitas and Halo CE Vita PC unless a check says) */
 static int test_platform = NETWORK_PLATFORM_VITA, test_audience = NETWORK_AUDIENCE_VITA_PC;

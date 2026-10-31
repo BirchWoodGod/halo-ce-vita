@@ -750,6 +750,7 @@
 
 # ---------- joining a game (source/networking/network_client_manager.c)
 "This PC game's network version (%u) is not one this version of the game can join (%u).\n\nUpdate the game, or join another game." = "La versión de red de esta partida de PC (%u) no es una a la que esta versión del juego pueda unirse (%u).\n\nActualiza el juego o únete a otra partida."
+"This PC game's network version (%u) can't be joined: %s.\n\nJoin another game." = "No se puede entrar en esta partida de PC (versión de red %u): %s.\n\nÚnete a otra partida."
 "This PC game's host runs an older version of OpenCE or ChupathingyCE (network version %u). Crossplay joins hosts of network version %u, the current OpenCE and ChupathingyCE.\n\nAsk the host to update, or join another game." = "El anfitrión de esta partida de PC usa una versión antigua de OpenCE o ChupathingyCE (versión de red %u). El Juego cruzado se une a anfitriones de la versión de red %u, la de OpenCE y ChupathingyCE actuales.\n\nPide al anfitrión que actualice o únete a otra partida."
 "This PC game's host runs a newer version of OpenCE or ChupathingyCE (network version %u) than this game can join (%u).\n\nUpdate the game, or join another game." = "El anfitrión de esta partida de PC usa una versión de OpenCE o ChupathingyCE más nueva (versión de red %u) que aquella a la que este juego puede unirse (%u).\n\nActualiza el juego o únete a otra partida."
 # (the crossplay guardrails, port/linux/src/crossplay_guard.c and its callers: a large or co-op PC game asked about, split screen, the server browser's badges)
@@ -2064,6 +2065,9 @@
 "PC mouse aim assist" = "Ayuda ratón PC"
 "Their choice" = "Cada uno"
 "Everyone games: Off turns off OpenCE players' mouse aim assist" = "Partidas para Todos: No quita la ayuda con ratón a OpenCE"
+"PC versions list" = "Lista versiones PC"
+"Built-in" = "Integrada"
+"Auto: gets the signed list of PC versions you can join" = "Auto: descarga la lista firmada de versiones de PC a las que entrar"
 "Which games the browser lists; who joins yours" = "Qué partidas lista el navegador; quién entra en las tuyas"
 # (friends join a private game too, Oct 19 2026)
 "Their game has a password: type it" = "Su partida tiene contraseña: escríbela"
@@ -2948,6 +2952,8 @@
 "Can't join: a newer Halo CE for PS Vita (network %u) - update to join" = "No se puede unir: un Halo CE para PS Vita más nuevo (red %u) - actualiza para unirte"
 "Can't join: an older Halo CE for PS Vita (network %u) - its host needs to update" = "No se puede unir: un Halo CE para PS Vita más antiguo (red %u) - su anfitrión debe actualizar"
 "Can't join: a newer PC version (network %u); this build joins %s" = "No se puede unir: una versión de PC más nueva (red %u); esta versión se une a %s"
+"Can't join: %s (network %u)" = "No se puede unir: %s (red %u)"
+"needs a newer Halo CE for PS Vita - update to join" = "requiere un Halo CE para PS Vita más nuevo: actualiza para unirte"
 "Can't join: an older PC version (network %u); this build joins %s" = "No se puede unir: una versión de PC más antigua (red %u); esta versión se une a %s"
 "Can't join: another PC version (network %u); this build joins %s" = "No se puede unir: otra versión de PC (red %u); esta versión se une a %s"
 "Only in a game you host" = "Solo en una partida que alojas"

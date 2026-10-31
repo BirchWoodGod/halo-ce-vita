@@ -266,6 +266,92 @@ int main(void)
 	check(!network_wire_crossplay() && network_wire_host_vita() && network_wire_version() == 18 && no_rules_past_28(),
 		"reset: the legacy wire again");
 
+	/* the signed crossplay version table (netversion_table.h): rows that
+	add versions played by a built-in one's rules, refuse one, and rows a
+	build ignores (a newer build's rules; a built-in version remapped; 18) */
+	{
+		struct netversion_table table;
+		char text[128], reason[96];
+
+		memset(&table, 0, sizeof(table));
+		table.version = 7;
+		table.rows[table.count].version = 18;
+		table.rows[table.count].kind = NETVERSION_ROW_JOIN;
+		table.rows[table.count++].rules = 32;
+		table.rows[table.count].version = 38;
+		table.rows[table.count].kind = NETVERSION_ROW_REFUSE;
+		snprintf(table.rows[table.count++].reason, NETVERSION_TABLE_REASON_SIZE, "%s", "38 broke");
+		table.rows[table.count].version = 39;
+		table.rows[table.count].kind = NETVERSION_ROW_JOIN;
+		table.rows[table.count++].rules = 32;
+		table.rows[table.count].version = 40;
+		table.rows[table.count].kind = NETVERSION_ROW_JOIN;
+		table.rows[table.count++].rules = 39;
+		table.rows[table.count].version = 41;
+		table.rows[table.count].kind = NETVERSION_ROW_JOIN;
+		table.rows[table.count++].rules = 41;
+		table.rows[table.count].version = 42;
+		table.rows[table.count].kind = NETVERSION_ROW_JOIN;
+		table.rows[table.count++].rules = 38;
+		table.rows[table.count].version = 50;
+		table.rows[table.count].kind = NETVERSION_ROW_REFUSE;
+		snprintf(table.rows[table.count++].reason, NETVERSION_TABLE_REASON_SIZE, "%s", "OpenCE 50 changed the record");
+		check(network_wire_table_version() == 0, "no table at first: version 0");
+		network_wire_table_set(&table);
+		check(network_wire_table_version() == 7, "the table taken: version 7");
+		check(network_wire_of_version(18) == 0 && !network_wire_version_accepted_on(1, 18),
+			"a row for 18 changes nothing: the legacy wire's own");
+		check(network_wire_of_version(40) == 1 && network_wire_rules_version(40) == 39,
+			"join 40 rules 39: 40 joined on the crossplay wire, by 39's rules");
+		check(network_wire_of_version(42) == 1 && network_wire_rules_version(42) == 38,
+			"join 42 rules 38: joined by 38's rules, though 38 itself is refused");
+		check(network_wire_of_version(39) == 1 && network_wire_rules_version(39) == 39,
+			"join 39 rules 32: a built-in version keeps its own rules");
+		check(network_wire_of_version(41) == -1 && network_wire_rules_version(41) == 41 &&
+			network_wire_crossplay_refusal(41, reason, (int)sizeof(reason)) && strstr(reason, "newer Halo CE"),
+			"join 41 rules 41 (a newer build's): not joined, the browser told to update");
+		check(network_wire_of_version(38) == -1 && network_wire_crossplay_refusal(38, reason, (int)sizeof(reason)) &&
+			!strcmp(reason, "38 broke"), "refuse 38: a built-in version refused, with its reason");
+		check(network_wire_of_version(50) == -1 && network_wire_crossplay_refusal(50, reason, (int)sizeof(reason)) &&
+			!strcmp(reason, "OpenCE 50 changed the record"), "refuse 50: not joined, its reason for the browser");
+		check(!network_wire_crossplay_refusal(32, reason, (int)sizeof(reason)) && !reason[0] &&
+			!network_wire_crossplay_refusal(45, reason, (int)sizeof(reason)), "no reason for 32 (joined) or 45 (no row)");
+		network_wire_crossplay_versions_text(text, (int)sizeof(text));
+		check(!strcmp(text, "29, 32, 39, 40 and 42"), "the versions joined: 29, 32, 39, 40 and 42");
+		check(network_wire_crossplay_version_near(33) == 39 && network_wire_crossplay_version_near(41) == 42 &&
+			network_wire_crossplay_version_near(60) == 42, "the version to look for: among those joined");
+		network_wire_choose_version(40, 2, "an OpenCE host's game of 40");
+		check(network_wire_crossplay() && network_wire_version() == 39 && network_wire_v39_rules() &&
+			network_wire_v36_rules() && network_wire_v33_rules() && network_wire_host_platform() == 2,
+			"a game of 40 joined: the crossplay wire, 39's rules and meanings (network_wire_version 39)");
+		network_wire_choose_version(42, 2, "a game of 42");
+		check(network_wire_crossplay() && network_wire_version() == 38 && network_wire_v36_rules() &&
+			!network_wire_v39_rules(), "a game of 42: 38's rules, none of 39's");
+		network_wire_choose_version(41, 2, "a game of 41");
+		check(!network_wire_crossplay() && network_wire_version() == 18, "a game of 41: never played, the legacy wire");
+		check(network_wire_version_of(1) == 32 && network_wire_announced_version(1) == 32,
+			"a host still announces 32 with any table");
+		network_wire_reset();
+		table.count = 0;
+		table.version = 8;
+		network_wire_table_set(&table);
+		network_wire_crossplay_versions_text(text, (int)sizeof(text));
+		check(!strcmp(text, "29, 32, 38 and 39") && network_wire_of_version(40) == -1,
+			"a table of no rows: the built-in list exactly");
+		network_wire_table_set(NULL);
+		check(network_wire_table_version() == 0 && versions_only4(1, 29, 32, 38, 39), "no table: the built-in list");
+	}
+#ifndef HALO_RELEASE
+	setenv("HALO_TEST_VERSION_HEARD", "39:40", 1);
+	check(network_wire_version_heard(39) == 40 && network_wire_version_heard(38) == 38,
+		"a test build: HALO_TEST_VERSION_HEARD=39:40 reads 39 as 40, nothing else");
+	unsetenv("HALO_TEST_VERSION_HEARD");
+#else
+	setenv("HALO_TEST_VERSION_HEARD", "39:40", 1);
+	check(network_wire_version_heard(39) == 39, "a release build: HALO_TEST_VERSION_HEARD changes nothing");
+	unsetenv("HALO_TEST_VERSION_HEARD");
+#endif
+
 	/* who can join: the setting, live from the environment; a Vita's
 	default Vitas only, the PC build's Vitas and Halo CE Vita PC, which is
 	its least */

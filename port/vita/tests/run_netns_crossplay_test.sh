@@ -245,7 +245,18 @@
 #   all         every mode above, one after the other (expected failures as
 #               XFAIL), and a summary
 #
-# Not here: crossversion (wants T10's signed table): reports SKIP.
+#   crossversion  a PC host of a network version no build of ours has
+#               (docs/crossplay.md 10.13): XPPC_BUILDS's OpenCE of 39 read as
+#               40 by our copies (HALO_TEST_VERSION_HEARD=39:40, test builds
+#               alone); our client with the signed crossplay version table
+#               joining 40 by 39's rules kept beside it (signed with
+#               XPPC_NETVERSIONS_KEY, a test key whose public half
+#               HALO_TEST_VITA was configured with, configure.py
+#               --netversions-test-key; else SKIP) joins and plays it on a
+#               LAN and from the server browser as opencelan and opencehost
+#               do, by 39's rules; without the table it refuses it (a newer
+#               PC build on the LAN, a listing of another version online)
+#
 # dedicatedopence was dropped (our dedicated servers stay off the crossplay
 # wire).
 #
@@ -356,8 +367,9 @@ crossmaps)
 			{ echo "SKIP (crossmaps): wants XPPC_CE_RESOURCES (a folder with Custom Edition's $f.map, for OpenCE)"; exit 0; }
 	done ;;
 crossversion)
-	echo "SKIP (crossversion): wants T10's signed crossplay table (HALO_CROSSPLAY_TABLE, a test key)"
-	exit 0 ;;
+	[ -n "${XPPC_NETVERSIONS_KEY:-}" ] && [ -r "$XPPC_NETVERSIONS_KEY" ] &&
+		grep -aq "$(sed -n 's/^# public key: //p' "$XPPC_NETVERSIONS_KEY")" "${HALO_TEST_VITA:-$root/build/linux/halo}" 2>/dev/null ||
+		{ echo "SKIP (crossversion): wants XPPC_NETVERSIONS_KEY, a test key (make_update_key.py) whose public half HALO_TEST_VITA was configured with (configure.py --netversions-test-key)"; exit 0; } ;;
 dedicatedopence)
 	echo "SKIP ($mode): our dedicated servers stay off the crossplay wire"
 	exit 0 ;;
@@ -1171,6 +1183,48 @@ opencehost)
 		our_results=$(for r in $our_results; do case $r in invite-opence-ours:*) ;; *) printf '%s ' "$r" ;; esac; done)
 	fi
 	echo "--- the brokers: what each kind of client published and subscribed to (hceu: OpenCE's topics, hcev: ours)"; broker_topics
+	;;
+crossversion)
+	# (docs/crossplay.md 10.13: the table made here with the test key, the
+	# way the owner makes the real one; our copies read the OpenCE host's 39
+	# as 40, a version no build of ours has)
+	table_dir=$out/netversions
+	mkdir -p "$table_dir" "$out/no-netversions"
+	python3 "$root/tools/release/sign_netversions.py" --test --key "$XPPC_NETVERSIONS_KEY" \
+		--table "$table_dir/netversions.txt" --join 40:39 > "$out/sign_netversions.log" 2>&1 ||
+		{ echo "BROKEN ($mode): sign_netversions.py failed"; cat "$out/sign_netversions.log"; exit 2; }
+	heard=HALO_TEST_VERSION_HEARD=39:40
+	control lan-opence-opence && pair lan-opence-opence lan opence opence
+	test_names="lan-opence-ours-v40 net-opence-ours-v40"
+	pair lan-opence-ours-v40 lan opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$table_dir"
+	pair net-opence-ours-v40 net opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$table_dir"
+	pair lan-opence-ours-v40-none lan opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$out/no-netversions"
+	pair net-opence-ours-v40-none net opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$out/no-netversions"
+	run_our_modes
+	for name in lan-opence-ours-v40 net-opence-ours-v40; do
+		clientlog=$out/$name/client/run.log
+		taken=$(grep -ac "netversions: the kept table .* taken: version 1, 1 rows; the crossplay wire joins 29, 32, 38, 39 and 40" "$clientlog" 2>/dev/null)
+		rules=$(grep -ac "network version 40, played by 39's rules (the crossplay version table 1)" "$clientlog" 2>/dev/null)
+		echo "--- $name: the table taken ${taken:-0}, 40 played by 39's rules ${rules:-0}"
+		grep -ah "netversions:\|network version 40" "$clientlog" 2>/dev/null | sed 's/^[0-9.]* [0-9:]*  //' | sort | uniq -c | head -6 | sed 's/^/  /'
+		[ "${taken:-0}" -ge 1 ] && [ "${rules:-0}" -ge 1 ] || our_results="$our_results $name-table:taken-$taken-rules-$rules"
+	done
+	for name in lan-opence-ours-v40-none net-opence-ours-v40-none; do
+		hostlog=$out/$name/host/run.log clientlog=$out/$name/client/run.log clientdebug=$out/$name/client/data/debug.txt
+		second=$(grep -ac "network test: player 1 is named" "$hostlog" 2>/dev/null)
+		played=$(grep -ac "the crossplay wire (.*network version 40" "$clientlog" 2>/dev/null)
+		case $name in
+		lan-*) said=$(cat "$clientlog" "$clientdebug" 2>/dev/null |
+			grep -ac "not joining a host of network version 40 (crossplay: this machine joins $our_versions): a newer PC build") ;;
+		*) said=$(grep -ac "of another version: network version 40 on the crossplay wire (this build joins $our_versions there)" "$clientlog" 2>/dev/null) ;;
+		esac
+		echo "--- $name: a second player on the host ${second:-0}, the crossplay wire at 40 ${played:-0}, refusal said ${said:-0}"
+		if [ "${second:-0}" = 0 ] && [ "${played:-0}" = 0 ] && [ "${said:-0}" -ge 1 ]; then
+			our_results="$our_results $name:pass"
+		else
+			our_results="$our_results $name:second-$second-played-$played-said-$said"
+		fi
+	done
 	;;
 crosstls)
 	# (our client's way to the plain port reset by its routers; the OpenCE

@@ -872,6 +872,13 @@ static struct setting settings[] = {
 	Vita's own aim assist is the Gyro page's) */
 	{ "PC mouse aim assist", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", 0, 2, { "false", "true" },
 		{ "Their choice", "Off" }, "Everyone games: Off turns off OpenCE players' mouse aim assist", 0, PAGE_CROSSPLAY },
+	/* (network.crossplay_updates: the signed crossplay version table,
+	netversion_fetch.h: Auto fetches the owner's newest at start and once a
+	day while Online, so new PC versions are joined without an update;
+	Built-in keeps the list this version shipped with and the table last
+	kept. Read as each fetch is due) */
+	{ "PC versions list", "HALO_NET_CROSSPLAY_UPDATES", 0, 2, { "true", "false" }, { "Auto", "Built-in" },
+		"Auto: gets the signed list of PC versions you can join", 0, PAGE_CROSSPLAY },
 	/* (bots.online: the bots a game this Vita hosts Online fills its lobby
 	with, to its most players less one, leaving as players join: Full by
 	default; the Halo 3 GAME OPTIONS' BOTS sets it too. Live. On Vita and PC
