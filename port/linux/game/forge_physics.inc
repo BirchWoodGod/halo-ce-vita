@@ -18,7 +18,9 @@ properties window's PHYSICS row, for any placed object but a character.
   Only its own collision goes: a floor of NORMAL or FIXED pieces under it
   holds a player as ever, and the map's structure is never touched. (A
   projectile's line still meets it: the engine's vector test does not read
-  the switch, as for a scripted object.)
+  the switch, as for a scripted object; so a PHASED object also carries
+  _object_forge_phased_bit, which the vector tests of collisions.c read: shots
+  pass it, a scripted object's behaviour as it was.)
 
 Every machine of a network Forge game sets the switch on its own copy (a
 joiner's movement is its own until the host corrects it), from the entry's
@@ -70,11 +72,13 @@ static void forge_physics_apply(
 	{
 		if (!TEST_FLAG(object->object.flags, _object_no_collisions_bit))
 			SET_FLAG(object->object.flags, _object_no_collisions_bit, TRUE);
+		SET_FLAG(object->object.flags, _object_forge_phased_bit, TRUE);
 		placed->phased_applied = TRUE;
 	}
 	else if (placed->phased_applied)
 	{
 		SET_FLAG(object->object.flags, _object_no_collisions_bit, FALSE);
+		SET_FLAG(object->object.flags, _object_forge_phased_bit, FALSE);
 		placed->phased_applied = FALSE;
 	}
 }

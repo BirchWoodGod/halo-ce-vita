@@ -1466,6 +1466,14 @@ static void forge_warning(
 	forge_globals.notice_until = system_milliseconds() + FORGE_WARNING_MILLISECONDS;
 }
 
+/* a warning on the HUD alone (the menu's status line left as it is) */
+static void forge_warning_hud(
+	char const *text)
+{
+	forge_notice("%s", text);
+	forge_globals.notice_until = system_milliseconds() + FORGE_WARNING_MILLISECONDS;
+}
+
 /* ---- the budget */
 
 /* whether an object is there and not being deleted (object_delete only
@@ -4205,6 +4213,7 @@ static void forge_variant_save(
 	char title[FORGE_FILE_TITLE_SIZE];
 	char author[FORGE_FILE_AUTHOR_SIZE];
 	char const *file_name = NULL;
+	char const *warning;
 	boolean done = FALSE;
 
 	forge_globals.save_requested = FALSE;
@@ -4243,10 +4252,22 @@ static void forge_variant_save(
 	}
 	if (!done)
 		platform_log("forge: the map variant was not saved: %s", forge_globals.save_status);
-	forge_menu_notice("%s", forge_globals.save_status);
-	/* (saved, but with a team left no spawn by its flags: that is said) */
-	if (done && forge_netgame_flags_warning())
-		forge_warning(forge_netgame_flags_warning());
+	/* (saved, but with the flags nearer the other team's spawns: that is
+	said too, after the save message - the menu line keeps both, the HUD
+	shows the warning - so a save always confirms) */
+	warning = done ? forge_netgame_flags_warning() : NULL;
+	if (warning)
+	{
+		char both[FORGE_STORE_WHY_SIZE];
+
+		snprintf(both, sizeof(both), "%s  %s", forge_globals.save_status, warning);
+		forge_menu_notice("%s", both);
+		forge_warning_hud(warning);
+	}
+	else
+	{
+		forge_menu_notice("%s", forge_globals.save_status);
+	}
 }
 
 /* (the session's start) the map variant read for it placed: each record's
