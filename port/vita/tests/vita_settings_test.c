@@ -3161,6 +3161,7 @@ static void test_forge_page(void)
 	check(strstr(menu, "\nForge and File Share\x02  3 variants  >") != NULL, "back on Game: three now");
 	/* in a Forge game: Clear dead AI and Clear all AI (asked first) */
 	check(open_page("Forge") && !strstr(menu, "Clear dead AI"), "no Forge game: no Clear AI rows");
+	press(VITA_BUTTON_CIRCLE);
 	test_forge_playing = 1;
 	test_forge_alive = 5;
 	test_forge_dead = 3;
