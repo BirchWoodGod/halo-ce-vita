@@ -433,21 +433,6 @@ def test_install_does_not_write_through_a_link(tmp_path):
     assert not os.listdir(str(elsewhere))
 
 
-def test_find_pc_packages_next_to_the_tool_only(tmp_path, monkeypatch):
-    here = tmp_path / "here"
-    here.mkdir()
-    monkeypatch.setattr(hcv, "_tool_folder", lambda: str(here))
-    monkeypatch.chdir(str(here))
-    downloads = tmp_path / "home" / "Downloads"
-    downloads.mkdir()
-    tar_release(downloads / "halo-ce-vita-9.9.9-pc-linux.tar.gz")  # (may be anyone's: not picked by itself)
-    assert hcv.find_pc_packages() == []
-    old = tar_release(here / "halo-ce-vita-1.1.2-pc-linux.tar.gz")
-    new = tar_release(here / "halo-ce-vita-1.1.10-pc-linux.tar.gz")
-    (here / "halo-ce-vita-1.1.2-pc-windows.zip").write_bytes(b"not for this system")
-    assert hcv.find_pc_packages() == [new, old]
-
-
 def test_default_install_folders(monkeypatch, tmp_path):
     assert hcv.default_install_folder() == os.path.join(str(tmp_path / "home"), ".local", "share", "halo-ce")
     monkeypatch.setattr(hcv.sys, "platform", "win32")
@@ -767,8 +752,8 @@ def test_command_line_pc_install_and_uninstall(tmp_path, capsys):
     assert hcv.main(["--out", str(out), "pc-uninstall", str(folder)]) == 0
     assert not folder.exists()
     assert hcv.main(["--out", str(out), "pc-uninstall"]) == 1
-    assert hcv.main(["--out", str(out), "pc-install", str(folder)]) == 1  # no package
-    assert "No PC build" in capsys.readouterr().out
+    assert hcv.main(["--out", str(out), "pc-install", str(folder), "--package", package, "--download"]) == 1
+    assert "not both" in capsys.readouterr().out
 
 
 def test_command_line_uninstall_window_needs_an_install(tmp_path, capsys):
@@ -843,6 +828,12 @@ def package_next_to_the_tool(tmp_path, monkeypatch):
     monkeypatch.setattr(hcv, "_tool_folder", lambda: str(here))
     monkeypatch.chdir(str(here))
     return tar_release(here / (RELEASE + ".tar.gz"))
+
+
+def choose_package(window, tmp_path):
+    """The user's own choice of that archive, in place of the download."""
+    window.download_build.set(False)
+    window.package.set(str(tmp_path / "tool" / (RELEASE + ".tar.gz")))
 
 
 def disc(tmp_path):
@@ -1096,6 +1087,7 @@ def test_ready_is_a_plain_summary_with_an_install_button(root, tmp_path, monkeyp
     package_next_to_the_tool(tmp_path, monkeypatch)
     fake_steam(tmp_path, monkeypatch)
     window = wizard(root, tmp_path)
+    choose_package(window, tmp_path)
     to_game_files(window, root, "pc")
     advance(window, root, "destination", "ready")
     assert window.next_button.cget("text") == "Install"
@@ -1116,10 +1108,10 @@ def test_automatic_on_pc_end_to_end(root, tmp_path, monkeypatch):
     mcc = fake_steam(tmp_path, monkeypatch)
     before = tree(mcc)
     window = wizard(root, tmp_path)
+    choose_package(window, tmp_path)
     window.install_folder.set(str(tmp_path / "Halo CE"))
     to_game_files(window, root, "pc")
     advance(window, root, "destination", "ready")
-    assert not any(text.startswith("PC build (") for text in texts(window))
     window.next_button.invoke()
     root.update()
     assert window.page == "installing"
@@ -1162,6 +1154,7 @@ def test_manual_on_pc_end_to_end(root, tmp_path, monkeypatch):
     errors = complaints(monkeypatch)
     package_next_to_the_tool(tmp_path, monkeypatch)
     window = wizard(root, tmp_path)
+    choose_package(window, tmp_path)
     window.install_folder.set(str(tmp_path / "Halo CE"))
     to_game_files(window, root, "pc")
     assert not [text for text in checks(window) if "movies" in text]  # the PC build plays none
@@ -1314,6 +1307,7 @@ def test_cancel_while_installing_takes_a_new_install_back(root, tmp_path, monkey
         return real(path, staging, progress, log)
     monkeypatch.setattr(hcv, "install_mcc_files", slow)
     window = wizard(root, tmp_path)
+    choose_package(window, tmp_path)
     window.install_folder.set(str(folder))
     to_game_files(window, root, "pc")
     advance(window, root, "destination", "ready")
@@ -1337,6 +1331,7 @@ def test_a_failed_new_install_is_taken_back(root, tmp_path, monkeypatch):
     fake_steam(tmp_path, monkeypatch)
     monkeypatch.setattr(hcv, "install_mcc_files", lambda *a: (_ for _ in ()).throw(hcv.InstallerError("no room")))
     window = wizard(root, tmp_path)
+    choose_package(window, tmp_path)
     window.install_folder.set(str(tmp_path / "Halo CE"))
     to_game_files(window, root, "pc")
     advance(window, root, "destination", "ready")
@@ -1353,6 +1348,7 @@ def existing_install(tmp_path, monkeypatch):
 def test_run_again_offers_repair_or_uninstall(root, tmp_path, monkeypatch):
     folder = existing_install(tmp_path, monkeypatch)
     window = wizard(root, tmp_path)
+    choose_package(window, tmp_path)
     assert window.flow()[:2] == ("welcome", "maintenance") and window.action.get() == "repair"
     advance(window, root, "maintenance")
     assert any(str(folder) == text for text in texts(window))
@@ -1374,7 +1370,11 @@ def test_repair_puts_back_what_is_damaged(root, tmp_path, monkeypatch):
     (folder / "build" / "linux" / "halo").write_bytes(b"broken")
     (folder / "build" / "linux" / "config.toml").write_text("kept")
     window = wizard(root, tmp_path)
-    advance(window, root, "maintenance", "ready")  # the build is next to the tool, the game files are fine
+    advance(window, root, "maintenance", "destination")  # the program files need a build, the game files are fine
+    choose_package(window, tmp_path)
+    window.show("destination")
+    root.update()
+    advance(window, root, "ready")
     assert "Program files to put back: 2" in window.summary_box.get("1.0", "end")
     window.next_button.invoke()
     wait_for_finish(window, root)

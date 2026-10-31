@@ -29,6 +29,19 @@ def own_settings(tmp_path, monkeypatch):
     return path
 
 
+@pytest.fixture(autouse=True)
+def yes_to_questions(monkeypatch):
+    """The window's questions answered yes and listed: a real dialog would
+    wait for a person. A test that wants another answer sets its own."""
+    asked = []
+    try:
+        from tkinter import messagebox
+    except ImportError:
+        return asked
+    monkeypatch.setattr(messagebox, "askyesno", lambda title, text, **options: asked.append(text) or True)
+    return asked
+
+
 @pytest.fixture
 def real_settings_path():
     """The tool's own settings_path (own_settings replaces it)."""

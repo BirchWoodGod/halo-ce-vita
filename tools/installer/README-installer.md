@@ -27,8 +27,8 @@ files.
 - **Without the window:** `python3 halo_ce_vita_installer.py --help` lists
   the same work as commands (see below).
 
-Put the VPK or the PC build's archive next to the tool and Setup finds it by
-itself.
+Put the VPK next to the tool and Setup finds it by itself. The PC build comes
+from Setup's signed download; an archive of yours is only used if you choose it.
 
 ## The wizard
 
@@ -53,8 +53,9 @@ right. Cancel asks first.
    - **PC:** the install folder (`%LOCALAPPDATA%\Programs\Halo CE`,
      `~/.local/share/halo-ce` on Linux: no admin needed), with **Browse**, the
      space needed and free, and check boxes for a desktop shortcut and a Start
-     menu entry. If no PC build is next to the tool, you choose its archive
-     here.
+     menu entry. Setup downloads the PC build; untick **Download the PC build**
+     to choose an archive of your own, after a warning that it is not
+     signature-checked.
 6. **Ready to Install.** A plain list of your choices, and the **Install**
    button.
 7. **Installing.** One progress bar with the current file, doing everything in
@@ -86,21 +87,25 @@ Like any installer, for the current user:
 - `halo-ce-install.json` in the folder: every file written and its size.
 
 Run Setup again and it offers **Repair** (it checks every file of that record
-and puts back what is missing or the wrong size: the PC build from its archive,
-the game files from the source you choose), **Uninstall**, or the whole wizard
+and puts back what is missing or the wrong size: the PC build by the signed
+download or an archive you choose, the game files from the source you choose), **Uninstall**, or the whole wizard
 again. Uninstall removes the files of the record and the shortcuts, and no
 other file: your saved games (`%APPDATA%\halo`, `~/.local/share/halo-linux`) and
 what the game wrote beside itself stay.
 
-With no archive next to the tool, Setup downloads the PC build from the newest
-release and checks it the way the game checks its updates: the signature of
+Setup downloads the PC build from the newest release and checks it the way the game checks its updates: the signature of
 `halo-update-pc.txt` by the release key built into the tool, then the file's
 size and SHA-512 (`tools/release/README.md`, "The PC builds' manifest"). If
-anything does not match it stops, keeps nothing and installs nothing. Untick
-**Download the PC build** to choose an archive you already have; an archive is
-read as untrusted all the same, and its SHA-256 is written to the log. **Launch
-Halo CE** on the last page starts only a build Setup downloaded and checked: an
-archive of yours installs, and you start it from its shortcut.
+anything does not match it stops, keeps nothing and installs nothing. An archive
+lying next to Setup is never picked up by itself (Setup is usually run from
+Downloads, where any site can drop a file). Untick **Download the PC build** to
+choose one you already have: Setup warns that it is not signature-checked and
+asks first, reads it as untrusted all the same, writes its SHA-256 to the log, and
+compares it with the signed list. If its SHA-512 is the release's, it counts as a
+checked download. **Launch Halo CE** on the last page starts only a build checked
+in this run: an archive that does not match installs, and you start it from its
+shortcut. The version of an unchecked archive is only its file's name: it is
+never taken as the version a signed download may not be older than.
 
 For a Vita, the files are gathered in a folder first (by default
 `Documents/Halo CE Vita files`, about 2.5 GB with everything), laid out as
@@ -284,11 +289,11 @@ it prints nothing; `selftest --report FILE` writes its results to a file.)
   this system's build must be in it, every name is checked as above, links,
   devices and doubled names are refused, sizes are bounded, and each file is
   checked (CRC, size) and moved into place only once it is whole. Only the
-  archive next to the tool, the one you chose or the checked download is used.
+  checked download, or the archive you chose after the warning, is used.
 - The PC download goes over HTTPS to GitHub's hosts alone, redirects too. The
   signature is checked before the list is read and the archive is asked for
   only after that; its size and SHA-512 are then the signed ones or it is
-  thrown away. A list older than the install or than Setup is refused. No key
+  thrown away. A list older than a verified install or than Setup is refused. No key
   but the release key's public half is in the tool. Launch starts only such a
   download.
 - The install's record is only a file in a folder the user can write:

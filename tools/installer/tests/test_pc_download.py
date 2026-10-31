@@ -17,7 +17,7 @@ import pytest
 
 import halo_ce_vita_installer as hcv
 from test_flow import advance, complaints, fake_steam, tar_release, to_game_files, wait_for_finish, wizard
-from test_flow import checks, package_next_to_the_tool, texts
+from test_flow import RELEASE, checks, choose_package, package_next_to_the_tool, texts
 from test_window import root  # noqa: F401 (the fixture)
 
 REPOSITORY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -278,11 +278,56 @@ def test_command_line_refuses_a_changed_download(tmp_path, release, capsys):
     assert not (folder / "build").exists()
 
 
-def test_a_package_given_is_not_verified(tmp_path, release):
+def test_a_package_given_is_warned_about_and_not_verified_unless_it_is_the_signed_file(tmp_path, release, capsys):
     folder = tmp_path / "Halo CE"
     archive = tmp_path / ARCHIVE
+    # (the very bytes the release signed: as good as the download)
+    assert hcv.main(["--out", str(tmp_path / "out"), "pc-install", str(folder), "--package", str(archive)]) in (0, None)
+    assert "not signature-checked" in capsys.readouterr().out
+    record = hcv.read_install(str(folder))
+    assert record["verified"] is True and record["version"] == VERSION
+    # (another file by that name: installed, as the user asked, and never verified)
+    release.files[LATEST + hcv.PC_MANIFEST], keep = b"", release.files[LATEST + hcv.PC_MANIFEST]
     assert hcv.main(["--out", str(tmp_path / "out"), "pc-install", str(folder), "--package", str(archive)]) in (0, None)
     assert hcv.read_install(str(folder))["verified"] is False
+
+
+def test_with_nothing_given_the_command_line_downloads(tmp_path, release, monkeypatch):
+    """A well named archive beside Setup is never picked by itself."""
+    here = tmp_path / "Downloads"
+    here.mkdir()
+    fake = tar_release(here / "halo-ce-vita-99.0.0-pc-linux.tar.gz", top="halo-ce-vita-99.0.0-pc-linux")
+    monkeypatch.setattr(hcv, "_tool_folder", lambda: str(here))
+    monkeypatch.chdir(str(here))
+    folder = tmp_path / "Halo CE"
+    assert hcv.main(["--out", str(tmp_path / "out"), "pc-install", str(folder)]) in (0, None)
+    record = hcv.read_install(str(folder))
+    assert record["verified"] is True and record["version"] == VERSION
+    assert os.path.exists(fake)
+
+
+def test_an_unchecked_install_is_no_floor(tmp_path, release):
+    """A file called 99.0.0, installed, does not keep the genuine release out."""
+    assert hcv.installed_version({"version": "99.0.0", "verified": False}) == ""
+    assert hcv.installed_version({"version": "99.0.0"}) == ""
+    assert hcv.installed_version({"version": "99.0.0", "verified": "yes"}) == ""
+    assert hcv.installed_version({"version": "1.1.3", "verified": True}) == "1.1.3"
+    folder = tmp_path / "Halo CE"
+    fake = tar_release(tmp_path / "halo-ce-vita-99.0.0-pc-linux.tar.gz", top="halo-ce-vita-99.0.0-pc-linux")
+    assert hcv.main(["--out", str(tmp_path / "out"), "pc-install", str(folder), "--package", str(fake)]) in (0, None)
+    assert hcv.read_install(str(folder))["verified"] is False
+    assert hcv.main(["--out", str(tmp_path / "out"), "pc-install", str(folder)]) in (0, None)
+    record = hcv.read_install(str(folder))
+    assert record["verified"] is True and record["version"] == VERSION
+
+
+def test_a_verified_install_is_a_floor(tmp_path, release):
+    folder = tmp_path / "Halo CE"
+    assert hcv.main(["--out", str(tmp_path / "out"), "pc-install", str(folder)]) in (0, None)
+    record = hcv.read_install(str(folder))
+    record["version"] = "9.9.9"
+    (folder / hcv.INSTALL_RECORD).write_text(hcv.json.dumps(record))
+    assert hcv.main(["--out", str(tmp_path / "out"), "pc-install", str(folder)]) not in (0, None)
 
 
 # -- the wizard
@@ -341,12 +386,73 @@ def test_a_failed_check_installs_nothing_and_offers_no_launch(root, tmp_path, re
     window.finish()
 
 
+def test_an_archive_beside_setup_is_not_picked(root, tmp_path, monkeypatch):
+    """A site can drop a well named file into Downloads, where Setup runs."""
+    package_next_to_the_tool(tmp_path, monkeypatch)
+    (tmp_path / "tool" / "halo-ce-vita-99.0.0-pc-linux.tar.gz").write_bytes(b"anyone's")
+    fake_steam(tmp_path, monkeypatch)
+    window = wizard(root, tmp_path)
+    assert window.download_build.get() and not window.package.get()
+    to_ready(window, root, tmp_path)
+    assert "Downloaded from the project's GitHub releases" in window.summary_box.get("1.0", "end")
+
+
+def test_a_chosen_archive_is_warned_about_and_no_means_no(root, tmp_path, monkeypatch, yes_to_questions):
+    from tkinter import messagebox
+    package_next_to_the_tool(tmp_path, monkeypatch)
+    fake_steam(tmp_path, monkeypatch)
+    window = wizard(root, tmp_path)
+    window.install_folder.set(str(tmp_path / "Halo CE"))
+    to_game_files(window, root, "pc")
+    choose_package(window, tmp_path)
+    window.next_button.invoke()
+    root.update()
+    assert window.page == "destination"
+    assert any("not signature-checked" in text for text in texts(window))
+    options = {}
+    monkeypatch.setattr(messagebox, "askyesno", lambda title, text, **given: options.update(given, text=text) or False)
+    window.next_button.invoke()
+    root.update()
+    assert window.page == "destination"  # no: it stays
+    assert "not signature-checked" in options["text"] and options["default"] == "no"
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+    window.next_button.invoke()
+    root.update()
+    assert window.page == "ready"
+    assert "(not signature-checked)" in window.summary_box.get("1.0", "end")
+
+
+def test_a_chosen_archive_that_is_the_signed_file_counts_as_checked(root, tmp_path, release, monkeypatch):
+    errors = complaints(monkeypatch)
+    fake_steam(tmp_path, monkeypatch)
+    window = wizard(root, tmp_path)
+    window.install_folder.set(str(tmp_path / "Halo CE"))
+    to_game_files(window, root, "pc")
+    window.download_build.set(False)
+    window.package.set(str(tmp_path / ARCHIVE))
+    window.next_button.invoke()
+    root.update()
+    window.next_button.invoke()
+    root.update()
+    assert window.page == "ready"
+    window.next_button.invoke()
+    wait_for_finish(window, root)
+    assert not errors and window.outcome == "done", window.reason
+    assert release.archive_url not in release.asked  # (compared, not downloaded)
+    record = hcv.read_install(str(tmp_path / "Halo CE"))
+    assert record["verified"] is True and record["version"] == VERSION
+    assert list(checks(window)) == ["Launch Halo CE"]
+
+
 def test_a_local_archive_installs_but_is_not_started(root, tmp_path, monkeypatch):
     errors = complaints(monkeypatch)
     package_next_to_the_tool(tmp_path, monkeypatch)
     fake_steam(tmp_path, monkeypatch)
     window = wizard(root, tmp_path)
-    to_ready(window, root, tmp_path)
+    window.install_folder.set(str(tmp_path / "Halo CE"))
+    to_game_files(window, root, "pc")
+    choose_package(window, tmp_path)
+    advance(window, root, "destination", "ready")
     window.next_button.invoke()
     wait_for_finish(window, root)
     assert not errors and window.outcome == "done"

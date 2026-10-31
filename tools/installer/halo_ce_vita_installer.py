@@ -2643,25 +2643,6 @@ def _tool_folder() -> str:
     return os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
 
 
-def find_pc_packages() -> List[str]:
-    """This system's PC build archives next to the tool and in the current
-    folder (not Downloads: what is picked by itself may be run), the newest
-    version first."""
-    found: List[str] = []
-    for place in (_tool_folder(), os.getcwd()):
-        try:
-            names = os.listdir(place)
-        except OSError:
-            continue
-        for name in names:
-            full = os.path.join(place, name)
-            if name.startswith("halo-ce-vita-") and name.endswith(pc_package_suffix()) and \
-                    os.path.isfile(full) and full not in found:
-                found.append(full)
-    return sorted(found, key=lambda path: [int(number) for number in re.findall(r"\d+", os.path.basename(path))],
-                  reverse=True)
-
-
 @dataclass
 class PackageFile:
     name: str  # as the archive names it
@@ -2680,7 +2661,7 @@ class PcPackage:
     kind: str  # "zip" or "tar"
     version: str
     files: List[PackageFile]
-    verified: bool = False  # this tool downloaded it and its signature checked (download_pc_build)
+    verified: bool = False  # its bytes are what the release key signed (download_pc_build, match_signed_package)
 
     @property
     def size(self) -> int:
@@ -2753,6 +2734,12 @@ def read_pc_package(path: str) -> PcPackage:
     found = _PACKAGE_NAME.search(prefix or os.path.basename(path)) or _PACKAGE_NAME.search(os.path.basename(path))
     return PcPackage(path, kind, found.group(1) if found else VERSION, files)
 
+
+# What is said before an archive the user chose is used: Setup installs one only
+# when asked to, after this. Nothing is ever picked up by itself: Setup is
+# usually run from Downloads, where any site can drop a well named file.
+NOT_SIGNATURE_CHECKED = ("%s is not signature-checked: it did not come through Setup's signed download, so nothing "
+                         "shows it is the Halo CE project's, and a program you run can do anything on this computer.")
 
 # The PC build downloaded from the newest release, checked as the game checks
 # its updates (port/vita/host/vita_update_verify.c, tools/release/README.md,
@@ -2861,17 +2848,55 @@ def verify_pc_manifest(text: bytes, signature: bytes, system: str, installed: st
     return PcDownload(version, row[1], int(row[2]), row[3])
 
 
+def signed_pc_download(installed: str = "") -> PcDownload:
+    """The newest release's signed row for this system (verify_pc_manifest)."""
+    latest = RELEASE_DOWNLOADS + "/latest/download/"
+    text = _read_small(latest + PC_MANIFEST, PC_MANIFEST_MAXIMUM)
+    signature = _read_small(latest + PC_SIGNATURE, PC_SIGNATURE_MAXIMUM)
+    return verify_pc_manifest(text, signature, _pc_builds_here_first()[0][0], installed)
+
+
+def match_signed_package(package: PcPackage, log: Callable[[str], None] = print, installed: str = "") -> bool:
+    """Whether an archive the user chose is, byte for byte, the build the
+    newest release signed: then it counts as a checked download
+    (package.verified, the release's version). Anything else, the network
+    down too, leaves it unchecked; nothing is refused here: the user chose
+    it, after the warning (NOT_SIGNATURE_CHECKED)."""
+    package.verified = False
+    try:
+        download = signed_pc_download(installed)
+    except (InstallerError, urllib.error.URLError, ssl.SSLError, OSError, EOFError) as error:
+        log("%s could not be compared with the release's signed list (%s): not signature-checked"
+            % (os.path.basename(package.path), error))
+        return False
+    digest = hashlib.sha512()
+    size = 0
+    try:
+        with open(package.path, "rb") as file:
+            for block in iter(lambda: file.read(1 << 20), b""):
+                size += len(block)
+                digest.update(block)
+    except OSError as error:
+        log("%s could not be read to compare it: %s" % (os.path.basename(package.path), error))
+        return False
+    if size != download.size or digest.hexdigest() != download.sha512:
+        log("%s is not the file release %s signed: not signature-checked"
+            % (os.path.basename(package.path), download.version))
+        return False
+    package.version = download.version
+    package.verified = True
+    log("%s matches the SHA-512 release %s signed" % (os.path.basename(package.path), download.version))
+    return True
+
+
 def download_pc_build(folder: str, progress: Progress = _no_progress, log: Callable[[str], None] = print,
                       installed: str = "") -> PcPackage:
     """The newest release's PC build for this system in `folder`, verified:
     what comes back is safe to install and to start. Raises InstallerError
     and leaves no archive otherwise."""
     system = _pc_builds_here_first()[0][0]
-    latest = RELEASE_DOWNLOADS + "/latest/download/"
     try:
-        text = _read_small(latest + PC_MANIFEST, PC_MANIFEST_MAXIMUM)
-        signature = _read_small(latest + PC_SIGNATURE, PC_SIGNATURE_MAXIMUM)
-        download = verify_pc_manifest(text, signature, system, installed)
+        download = signed_pc_download(installed)
         log("Signed by the release key: PC build %s for %s, %s" % (download.version, system,
                                                                      human_size(download.size)))
         if shutil.disk_usage(folder).free < download.size:
@@ -3283,8 +3308,11 @@ def roll_back_install(folder: str, before: set) -> None:
 
 
 def installed_version(record: Optional[dict]) -> str:
+    """The version a signed download may not be older than: a verified
+    install's alone. An unchecked archive's version is only what its file is
+    called, which must never keep a genuine release out."""
     version = (record or {}).get("version")
-    return version if isinstance(version, str) else ""
+    return version if isinstance(version, str) and (record or {}).get("verified") is True else ""
 
 
 def launch_pc(folder: str) -> None:
@@ -3468,9 +3496,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     step = commands.add_parser("pc-install", help="install the PC build: the archive, the gathered files, shortcuts "
                                                   "and, on Windows, the uninstaller and Apps & Features entry")
     step.add_argument("folder", nargs="?", help="the install folder (default: %s)" % default_install_folder())
-    step.add_argument("--package", help="the PC build's archive (default: one next to this tool)")
+    step.add_argument("--package", help="a PC build's archive of your own, instead of the signed download (it is "
+                                        "not signature-checked unless the release's signed list has its SHA-512)")
     step.add_argument("--download", action="store_true",
-                      help="download the newest release's PC build, checked by its signature")
+                      help="download the newest release's PC build, checked by its signature (the default)")
     step.add_argument("--desktop-shortcut", action="store_true", help="make a desktop shortcut")
     step.add_argument("--start-menu", action="store_true", help="make a Start menu or applications menu entry")
     step = commands.add_parser("pc-uninstall", help="remove a PC install: the files it wrote and its shortcuts")
@@ -3565,17 +3594,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result = copy_to_pc_build(out, build, arguments.replace, progress, _console_log)
             _console_log("Done: %(copied)d copied, %(skipped)d already there" % result)
         elif arguments.command == "pc-install":
-            package_path = arguments.package or (find_pc_packages() or [None])[0]
-            if not package_path and not arguments.download:
-                raise InstallerError("No PC build next to this tool: give it (--package) or get it (--download). "
-                                     "Download halo-ce-vita-<version>%s from %s" % (pc_package_suffix(), RELEASES_URL))
+            if arguments.package and arguments.download:
+                raise InstallerError("Give --package or --download, not both.")
             folder = check_install_folder(arguments.folder or default_install_folder())
+            installed = installed_version(read_install(folder))
             with tempfile.TemporaryDirectory(prefix="halo-ce-setup-") as temporary:
-                if arguments.download:
-                    package = download_pc_build(temporary, progress, _console_log,
-                                                installed_version(read_install(folder)))
+                if arguments.package:
+                    package = read_pc_package(arguments.package)
+                    _console_log("Warning: " + NOT_SIGNATURE_CHECKED % os.path.basename(arguments.package))
+                    match_signed_package(package, _console_log, installed)
                 else:
-                    package = read_pc_package(package_path)
+                    package = download_pc_build(temporary, progress, _console_log, installed)
                 files = install_pc_package(package, folder, progress, _console_log)
             if pc_uploads(out):
                 copy_to_pc_build(out, folder, False, progress, _console_log)
@@ -3874,9 +3903,8 @@ class InstallerWindow:
         self.vpk = var(value=(find_local_vpks() or [""])[0])
         self.out = var(value=out)
         self.install_folder = var(value=self.existing or default_install_folder())
-        self.package = var(value=(find_pc_packages() or [""])[0])
-        self.package_found = bool(self.package.get())
-        self.download_build = tkinter.BooleanVar(value=not self.package_found)
+        self.package = var()
+        self.download_build = tkinter.BooleanVar(value=True)
         self.download_folder = ""
         # (the program files on disk came from a checked download: Launch is offered)
         self.build_verified = False
@@ -3919,7 +3947,7 @@ class InstallerWindow:
             return ("ready", "installing", "finish")
         return install_flow(self.platform.get(), action=self.action.get(), installed=bool(self.existing),
                             need_game=bool(self.damaged[1]),
-                            need_build=bool(self.damaged[0]) and not self.package_found)
+                            need_build=bool(self.damaged[0]))
 
     @property
     def on_pc(self) -> bool:
@@ -4172,7 +4200,6 @@ class InstallerWindow:
         if self.action.get() == "install":
             return True
         self.install_folder.set(self.existing)
-        self.package_found = bool(find_pc_packages())
         record = read_install(self.existing) or {}
         self.desktop_shortcut.set(record.get("desktop") is not False)
         self.start_menu.set(record.get("start_menu") is not False)
@@ -4362,9 +4389,7 @@ class InstallerWindow:
                   pady=(0, px(8)))
         self.field("Install folder:", self.install_folder, browse=lambda: self.browse_folder(self.install_folder),
                    state="disabled" if repairing else "normal")
-        if self.package_found:
-            self.text("PC build: %s" % os.path.basename(self.package.get()), pady=(0, px(8)))
-        elif self.downloading():
+        if self.downloading():
             self.text("Setup will download the PC build from the project's GitHub releases and check its signature.",
                       pady=(0, px(4)))
             ttk.Checkbutton(self.body, text="Download the PC build", variable=self.download_build,
@@ -4375,6 +4400,8 @@ class InstallerWindow:
             kind = [("PC build", "*" + os.path.splitext(pc_package_suffix())[1]), ("All files", "*")]
             self.field("PC build (halo-ce-vita-<version>%s):" % pc_package_suffix(), self.package, pady=(0, 2),
                        browse=lambda: self.browse_file(self.package, kind))
+            self.text("A file you choose here is not signature-checked unless it matches the release's signed list.",
+                      pady=(0, 2))
             self.link("Download it from the releases page", RELEASES_URL)
             self.ttk.Frame(self.body, height=px(6)).pack()
         self.text("", textvariable=self.space, pady=(0, px(8)))
@@ -4386,10 +4413,11 @@ class InstallerWindow:
 
     def downloading(self) -> bool:
         """The PC build comes from the releases, not from an archive here."""
-        return self.on_pc and not self.package_found and self.download_build.get()
+        return self.on_pc and self.download_build.get()
 
     def build_source(self) -> str:
-        return "Downloaded from the project's GitHub releases" if self.downloading() else self.package.get()
+        return "Downloaded from the project's GitHub releases" if self.downloading() else \
+            "%s (not signature-checked)" % self.package.get()
 
     def package_info(self, path: str) -> PcPackage:
         path = path.strip()
@@ -4484,6 +4512,13 @@ class InstallerWindow:
                                      % (folder, human_size(needed), human_size(free)))
         except InstallerError as error:
             self.complain(str(error))
+            return False
+        if not self.downloading() and not messagebox.askyesno(
+                "%s Setup" % APP_NAME,
+                (NOT_SIGNATURE_CHECKED + "\n\nSetup will compare it with the release's signed list, but if the two "
+                 "do not match it will still install it, and leave starting it to you.\n\nUse this file?")
+                % os.path.basename(self.package.get().strip()),
+                icon="warning", default="no", parent=self.root):
             return False
         if self.action.get() == "install" and os.path.isdir(folder) and os.listdir(folder):
             question = "Halo CE is already installed in %s. Install over it?" if read_install(folder) is not None \
@@ -4701,6 +4736,9 @@ class InstallerWindow:
             tasks.append(InstallTask("Downloading and checking the PC build", PC_DOWNLOAD_ESTIMATE, fetched))
         elif unpack:
             chosen.append(self.package_info(self.package.get()))
+            installed = installed_version(record)
+            tasks.append(InstallTask("Comparing the archive with the signed list", 1 << 20,
+                                     lambda step: match_signed_package(chosen[0], self.log, installed)))
         if unpack:
             def unpacked(step):
                 nonlocal version
