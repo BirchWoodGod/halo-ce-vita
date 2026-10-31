@@ -1194,7 +1194,8 @@ crossversion)
 		--table "$table_dir/netversions.txt" --join 40:39 > "$out/sign_netversions.log" 2>&1 ||
 		{ echo "BROKEN ($mode): sign_netversions.py failed"; cat "$out/sign_netversions.log"; exit 2; }
 	cat "$table_dir/netversions.txt.sig" "$table_dir/netversions.txt" > "$table_dir/netversions.kept"
-	heard=HALO_TEST_VERSION_HEARD=39:40
+	# (XPPC_HEARD= with XPPC_OPENCE an OpenCE really built as 40: nothing rewritten)
+	heard=${XPPC_HEARD-HALO_TEST_VERSION_HEARD=39:40}
 	control lan-opence-opence && pair lan-opence-opence lan opence opence
 	test_names="lan-opence-ours-v40 net-opence-ours-v40"
 	pair lan-opence-ours-v40 lan opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$table_dir"
