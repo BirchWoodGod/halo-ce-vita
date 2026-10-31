@@ -264,6 +264,7 @@ Multiplayer tab's way.
 
 #include "lang.h"
 #include "forge_store.h"
+#include "port_config.h"
 #include "mod_manager_share.h"
 #include "p2p.h"
 #include "p2p_friends.h"
@@ -1947,6 +1948,10 @@ player_cosmetics.c; changed only by a press, change) */
 		unsetenv(setting->variable);
 	else
 		setenv(setting->variable, value, 1);
+	/* (the fetch asks config_boolean, which holds what was read at the start:
+	Built-in means no fetch from this press on, not from the next start) */
+	if (!strcmp(setting->variable, "HALO_NET_CROSSPLAY_UPDATES"))
+		config_set_override("network.crossplay_updates", value);
 }
 
 /* a Play page text set (typed, loaded or a test command's): kept

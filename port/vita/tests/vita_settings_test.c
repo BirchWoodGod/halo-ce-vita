@@ -151,6 +151,16 @@ int vita_host_restart_game(void) { restarts_asked++; return 0x80010013; }
 /* (port/linux/src/network_wire.c's: the wire of the game hosted or joined,
 a test's; and whether the public games list PC games, a test's) */
 static int test_crossplay_wire, test_pc_games;
+/* the last setting put in effect at once (port_config.c's) */
+static char test_override_name[64], test_override_text[64];
+
+int config_set_override(const char *name, const char *text)
+{
+	snprintf(test_override_name, sizeof(test_override_name), "%s", name);
+	snprintf(test_override_text, sizeof(test_override_text), "%s", text);
+	return 1;
+}
+
 int network_wire_crossplay(void) { return test_crossplay_wire; }
 /* (the map in play: never deleted) */
 int halo_cache_map_in_use(const char *name) { return !strcmp(name, "inplay"); }
@@ -2989,8 +2999,12 @@ static void test_multiplayer_tab(void)
 	press(VITA_BUTTON_RIGHT);
 	check(strstr(menu, "\nPC versions list\x02< Built-in  ") && getenv("HALO_NET_CROSSPLAY_UPDATES") &&
 		!strcmp(getenv("HALO_NET_CROSSPLAY_UPDATES"), "false"), "PC versions list Built-in: HALO_NET_CROSSPLAY_UPDATES false");
+	check(!strcmp(test_override_name, "network.crossplay_updates") && !strcmp(test_override_text, "false"),
+		"PC versions list Built-in: in effect at once (config_set_override: the fetch reads config_boolean)");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_NET_CROSSPLAY_UPDATES"), "true"), "PC versions list Auto again: true");
+	check(!strcmp(test_override_name, "network.crossplay_updates") && !strcmp(test_override_text, "true"),
+		"PC versions list Auto: in effect at once");
 	/* (bots.online: on this page with the other rows of the games hosted
 	online, not on the tab - the tab is a screen's height; while it fills,
 	the bots' skill, vehicles and routes under it, the tab's own rows) */
