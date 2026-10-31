@@ -1792,13 +1792,13 @@ for c in $cases; do
 			flagswap-playright flagswap-playmap; do
 			checked "$r" || continue 2
 		done
-		both="forge: Red's flag is nearer Blue's spawns and Blue's nearer Red's: nobody will spawn"
+		both="forge: Both flags are nearer the other team's spawns"
 		count flagswap "said on placing, moving and saving" "$both" 3
-		count flagswap-es "in Spanish" "forge: La bandera roja está más cerca de las apariciones azules y la azul de las rojas: nadie aparecerá" 3
+		count flagswap-es "in Spanish" "forge: Ambas banderas están más cerca de las apariciones del otro equipo" 3
 		for r in flagswap-halo3 flagswap-online flagswap-original; do
 			count "$r" "said in this menu style" "$both" 3
 		done
-		if grep -aE "forge: (Red's|Blue's) " "$out/flagswap-right/run.log"; then
+		if grep -aE "forge: (Red's|Blue's|Both) " "$out/flagswap-right/run.log"; then
 			fail "flagswap-right: a warning with the flags on their right sides"
 		else
 			echo "  ok: flagswap-right: nothing said with the flags on their right sides"

@@ -111,6 +111,8 @@ enum
 	_object_has_collision_model_bit,
 	_object_force_baseline_update_bit,
 	_object_has_been_updated_from_network_bit,
+	/* (the port) a Forge PHASED object: shots pass it too (forge_physics.inc) */
+	_object_forge_phased_bit,
 	NUMBER_OF_OBJECT_DATA_FLAGS,
 };
 

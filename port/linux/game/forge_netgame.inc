@@ -630,11 +630,11 @@ static char const *forge_netgame_flags_warning(
 	red = forge_netgame_team_spawns_skipped(scenario, 0);
 	blue = forge_netgame_team_spawns_skipped(scenario, 1);
 	if (red && blue)
-		return T("Red's flag is nearer Blue's spawns and Blue's nearer Red's: nobody will spawn");
+		return T("Both flags are nearer the other team's spawns");
 	if (red)
-		return T("Red's spawns are nearer Blue's flag: Red players won't spawn");
+		return T("Red's spawns are nearer Blue's flag");
 	if (blue)
-		return T("Blue's spawns are nearer Red's flag: Blue players won't spawn");
+		return T("Blue's spawns are nearer Red's flag");
 	return NULL;
 }
 

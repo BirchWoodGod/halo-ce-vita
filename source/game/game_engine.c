@@ -4716,7 +4716,14 @@ boolean game_engine_should_end_game(
 	/* port: Infection's round (port/linux/game/infection.c): its own end */
 	if (infection_active())
 		return infection_should_end_game();
-	if (game_engine && !multiple_teams_alive())
+	/* port: a Forge game (the monitors editing a map) does not end because one
+	team is left (a machine that left it, the other's quit player still
+	counted: the host's game ended at once, and after a rejoin) */
+	if (game_engine && !multiple_teams_alive()
+#ifdef HALO_LINUX
+		&& !forge_game_active()
+#endif
+		)
 		should_end_game = TRUE;
 	/* port: the gametype's time limit (game_variant_options; OpenCE's) */
 	if (game_engine && game_variant_options_get()->time_limit > 0 &&

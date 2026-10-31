@@ -113,8 +113,10 @@
 #              (asked of the host: the host's copy without collision); the host places an
 #              oddball spawn and sets its boulder NORMAL: the joiner has the oddball spawn and
 #              its copy of the boulder collides again. Back in the game in progress, the
-#              joiner is given all of it as it was. (A rejoined machine's game ends a few
-#              seconds after it is back, on 1.1.1 too: its look is right after it joins)
+#              joiner is given all of it as it was. (Before Oct 30 the host's game ended
+#              about 7 s after the joiner LEFT, not after it came back: the engine ends a
+#              game when one team is left, and the quit player still counted; a Forge game
+#              no longer ends so, game_engine_should_end_game)
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
 #              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
 #              System Link screen's profile, then a network Forge game of Blood Gulch
@@ -941,6 +943,27 @@ forge_case() {
 		grep -aqE "Boulder \(id [5-9]\) .*physics phased \(no collision\)" <<< "$late" ||
 			fail "the late joiner's copy of the phased boulder has its collision"
 		grep -aqE "Warthog \(id 4\) .*physics fixed" <<< "$late" || fail "the late joiner's Warthog is not fixed"
+		;;
+	forgeflagwarn)
+		# (the flag warning on a client: the host places a red flag and a blue
+		# one so that each team's spawns are nearer the other's flag - the
+		# flagswap case's positions - and the joiner, which has the layout
+		# from the host, says it too, from its own copy)
+		host_cmds="L150:forge camera 40 -79 6 0 -89;L162:forge spawnpoint flag;L166:forge drop"
+		host_cmds="$host_cmds;L180:forge camera 96 -159 6 0 -89;L192:forge spawnpoint flag;L196:forge drop"
+		host_cmds="$host_cmds;L215:forge marker #2;L222:forge camera 94 -157 6 0 -89;L234:forge drop"
+		join_cmds="L400:forge spawns"
+		forge_host "$host_cmds" HALO_EXIT_AFTER=70
+		sleep 5
+		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join "HALO_TEST_COMMANDS=$join_cmds" \
+			HALO_EXIT_AFTER=60
+		join_pid=$last_pid
+		wait $join_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl"
+		echo "--- host"; grep -aE "forge: (Both flags|Red's spawns|Blue's spawns)" "$hl" | head
+		echo "--- joiner"; grep -aE "forge: (Both flags|Red's spawns|Blue's spawns|\(for another)|forge net: the host's layout read" "$jl" | head
+		grep -aqE "forge: (Both flags|Red's spawns|Blue's spawns)" "$hl" || fail "the host did not say the flag warning"
+		grep -aqE "forge: (Both flags|Red's spawns|Blue's spawns)" "$jl" || fail "the joiner did not say the flag warning"
 		;;
 	forgeleave)
 		host_cmds="L150:forge camera 60 -100 1.6 130 0;L160:forge spawn warthog;L165:forge distance 8;L170:forge drop;L600:@menu"
