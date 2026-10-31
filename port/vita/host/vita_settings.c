@@ -230,7 +230,9 @@ Forge game is played, Clear dead AI and Clear all AI (asked first) do what
 the Forge menu's CLEAR DEAD AI and CLEAR ALL AI do, each with how many it
 takes (forge.c forge_panel_ai_counts, forge_panel_clear_ai); Magnets and Nudge
 step set the Forge game's blocks' magnets and its nudge (forge.c
-forge_precision.inc: 1.1.2).
+forge_precision.inc: 1.1.2). Touch in Forge (HALO_FORGE_TOUCH, on by
+default) is the monitor's front screen (forge_touch.inc); the page is there in
+any Menu style during a Forge game, its rows being that game's.
 
 Dev holds a few switches for testers (each a debug environment variable;
 most are read once, at start-up, and say so; the renderer's A/B ones on a
@@ -664,6 +666,9 @@ static struct setting settings[] = {
 	/* (File Share with friends, for the original menus: p2p_fileshare.h) */
 	PAGE_ROW("Share with friends", "Share your variants, send one, a friend's File Share", PAGE_FORGE,
 		PAGE_FSFRIENDS),
+	/* (the monitor's front screen: port/linux/game/forge_touch.inc) */
+	{ "Touch in Forge", "HALO_FORGE_TOUCH", 0, 2, { "1", "0" }, { "On", "Off" },
+		"Drag an object to move it; tap it, then drag the screen to turn it", 0, PAGE_FORGE },
 	/* (friends.fileshare: friends browse the files marked shared; files sent
 	and taken, asked each time) */
 	{ "Sharing", "HALO_FRIENDS_FILESHARE", 0, 2, { "true", "false" }, { "On", "Off" },
@@ -1530,7 +1535,8 @@ extern volatile int halo_forge_request_network;
 
 /* the map variants listed (File Share's), the ones shown at once */
 #define FORGE_PANEL_MAXIMUM 32
-#define FORGE_PANEL_LINES 6
+/* (a Forge game's rows leave room for two) */
+#define FORGE_PANEL_LINES (forge_panel_ai_counts(NULL, NULL) ? 2 : 6)
 
 enum
 {
@@ -1819,9 +1825,11 @@ static int pc_menus_shown(void);
 static int setting_shown(const struct setting *setting)
 {
 	/* (Forge and File Share: the Halo 3 main menu has them; for the
-	original menus, the Halo CE Menu style, the panel does) */
+	original menus, the Halo CE Menu style, the panel does; and for every
+	style while a Forge game is played: its rows are that game's, Touch in
+	Forge, the magnets) */
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_FORGE)
-		return classic_panel();
+		return classic_panel() || forge_panel_ai_counts(NULL, NULL);
 	/* (the Halo 3 menus' report: with Menu style Halo 3) */
 	if (setting->variable && (!strcmp(setting->variable, "HALO_CARNAGE_REPORT") ||
 		!strcmp(setting->variable, "HALO_SCOREBOARD")))
@@ -5303,10 +5311,11 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 		if (line->type == LINE_HEADING && (*headings)++ < skip)
 			continue;
 		/* (Modded maps: a gap between its switch and the maps; the Forge page:
-		before its File Share heading; the Mod manager: between its totals and
+		before its File Share heading, but for a Forge game's rows, which fill
+		it; the Mod manager: between its totals and
 		the entries) */
 		if (index && ((page == PAGE_MAPS && line->type != LINE_SETTING && lines[index - 1].type == LINE_SETTING) ||
-			(page == PAGE_FORGE && line->type == LINE_HEADING) ||
+			(page == PAGE_FORGE && line->type == LINE_HEADING && !forge_panel_ai_counts(NULL, NULL)) ||
 			(page == PAGE_MODS && line->type == LINE_MOD && lines[index - 1].type == LINE_INFO) ||
 			(page == PAGE_FRIENDS && line->type == LINE_INFO && lines[index - 1].type == LINE_SETTING)))
 		{
@@ -5475,7 +5484,7 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			}
 		}
 	}
-	if (page == PAGE_FORGE && forge_entry_count > FORGE_PANEL_LINES && length + 2 < size)
+	if (page == PAGE_FORGE && forge_entry_count > FORGE_PANEL_LINES && !forge_panel_ai_counts(NULL, NULL) && length + 2 < size)
 	{
 		length += snprintf(text + length, (size_t)(size - length), "\n\x04");
 		length += snprintf(text + length, (size_t)(size - length), T("(variants %d-%d of %d)"), forge_scroll + 1,

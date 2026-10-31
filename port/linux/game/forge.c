@@ -66,6 +66,9 @@ the keys of its own the layout has no room for: forge_keys):
   shows the scoreboard; the click alone is the Spartan's zoom, as in any
   game, and nothing for the monitor;
 - Start: the Forge menu (resume, monitor or Spartan, the controls, leave).
+The Vita's front screen does some of this too (forge_touch.inc): drag an
+object to carry it, tap one and drag the screen to turn it, or drag to turn
+the one held.
 
 The palette is every tag of the loaded map that the browser offers, with a
 readable name each (forge_names: our own names for the multiplayer maps'
@@ -137,6 +140,8 @@ HALO_TEST_COMMANDS):
                            camera and held (the budget as the browser's)
   forge fill <count> <name>  that many spawned and let go on a grid in front
                            of the camera, while the budget allows
+  forge touch <x> <y> [<x2> <y2>] | up | probe  the tests' fingers on the
+                           front screen (forge_touch.inc)
   forge grab [#id] | drop  the object under the crosshair (or the layout's
                            of that id) grabbed, the held one dropped
   forge turn <degrees>     the held (or aimed at) object turned about up
@@ -244,6 +249,7 @@ Each logs what it did ("forge: ...").
 #include "forge_blocks.h"
 #include "forge_files.h"
 #include "forge_net_protocol.h"
+#include "forge_touch.h"
 #include "halo_menus.h"
 #include "scene_pack.h"
 #include "scene_packs.h"
@@ -960,6 +966,24 @@ static struct
 	boolean nudge_flicked[3];
 	boolean magnets_off;
 	boolean magnet_said;
+	/* (forge_touch.inc) the fingers' gesture, what they are doing
+	(_forge_touch_*), waiting for the object they grabbed; the object held's
+	place on the view (tangents across its middle), each axis's drag towards
+	a snapped step, the object selected; forge_camera_get looking along a
+	place on the view; a finger turned the object this frame; the console's
+	fingers (forge touch) */
+	struct forge_touch_gesture touch_gesture;
+	short touch_mode;
+	boolean touch_waiting;
+	real touch_hold_across, touch_hold_up;
+	real touch_turn[2];
+	long touch_selected;
+	boolean touch_aiming;
+	real touch_aim_across, touch_aim_up;
+	boolean touch_turning;
+	struct forge_touch_finger test_touch[2];
+	short test_touch_count;
+	boolean test_touch_probe;
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -1026,6 +1050,12 @@ static short forge_physics_mode(struct forge_placed const *placed);
 static unsigned char forge_physics_flags(short mode);
 static void forge_physics_apply(struct forge_placed *placed);
 static void forge_physics_update(void);
+static void forge_touch_update(boolean menu_open);
+static void forge_touch_hold_aim(boolean on);
+static void forge_touch_reset(void);
+static void forge_touch_probe(void);
+static void forge_touch_ray(real across, real up, real_vector3d *forward);
+static boolean forge_net_grab_waiting(void);
 static char const *const forge_physics_log_names[NUMBER_OF_FORGE_PHYSICS_MODES] = { "normal", "fixed", "phased" };
 static void forge_netgame_log(void);
 static char const *forge_netgame_flags_warning(void);
@@ -2200,6 +2230,9 @@ static boolean forge_camera_get(
 		return FALSE;
 	*position = camera->position;
 	*forward = camera->forward;
+	/* (forge_touch.inc: a finger's line) */
+	if (forge_globals.touch_aiming)
+		forge_touch_ray(forge_globals.touch_aim_across, forge_globals.touch_aim_up, forward);
 	return TRUE;
 }
 
@@ -3065,6 +3098,7 @@ static boolean forge_begin(
 	players_unzoom_all();
 	forge_palette_ready();
 	forge_globals.held_object_index = NONE;
+	forge_touch_reset();
 	director_forge_camera(forge_globals.local_player_index, TRUE, &position, &forward);
 	forge_globals.active = TRUE;
 	forge_monitor_flying = 1;
@@ -3105,6 +3139,7 @@ static void forge_end(
 	director_forge_camera(forge_globals.local_player_index, FALSE, NULL, NULL);
 	forge_globals.active = FALSE;
 	forge_monitor_flying = 0;
+	forge_touch_reset();
 	if (unit)
 	{
 		platform_log("forge: player mode at %.2f %.2f %.2f, %s (%ld spawned, %ld deleted)", unit->object.position.x,
@@ -3174,7 +3209,8 @@ static void forge_hud_update(
 			forge_objects_counted(), FORGE_MAXIMUM_OBJECTS, forge_ai_alive(), forge_ai_maximum());
 	forge_globals.hud_label[0] = 0;
 	forge_globals.hud_label_held = object_try_and_get(forge_globals.held_object_index) != NULL;
-	object_index = forge_globals.hud_label_held ? forge_globals.held_object_index : forge_object_under_crosshair();
+	object_index = forge_globals.hud_label_held ? forge_globals.held_object_index :
+		object_try_and_get(forge_globals.touch_selected) ? forge_globals.touch_selected : forge_object_under_crosshair();
 	if (object_index != NONE)
 		forge_object_name(object_index, forge_globals.hud_label, sizeof(forge_globals.hud_label));
 	/* (a spawn marker held, or under the crosshair before what is behind
@@ -3240,6 +3276,12 @@ static void forge_hud_update(
 		{
 			snprintf(forge_globals.hud_rotate, sizeof(forge_globals.hud_rotate), "%s", snapping);
 		}
+	}
+	/* (forge_touch.inc: tapped) */
+	else if (object_try_and_get(forge_globals.touch_selected) && !forge_globals.held_marker_id)
+	{
+		snprintf(forge_globals.hud_rotate, sizeof(forge_globals.hud_rotate), "%s",
+			T("Selected. Drag the screen: turn it. Tap away: let it go"));
 	}
 }
 
@@ -6252,8 +6294,14 @@ void forge_update(
 	{
 		forge_globals.rotating = FALSE;
 	}
+	/* (the front screen, forge_touch.inc: the pad's own grab, turn and
+	drop; a finger's turn shown as rotate mode's) */
+	forge_touch_update(menu_open);
+	if (forge_globals.touch_turning)
+		forge_globals.rotating = TRUE;
 	forge_globals.pending_mouse_turn = 0.f;
 	forge_globals.pending_mouse_pitch = 0.f;
+	forge_touch_hold_aim(TRUE);
 	if (object_try_and_get(forge_globals.held_object_index))
 		forge_held_object_place();
 	if (forge_globals.held_marker_id)
@@ -6262,6 +6310,7 @@ void forge_update(
 			FORGE_MINIMUM_HOLD_DISTANCE, FORGE_MAXIMUM_HOLD_DISTANCE);
 		forge_marker_held_update();
 	}
+	forge_touch_hold_aim(FALSE);
 	forge_hud_update();
 
 	return;
@@ -6350,6 +6399,7 @@ void forge_draw(
 	bounds.y1 = (short)(bounds.y0 + height);
 	forge_draw_line(font_index, &bounds, 0, 0.62f, 0.71f, 0.80f, forge_globals.hud_budget);
 	/* (a network game: the other players' monitors where they fly) */
+	forge_touch_probe();
 	forge_net_draw_monitors(font_index, height);
 	/* the notice, a while, at the left below the middle (where Halo
 	Online's Forge says "Movement Speed: Fast") */
@@ -6603,6 +6653,38 @@ boolean forge_command(
 			forge_globals.test_sticks[_gamepad_stick_right][1] = ry;
 			forge_globals.test_sticks_frames = (short)PIN(frames, 1, 3000);
 		}
+		return TRUE;
+	}
+	if (!strcmp(word, "touch"))
+	{
+		/* ("touch <x> <y> [<x2> <y2>]": the tests' fingers on the front
+		screen, in the menus' 640x480, as vita_pad.c gives them, until "touch
+		up" lifts them; "touch probe" says where the renderer shows the
+		object held, for a finger's place to be checked against) */
+		int x = 0, y = 0, x2 = 0, y2 = 0;
+		int given = sscanf(rest, "%d %d %d %d", &x, &y, &x2, &y2);
+
+		if (!strncmp(rest, "up", 2))
+		{
+			forge_globals.test_touch_count = 0;
+			return TRUE;
+		}
+		if (!strncmp(rest, "probe", 5))
+		{
+			forge_globals.test_touch_probe = TRUE;
+			return TRUE;
+		}
+		if (given != 2 && given != 4)
+			return FALSE;
+		forge_globals.test_touch[0].id = 1;
+		forge_globals.test_touch[0].x = (short)x;
+		forge_globals.test_touch[0].y = (short)y;
+		forge_globals.test_touch[0].reserved = 0;
+		forge_globals.test_touch[1].id = 2;
+		forge_globals.test_touch[1].x = (short)x2;
+		forge_globals.test_touch[1].y = (short)y2;
+		forge_globals.test_touch[1].reserved = 0;
+		forge_globals.test_touch_count = given == 4 ? 2 : 1;
 		return TRUE;
 	}
 	if (!strcmp(word, "look"))
@@ -7281,3 +7363,4 @@ boolean forge_command(
 #include "forge_netgame.inc"
 #include "forge_physics.inc"
 #include "forge_precision.inc"
+#include "forge_touch.inc"

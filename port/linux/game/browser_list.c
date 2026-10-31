@@ -279,6 +279,24 @@ void browser_view_reset(
 	view->row = -1;
 }
 
+/* (browser_view_drag) the rows a finger asked for, until a list takes them */
+static int browser_view_drag_rows;
+
+void browser_view_drag(
+	int rows)
+{
+	browser_view_drag_rows += rows;
+}
+
+int browser_view_drag_unclaimed(
+	void)
+{
+	int rows = browser_view_drag_rows;
+
+	browser_view_drag_rows = 0;
+	return rows;
+}
+
 int browser_view_follow(
 	struct browser_view *view,
 	int rows,
@@ -293,6 +311,22 @@ int browser_view_follow(
 	{
 		browser_view_reset(view);
 		return -1;
+	}
+	/* a finger's drag on the list in focus */
+	if (browser_view_drag_rows && focused_row >= 0)
+	{
+		int moved = browser_view_drag_rows;
+
+		browser_view_drag_rows = 0;
+		if (count > rows && view->row >= 0)
+		{
+			/* (the row the finger's first touch put the focus on, if it did) */
+			if (focused_row < view->visible)
+				view->row = focused_row;
+			view->offset = clamp(view->offset + moved, 0, count - rows);
+			chosen = view->offset + view->row;
+			focused_row = -1;
+		}
 	}
 	/* the player stepped to another row: past the last or the first of a
 	full screen of rows (the menus wrap to the other end), the next game or
@@ -334,8 +368,24 @@ int browser_view_follow_groups(
 	int chosen,
 	int page)
 {
+	/* (a finger's drag, browser_view_follow's) */
+	int dragged = focused_row >= 0 ? browser_view_drag_rows : 0;
 	int target = browser_view_follow(view, rows, count, focused_row, chosen, page);
-	int game = browser_list_skip_header(entries, count, target, chosen, page);
+	int game;
+
+	/* (a drag doesn't stop with a group's first game at the top: its header
+	would be brought back and the rows with it, the finger's move lost) */
+	if (dragged && target >= 0 && view->offset > 0 && view->offset < count && entries[view->offset - 1].header)
+	{
+		int shift = dragged > 0 ? 1 : -1;
+
+		if (view->offset + shift + rows <= count && target + shift < count)
+		{
+			view->offset += shift;
+			target += shift;
+		}
+	}
+	game = browser_list_skip_header(entries, count, target, chosen, page);
 
 	if (game >= 0 && game != target)
 		target = browser_view_follow(view, rows, count, -1, game, 0);

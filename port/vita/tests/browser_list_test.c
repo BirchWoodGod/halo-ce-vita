@@ -370,10 +370,47 @@ static void merge_lan(void)
 	check(browser_list_merge_lan(entries, 0, &lan) == 0 && lan == 0, "no games");
 }
 
+/* a finger's drag: the rows move under the finger, stopping at the ends */
+static void drags(void)
+{
+	struct browser_view view;
+	int target;
+
+	/* (30 games, 12 rows, the fifth row focused) */
+	browser_view_reset(&view);
+	target = browser_view_follow(&view, 12, 30, -1, 4, 0);
+	check(target == 4 && view.offset == 0 && view.row == 4, "drag: the view before");
+	browser_view_drag(3);
+	target = browser_view_follow(&view, 12, 30, 4, target, 0);
+	check(target == 7 && view.offset == 3 && view.row == 4, "drag: 3 rows on, the focused row where it was");
+	check(browser_view_drag_unclaimed() == 0, "drag: the list took it");
+	browser_view_drag(100);
+	target = browser_view_follow(&view, 12, 30, 4, target, 0);
+	check(view.offset == 18 && target == 22, "drag: the end of the list stops it, no wrap");
+	browser_view_drag(-100);
+	target = browser_view_follow(&view, 12, 30, 4, target, 0);
+	check(view.offset == 0 && target == 4, "drag: the top stops it, no wrap");
+	/* (the finger's first touch moved the focus to another row) */
+	browser_view_drag(2);
+	target = browser_view_follow(&view, 12, 30, 9, target, 0);
+	check(view.offset == 2 && view.row == 9 && target == 11, "drag: from the row touched");
+	/* (a list with no focus takes nothing: the menus step the focused one) */
+	browser_view_drag(2);
+	browser_view_follow(&view, 12, 30, -1, target, 0);
+	check(view.offset == 2 && browser_view_drag_unclaimed() == 2, "drag: not for a list out of focus");
+	/* (a list that fits has nothing to move, and takes it) */
+	browser_view_reset(&view);
+	target = browser_view_follow(&view, 12, 8, -1, 3, 0);
+	browser_view_drag(2);
+	target = browser_view_follow(&view, 12, 8, 3, target, 0);
+	check(target == 3 && view.offset == 0 && browser_view_drag_unclaimed() == 0, "drag: a list that fits stays");
+}
+
 int main(void)
 {
 	sorts();
 	scrolling();
+	drags();
 	groups();
 	merge_lan();
 	printf("-- %d of %d checks failed\n", failures, checks);

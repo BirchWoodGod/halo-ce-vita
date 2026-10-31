@@ -3068,6 +3068,14 @@ static void test_forge_page(void)
 	test_forge_entry("chillout", "cold.hmv", "Cold", 5, 0);
 	open_panel();
 	check(to_tab("Game") && !strstr(menu, "\nForge"), "Menu style Halo 3: no Forge row (the Halo 3 main menu has FORGE)");
+	test_forge_playing = 1;
+	press(VITA_BUTTON_R);
+	press(VITA_BUTTON_L);
+	check(to_tab("Game") && strstr(menu, "\nForge and File Share\x02") != NULL,
+		"Menu style Halo 3, a Forge game: its row (Touch in Forge, the magnets)");
+	test_forge_playing = 0;
+	press(VITA_BUTTON_R);
+	press(VITA_BUTTON_L);
 	vita_settings_set("HALO_MENU_STYLE", "classic");
 	press(VITA_BUTTON_R);
 	press(VITA_BUTTON_L);
@@ -3077,16 +3085,26 @@ static void test_forge_page(void)
 	check(open_page("Forge") && strstr(menu, "\n\x03Game > Forge and File Share\n"), "the Forge page");
 	printf("%s\n--\n", menu);
 	check(!strcmp(menu_line(2, line, sizeof(line)), "Share with friends\x02  >") &&
-		!strcmp(menu_line(3, line, sizeof(line)), "Map\x02  Blood Gulch") &&
-		!strcmp(menu_line(4, line, sizeof(line)), "Map variant\x02  None >") &&
-		!strcmp(menu_line(5, line, sizeof(line)), "Network\x02  Local >") &&
-		!strcmp(menu_line(6, line, sizeof(line)), "Start Forge\x02  >") && !menu_line(7, line, sizeof(line))[0] &&
-		!strcmp(menu_line(8, line, sizeof(line)), "\x08" "File Share") &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Touch in Forge\x02  On >") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Map\x02  Blood Gulch") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Map variant\x02  None >") &&
+		!strcmp(menu_line(6, line, sizeof(line)), "Network\x02  Local >") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "Start Forge\x02  >") && !menu_line(8, line, sizeof(line))[0] &&
+		!strcmp(menu_line(9, line, sizeof(line)), "\x08" "File Share") &&
 		strstr(menu, "\nGulch A\x02  Blood Gulch\n") && strstr(menu, "\nDamaged file\x02  Blood Gulch\n") &&
 		strstr(menu, "\nCold\x02  Chill Out\n") && menu_fits() && menu_height_fits(),
-		"Forge: Map (Blood Gulch first), Map variant (None), Network (Local), Start Forge; File Share's map variants, each fits");
+		"Forge: Touch in Forge (On), Map (Blood Gulch first), Map variant (None), Network (Local), Start Forge; File Share's map variants, each fits");
+	/* Touch in Forge: on as shipped; off and on again (HALO_FORGE_TOUCH) */
+	to_line("Touch in Forge");
+	check(strstr(menu, "\n\x05" "Drag an object to move it; tap it, then drag the screen to turn it\n") != NULL, "Touch in Forge's help");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nTouch in Forge\x02< Off  \n") != NULL && getenv("HALO_FORGE_TOUCH") && !strcmp(getenv("HALO_FORGE_TOUCH"), "0"),
+		"Touch in Forge: right, Off (HALO_FORGE_TOUCH 0)");
+	press(VITA_BUTTON_LEFT);
+	check(strstr(menu, "\nTouch in Forge\x02  On >\n") != NULL && getenv("HALO_FORGE_TOUCH") && !strcmp(getenv("HALO_FORGE_TOUCH"), "1"),
+		"Touch in Forge: left, On");
 	to_line("Map");
-	check(menu_selected == 3 && strstr(menu, "\n\x05The multiplayer map to edit\n") &&
+	check(menu_selected == 4 && strstr(menu, "\n\x05The multiplayer map to edit\n") &&
 		strstr(menu, "Left/right: change"), "Map chosen (under File Share with friends), its help");
 	press(VITA_BUTTON_RIGHT);
 	check(strstr(menu, "\nMap\x02  Chill Out\n") != NULL, "right: Chill Out (Battle Creek is not in the maps folder)");
@@ -3630,6 +3648,7 @@ static void test_tab_layouts(void)
 		{ TAB_GAME, "Forge and File Share", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_FORGE },
 		/* (File Share with friends: its page on Forge and File Share's) */
 		{ PAGE_FORGE, "Share with friends", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_FSFRIENDS },
+		{ PAGE_FORGE, "Touch in Forge", "HALO_FORGE_TOUCH", "1|0", 0, "1" },
 		{ PAGE_FSFRIENDS, "Sharing", "HALO_FRIENDS_FILESHARE", "true|false", 0, "true" },
 		{ TAB_GAME, "Button icons", "HALO_BUTTON_ICONS", "xbox|playstation", 0,
 			VITA_BUTTON_ICONS_DEFAULT ? "playstation" : "xbox" },
@@ -3952,6 +3971,7 @@ static void test_variables_kept(void)
 		"HALO_MCC_MODS", "HALO_CONTENT_ROOT", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL", "HALO_ARMOR_COLOR", "HALO_VISOR_COLOR",
 		"HALO_FRIENDS_APPEAR_OFFLINE",
 		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT", "HALO_FRIENDS_FILESHARE",
+		"HALO_FORGE_TOUCH",
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
 		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_BRIGHTNESS", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",

@@ -3657,7 +3657,8 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 	char const *controls;
 	/* (1.1.2: the nudge, a pad's: forge_precision.inc) */
 	char const *nudge = "";
-	char text[640];
+	char const *touch = "";
+	char text[768];
 
 #ifdef HALO_VITA
 	controls = T("Fly: left stick. Up: Cross. Down: D-pad down.\nFaster: hold L. Look: right stick.\n"
@@ -3665,6 +3666,10 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 		"Rotate: hold L + right stick; with R: roll.\nL + left stick: distance. L + D-pad right: snap.\n"
 		"Upright: D-pad left. Speed: D-pad right.\nSpartan: Select + D-pad up.");
 	nudge = T("Nudge: L + D-pad up, then L + sticks.");
+	/* (the front screen, forge_touch.inc, unless the panel's Touch in Forge
+	is off) */
+	if (!getenv("HALO_FORGE_TOUCH") || atoi(getenv("HALO_FORGE_TOUCH")))
+		touch = T("Touch: drag an object. Tap it, then drag to turn it.");
 #elif defined(H3_BUTTON_ICONS)
 	switch (halo_button_icons_shown())
 	{
@@ -3698,8 +3703,8 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 	/* (and a character's RESPAWN, Oct 22 2026: dead, it comes back; the
 	player spawn points, the browser's SPAWNING; the teleporters, its
 	TELEPORTERS, 1.1.2) */
-	snprintf(text, sizeof(text), "%s\n%s\n%s%s%s", controls, T("AI respawn: a character's properties, RESPAWN."),
-		T("Spawns, teleporters: Objects. Held: team, channel."), nudge[0] ? "\n" : "", nudge);
+	snprintf(text, sizeof(text), "%s\n%s\n%s%s%s%s%s", controls, T("AI respawn: a character's properties, RESPAWN."),
+		T("Spawns, teleporters: Objects. Held: team, channel."), nudge[0] ? "\n" : "", nudge, touch[0] ? "\n" : "", touch);
 	text_show(widget, text);
 }
 
@@ -22071,6 +22076,13 @@ static boolean mouse_on_screen(struct widget_instance *widget, char const *scree
 	char const *name = screen ? tag_get_name(screen->definition_tag_index) : NULL;
 
 	return name && !strcmp(name, screen_tag);
+}
+
+/* (ui_widget.c, a finger's drag) the open scoreboard scrolls its rows by a
+drag of its own */
+boolean menu_functions_mouse_drag_own(void)
+{
+	return h3_scoreboard.open;
 }
 
 int menu_functions_mouse_kind(struct widget_instance *widget)

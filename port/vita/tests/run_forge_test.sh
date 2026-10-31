@@ -55,6 +55,13 @@
 #               map, a map variant renamed (typed), deleted (asked first), a
 #               damaged one refused for Forge and deleted, GAME VARIANTS
 #               listed, A opens the Forge lobby on the map with the variant
+#   touch       the monitor's front screen (forge_touch.inc, the console's
+#               forge touch, as vita_pad.c's fingers), at the Vita's 848 wide
+#               and at 640: a tap selects, a tap on the sky lets go, a drag
+#               carries under the finger (checked against the renderer's
+#               projection), a second finger or a drag on nothing turns,
+#               R's hold turns by a drag and snaps, undo takes each back,
+#               the properties don't lose what a finger carries
 #   fstouch     FILE SHARE by taps (HALO_TEST_TAPS): the main menu's row,
 #               Rename, a row (the Forge lobby), the lobby's Leave, Back
 #   packs       other maps' objects (scene packs, built from the player's own
@@ -339,7 +346,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives flagground flagswap physics phaseshot precision allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch touch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives flagground flagswap physics phaseshot precision allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -418,6 +425,36 @@ count() {
 
 bloodgulch='game_variant slayer\nmap_name levels\\test\\bloodgulch\\bloodgulch'
 b30='map_name levels\\b30\\b30'
+
+touch_check() {
+	local n=$1 log="$out/$1/run.log" at x y
+	checked "$n" || return
+	expect "$n" "a tap on the boulder selected it, by its place on the screen" "forge touch: selected Boulder"
+	expect "$n" "a tap on the sky let it go" "forge touch: selected nothing"
+	expect "$n" "a drag from it grabbed it" "forge touch: dragging an object"
+	# (the renderer's own projection against the finger's: the hold moved
+	# 82 across and 25 up from the position's 418,240)
+	at=$(grep -a "held object on screen at" "$log" | sed 's/.*at //')
+	x=${at%,*}
+	y=${at#*,}
+	if [ -n "$at" ] && [ "$x" -ge 497 ] && [ "$x" -le 503 ] && [ "$y" -ge 212 ] && [ "$y" -le 218 ]; then
+		echo "  ok: $n: the object stayed under the finger ($at, 500,215 asked)"
+	else
+		fail "$n: the object is not under the finger: $at, not 500,215"
+	fi
+	expect "$n" "a second finger turned it, the side facing the camera its way (+34 degrees)" "held boulder .*yaw -146\\.[0-9] pitch 0\\.0"
+	count "$n" "each gesture one undo step" "forge: undid Move Boulder" 2
+	expect "$n" "a drag on nothing turned the selected one where it stands, 90 pixels" "forge: dropped Boulder \\(boulder\\) at 68\\.[0-9]+ -100\\.[0-9]+ 2\\.00 facing -0\\.63 -0\\.77"
+	expect "$n" "held by R, a drag turned it, 40 pixels" "held boulder .*yaw -157\\.5 pitch"
+	expect "$n" "snapped at 15 degrees, 62 pixels are two steps" "held boulder .*yaw -127\\.5 pitch"
+	expect "$n" "the properties opened over a carried object" "ui: screen pc.h3.forge.properties.screen"
+	sed -n '/test command at tick 49[89]:/,$p' "$log" | grep -aq "holding boulder" &&
+		echo "  ok: $n: it waited in the hand" || fail "$n: the properties lost what the finger carried"
+	expect "$n" "a drag from a spawn marker carried it" "forge touch: dragging a marker"
+	expect "$n" "and left it where the finger went" "forge: moved the initial spawn .* at 50\\.[0-9]+ -90\\.[0-9]+"
+	sed -n '/test command at tick 5[01][0-9]: forge where/,$p' "$log" | grep -aq "holding nothing" &&
+		echo "  ok: $n: closed, the finger gone: let go" || fail "$n: still held after the menu closed"
+}
 
 # (v1: the main menu: down to FORGE; the lobby: Map, down, A: Wizard, its
 # variants (Halo 3's), A: Wizard itself; Map, up, A: Blood Gulch, A: the map
@@ -1284,6 +1321,40 @@ rotate_runs() {
 		HALO_TEST_FORGE_PACKS=none HALO_SAVE_ROOT="$store"
 }
 
+touch_runs() {
+	# (the front screen's fingers, forge touch, as vita_pad.c gives them, in
+	# the menus' 640x480. The camera level along +x, a boulder dropped 8 ahead,
+	# the camera then turned 12 degrees left: its position, the middle of its
+	# base, 98 of the menus' pixels right of the middle at any width; $at on
+	# the rock)
+	local name=$1 width=$2 at="418 225" from="448 225"
+	local c="L280:forge camera 60 -100 2 0 0;L290:forge spawn boulder;L294:forge distance 8;L300:forge where;L306:forge drop"
+	c="$c;L320:forge camera 60 -100 2 12 0;L322:forge objects"
+	# (a tap on it selects it, a tap on the sky lets it go, neither moves it)
+	c="$c;L330:forge touch $at;L332:forge touch up;L335:@shot 00-selected;L336:forge where;L340:forge touch 200 40"
+	c="$c;L342:forge touch 210 50;L344:forge touch up;L350:forge objects"
+	# (a drag from it: grabbed, under the finger, lifted: dropped; undone)
+	c="$c;L360:forge touch $at;L362:forge touch $from;L364:forge touch 500 200;L370:forge touch probe;L372:@shot 01-carried"
+	# (a second finger turns what the first carries)
+	c="$c;L376:forge touch 500 200 300 300;L378:forge touch 500 200 360 300;L380:forge where;L382:forge touch up"
+	c="$c;L390:forge objects;L392:forge undo;L396:forge objects"
+	# (tapped, a drag on nothing turns it where it stands; undone in one)
+	c="$c;L400:forge touch $at;L402:forge touch up;L404:forge touch 200 100;L406:forge touch 260 100;L408:forge touch 290 100"
+	c="$c;L412:forge touch up;L420:forge objects;L422:forge undo;L426:forge objects"
+	# (held by R, aimed at: a drag turns it; snapped, a step each 30 pixels'
+	# drag; the camera on it again)
+	c="$c;L430:forge camera 60 -100 2 0 0;L436:forge press rt 2;L440:forge where;L442:forge touch 200 100;L444:forge touch 240 100"
+	c="$c;L446:forge touch up;L448:forge where;L450:forge press lt+white 4;L456:forge touch 200 100;L458:forge touch 235 100"
+	c="$c;L460:forge touch 262 100;L462:forge touch up;L464:forge where;L466:forge drop;L470:forge camera 60 -100 2 12 0"
+	# (carried, the properties opened: it waits in the hand, the finger gone)
+	c="$c;L480:forge touch $at;L482:forge touch $from;L486:forge press x 2;L492:forge touch up;L498:forge where"
+	c="$c;L502:forge closemenus;L510:forge where"
+	# (a spawn marker looked down on, at the middle of the screen: dragged and let go)
+	c="$c;L520:forge camera 50 -90 6 0 -89;L530:forge spawnpoint initial;L536:forge drop;L542:forge spawns;L550:forge touch 320 240"
+	c="$c;L552:forge touch 360 240;L556:forge touch 400 200;L560:forge touch up;L566:forge spawns"
+	ai_run "$name" 30 "$c" HALO_TEST_FORGE_PACKS=none $width
+}
+
 floodcov_runs() {
 	# (two of the Flood and two of the Covenant 12 world units apart, the
 	# monitor over them)
@@ -1507,6 +1578,8 @@ for c in $cases; do
 		clearaimenu_runs & ;;
 	rotate)
 		rotate_runs & ;;
+	touch)
+		{ touch_runs touch HALO_GL_VITA_DISPLAY=1; touch_runs touch-43 HALO_GL_VITA_DISPLAY=0; } & ;;
 	floodcov)
 		floodcov_runs & ;;
 	sentinels)
@@ -2645,6 +2718,9 @@ for c in $cases; do
 		else
 			fail "$c: the file lacks the properties: $(cat "$out/edit/dump.txt")"
 		fi ;;
+	touch)
+		touch_check touch
+		touch_check touch-43 ;;
 	fstouch)
 		expect "$c" "a tap on FILE SHARE opened it" "ui: screen pc.h3.fileshare.screen"
 		expect "$c" "a tap on Rename renamed the first" "forge store: bloodgulch/missing.hmv written: \"Touched\""

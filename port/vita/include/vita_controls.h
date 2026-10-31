@@ -153,6 +153,10 @@ moved or came down, *tap on the frame a tap ended */
 int vita_touch_pointer(struct vita_touch_pointer *pointer, const struct vita_touch_contact *contacts, int count,
 	unsigned long long now_us, int screen_width, short *x, short *y, int *tap, int *moved);
 
+/* where a place on the front screen is in the menus' 640x480 (as above: the
+game screen_width wide, drawn as high as the screen and centred) */
+void vita_touch_to_menus(int screen_width, int touch_x, int touch_y, short *x, short *y);
+
 /* ---------- the Xbox controller's buttons */
 
 /* what a touch zone presses, and what each remappable row is: the Xbox

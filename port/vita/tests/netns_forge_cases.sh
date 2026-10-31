@@ -86,6 +86,10 @@
 #              (asked) and carries it off (asked: the host moves it); the host and the second
 #              joiner have it, red, where it was let go; the first joiner deletes it (asked),
 #              gone on all three
+#   forgetouch the joiner's front screen (forge_touch.inc, the console's forge touch): its
+#              drag asks the host as R does (the host's grant, moves, drop), a tap and a
+#              drag on nothing turn the object, the host's copy and the joiner's agreeing;
+#              its drag of the object the host holds is refused and leaves nothing held
 #   forgetele  teleporters online (forge_netgame.inc, 1.1.2): the host places a sender and a
 #              receiver before the joiner comes (the joiner, joining late, is given them);
 #              the joiner places a sender (asked of the host), takes its marker and steps
@@ -782,6 +786,43 @@ forge_case() {
 		grep -aq "forge net: machine 1 plays the Forge game" "$hl" || fail "the joiner did not play the panel's Forge game"
 		grep -aq "forge: levels.test.bloodgulch.bloodgulch loaded for a Forge game" "$jl" || fail "the joiner's Forge game did not start"
 		grep -aq "forge net: machine 1 spawned boulder" "$hl" || fail "the joiner's edit was not the host's"
+		;;
+	forgetouch)
+		# (a boulder 8 ahead; both monitors at the same place, the joiner's turned 12
+		# degrees left: the boulder 98 of the menus' pixels right of its middle)
+		host_cmds="L150:forge camera 60 -100 2 0 0;L160:forge spawn boulder;L165:forge distance 8;L172:forge where;L175:forge drop"
+		host_cmds="$host_cmds;L190:forge camera 60 -100 2 12 0;L500:forge objects;L540:forge grab #1;L640:forge drop;L700:forge objects"
+		join_cmds="L250:forge camera 60 -100 2 12 0;L270:forge touch 418 225;L274:forge touch 448 225;L280:forge touch 500 200"
+		join_cmds="$join_cmds;L320:forge where;L330:forge touch up;L360:forge objects;L400:forge touch 500 205;L402:forge touch up"
+		join_cmds="$join_cmds;L410:forge touch 200 100;L414:forge touch 260 100;L420:forge touch 290 100;L440:forge touch up"
+		join_cmds="$join_cmds;L500:forge objects;L570:forge touch 500 205;L574:forge touch 530 205;L600:forge touch up"
+		join_cmds="$join_cmds;L620:forge where;L700:forge objects"
+		forge_host "$host_cmds" $(forge_shots mpforge-shots/forgetouch-host)
+		sleep 5
+		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join "HALO_TEST_COMMANDS=$join_cmds" \
+			$(forge_shots mpforge-shots/forgetouch-joiner)
+		join_pid=$last_pid
+		wait $join_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl"
+		echo "--- host"; grep -aE "forge net: machine|forge: object 0" "$hl" | cut -c1-150 | head -30
+		echo "--- joiner"; grep -aE "forge touch|forge net: (asked|holding|refused)|forge: (object 0|.*is holding)" "$jl" | cut -c1-150 | head -30
+		[ "$(grep -ac "forge net: machine 1 grabbed boulder" "$hl")" -ge 2 ] || fail "the joiner's drag and turn did not ask the host twice"
+		[ "$(grep -ac "forge net: machine 1 dropped boulder" "$hl")" -ge 2 ] || fail "the joiner's lifts did not reach the host"
+		grep -aq "forge touch: selected Boulder" "$jl" || fail "the joiner's tap did not select the boulder"
+		grep -aq "is holding it" "$jl" || fail "the joiner's drag of what the host holds was not refused"
+		sed -n '/test command at tick 620: forge where/,/test command at tick 700/p' "$jl" | grep -aq "holding nothing" ||
+			fail "the refused drag left something held"
+		# (the two copies agree on where it ended up, and it moved)
+		host_at=$(sed -n '/test command at tick 700: forge objects/,$p' "$hl" | grep -a "forge: object 0" | head -1 | sed 's/.*alive at \([-0-9. ]*\), placed.*facing \([-0-9. ]*\) up.*/\1 \2/')
+		join_at=$(sed -n '/test command at tick 700: forge objects/,$p' "$jl" | grep -a "forge: object 0" | head -1 | sed 's/.*alive at \([-0-9. ]*\), placed.*facing \([-0-9. ]*\) up.*/\1 \2/')
+		echo "host: $host_at; joiner: $join_at"
+		[ -n "$host_at" ] || fail "no state of the host's"
+		[ -n "$join_at" ] || fail "no state of the joiner's"
+		python3 -c "
+import sys
+h=[float(v) for v in sys.argv[1].split()]; j=[float(v) for v in sys.argv[2].split()]
+sys.exit(0 if len(h)==len(j)==6 and all(abs(a-b)<0.02 for a,b in zip(h,j)) else 1)" "$host_at" "$join_at" || fail "the host's copy and the joiner's differ"
+		case $host_at in 68.0*" "-100.*) fail "the joiner's drag did not move the host's object" ;; esac
 		;;
 	forgetele)
 		host_cmds="L150:forge camera 50 -90 6 0 -89;L162:forge spawnpoint sender;L166:forge drop"
