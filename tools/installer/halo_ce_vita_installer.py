@@ -86,8 +86,10 @@ from dataclasses import dataclass
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
 # (the Ed25519 check of the release tools; the one-file program has it from
-# the spec's pathex)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "release"))
+# the spec's pathex, and its __file__ is in the temporary folder, where anyone
+# could put a "release" folder of their own)
+if not getattr(sys, "frozen", False):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "release"))
 import ed25519_rfc8032 as ed25519  # noqa: E402
 
 VERSION = "1.1.2"

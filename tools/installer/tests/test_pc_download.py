@@ -478,6 +478,23 @@ def test_the_download_can_be_turned_off_for_an_archive(root, tmp_path, monkeypat
     assert any(text.startswith("PC build (") for text in texts(window))
 
 
+def test_a_frozen_program_adds_nothing_to_its_import_path(tmp_path):
+    """One file's __file__ is in %TEMP%: <temp>/release must never be searched,
+    or a file planted there replaces the signature check."""
+    tool = os.path.join(REPOSITORY, "tools", "installer", "halo_ce_vita_installer.py")
+    release = os.path.join(REPOSITORY, "tools", "release")
+    script = ("import runpy, sys\n"
+              "sys.frozen = %r\n"
+              "sys.path.append(%r)\n"  # (the spec's pathex stands in)
+              "before = list(sys.path)\n"
+              "runpy.run_path(%r, run_name='halo_tool')\n"
+              "print(sum(p.endswith('release') for p in sys.path) - sum(p.endswith('release') for p in before))\n")
+    for frozen, added in ((True, b"0"), (False, b"1")):
+        out = subprocess.run([sys.executable, "-B", "-c", script % (frozen, release, tool)], cwd=str(tmp_path),
+                             capture_output=True, check=True).stdout
+        assert out.strip() == added
+
+
 # -- Launch: a checked unpack of this very run, and nothing beside it
 
 def verified_install(root, tmp_path, monkeypatch):
