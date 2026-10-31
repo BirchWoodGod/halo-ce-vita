@@ -113,8 +113,10 @@
 #              (asked of the host: the host's copy without collision); the host places an
 #              oddball spawn and sets its boulder NORMAL: the joiner has the oddball spawn and
 #              its copy of the boulder collides again. Back in the game in progress, the
-#              joiner is given all of it as it was. (A rejoined machine's game ends a few
-#              seconds after it is back, on 1.1.1 too: its look is right after it joins)
+#              joiner is given all of it as it was. (Before Oct 30 the host's game ended
+#              about 7 s after the joiner LEFT, not after it came back: the engine ends a
+#              game when one team is left, and the quit player still counted; a Forge game
+#              no longer ends so, game_engine_should_end_game)
 #   forgepanel the settings panel's Forge page, Network on (Menu style Halo CE: the
 #              classic menus' route), asked by HALO_SYSTEM_LINK_TEST=forgenet:9: the
 #              System Link screen's profile, then a network Forge game of Blood Gulch
