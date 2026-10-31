@@ -27,7 +27,7 @@ it and checks both as the game does. The game takes a table only when its
 version is higher than the one it has, so a table's version only goes up.
 Rules (--join's second number) must be the network version of a wire this
 source has built in (port/linux/include/network_wire.h's
-HALO_PORT_CROSSPLAY_*NETWORK_VERSION: 29, 32, 38, 39); --allow-newer-rules
+HALO_PORT_CROSSPLAY_*NETWORK_VERSION: 29, 32, 38, 39, 40, 41); --allow-newer-rules
 takes another (a newer build's wire: older builds then show "needs a newer
 Halo CE for PS Vita"). A table made with another key than
 port/vita/include/vita_update_key.h's HALO_RELEASE_PUBLIC_KEY is refused

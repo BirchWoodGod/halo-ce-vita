@@ -78,6 +78,20 @@ boolean network_game_record_decode_version(
 long network_game_record_wire_size(
 	short format,
 	unsigned int version);
+/* whether the last record taken said its host is a dedicated server (the
+co-op switch of OpenCE's 41: docs/opence-net41-spec.md 3.4). A label from the
+host, read only to leave out a hint */
+boolean network_game_record_host_is_dedicated(
+	void);
+/* whether a host's King state of size bytes is one to take: exactly
+stock_size, or, in a game of 39 or more (multi_hill), a Multi-Hill game's 20
+bytes more with an extra hill count of 0 to 4 (docs/opence-net41-spec.md
+4.3). Nothing else, whatever it holds. buffer holds size bytes */
+boolean network_game_record_king_state_valid(
+	void const *buffer,
+	long size,
+	long stock_size,
+	boolean multi_hill);
 /* whether co-op's switches are ones this game knows */
 boolean network_game_cooperative_flags_valid(
 	byte flags);

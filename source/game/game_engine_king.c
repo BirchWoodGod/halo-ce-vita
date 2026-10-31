@@ -87,6 +87,8 @@ symbols in this file:
 #include "game/game_engine_place.h"
 #include "game/players.h"
 #include "main/console.h"
+#include "network_game_record.h" /* port: port/linux/game/network_game_record.c */
+#include "network_wire.h"
 #include "math/geometry.h"
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_geometry.h"
@@ -1206,7 +1208,11 @@ boolean game_engine_king_read_network_state(
 	struct king_globals state;
 	long team_index;
 
-	if (size != (long)sizeof(state))
+	/* port: exactly the stock state, or that and the other hills of a
+	Multi-Hill game of OpenCE's. The first hill is played as ever, and only
+	it is drawn; the others' ids are read by nothing here, and the host keeps
+	the score whatever hills a client sees */
+	if (!network_game_record_king_state_valid(buffer, size, (long)sizeof(state), network_wire_v39_rules()))
 		return FALSE;
 	csmemcpy(&state, buffer, sizeof(state));
 	for (team_index = 0; team_index < (long)NUMBEROF(state.score); team_index++)

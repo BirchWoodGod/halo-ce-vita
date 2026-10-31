@@ -353,7 +353,7 @@ version plays a game exactly as one this build already has rules for (as
 OpenCE's 39 is 38's game with its dedicated-server flags), a signed table
 tells every Vita and PC build to join it, with no game update. The table
 can only point a network version at rules already built in (29, 32, 38,
-39 in 1.1.1: `HALO_PORT_CROSSPLAY_*NETWORK_VERSION` in
+39 in 1.1.1, and 40, 41 from 1.1.2: `HALO_PORT_CROSSPLAY_*NETWORK_VERSION` in
 `port/linux/include/network_wire.h`), or refuse a version with a short
 reason the browser shows. It never carries code or a message layout, never
 remaps a built-in version, and never changes what our hosts announce (32).

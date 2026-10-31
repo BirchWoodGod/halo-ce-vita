@@ -3,7 +3,7 @@ NETVERSION_TABLE.H
 
 The signed crossplay version table (docs/crossplay.md 5.2 and 10.13): which
 PC network versions this build's client may join, and which of the wire
-rules already built into it (network_wire.h: the rules of 29, 32, 38 and 39)
+rules already built into it (network_wire.h: the rules of 29, 32, 38, 39, 40 and 41)
 each one plays; and versions known not to work, with a reason for the
 browser. When OpenCE or ChupathingyCE raise their network version and the
 new one plays a game as one of the old ones does (OpenCE 39: 38's rules

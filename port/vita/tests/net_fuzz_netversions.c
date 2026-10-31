@@ -103,7 +103,8 @@ static int reason_ok(const char *reason)
 /* a table taken: its form, then what the wire makes of it */
 static void fuzz_taken(const struct netversion_table *table)
 {
-	static const unsigned int built_in[] = { 29, 32, 38, 39 };
+	static const unsigned int built_in[] = { 29, 32, 38, 39, 40, 41 };
+	enum { BUILT_IN = (int)(sizeof(built_in) / sizeof(built_in[0])) };
 	unsigned int previous = 0, version;
 	char text[48], reason[128];
 	int index;
@@ -128,7 +129,7 @@ static void fuzz_taken(const struct netversion_table *table)
 	network_wire_table_set(table);
 	if (network_wire_table_version() != table->version)
 		fuzz_abort("the table in effect is not the one set");
-	for (index = 0; index <= table->count + 4; index++)
+	for (index = 0; index <= table->count + BUILT_IN; index++)
 	{
 		const struct netversion_row *row = index < table->count ? &table->rows[index] : NULL;
 		unsigned int rules;
@@ -164,7 +165,7 @@ static void fuzz_taken(const struct netversion_table *table)
 		fuzz_abort("the joined list's text past its buffer");
 	(void)network_wire_crossplay_version_near(0xFFFF);
 	network_wire_table_set(NULL);
-	for (index = 0; index < 4; index++)
+	for (index = 0; index < BUILT_IN; index++)
 	{
 		if (network_wire_of_version(built_in[index]) != 1 || network_wire_rules_version(built_in[index]) != built_in[index])
 			fuzz_abort("no table: a built-in version not joined by its own rules");

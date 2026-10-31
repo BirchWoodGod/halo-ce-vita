@@ -83,17 +83,18 @@ static void check(int good, const char *what)
 	printf("%s %s\n", good ? "PASS" : "FAIL", what);
 }
 
-static int versions_only4(int crossplay, unsigned int version, unsigned int other, unsigned int third,
-	unsigned int fourth)
+static int versions_only6(int crossplay, unsigned int version, unsigned int other, unsigned int third,
+	unsigned int fourth, unsigned int fifth, unsigned int sixth)
 {
 	static const unsigned int tried[] = { 0, 4, 17, 18, 19, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
-		40, 41, 0xFFFF };
+		40, 41, 42, 43, 0xFFFF };
 	size_t index;
 
 	for (index = 0; index < sizeof(tried) / sizeof(tried[0]); index++)
 	{
 		if (network_wire_version_accepted_on(crossplay, tried[index]) !=
-			(tried[index] == version || tried[index] == other || tried[index] == third || tried[index] == fourth))
+			(tried[index] == version || tried[index] == other || tried[index] == third || tried[index] == fourth ||
+			tried[index] == fifth || tried[index] == sixth))
 		{
 			return 0;
 		}
@@ -103,13 +104,14 @@ static int versions_only4(int crossplay, unsigned int version, unsigned int othe
 
 static int versions_only(int crossplay, unsigned int version, unsigned int other)
 {
-	return versions_only4(crossplay, version, other, other, other);
+	return versions_only6(crossplay, version, other, other, other, other, other);
 }
 
 static int no_rules_past_28(void)
 {
 	return !network_wire_v30_rules() && !network_wire_v31_rules() && !network_wire_v32_rules() && !network_wire_v33_rules() &&
-		!network_wire_v34_rules() && !network_wire_v35_rules() && !network_wire_v36_rules() && !network_wire_v39_rules();
+		!network_wire_v34_rules() && !network_wire_v35_rules() && !network_wire_v36_rules() && !network_wire_v39_rules() &&
+		!network_wire_v40_rules() && !network_wire_v41_rules();
 }
 
 int main(void)
@@ -190,28 +192,71 @@ int main(void)
 	return failures != 0;
 #else
 	check(network_wire_crossplay_available(), "a Vita: the crossplay wire available");
-	check(versions_only4(1, 29, 32, 38, 39),
-		"the crossplay wire joins 29, 32, 38 and 39 alone (not 26-28, 30, 31, 33-37, 40 and up)");
+	check(versions_only6(1, 29, 32, 38, 39, 40, 41),
+		"the crossplay wire joins 29, 32, 38, 39, 40 and 41 alone (not 26-28, 30, 31, 33-37, 42 and up)");
 	check(network_wire_of_version(29) == 1 && network_wire_of_version(32) == 1 && network_wire_of_version(38) == 1 &&
 		network_wire_of_version(39) == 1 && network_wire_of_version(28) == -1 && network_wire_of_version(30) == -1 &&
 		network_wire_of_version(31) == -1 && network_wire_of_version(33) == -1 && network_wire_of_version(37) == -1 &&
-		network_wire_of_version(40) == -1 && network_wire_of_version(26) == -1,
-		"29, 32, 38 and 39 play the crossplay wire; 26, 28, 30, 31, 33-37, 40 neither wire");
+		network_wire_of_version(40) == 1 && network_wire_of_version(41) == 1 && network_wire_of_version(42) == -1 &&
+		network_wire_of_version(26) == -1,
+		"29, 32, 38, 39, 40 and 41 play the crossplay wire; 26, 28, 30, 31, 33-37, 42 neither wire");
 	check(network_wire_version_of(1) == 32 && network_wire_host_version() == 32 && network_wire_version_of(0) == 18,
 		"the versions each wire announces: a host for Vitas and PC, 32");
 	{
 		char text[32];
 
 		network_wire_crossplay_versions_text(text, (int)sizeof(text));
-		check(!strcmp(text, "29, 32, 38 and 39"), "the versions joined, for the log: 29, 32, 38 and 39");
+		check(!strcmp(text, "29, 32, 38, 39, 40 and 41"), "the versions joined, for the log: 29, 32, 38, 39, 40 and 41");
 	}
 	check(network_wire_crossplay_version_near(26) == 29 && network_wire_crossplay_version_near(28) == 29 &&
 		network_wire_crossplay_version_near(30) == 32 && network_wire_crossplay_version_near(31) == 32 &&
 		network_wire_crossplay_version_near(33) == 38 && network_wire_crossplay_version_near(37) == 38 &&
-		network_wire_crossplay_version_near(40) == 39 && network_wire_crossplay_version_near(0xFFFF) == 39,
-		"the version to look for instead: 29 for 26-28, 32 for 30-31, 38 for 33-37, 39 for newer");
+		network_wire_crossplay_version_near(42) == 41 && network_wire_crossplay_version_near(0xFFFF) == 41,
+		"the version to look for instead: 29 for 26-28, 32 for 30-31, 38 for 33-37, 41 for newer");
 
 	/* a game joined on the crossplay wire: a PC's of 32, of 29, then a Vita's */
+	/* 40 and 41: 39's rules, a longer join request from 40, codes 8 to 13 only
+	in a PC host's game on the crossplay wire */
+	{
+		static const unsigned int short_join[] = { 29, 32, 38, 39 };
+		size_t which;
+		int code, others = 0;
+
+		for (which = 0; which < sizeof(short_join) / sizeof(short_join[0]); which++)
+		{
+			network_wire_choose_version(short_join[which], 2, "a PC host's game");
+			check(network_wire_crossplay() && !network_wire_join_request_padding() && !network_wire_v40_rules() &&
+				!network_wire_v41_rules(), "up to 39: the join request of every older wire, no rules of 40 or 41");
+		}
+		network_wire_choose_version(40, 2, "a PC host's game of 40");
+		check(network_wire_crossplay() && network_wire_version() == 40 && network_wire_v39_rules() &&
+			network_wire_v40_rules() && !network_wire_v41_rules() &&
+			network_wire_join_request_padding() == NETWORK_WIRE_V40_JOIN_REQUEST_PADDING,
+			"a PC's game of 40: 39's rules, the 234 more bytes of its join request, not 41's co-op rule");
+		network_wire_choose_version(41, 2, "a PC host's game of 41");
+		check(network_wire_crossplay() && network_wire_version() == 41 && network_wire_v39_rules() &&
+			network_wire_v40_rules() && network_wire_v41_rules() &&
+			network_wire_join_request_padding() == NETWORK_WIRE_V40_JOIN_REQUEST_PADDING,
+			"a PC's game of 41: 39's rules, 40's join request, 41's co-op rule");
+		check(NETWORK_WIRE_V40_JOIN_REQUEST_PADDING + 0x70 == 346, "the join request of 40: 346 bytes");
+		check(strstr(network_wire_rejection_text(8), "VPN") && strstr(network_wire_rejection_text(9), "VPN") &&
+			strstr(network_wire_rejection_text(10), "Discord") && strstr(network_wire_rejection_text(11), "Discord") &&
+			strstr(network_wire_rejection_text(12), "Discord") && strstr(network_wire_rejection_text(13), "address"),
+			"a PC host's refusals 8 to 13 in words: a VPN refusal says so");
+		for (code = -1; code <= 0x10000; code++)
+			others += (code < 8 || code > 13) && network_wire_rejection_text(code) != NULL;
+		check(!others, "every other code a host can send, to 65535: the generic failure, no text");
+		network_wire_reset();
+		check(!network_wire_join_request_padding() && !network_wire_rejection_text(8) && !network_wire_rejection_text(13),
+			"no game: 0x70, no text");
+		network_wire_choose_version(18, 0, "a Vita's game");
+		check(!network_wire_join_request_padding() && !network_wire_rejection_text(8),
+			"the legacy wire: 0x70, and 8 means nothing");
+		network_wire_choose(1, 0, "a Vita's game for Vitas and PC");
+		check(network_wire_crossplay() && network_wire_host_vita() && !network_wire_join_request_padding() &&
+			!network_wire_rejection_text(13), "a Vita's host of the crossplay wire: 0x70, and 13 means nothing");
+		network_wire_reset();
+	}
 	network_wire_choose_version(32, 2, "a PC host's game of 32");
 	check(network_wire_crossplay() && network_wire_version() == 32 && network_wire_v28_rules() && network_wire_v30_rules() &&
 		network_wire_v31_rules() && network_wire_v32_rules() && !network_wire_host_vita() && network_wire_host_platform() == 2,
@@ -287,12 +332,18 @@ int main(void)
 		table.rows[table.count].version = 40;
 		table.rows[table.count].kind = NETVERSION_ROW_JOIN;
 		table.rows[table.count++].rules = 39;
-		table.rows[table.count].version = 41;
-		table.rows[table.count].kind = NETVERSION_ROW_JOIN;
-		table.rows[table.count++].rules = 41;
 		table.rows[table.count].version = 42;
 		table.rows[table.count].kind = NETVERSION_ROW_JOIN;
 		table.rows[table.count++].rules = 38;
+		table.rows[table.count].version = 43;
+		table.rows[table.count].kind = NETVERSION_ROW_JOIN;
+		table.rows[table.count++].rules = 39;
+		table.rows[table.count].version = 44;
+		table.rows[table.count].kind = NETVERSION_ROW_JOIN;
+		table.rows[table.count++].rules = 44;
+		table.rows[table.count].version = 46;
+		table.rows[table.count].kind = NETVERSION_ROW_JOIN;
+		table.rows[table.count++].rules = 41;
 		table.rows[table.count].version = 50;
 		table.rows[table.count].kind = NETVERSION_ROW_REFUSE;
 		snprintf(table.rows[table.count++].reason, NETVERSION_TABLE_REASON_SIZE, "%s", "OpenCE 50 changed the record");
@@ -301,15 +352,17 @@ int main(void)
 		check(network_wire_table_version() == 7, "the table taken: version 7");
 		check(network_wire_of_version(18) == 0 && !network_wire_version_accepted_on(1, 18),
 			"a row for 18 changes nothing: the legacy wire's own");
-		check(network_wire_of_version(40) == 1 && network_wire_rules_version(40) == 39,
-			"join 40 rules 39: 40 joined on the crossplay wire, by 39's rules");
+		check(network_wire_of_version(40) == 1 && network_wire_rules_version(40) == 40,
+			"join 40 rules 39: a built-in version keeps its own rules, a longer join request among them");
+		check(network_wire_of_version(43) == 1 && network_wire_rules_version(43) == 39,
+			"join 43 rules 39: 43 joined on the crossplay wire, by 39's rules");
 		check(network_wire_of_version(42) == 1 && network_wire_rules_version(42) == 38,
 			"join 42 rules 38: joined by 38's rules, though 38 itself is refused");
 		check(network_wire_of_version(39) == 1 && network_wire_rules_version(39) == 39,
 			"join 39 rules 32: a built-in version keeps its own rules");
-		check(network_wire_of_version(41) == -1 && network_wire_rules_version(41) == 41 &&
-			network_wire_crossplay_refusal(41, reason, (int)sizeof(reason)) && strstr(reason, "newer Halo CE"),
-			"join 41 rules 41 (a newer build's): not joined, the browser told to update");
+		check(network_wire_of_version(44) == -1 && network_wire_rules_version(44) == 44 &&
+			network_wire_crossplay_refusal(44, reason, (int)sizeof(reason)) && strstr(reason, "newer Halo CE"),
+			"join 44 rules 44 (a newer build's): not joined, the browser told to update");
 		check(network_wire_of_version(38) == -1 && network_wire_crossplay_refusal(38, reason, (int)sizeof(reason)) &&
 			!strcmp(reason, "38 broke"), "refuse 38: a built-in version refused, with its reason");
 		check(network_wire_of_version(50) == -1 && network_wire_crossplay_refusal(50, reason, (int)sizeof(reason)) &&
@@ -317,18 +370,24 @@ int main(void)
 		check(!network_wire_crossplay_refusal(32, reason, (int)sizeof(reason)) && !reason[0] &&
 			!network_wire_crossplay_refusal(45, reason, (int)sizeof(reason)), "no reason for 32 (joined) or 45 (no row)");
 		network_wire_crossplay_versions_text(text, (int)sizeof(text));
-		check(!strcmp(text, "29, 32, 39, 40 and 42"), "the versions joined: 29, 32, 39, 40 and 42");
-		check(network_wire_crossplay_version_near(33) == 39 && network_wire_crossplay_version_near(41) == 42 &&
-			network_wire_crossplay_version_near(60) == 42, "the version to look for: among those joined");
-		network_wire_choose_version(40, 2, "an OpenCE host's game of 40");
+		check(!strcmp(text, "29, 32, 39, 40, 41, 42, 43 and 46"), "the versions joined: 29, 32, 39, 40, 41, 42, 43 and 46");
+		check(network_wire_crossplay_version_near(33) == 39 && network_wire_crossplay_version_near(45) == 46 &&
+			network_wire_crossplay_version_near(60) == 46, "the version to look for: among those joined");
+		network_wire_choose_version(43, 2, "an OpenCE host's game of 43");
 		check(network_wire_crossplay() && network_wire_version() == 39 && network_wire_v39_rules() &&
-			network_wire_v36_rules() && network_wire_v33_rules() && network_wire_host_platform() == 2,
-			"a game of 40 joined: the crossplay wire, 39's rules and meanings (network_wire_version 39)");
+			network_wire_v36_rules() && network_wire_v33_rules() && network_wire_host_platform() == 2 &&
+			!network_wire_v40_rules() && network_wire_join_request_padding() == NETWORK_WIRE_V40_JOIN_REQUEST_PADDING,
+			"a game of 43 joined: 39's rules and meanings, a host of 40 or more's join request whatever its rules");
+		network_wire_choose_version(46, 2, "a game of 46");
+		check(network_wire_crossplay() && network_wire_version() == 41 && network_wire_v41_rules() &&
+			network_wire_join_request_padding() == NETWORK_WIRE_V40_JOIN_REQUEST_PADDING,
+			"join 46 rules 41: what a raise that changes nothing can be, 41's rules");
 		network_wire_choose_version(42, 2, "a game of 42");
 		check(network_wire_crossplay() && network_wire_version() == 38 && network_wire_v36_rules() &&
 			!network_wire_v39_rules(), "a game of 42: 38's rules, none of 39's");
-		network_wire_choose_version(41, 2, "a game of 41");
-		check(!network_wire_crossplay() && network_wire_version() == 18, "a game of 41: never played, the legacy wire");
+		network_wire_choose_version(44, 2, "a game of 44");
+		check(!network_wire_crossplay() && network_wire_version() == 18 && !network_wire_join_request_padding(),
+			"a game of 44: never played, the legacy wire");
 		check(network_wire_version_of(1) == 32 && network_wire_announced_version(1) == 32,
 			"a host still announces 32 with any table");
 		network_wire_reset();
@@ -336,7 +395,7 @@ int main(void)
 		table.version = 8;
 		network_wire_table_set(&table);
 		network_wire_crossplay_versions_text(text, (int)sizeof(text));
-		check(!strcmp(text, "29, 32, 38 and 39") && network_wire_of_version(40) == -1,
+		check(!strcmp(text, "29, 32, 38, 39, 40 and 41") && network_wire_of_version(42) == -1,
 			"a table of no rows: the built-in list exactly");
 		/* (a table is about whom a client joins: one that refuses the very
 		version hosts announce must not move a host to the legacy wire) */
@@ -354,7 +413,7 @@ int main(void)
 		check(!network_wire_crossplay(), "refuse 32: a PC's game of 32 is not joined");
 		network_wire_reset();
 		network_wire_table_set(NULL);
-		check(network_wire_table_version() == 0 && versions_only4(1, 29, 32, 38, 39), "no table: the built-in list");
+		check(network_wire_table_version() == 0 && versions_only6(1, 29, 32, 38, 39, 40, 41), "no table: the built-in list");
 	}
 #ifndef HALO_RELEASE
 	setenv("HALO_TEST_VERSION_HEARD", "39:40", 1);

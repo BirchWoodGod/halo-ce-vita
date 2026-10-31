@@ -3011,6 +3011,32 @@ void network_game_client_rejected_by_game(
 		reason = network_wire_rejection_is_name_refused(rejection_code) ? "name refused (OpenCE 39)" :
 			"_rejection_code_vitas_only";
 		break;
+
+	/* (port: OpenCE's 40 and 41; only its dedicated servers send them, and
+	a number the host makes up stays "<unknown>", the generic failure) */
+	case NETWORK_WIRE_REJECTION_VPN_LINK_REQUIRED:
+		reason = "vpn link required (OpenCE 40)";
+		break;
+
+	case NETWORK_WIRE_REJECTION_VPN_BLOCKED:
+		reason = "vpn blocked (OpenCE 40)";
+		break;
+
+	case NETWORK_WIRE_REJECTION_VPN_LINK_INVALID:
+		reason = "vpn link invalid (OpenCE 40)";
+		break;
+
+	case NETWORK_WIRE_REJECTION_VPN_LINK_TOO_NEW:
+		reason = "vpn link too new (OpenCE 40)";
+		break;
+
+	case NETWORK_WIRE_REJECTION_VPN_LINK_IN_USE:
+		reason = "vpn link in use (OpenCE 40)";
+		break;
+
+	case NETWORK_WIRE_REJECTION_ADDRESS_FULL:
+		reason = "address full (OpenCE 41)";
+		break;
 	}
 
 	network_event(
@@ -3033,6 +3059,10 @@ void network_game_client_rejected_by_game(
 	}
 	else if (rejection_code == _rejection_code_vitas_only)
 		platform_show_message(T("Halo: cannot join this game"), crossplay_guard_vitas_only_text());
+	/* (a fixed text by the code: nothing of the host's is shown, and the
+	join ends below like any refusal, never tried again by itself) */
+	else if (network_wire_rejection_text(rejection_code))
+		platform_show_message(T("Halo: cannot join this game"), network_wire_rejection_text(rejection_code));
 #endif
 	/* port: the join went to the pregame screen at once (and a machine
 	refused a game in progress, network_game_server_refuse_late_joiner, is in
@@ -3655,10 +3685,18 @@ static boolean network_game_client_idle_joining(
 					csmemcpy(join_game_request.hardware_id, hardware_id, csstrlen(hardware_id));
 				}
 
-				message = create_network_game_message(
-					_message_client_join_game_request,
-					&join_game_request,
-					sizeof(join_game_request));
+				/* (port: to a host of 40 or more, 234 more bytes, all zero:
+				the one message that differs by version, here and not in the
+				message table every other wire shares: network_messages.h) */
+				message = network_wire_join_request_padding() ?
+					create_network_game_join_request_padded(
+						&join_game_request,
+						sizeof(join_game_request),
+						(short)network_wire_join_request_padding()) :
+					create_network_game_message(
+						_message_client_join_game_request,
+						&join_game_request,
+						sizeof(join_game_request));
 				if (message)
 				{
 					if (network_game_client_write(

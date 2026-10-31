@@ -836,10 +836,13 @@ static boolean encode_network_game_message(
 	return data_packet_group_encode_packet(&data_0030aa68.group, message_struct, encoded_message, encoded_message_size, message_type, message_version);
 }
 
-void *create_network_game_message(
+/* trailing_zero_bytes: zeros between the encoded structure and the packet's
+type, its last byte (0 for every message but create_network_game_join_request_padded's) */
+static void *create_network_game_message_with_zeros(
 	enum network_game_message_type message_type,
 	const void *message_struct,
-	short message_struct_size)
+	short message_struct_size,
+	short trailing_zero_bytes)
 {
 	/* as large as the packet group lets the encoder write */
 	byte encoded_message[HALO_PORT_NETWORK_PACKET_SIZE];
@@ -1048,6 +1051,19 @@ void *create_network_game_message(
 
 	if (encode_network_game_message(message_struct, encoded_message, &encoded_message_size.encoded, message_type, 1))
 	{
+		if (trailing_zero_bytes > 0)
+		{
+			long encoded_size = encoded_message_size.value;
+
+			if (encoded_size < 1 || encoded_size + trailing_zero_bytes > (long)sizeof(encoded_message))
+			{
+				network_event("create_network_game_message(): no room for the zeros");
+				return NULL;
+			}
+			encoded_message[encoded_size - 1 + trailing_zero_bytes] = encoded_message[encoded_size - 1];
+			csmemset(encoded_message + encoded_size - 1, 0, trailing_zero_bytes);
+			encoded_message_size.value = encoded_size + trailing_zero_bytes;
+		}
 		/* a message header holds lengths up to HALO_PORT_MAXIMUM_NETWORK_MESSAGE_SIZE-1,
 		header included: a longer message would go out with a wrong length and
 		derail the stream (create_message only asserts on it) */
@@ -1070,6 +1086,23 @@ void *create_network_game_message(
 	}
 
 	return message;
+}
+
+void *create_network_game_message(
+	enum network_game_message_type message_type,
+	const void *message_struct,
+	short message_struct_size)
+{
+	return create_network_game_message_with_zeros(message_type, message_struct, message_struct_size, 0);
+}
+
+void *create_network_game_join_request_padded(
+	const void *message_struct,
+	short message_struct_size,
+	short zero_bytes)
+{
+	return create_network_game_message_with_zeros(
+		_message_client_join_game_request, message_struct, message_struct_size, zero_bytes);
 }
 
 boolean decode_network_game_message(
