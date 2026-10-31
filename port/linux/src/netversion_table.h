@@ -11,7 +11,9 @@ with its dedicated-server flags), the owner signs a table saying so, and
 every Vita and PC build joins it without an update. The table selects
 behaviour that is already built in: never code, never a message format.
 Built-in versions keep their own rules whatever a table says; a table can
-refuse one (a kill switch) and name the reason.
+refuse one (a kill switch for joining it, naming the reason), never what a
+host of this build plays (network_wire_choose), and the owner's tool will not
+refuse 32, which Vitas host.
 
 Signed with the owner's release key (port/vita/include/vita_update_key.h's
 HALO_RELEASE_PUBLIC_KEY, the key updates and the tester list are signed

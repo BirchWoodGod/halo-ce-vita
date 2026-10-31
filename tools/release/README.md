@@ -425,8 +425,10 @@ Each change writes the table with its version one higher (or `--version N`,
 higher still), signs it into `netversions.txt.sig` beside it and checks both
 as the game does; `--show` and every change print what a build of this
 source makes of each row. The tool refuses a key that is not the release
-key, a version that does not go up, 18 (the Vitas' own version), a row for a
-built-in version, rules this source has not got (`--allow-newer-rules` for a
+key, a version that does not go up, 18 (the Vitas' own version), `--refuse 32`
+(what a Vita hosting for everyone announces: Vitas could no longer join each
+other; a table never changes what a host plays), a row for a built-in version,
+rules this source has not got (`--allow-newer-rules` for a
 newer build's wire: older builds then say "needs a newer Halo CE for PS
 Vita"), and a reason out of its characters. Never upload a table without its
 `.sig` from the same run: the game takes neither then. Players get it at

@@ -234,10 +234,9 @@ static int crossplay_joined_versions(unsigned short *versions, int maximum)
 	return count;
 }
 
-void network_wire_choose_version(unsigned int version, int platform, const char *why)
+/* the wire and its version: rules, a built-in version's, or 0 the legacy wire */
+static void wire_set(unsigned int version, unsigned int rules, int platform, const char *why)
 {
-	unsigned int rules = version != HALO_PORT_NETWORK_VERSION && network_wire_crossplay_available() ?
-		crossplay_rules(version, NULL, 0) : 0;
 	int crossplay = rules != 0;
 
 	platform = crossplay ? platform : 0;
@@ -266,9 +265,21 @@ void network_wire_choose_version(unsigned int version, int platform, const char 
 	host_platform = platform;
 }
 
+void network_wire_choose_version(unsigned int version, int platform, const char *why)
+{
+	wire_set(version, version != HALO_PORT_NETWORK_VERSION && network_wire_crossplay_available() ?
+		crossplay_rules(version, NULL, 0) : 0, platform, why);
+}
+
 void network_wire_choose(int crossplay, int platform, const char *why)
 {
-	network_wire_choose_version(crossplay ? network_wire_host_version() : HALO_PORT_NETWORK_VERSION, platform, why);
+	/* (a game of this machine's: the built-in list alone, so that no table,
+	whatever it refuses, changes what a host plays: a table is about whom a
+	client joins) */
+	unsigned int version = crossplay ? network_wire_host_version() : HALO_PORT_NETWORK_VERSION;
+
+	wire_set(version, crossplay && network_wire_rules_built_in(version) && network_wire_crossplay_available() ? version : 0,
+		platform, why);
 }
 
 void network_wire_reset(void)

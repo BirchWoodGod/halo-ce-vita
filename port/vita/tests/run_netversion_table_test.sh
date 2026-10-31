@@ -61,6 +61,7 @@ refused "--join 18" $tool --join 18:32
 refused "--join of a built-in version" $tool --join 39:38
 refused "--join with rules this source lacks" $tool --join 41:41
 refused "--refuse 18" $tool --refuse 18 "the Vitas"
+refused "--refuse 32, what Vitas host" $tool --refuse 32 "no"
 refused "a reason with a quote" $tool --refuse 41 'say "no"'
 refused "a reason too long" $tool --refuse 41 "0123456789012345678901234567890123456789012345678901234567890123456789"
 refused "a reason ending in a space" $tool --refuse 41 "trailing "

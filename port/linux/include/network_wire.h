@@ -35,7 +35,7 @@ The versions a crossplay client joins, and the one a crossplay host
 announces, are a list built in: exactly the pinned OpenCE's. The signed
 crossplay version table (netversion_table.h, docs/crossplay.md 10.13) can
 add versions that play as a built-in one does (OpenCE 40 played by 39's
-rules) and refuse any, with a reason for the browser; it never remaps a
+rules) and refuse any but 32, with a reason for the browser; it never remaps a
 built-in version, never changes what a host announces, and selects only
 rules built in here. Not 26 or 27
 beside it: 28 plays a script's switch_bsp, the flashlight and dynamic lights

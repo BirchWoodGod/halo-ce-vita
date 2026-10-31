@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import update_signing as common  # noqa: E402
 
 MAGIC = "halo-ce-vita-netversions 1"
+HOST_VERSION = 32  # (network_wire.h's HALO_PORT_CROSSPLAY_NETWORK_VERSION: what a Vita hosting for everyone announces)
 SIGNATURE_SUFFIX = ".sig"
 MAXIMUM_ROWS = 64
 MAXIMUM_SIZE = 27 + 19 + MAXIMUM_ROWS * (13 + 64 + 1)
@@ -217,6 +218,9 @@ def main():
         number = int(number_text)
         if number == LEGACY_VERSION:
             common.fail(f"--refuse {number}: the Vitas' own network version, not the table's")
+        if number == HOST_VERSION:
+            common.fail(f"--refuse {number}: what every Vita's game for everyone announces: Vitas could no longer "
+                        "join each other's games")
         rows[number] = ("refuse", reason)
         print(f"refuse {number}: {reason}" + (" (a built-in version: its games are no longer joined)"
                                              if number in rules else ""))

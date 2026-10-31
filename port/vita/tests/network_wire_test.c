@@ -338,6 +338,21 @@ int main(void)
 		network_wire_crossplay_versions_text(text, (int)sizeof(text));
 		check(!strcmp(text, "29, 32, 38 and 39") && network_wire_of_version(40) == -1,
 			"a table of no rows: the built-in list exactly");
+		/* (a table is about whom a client joins: one that refuses the very
+		version hosts announce must not move a host to the legacy wire) */
+		network_wire_reset();
+		table.count = 1;
+		table.version = 9;
+		table.rows[0].version = 32;
+		table.rows[0].kind = NETVERSION_ROW_REFUSE;
+		snprintf(table.rows[0].reason, NETVERSION_TABLE_REASON_SIZE, "%s", "32 broke");
+		network_wire_table_set(&table);
+		network_wire_choose(1, 0, "hosting for everyone");
+		check(network_wire_crossplay() && network_wire_version() == 32 && network_wire_host_vita() &&
+			network_wire_announced_version(1) == 32, "refuse 32: this machine's game stays on the crossplay wire, 32's rules");
+		network_wire_choose_version(32, 2, "a PC's game of 32");
+		check(!network_wire_crossplay(), "refuse 32: a PC's game of 32 is not joined");
+		network_wire_reset();
 		network_wire_table_set(NULL);
 		check(network_wire_table_version() == 0 && versions_only4(1, 29, 32, 38, 39), "no table: the built-in list");
 	}
