@@ -245,6 +245,13 @@
 #   all         every mode above, one after the other (expected failures as
 #               XFAIL), and a summary
 #
+#   opencerefuse  a dedicated server of 41 refusing our client by its VPN
+#               rules (HALO_SERVER_VPN_*, spec 41 T6, T7): our client says why,
+#               once (not in all; run it with XPPC_TWO_COPIES=1 for ours alone)
+#   crossstandin  our build as a stand-in host of 41 (test-only settings): the
+#               refusal codes 10 to 13 and unknown ones, a record with a co-op
+#               switch or reserved byte unknown, Force Team Spawns, King's
+#               Multi-Hill tail, good and hostile (T9, T11-T13; not in all)
 #   crossversion  a PC host of a network version no build of ours has
 #               (docs/crossplay.md 10.13): XPPC_BUILDS's OpenCE of 39 read as
 #               40 by our copies (HALO_TEST_VERSION_HEARD=39:40, test builds
@@ -292,6 +299,9 @@
 #                      ChupathingyCE's crossplay test: an OpenCE host starts no
 #                      game once a client has changed team in its lobby)
 #   XPPC_CONTROL=0     leave out the expected-fail modes' controls
+#   XPPC_TWO_COPIES=1  two game copies at a time: no late or back client (no
+#                      rejoin step), no OpenCE client beside ours on a
+#                      server, one pair after another
 #   XPPC_MQTT311=1     the broker refuses MQTT 5 (every copy must fall back to
 #                      3.1.1)
 #   XPPC_EXPECTED_FAIL the expected-fail modes (none)
@@ -331,7 +341,7 @@ mode=${1:-}
 
 case $mode in
 pcself|chupaopence|opencelan|opencehost|crosstls|chupahost|chupaserver|damnserver|openceserver|crossrefuse|crossbig|crossmixed|crosscoop|crossctf) ;;
-pcjoinsvita|pccap|browserboth|crosspassword|crosscoophost|net32|crosschat) ;;
+pcjoinsvita|pccap|browserboth|crosspassword|crosscoophost|net32|crosschat|opencerefuse|crossstandin) ;;
 net29)
 	[ -n "${XPPC_OPENCE29:-}" ] && [ -x "$XPPC_OPENCE29" ] ||
 		{ echo "SKIP (net29): wants XPPC_OPENCE29 (an OpenCE of network version 29's binary: build_pc_crossplay.sh opence ... 8102e711)"; exit 0; } ;;
@@ -833,14 +843,14 @@ s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind(("0.0.0.0", 5151));
 			# (a second client joins 5 s into the first game and stays: with
 			# two players, the first leaving would end the game, and an OpenCE
 			# host crashed when the copy coming back joined its postgame)
-			if [ -z "$late_pid" ] && [ "$first" -ge "$late_at" ]; then
+			if [ "${XPPC_TWO_COPIES:-0}" != 1 ] && [ -z "$late_pid" ] && [ "$first" -ge "$late_at" ]; then
 				copy_args=$invite copy_maps=${client_maps:-} run_copy "$name/late" "$late_ns" "$clientkind" "$late_ip" "$broker_address" \
 					$(client_env "$clientkind" "$transport" $((29 + pairs))) $extra ${client_extra:-}
 				mine="$mine $last_pid"; late_pid=$last_pid
 			fi
 			# (the client leaves 11 s into the first game, if it is in it, and
 			# a new copy comes back at 14)
-			if [ -n "$client_pid" ] && [ "$first" -ge "$leave_at" ] && [ -z "$back_pid" ] &&
+			if [ "${XPPC_TWO_COPIES:-0}" != 1 ] && [ -n "$client_pid" ] && [ "$first" -ge "$leave_at" ] && [ -z "$back_pid" ] &&
 				[ "$(games_played "$out/$name/client/run.log")" -ge 1 ]; then
 				echo "$name: the client leaves $first s into game 1"
 				kill "$client_pid" 2>/dev/null; wait "$client_pid" 2>/dev/null; client_pid=
@@ -861,6 +871,8 @@ s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind(("0.0.0.0", 5151));
 	pids="$pids $!"
 	pair_pids="${pair_pids:-} $!"
 	pairs=$((pairs + 1))
+	# (XPPC_TWO_COPIES: one pair at a time)
+	[ "${XPPC_TWO_COPIES:-0}" != 1 ] || wait "$!" 2>/dev/null
 }
 pair_server() { # pair_server NAME TRANSPORT SERVERKIND SECONDCLIENTKIND [CLIENTENV]
 	local name=$1 transport=$2 serverkind=$3 clientkind=$4 extra=${5:-}
@@ -890,6 +902,13 @@ pair_server() { # pair_server NAME TRANSPORT SERVERKIND SECONDCLIENTKIND [CLIENT
 			server_kind=openceserver console=$out/$name/console
 			mkfifo "$console"
 			exec 3<> "$console"
+			# (opencerefuse: the ranges a server keeps out, its vpn_block.txt
+			# in the folders a server's files may be read from)
+			if [ -n "${server_vpn_block:-}" ]; then
+				mkdir -p "$out/$name/host/data" "$out/$name/host/bin"
+				printf '%s\n' "$server_vpn_block" > "$out/$name/host/data/vpn_block.txt"
+				cp "$out/$name/host/data/vpn_block.txt" "$out/$name/host/bin/vpn_block.txt"
+			fi
 		fi
 		copy_stdin=$console copy_args=$([ "$serverkind" = openceserver ] && echo --server) \
 			run_copy "$name/host" "$server_ns" "$kind" "$server_ip" "$broker_address" $(host_env "$server_kind" "$transport")
@@ -904,9 +923,11 @@ pair_server() { # pair_server NAME TRANSPORT SERVERKIND SECONDCLIENTKIND [CLIENT
 			done
 			echo "$name: the server's invite: ${invite:-none in its log}"
 		fi
-		copy_args=$invite run_copy "$name/client" "$c1_ns" $opence_chupa "$c1_ip" "$broker_address" $(client_env $opence_chupa "$transport" $((41 + pairs)))
-		mine="$mine $last_pid"
-		sleep 4
+		if [ "${XPPC_TWO_COPIES:-0}" != 1 ]; then
+			copy_args=$invite run_copy "$name/client" "$c1_ns" $opence_chupa "$c1_ip" "$broker_address" $(client_env $opence_chupa "$transport" $((41 + pairs)))
+			mine="$mine $last_pid"
+			sleep 4
+		fi
 		copy_args=$invite run_copy "$name/client2" "$c2_ns" "$clientkind" "$c2_ip" "$broker_address" \
 			$(client_env "$clientkind" "$transport" $((43 + pairs))) $extra
 		mine="$mine $last_pid"
@@ -924,6 +945,7 @@ pair_server() { # pair_server NAME TRANSPORT SERVERKIND SECONDCLIENTKIND [CLIENT
 	pids="$pids $!"
 	pair_pids="${pair_pids:-} $!"
 	pairs=$((pairs + 1))
+	[ "${XPPC_TWO_COPIES:-0}" != 1 ] || wait "$!" 2>/dev/null
 }
 wait_pairs() { for p in $pair_pids; do wait "$p" 2>/dev/null; done; pair_pids=; }
 
@@ -931,7 +953,8 @@ wait_pairs() { for p in $pair_pids; do wait "$p" 2>/dev/null; done; pair_pids=; 
 # Its stage (the first failing one) in check_stage
 check_pair() {
 	local name=$1 kind=${2:-direction} args rc
-	args="--host $out/$name/host --client $out/$name/client"
+	args="--host $out/$name/host"
+	[ -d "$out/$name/client" ] && args="$args --client $out/$name/client"
 	if [ "$kind" = server ]; then
 		args="$args --client $out/$name/client2"
 	elif [ -d "$out/$name/back" ] && [ -d "$out/$name/late" ]; then
@@ -1184,43 +1207,148 @@ opencehost)
 	fi
 	echo "--- the brokers: what each kind of client published and subscribed to (hceu: OpenCE's topics, hcev: ours)"; broker_topics
 	;;
+opencerefuse)
+	# (docs/opence-net41-spec.md T6, T7: a dedicated server of 41 keeping our
+	# client out, by its own settings. Our client is told in words, once: one
+	# join request, no second by itself)
+	refuse_case() { # refuse_case NAME CODE TEXT SERVERENV [BLOCK]
+		local name=lan-refuse-$1
+		server_extra="HALO_SERVER_AUTO_UPDATE=off HALO_SERVER_VPN_CHECK_LAN=true $4" server_vpn_block=${5:-} \
+			pair_server "$name" lan openceserver ours; : > "$out/$name/server"
+		refuse_names="${refuse_names:-} $name:$2:$3"
+	}
+	server_seconds=${XPPC_REFUSE_SECONDS:-50} XPPC_SERVER_END_AT=45
+	refuse_case link 8 "VPN_or_datacenter" "HALO_SERVER_VPN_POLICY=link" 192.168.0.0/16
+	refuse_case block 9 "VPN_or_datacenter" "HALO_SERVER_VPN_POLICY=block" 192.168.0.0/16
+	refuse_case closed 9 "VPN_or_datacenter" "HALO_SERVER_VPN_POLICY=link HALO_SERVER_VPN_FAIL=closed"
+	wait_pairs
+	for entry in $refuse_names; do
+		name=${entry%%:*} rest=${entry#*:} code=${rest%%:*} words=${rest#*:}
+		words=${words//_/ }
+		log=$out/$name/client2/run.log debug=$out/$name/client2/data/debug.txt
+		sent=$(grep -ac "sent a join request of 346 bytes" "$debug" 2>/dev/null)
+		told=$(grep -ac "unable to join game: reason= #$code/vpn" "$debug" 2>/dev/null)
+		said=$(cat "$log" "$debug" 2>/dev/null | grep -ac "$words")
+		echo "--- $name: join requests $sent, reason #$code logged $told, the words said $said"
+		grep -ah "unable to join game\|VPN or datacenter" "$log" "$debug" 2>/dev/null | cut -c1-140 | sort | uniq -c | head -4 | sed 's/^/  /'
+		if [ "${sent:-0}" = 1 ] && [ "${told:-0}" -ge 1 ] && [ "${said:-0}" -ge 1 ]; then
+			our_results="$our_results $name:pass"
+		else
+			our_results="$our_results $name:sent-$sent-told-$told-said-$said"
+		fi
+	done
+	;;
+crossstandin)
+	# (docs/opence-net41-spec.md T9, T11, T12, T13: what no setting of a real
+	# OpenCE host of 41 gives: our own build as a stand-in host announcing 41,
+	# its record, refusals or King state made hostile by test-only settings,
+	# and our client joining it)
+	stand_in="HALO_TEST_CROSSPLAY_HOST=1 HALO_TEST_CROSSPLAY_HOST_VERSION=41"
+	seconds=${XPPC_STANDIN_SECONDS:-45}
+	standin_case() { # standin_case NAME HOSTENV [HOSTGAME]
+		host_extra="$stand_in $2" host_variants=${3:-slayer} pair "lan-$1" lan ours ours
+	}
+	for code in 10 11 12 13 14 255 65535; do
+		standin_case "refuse$code" "HALO_TEST_HOST_REFUSE=$code HALO_TEST_RECORD_FURTHER=0:0:0"
+	done
+	standin_case "bit8" "HALO_TEST_RECORD_FURTHER=8:0:0"
+	standin_case "reserved11" "HALO_TEST_RECORD_FURTHER=0:0:1"
+	standin_case "force2" "HALO_TEST_RECORD_FURTHER=0:2:0"
+	standin_case "force1" "HALO_TEST_RECORD_FURTHER=0:1:0"
+	standin_case "bit4" "HALO_TEST_RECORD_FURTHER=4:1:0"
+	for count in 1 4 0; do
+		standin_case "king$count" "HALO_TEST_RECORD_FURTHER=0:0:0 HALO_TEST_KING_TAIL=$count" king
+	done
+	for count in 5 -1; do
+		standin_case "king$count" "HALO_TEST_RECORD_FURTHER=0:0:0 HALO_TEST_KING_TAIL=$count" king
+	done
+	wait_pairs
+	standin_result() { # standin_result NAME GOOD: GOOD 1 passed
+		[ "$2" = 1 ] && our_results="$our_results $1:pass" || our_results="$our_results $1:failed"
+	}
+	for code in 10 11 12 13 14 255 65535; do
+		name=lan-refuse$code debug=$out/$name/client/data/debug.txt log=$out/$name/client/run.log
+		sent=$(grep -ac "sent a join request of 346 bytes" "$debug" 2>/dev/null)
+		told=$(grep -ac "unable to join game: reason= #$code/" "$debug" 2>/dev/null)
+		case $code in
+		10|11|12) words="could not check a Discord link" ;;
+		13) words="too many players from your address" ;;
+		*) words= ;;
+		esac
+		said=$(cat "$log" "$debug" 2>/dev/null | grep -ac "${words:-could not check a Discord link\\|too many players}")
+		echo "--- $name: join requests $sent, reason logged $told, words said $said"
+		good=0
+		if [ "${sent:-0}" = 1 ] && [ "${told:-0}" -ge 1 ]; then
+			if [ -n "$words" ]; then [ "${said:-0}" -ge 1 ] && good=1; else [ "${said:-0}" = 0 ] && good=1; fi
+		fi
+		standin_result "$name" $good
+	done
+	for name in lan-bit8 lan-reserved11 lan-force2; do
+		log=$out/$name/client/run.log debug=$out/$name/client/data/debug.txt
+		refused=$(cat "$log" "$debug" 2>/dev/null | grep -ac "refused the host's game settings")
+		echo "--- $name: refused the record $refused"
+		grep -ah "refused the host's game settings" "$log" "$debug" 2>/dev/null | head -1 | cut -c1-150 | sed 's/^/  /'
+		[ "${refused:-0}" -ge 1 ] && standin_result "$name" 1 || standin_result "$name" 0
+	done
+	for name in lan-force1 lan-bit4 lan-king1 lan-king4 lan-king0; do
+		log=$out/$name/client/run.log debug=$out/$name/client/data/debug.txt
+		refused=$(cat "$log" "$debug" 2>/dev/null | grep -ac "refused the host's game settings")
+		ticks=$(grep -ac "network test: tick" "$log" 2>/dev/null)
+		over=$(grep -ac "network test: tick .*| game over\|game over" "$log" 2>/dev/null)
+		echo "--- $name: record refused $refused, ticks logged $ticks, game-over lines $over"
+		[ "${refused:-0}" = 0 ] && [ "${ticks:-0}" -ge 5 ] && standin_result "$name" 1 || standin_result "$name" 0
+	done
+	for name in lan-king1 lan-king4 lan-king0 lan-king5 lan-king-1; do
+		debug=$out/$name/client/data/debug.txt
+		state=$(grep -ac "refused a host's King state" "$debug" 2>/dev/null)
+		echo "--- $name: King states refused $state"
+		grep -a "network test: tick" "$out/$name/host/run.log" 2>/dev/null | tail -1 | cut -c1-170 | sed 's/^/  host: /'
+		grep -a "network test: tick" "$out/$name/client/run.log" 2>/dev/null | tail -1 | cut -c1-170 | sed 's/^/  client: /'
+		case $name in
+		lan-king5|lan-king-1) [ "${state:-0}" -ge 1 ] && standin_result "$name" 1 || standin_result "$name" 0 ;;
+		*) [ "${state:-0}" = 0 ] && standin_result "$name-state" 1 || standin_result "$name-state" 0 ;;
+		esac
+	done
+	;;
 crossversion)
 	# (docs/crossplay.md 10.13: the table made here with the test key, the
 	# way the owner makes the real one; our copies read the OpenCE host's 39
-	# as 40, a version no build of ours has)
+	# as 42, a version no build of ours has, which a table joins by 39's rules
+	# as if a host of 42 were one of 39's; so a real 39 takes the longer join
+	# request a host announcing 42 gets)
 	table_dir=$out/netversions
 	mkdir -p "$table_dir" "$out/no-netversions"
 	python3 "$root/tools/release/sign_netversions.py" --test --key "$XPPC_NETVERSIONS_KEY" \
-		--table "$table_dir/netversions.txt" --join 40:39 > "$out/sign_netversions.log" 2>&1 ||
+		--table "$table_dir/netversions.txt" --join 42:39 > "$out/sign_netversions.log" 2>&1 ||
 		{ echo "BROKEN ($mode): sign_netversions.py failed"; cat "$out/sign_netversions.log"; exit 2; }
 	cat "$table_dir/netversions.txt.sig" "$table_dir/netversions.txt" > "$table_dir/netversions.kept"
-	# (XPPC_HEARD= with XPPC_OPENCE an OpenCE really built as 40: nothing rewritten)
-	heard=${XPPC_HEARD-HALO_TEST_VERSION_HEARD=39:40}
+	# (XPPC_HEARD= with XPPC_OPENCE an OpenCE really built as 42: nothing rewritten)
+	heard=${XPPC_HEARD-HALO_TEST_VERSION_HEARD=39:42}
 	control lan-opence-opence && pair lan-opence-opence lan opence opence
-	test_names="lan-opence-ours-v40 net-opence-ours-v40"
-	pair lan-opence-ours-v40 lan opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$table_dir"
-	pair net-opence-ours-v40 net opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$table_dir"
-	pair lan-opence-ours-v40-none lan opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$out/no-netversions"
-	pair net-opence-ours-v40-none net opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$out/no-netversions"
+	test_names="lan-opence-ours-v42 net-opence-ours-v42"
+	pair lan-opence-ours-v42 lan opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$table_dir"
+	pair net-opence-ours-v42 net opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$table_dir"
+	pair lan-opence-ours-v42-none lan opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$out/no-netversions"
+	pair net-opence-ours-v42-none net opence ours "$heard HALO_TEST_NETVERSIONS_FOLDER=$out/no-netversions"
 	run_our_modes
-	for name in lan-opence-ours-v40 net-opence-ours-v40; do
+	for name in lan-opence-ours-v42 net-opence-ours-v42; do
 		clientlog=$out/$name/client/run.log
-		taken=$(grep -ac "netversions: the kept table .* taken: version 1, 1 rows; the crossplay wire joins 29, 32, 38, 39 and 40" "$clientlog" 2>/dev/null)
-		rules=$(grep -ac "network version 40, played by 39's rules (the crossplay version table 1)" "$clientlog" 2>/dev/null)
-		echo "--- $name: the table taken ${taken:-0}, 40 played by 39's rules ${rules:-0}"
-		grep -ah "netversions:\|network version 40" "$clientlog" 2>/dev/null | sed 's/^[0-9.]* [0-9:]*  //' | sort | uniq -c | head -6 | sed 's/^/  /'
+		taken=$(grep -ac "netversions: the kept table .* taken: version 1, 1 rows; the crossplay wire joins 29, 32, 38, 39, 40, 41 and 42" "$clientlog" 2>/dev/null)
+		rules=$(grep -ac "network version 42, played by 39's rules (the crossplay version table 1)" "$clientlog" 2>/dev/null)
+		echo "--- $name: the table taken ${taken:-0}, 42 played by 39's rules ${rules:-0}"
+		grep -ah "netversions:\|network version 42" "$clientlog" 2>/dev/null | sed 's/^[0-9.]* [0-9:]*  //' | sort | uniq -c | head -6 | sed 's/^/  /'
 		[ "${taken:-0}" -ge 1 ] && [ "${rules:-0}" -ge 1 ] || our_results="$our_results $name-table:taken-$taken-rules-$rules"
 	done
-	for name in lan-opence-ours-v40-none net-opence-ours-v40-none; do
+	for name in lan-opence-ours-v42-none net-opence-ours-v42-none; do
 		hostlog=$out/$name/host/run.log clientlog=$out/$name/client/run.log clientdebug=$out/$name/client/data/debug.txt
 		second=$(grep -ac "network test: player 1 is named" "$hostlog" 2>/dev/null)
-		played=$(grep -ac "the crossplay wire (.*network version 40" "$clientlog" 2>/dev/null)
+		played=$(grep -ac "the crossplay wire (.*network version 42" "$clientlog" 2>/dev/null)
 		case $name in
 		lan-*) said=$(cat "$clientlog" "$clientdebug" 2>/dev/null |
-			grep -ac "not joining a host of network version 40 (crossplay: this machine joins $our_versions): a newer PC build") ;;
-		*) said=$(grep -ac "of another version: network version 40 on the crossplay wire (this build joins $our_versions there)" "$clientlog" 2>/dev/null) ;;
+			grep -ac "not joining a host of network version 42 (crossplay: this machine joins $our_versions): a newer PC build") ;;
+		*) said=$(grep -ac "of another version: network version 42 on the crossplay wire (this build joins $our_versions there)" "$clientlog" 2>/dev/null) ;;
 		esac
-		echo "--- $name: a second player on the host ${second:-0}, the crossplay wire at 40 ${played:-0}, refusal said ${said:-0}"
+		echo "--- $name: a second player on the host ${second:-0}, the crossplay wire at 42 ${played:-0}, refusal said ${said:-0}"
 		if [ "${second:-0}" = 0 ] && [ "${played:-0}" = 0 ] && [ "${said:-0}" -ge 1 ]; then
 			our_results="$our_results $name:pass"
 		else

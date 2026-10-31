@@ -11,8 +11,8 @@
 # (unshare -rn: loopback and a dummy LAN, nothing outside).
 #
 #   none        no table published (404): the built-in list, nothing kept
-#   good        a table (join 40 by 39's rules, refuse 50): taken, kept as
-#               served, the wire joins 29, 32, 38, 39 and 40; two requests,
+#   good        a table (join 42 by 39's rules, refuse 50): taken, kept as
+#               served, the wire joins 29, 32, 38, 39, 40, 41 and 42; two requests,
 #               the fixed User-Agent, no cookie
 #   kept        the kept table taken at start; the same version fetched: not
 #               newer, kept as it was
@@ -21,8 +21,8 @@
 #   badsig      a table changed after signing: not taken, nothing kept
 #   otherkey    a table signed with another key: not taken
 #   garbage     bytes that are no table and no signature: not taken
-#   unknownwire join 41 by 41's rules (a newer build's) beside join 40: taken,
-#               41 not joined, 40 joined
+#   unknownwire join 44 by 44's rules (a newer build's) beside join 42: taken,
+#               44 not joined, 42 joined
 #   big         a 100000-byte answer: refused by its size
 #   chunked     no Content-Length: refused
 #   redirect    the files behind a redirect on this machine (as GitHub's
@@ -85,19 +85,19 @@ sign() { # FOLDER ARGUMENTS...: a table made or changed in FOLDER with the test 
 	python3 "$root/tools/release/sign_netversions.py" --test --key "$key" --table "$folder/netversions.txt" "$@" \
 		>> "$out/sign.log" 2>&1 || { echo "BROKEN: sign_netversions.py $*"; exit 2; }
 }
-# the tables served (version 5: join 40 by 39's rules, refuse 50; 6: and
-# join 45 by 38's; 7: join 41 by 41's)
-sign "$out/served/v5" --join 40:39 --version 4
+# the tables served (version 5: join 42 by 39's rules, refuse 50; 6: and
+# join 45 by 38's; 7: join 44 by 44's)
+sign "$out/served/v5" --join 42:39 --version 4
 sign "$out/served/v5" --refuse 50 "OpenCE 50 changed the record"
 cp -r "$out/served/v5" "$out/served/v6"
 sign "$out/served/v6" --join 45:38
 cp -r "$out/served/v5" "$out/served/v7"
-sign "$out/served/v7" --join 41:41 --allow-newer-rules --version 7
+sign "$out/served/v7" --join 44:44 --allow-newer-rules --version 7
 mkdir -p "$out/served/badsig" "$out/served/otherkey" "$out/served/garbage" "$out/served/none"
 cp "$out/served/v5/"* "$out/served/badsig/"
 sed -i 's/rules 39/rules 38/' "$out/served/badsig/netversions.txt"
 python3 "$root/tools/release/sign_netversions.py" --test --key "$out/keys/other.key" \
-	--table "$out/served/otherkey/netversions.txt" --join 40:39 --version 9 >> "$out/sign.log" 2>&1
+	--table "$out/served/otherkey/netversions.txt" --join 42:39 --version 9 >> "$out/sign.log" 2>&1
 head -c 300 /dev/urandom > "$out/served/garbage/netversions.txt"
 head -c 129 /dev/urandom > "$out/served/garbage/netversions.txt.sig"
 grep -q "^version 5$" "$out/served/v5/netversions.txt" && grep -q "^version 6$" "$out/served/v6/netversions.txt" &&
@@ -193,8 +193,8 @@ for case in $cases; do
 		has none "could not fetch the table: the server answered 404"
 		nothing_kept none ;;
 	good)
-		has good "the fetched table taken: version 5, 2 rows; the crossplay wire joins 29, 32, 38, 39 and 40"
-		has good "netversions:   join 40 by 39's rules"
+		has good "the fetched table taken: version 5, 2 rows; the crossplay wire joins 29, 32, 38, 39, 40, 41 and 42"
+		has good "netversions:   join 42 by 39's rules"
 		has good "netversions:   refuse 50: OpenCE 50 changed the record"
 		kept_is good v5
 		[ "$(requests files/v5/netversions.txt)" -ge 1 ] && [ "$(requests files/v5/netversions.txt.sig)" -ge 1 ] ||
@@ -202,12 +202,12 @@ for case in $cases; do
 		grep "^/files/v5/" "$out/requests" | grep -v " HaloCEVita/$version$" | grep -q . &&
 			fail good "a request with another User-Agent or a cookie" ;;
 	kept)
-		has kept "the kept table .*/kept/netversions.kept taken: version 5, 2 rows; the crossplay wire joins 29, 32, 38, 39 and 40"
+		has kept "the kept table .*/kept/netversions.kept taken: version 5, 2 rows; the crossplay wire joins 29, 32, 38, 39, 40, 41 and 42"
 		has kept "the fetched table is not taken: version 5 is not newer than 5"
 		kept_is kept v5 ;;
 	newer)
 		has newer "the kept table .* taken: version 5"
-		has newer "the fetched table taken: version 6, 3 rows; the crossplay wire joins 29, 32, 38, 39, 40 and 45"
+		has newer "the fetched table taken: version 6, 3 rows; the crossplay wire joins 29, 32, 38, 39, 40, 41, 42 and 45"
 		kept_is newer v6 ;;
 	older)
 		has older "the kept table .* taken: version 6"
@@ -222,8 +222,8 @@ for case in $cases; do
 		hasnt garbage "table taken"
 		nothing_kept garbage ;;
 	unknownwire)
-		has unknownwire "the fetched table taken: version 7, 3 rows; the crossplay wire joins 29, 32, 38, 39 and 40$"
-		has unknownwire "join 41 by 41's rules: not rules this build has (a newer build's), not joined"
+		has unknownwire "the fetched table taken: version 7, 3 rows; the crossplay wire joins 29, 32, 38, 39, 40, 41 and 42$"
+		has unknownwire "join 44 by 44's rules: not rules this build has (a newer build's), not joined"
 		kept_is unknownwire v7 ;;
 	big)
 		has big "could not fetch the table: the file is too large (100000 bytes)"

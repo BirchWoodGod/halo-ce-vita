@@ -83,6 +83,14 @@ co-op switch of OpenCE's 41: docs/opence-net41-spec.md 3.4). A label from the
 host, read only to leave out a hint */
 boolean network_game_record_host_is_dedicated(
 	void);
+/* (automated tests only, never in release builds) HALO_TEST_RECORD_FURTHER=
+co-op byte:further byte 10:further byte 11: this host, a stand-in for a PC
+host of 35 or more, sends its record of size bytes in OpenCE's form with
+those values; its new size. Otherwise size */
+long network_game_record_test_stand_in(
+	void *record,
+	long size,
+	long capacity);
 /* whether a host's King state of size bytes is one to take: exactly
 stock_size, or, in a game of 39 or more (multi_hill), a Multi-Hill game's 20
 bytes more with an extra hill count of 0 to 4 (docs/opence-net41-spec.md

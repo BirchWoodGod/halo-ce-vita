@@ -3706,6 +3706,8 @@ static boolean network_game_client_idle_joining(
 						NULL,
 						1))
 					{
+						network_event("sent a join request of %d bytes", (int)sizeof(join_game_request) +
+							network_wire_join_request_padding());
 						SET_FLAG(
 							client->flags,
 							_network_game_client_join_request_sent_bit,

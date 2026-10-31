@@ -87,8 +87,10 @@ symbols in this file:
 #include "game/game_engine_place.h"
 #include "game/players.h"
 #include "main/console.h"
+#include "networking/network_messages.h"
 #include "network_game_record.h" /* port: port/linux/game/network_game_record.c */
 #include "network_wire.h"
+#include <stdlib.h>
 #include "math/geometry.h"
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_geometry.h"
@@ -1143,6 +1145,24 @@ long game_engine_king_write_network_state(
 	if (size < (long)sizeof(king_globals))
 		return 0;
 	csmemcpy(buffer, &king_globals, sizeof(king_globals));
+#ifndef HALO_RELEASE
+	/* (automated tests only: a stand-in for a Multi-Hill host of OpenCE's,
+	HALO_TEST_KING_TAIL=the extra hill count) */
+	{
+		const char *value = getenv("HALO_TEST_KING_TAIL");
+
+		if (value && value[0] && size >= (long)sizeof(king_globals) + 20)
+		{
+			long tail[5] = { 0 };
+
+			tail[0] = strtol(value, NULL, 10);
+			tail[1] = -1;
+			tail[2] = 0x7FFFFFFF;
+			csmemcpy(buffer + sizeof(king_globals), tail, sizeof(tail));
+			return sizeof(king_globals) + sizeof(tail);
+		}
+	}
+#endif
 	return sizeof(king_globals);
 }
 
@@ -1213,7 +1233,14 @@ boolean game_engine_king_read_network_state(
 	it is drawn; the others' ids are read by nothing here, and the host keeps
 	the score whatever hills a client sees */
 	if (!network_game_record_king_state_valid(buffer, size, (long)sizeof(state), network_wire_v39_rules()))
+	{
+		/* (one line in 64: a host may send them for ever) */
+		static long refused_count = 0;
+
+		if (!(refused_count++ & 63))
+			network_event("refused a host's King state of %ld bytes", size);
 		return FALSE;
+	}
 	csmemcpy(&state, buffer, sizeof(state));
 	for (team_index = 0; team_index < (long)NUMBEROF(state.score); team_index++)
 	{

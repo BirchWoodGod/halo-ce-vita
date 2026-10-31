@@ -360,8 +360,8 @@ int main(void)
 				(int)sizeof(error)) == NETVERSION_TABLE_OK, "sign_netversions.py's table: taken");
 			check(table.version == strtoul(getenv("NETVERSIONS_TEST_FILE_VERSION") ? getenv("NETVERSIONS_TEST_FILE_VERSION") :
 				"0", NULL, 10), "... at the version the tool said");
-			row = netversion_table_find(&table, 40);
-			check(row && row->kind == NETVERSION_ROW_JOIN && row->rules == 39, "... join 40 rules 39");
+			row = netversion_table_find(&table, 42);
+			check(row && row->kind == NETVERSION_ROW_JOIN && row->rules == 39, "... join 42 rules 39");
 			row = netversion_table_find(&table, 50);
 			check(row && row->kind == NETVERSION_ROW_REFUSE && !strcmp(row->reason, "OpenCE 50 changed the record"),
 				"... refuse 50 with its reason");

@@ -15,6 +15,10 @@ The game settings record on the legacy Vita wire and on the crossplay wire
 #include "network_wire.h"
 #include "halo_port_limits.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 /* ---------- the layouts */
 
 typedef char network_game_record_options_offset_assert[
@@ -241,6 +245,34 @@ static char const *further_options_game_type(
 	if (further[FURTHER_OPTION_HARDCORE])
 		return "OpenCE's Hardcore game type, which this build does not play";
 	return NULL;
+}
+
+long network_game_record_test_stand_in(
+	void *record,
+	long size,
+	long capacity)
+{
+#ifndef HALO_RELEASE
+	const char *value = getenv("HALO_TEST_RECORD_FURTHER");
+	unsigned int cooperative, option_10, option_11;
+	byte *bytes = (byte *)record;
+	long local = HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET;
+
+	if (value && network_wire_crossplay() && size + FURTHER_OPTIONS_SIZE <= capacity &&
+		sscanf(value, "%u:%u:%u", &cooperative, &option_10, &option_11) == 3)
+	{
+		memmove(bytes + local + FURTHER_OPTIONS_SIZE, bytes + local, (size_t)(size - local));
+		memset(bytes + local, 0, FURTHER_OPTIONS_SIZE);
+		bytes[offsetof(struct network_game, cooperative_flags)] = (byte)cooperative;
+		bytes[local + FURTHER_OPTION_FORCE_TEAM_SPAWNS] = (byte)option_10;
+		bytes[local + FURTHER_OPTION_RESERVED] = (byte)option_11;
+		return size + FURTHER_OPTIONS_SIZE;
+	}
+#else
+	(void)record;
+	(void)capacity;
+#endif
+	return size;
 }
 
 boolean network_game_record_king_state_valid(
