@@ -27,6 +27,8 @@ const char *config_string(const char *name);
 void config_folder(char *path, size_t size);
 /* a whole file, NUL terminated, or NULL; free() it */
 char *config_file_read(const char *path, size_t *size);
+/* a file's size, or -1 when it cannot be told: to refuse one before it is read */
+long long config_file_size(const char *path);
 /* a whole file written (replaced); 1 on success */
 int config_file_write(const char *path, const char *text, size_t size);
 /* ... whole or not at all, on every system: the old file or the new one is

@@ -2670,6 +2670,32 @@ class PcPackage:
         return sum(item.size for item in self.files)
 
 
+class _ArchiveTooLarge(tarfile.TarError):
+    pass
+
+
+class _BoundedReader:
+    """A tar's decompressed stream, cut off at `limit` bytes: a hostile
+    .tar.gz can unpack to far more than a PC build while it is only listed."""
+
+    def __init__(self, stream, limit: int):
+        self.stream, self.limit = stream, limit
+
+    def read(self, size: int = -1) -> bytes:
+        left = self.limit - self.stream.tell()
+        if left <= 0:
+            raise _ArchiveTooLarge("it unpacks to more than a PC build")
+        return self.stream.read(left if size < 0 else min(size, left))
+
+    def seek(self, offset: int, whence: int = os.SEEK_SET) -> int:
+        if whence == os.SEEK_SET and offset > self.limit:
+            raise _ArchiveTooLarge("it unpacks to more than a PC build")
+        return self.stream.seek(offset, whence)
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
 def _archive_entries(path: str) -> Tuple[str, List[Tuple[str, int, bool, bool]]]:
     """The archive's kind and its files: (name, size, is a plain file or
     folder, executable). Folders are left out."""
@@ -2685,6 +2711,8 @@ def _archive_entries(path: str) -> Tuple[str, List[Tuple[str, int, bool, bool]]]
         return "zip", entries
     if tarfile.is_tarfile(path):
         with tarfile.open(path, "r:*") as archive:
+            # (a header and padding for each entry, on top of the files)
+            archive.fileobj = _BoundedReader(archive.fileobj, PACKAGE_SIZE_MAXIMUM + 4096 * (PACKAGE_ENTRIES_MAXIMUM + 2))
             for info in archive:
                 if len(entries) > PACKAGE_ENTRIES_MAXIMUM:
                     break
@@ -2897,6 +2925,7 @@ def download_pc_build(folder: str, progress: Progress = _no_progress, log: Calla
     what comes back is safe to install and to start. Raises InstallerError
     and leaves no archive otherwise."""
     system = _pc_builds_here_first()[0][0]
+    partial = ""
     try:
         download = signed_pc_download(installed)
         log("Signed by the release key: PC build %s for %s, %s" % (download.version, system,
@@ -2909,17 +2938,22 @@ def download_pc_build(folder: str, progress: Progress = _no_progress, log: Calla
         digest = hashlib.sha512()
         done = 0
         url = "%s/download/v%s/%s" % (RELEASE_DOWNLOADS, download.version, download.file)
-        with open_download(url) as answer, open(partial, "wb") as file:
-            while True:
-                block = answer.read(1 << 20)
-                if not block:
-                    break
-                done += len(block)
-                if done > download.size:
-                    raise InstallerError("The download is longer than the release's list says, so Setup stopped.")
-                digest.update(block)
-                file.write(block)
-                progress(download.file, done, download.size)
+        try:
+            with open_download(url) as answer, open(partial, "wb") as file:
+                while True:
+                    block = answer.read(1 << 20)
+                    if not block:
+                        break
+                    done += len(block)
+                    if done > download.size:
+                        raise InstallerError("The download is longer than the release's list says, so Setup stopped.")
+                    digest.update(block)
+                    file.write(block)
+                    progress(download.file, done, download.size)
+        except BaseException:
+            if os.path.exists(partial):
+                os.remove(partial)
+            raise
     except urllib.error.HTTPError as error:
         if error.code == 404:
             raise InstallerError("This release has no signed PC build to download yet. Get the archive from "

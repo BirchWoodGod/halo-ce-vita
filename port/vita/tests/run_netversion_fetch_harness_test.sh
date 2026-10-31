@@ -31,6 +31,7 @@
 #   keptbad     a kept table changed on the card: not taken at start (the
 #               built-in list), then the fetched one taken
 #   keptcut     a kept file cut short (a signature, no table): not taken, the built-in list
+#   kepthuge    a kept file larger than any table: refused by its size, unread
 #   off         network.crossplay_updates false: no request; the kept table
 #               still taken
 #   offline     internet play off (network.online false): no request
@@ -59,7 +60,7 @@ data=${HALO_TEST_DATA:-$root/../data2276}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netversion_fetch_test.$$}
 key=${NETVERSIONS_TEST_KEY:-}
 . "$here/test_out.sh"
-cases=${*:-none good kept newer older badsig otherkey garbage unknownwire big chunked redirect elsewhere keptbad keptcut off offline autooff daily}
+cases=${*:-none good kept newer older badsig otherkey garbage unknownwire big chunked redirect elsewhere keptbad keptcut kepthuge off offline autooff daily}
 parallel=${NETVERSIONS_PARALLEL:-6}
 [ -n "$key" ] && [ -r "$key" ] || { echo "SKIP: wants NETVERSIONS_TEST_KEY (a test key: make_update_key.py)"; exit 0; }
 public=$(sed -n 's/^# public key: //p' "$key")
@@ -160,6 +161,8 @@ start_case() { # CASE: its run, in the background
 		sed -i 's/^version 5$/version 9/' "$out/keptbad-seed/netversions.txt" && run keptbad 25 files/v6 "$out/keptbad-seed" ;;
 	keptcut) mkdir -p "$out/keptcut-seed" && cp "$out/served/v5/"* "$out/keptcut-seed/" &&
 		: > "$out/keptcut-seed/netversions.txt" && run keptcut 25 files/none "$out/keptcut-seed" ;;
+	kepthuge) mkdir -p "$out/kepthuge-seed" && cp "$out/served/v5/"* "$out/kepthuge-seed/" &&
+		head -c 100000 /dev/zero >> "$out/kepthuge-seed/netversions.txt" && run kepthuge 25 files/none "$out/kepthuge-seed" ;;
 	off) run off 25 files/v6 "$out/served/v5" HALO_NET_CROSSPLAY_UPDATES=false ;;
 	offline) run offline 25 files/v6 "" HALO_NET_ONLINE=false ;;
 	autooff) run autooff 25 files/v6 "" HALO_UPDATE_AUTO=false ;;
@@ -199,7 +202,7 @@ for case in $cases; do
 		grep "^/files/v5/" "$out/requests" | grep -v " HaloCEVita/$version$" | grep -q . &&
 			fail good "a request with another User-Agent or a cookie" ;;
 	kept)
-		has kept "the kept table .*/kept/netversions.txt taken: version 5, 2 rows; the crossplay wire joins 29, 32, 38, 39 and 40"
+		has kept "the kept table .*/kept/netversions.kept taken: version 5, 2 rows; the crossplay wire joins 29, 32, 38, 39 and 40"
 		has kept "the fetched table is not taken: version 5 is not newer than 5"
 		kept_is kept v5 ;;
 	newer)
@@ -243,6 +246,9 @@ for case in $cases; do
 	keptcut)
 		has keptcut "the kept table .* not taken: "
 		has keptcut "the built-in list; $builtin" ;;
+	kepthuge)
+		has kepthuge "is larger than any table can be: not read"
+		has kepthuge "the built-in list; $builtin" ;;
 	off)
 		has off "the kept table .* taken: version 5"
 		has off "not fetching the table: network.crossplay_updates is off"

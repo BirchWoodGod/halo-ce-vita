@@ -518,6 +518,40 @@ def test_a_frozen_program_adds_nothing_to_its_import_path(tmp_path):
         assert out.strip() == added
 
 
+def test_a_download_stopped_part_way_leaves_nothing(tmp_path, release):
+    release.files[release.archive_url] += b"longer than signed"
+    with pytest.raises(hcv.InstallerError, match="longer"):
+        fetch(tmp_path)
+    assert os.listdir(str(tmp_path / "download")) == []
+
+
+def test_listing_a_tar_gz_stops_at_what_a_build_can_be(tmp_path, monkeypatch):
+    """A small file that unpacks to far more: refused while it is listed, not
+    read to its end."""
+    import gzip
+    import tarfile
+    path = tmp_path / "bomb.tar.gz"
+    with gzip.open(str(path), "wb", compresslevel=1) as stream, tarfile.open(fileobj=stream, mode="w") as archive:
+        for index in range(4):
+            info = tarfile.TarInfo("build/linux/%s" % ("halo" if not index else "file%d" % index))
+            info.size = 8 << 20
+            archive.addfile(info, io.BytesIO(bytes(info.size)))
+    assert os.path.getsize(str(path)) < 1 << 20
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(hcv, "PACKAGE_SIZE_MAXIMUM", 1 << 20)
+    monkeypatch.setattr(hcv, "PACKAGE_ENTRIES_MAXIMUM", 8)
+    read = []
+    real = hcv.tarfile.TarFile.next
+
+    def counted(archive):
+        read.append(archive.fileobj.tell())
+        return real(archive)
+    monkeypatch.setattr(hcv.tarfile.TarFile, "next", counted)
+    with pytest.raises(hcv.InstallerError, match="more than a PC build"):
+        hcv.read_pc_package(str(path))
+    assert max(read) < 2 << 20
+
+
 # -- Launch: a checked unpack of this very run, and nothing beside it
 
 def verified_install(root, tmp_path, monkeypatch):

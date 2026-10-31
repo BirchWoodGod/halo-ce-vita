@@ -959,6 +959,27 @@ int config_file_replace(const char *path, const char *text, size_t size)
 #endif
 }
 
+long long config_file_size(const char *path)
+{
+#ifdef HALO_NOT_DESKTOP
+	struct posix_file_information information;
+
+	return posix_stat(path, &information) == 0 ?
+		(long long)((unsigned long long)information.size_high << 32 | information.size_low) : -1;
+#else
+	/* (not SDL_GetPathInfo: this file's -malign-double lays out its structure
+	otherwise than SDL's own build) */
+	SDL_IOStream *file = SDL_IOFromFile(path, "rb");
+	long long size;
+
+	if (!file)
+		return -1;
+	size = (long long)SDL_GetIOSize(file);
+	SDL_CloseIO(file);
+	return size;
+#endif
+}
+
 /* whether there is a file (or anything) at path */
 static int config_file_exists(const char *path)
 {

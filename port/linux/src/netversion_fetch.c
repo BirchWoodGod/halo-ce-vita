@@ -159,11 +159,20 @@ static int redirect_allowed(const char *from_url, const char *to_url)
 
 /* ---------- the table */
 
-/* a file of at most maximum bytes: its text (free() it) and size, or NULL */
+/* a file of at most maximum bytes: its text (free() it) and size, or NULL;
+one larger is not read at all (and a read that grew it, not kept) */
 static char *read_bounded(const char *path, size_t maximum, size_t *size)
 {
-	char *text = config_file_read(path, size);
+	long long known = config_file_size(path);
+	char *text;
 
+	if (known > (long long)maximum)
+	{
+		platform_log("netversions: %s is larger than any table can be: not read", path);
+		*size = 0;
+		return NULL;
+	}
+	text = config_file_read(path, size);
 	if (text && *size > maximum)
 	{
 		free(text);

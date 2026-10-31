@@ -699,7 +699,7 @@ What crossplay changes:
 | Cheats (speed, aimbot, god mode via host rules) | host | OpenCE v9 speed-hack kick and bans (ours); clients enforce the host's rules (v8, ours). Port votekick (G10) for mixed lobbies. Hardware ids are self-reported (they deter, they don't prove). |
 | Flooding | signalling, tunnel, host | Existing budgets (signalling 8-publish bucket, 256 askers; tunnel 2000 pkt/s on servers; 6 joins/min/address on servers). Recheck them against 128-slot PC clients joining 16-slot games. |
 | Spoofed datagrams | client | OpenCE's rule (datagrams attributed by source only; game messages in datagrams ignored) plus ours (spoofed virtual sources dropped, c87c7aff). |
-| Forged or rolled-back version table | table fetch | Ed25519 with two keys, serial monotonic, widen-only, size cap, kill switch. The private key is offline. |
+| Forged or rolled-back version table | table fetch | Ed25519 with the one release key, version only goes up, a per-release minimum in the binary, kept as one atomic file, size cap. A table selects built-in rules only, can refuse a version (never 32, what Vitas host; a kill switch stops honest hosts only, a hostile PC host can announce another version). The private key is offline. |
 | Chat or voice abuse from PC players | 1.1.1 | Chat stays ours-only (PC builds have none). Voice from PC players follows our defaults: off in public games, per-player mute, at most 4 decoded. |
 | Leaking addresses | signalling | Same as today: addresses go only to proven joiners. The relay hides the Vita's address only between our builds; PC peers see it. Note this in the setting's help. |
 
@@ -892,7 +892,7 @@ order follows the phases; tasks within a phase run in parallel up to the
 
 | Task | What | Days | Test |
 |---|---|---|---|
-| T10 Signed table | Fetch, cache, verify (Ed25519, two keys), widen-only, kill switch; key generation and signing script for the owner (offline); `HALO_CROSSPLAY_TABLE` override for tests | 4–5 | Unit + fuzz; netns serves a signed table from the test broker host over HTTP (local, no internet) |
+| T10 Signed table | Fetch, cache, verify (Ed25519, one key), kill switch; key generation and signing script for the owner (offline); `HALO_CROSSPLAY_TABLE` override for tests | 4–5 | Unit + fuzz; netns serves a signed table from the test broker host over HTTP (local, no internet) |
 | T11 Client guardrails | Refusals of section 6, browser badges (PC / Vita / dedicated), clear messages | 3–4 | netns `crossrefuse`: co-op refused, a second local player refused, missing map named (T3's text); `crossbig`: an OpenCE host of 128 joined after asking once (done Oct 11, 10.3) |
 | T12 Browser for PC games | List hceu games (OpenCE/Chupa/Damnation hosts and servers), passwords (Argon2id cost on Vita: measure), invite link entry; optionally halo.milenko.org's list (**owner decision**: a third-party service; ask its operator first) | 3–4 | netns `browseropence` |
 | T13 Votekick | Port OpenCE 3b20ef87 (78/79) | 3 | OpenCE harness test `votekick_count.c` ported; netns mixed vote |
