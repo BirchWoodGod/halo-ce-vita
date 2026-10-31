@@ -6640,6 +6640,151 @@ void ui_widget_port_pointer_drag(
 	ui_widget_port_pointer_state.dragging = dragging;
 }
 
+/* port: a finger dragged in the menus (the Vita's front screen, the tests'
+drags) moves the list it is on: past VITA_TAP_SLOP's distance, in the menus'
+pixels, it is a drag, never a tap or a highlight, and a row goes by for each
+row's height the finger goes. The port's lists move by themselves
+(browser_view_drag); the game's own step, as the d-pad, stopping at their
+ends where the d-pad would wrap. Any screen, any Menu style; the pad does as
+it did. A screen with a drag of its own says so
+(menu_functions_mouse_drag_own) */
+#define UI_TOUCH_DRAG_SLOP 21
+#define UI_TOUCH_DRAG_ROW 24
+#define UI_TOUCH_DRAG_MINIMUM_ROW 16
+#define UI_TOUCH_DRAG_MAXIMUM_ROW 64
+
+boolean menu_functions_mouse_drag_own(void);
+void browser_view_drag(int rows);
+int browser_view_drag_unclaimed(void);
+
+static struct
+{
+	boolean down;
+	boolean dragging;
+	boolean across;
+	short start;
+	short row;
+	long rows_done;
+} ui_touch_drag;
+
+/* whether a step of the d-pad would go on without wrapping to the other end */
+static boolean ui_touch_drag_can_step(
+	struct widget_instance *widget,
+	boolean forward)
+{
+	struct widget_instance *child;
+
+	if ((widget->type == _ui_widget_type_spinner_list || widget->type == _ui_widget_type_column_list) &&
+		widget->parameters.list.list_items && widget->parameters.list.number_of_items > 0)
+	{
+		return forward ? widget->parameters.list.selected_index + 1 < widget->parameters.list.number_of_items :
+			widget->parameters.list.selected_index > 0;
+	}
+	if (!widget->focused_child)
+		return TRUE;
+	if (forward)
+	{
+		for (child = widget->focused_child->next; child; child = child->next)
+		{
+			if (!child->disabled)
+				return TRUE;
+		}
+		return FALSE;
+	}
+	for (child = widget->child; child && child != widget->focused_child; child = child->next)
+	{
+		if (!child->disabled)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* (a frame after asking) the rows no list of the port's took: the d-pad's
+steps on the game's own list */
+static void ui_touch_drag_step(
+	struct widget_instance *widget)
+{
+	long rows = browser_view_drag_unclaimed();
+	short back, forward;
+
+	if (!rows || !widget)
+		return;
+	ui_mouse_list_directions(widget, &back, &forward);
+	/* (a step a frame, the rest asked for again; the end of the list ends
+	them) */
+	if (ui_mouse_press_count)
+	{
+		browser_view_drag((int)rows);
+		return;
+	}
+	if (!ui_touch_drag_can_step(widget, rows > 0))
+		return;
+	platform_log("menus: a drag's step %s", rows > 0 ? "on" : "back");
+	ui_mouse_press(rows > 0 ? forward : back);
+	browser_view_drag((int)(rows > 0 ? rows - 1 : rows + 1));
+}
+
+/* TRUE while a finger's moves are a drag's */
+static boolean ui_touch_drag_update(
+	struct halo_ui_pointer const *pointer,
+	boolean present)
+{
+	struct widget_instance *menu = ui_mouse_menu();
+	struct widget_instance *widget = menu ? ui_mouse_wheel_widget(menu) : NULL;
+	boolean dragging = ui_touch_drag.dragging;
+	short at;
+
+	if (ui_touch_drag.dragging)
+		ui_touch_drag_step(widget);
+	if (!present || !pointer->held || virtual_keyboard_active() || menu_functions_mouse_drag_own())
+	{
+		ui_touch_drag.down = FALSE;
+		ui_touch_drag.dragging = FALSE;
+		browser_view_drag_unclaimed();
+		return dragging;
+	}
+	if (!ui_touch_drag.down)
+	{
+		struct ui_mouse_target *under = ui_mouse_target_at(pointer->x, pointer->y);
+		short back = _widget_event_dpad_up, forward = _widget_event_dpad_down;
+
+		if (widget)
+			ui_mouse_list_directions(widget, &back, &forward);
+		ui_touch_drag.down = TRUE;
+		ui_touch_drag.dragging = FALSE;
+		ui_touch_drag.across = back == _widget_event_dpad_left;
+		ui_touch_drag.start = ui_touch_drag.across ? pointer->x : pointer->y;
+		ui_touch_drag.rows_done = 0;
+		/* (the row it came down on is the list's row height) */
+		ui_touch_drag.row = UI_TOUCH_DRAG_ROW;
+		if (under)
+		{
+			ui_touch_drag.row = (short)(ui_touch_drag.across ? under->bounds.x1 - under->bounds.x0 :
+				under->bounds.y1 - under->bounds.y0);
+			ui_touch_drag.row = PIN(ui_touch_drag.row, UI_TOUCH_DRAG_MINIMUM_ROW, UI_TOUCH_DRAG_MAXIMUM_ROW);
+		}
+		return FALSE;
+	}
+	at = ui_touch_drag.across ? pointer->x : pointer->y;
+	if (!ui_touch_drag.dragging && ABS(at - ui_touch_drag.start) > UI_TOUCH_DRAG_SLOP)
+	{
+		ui_touch_drag.dragging = TRUE;
+		platform_log("menus: a drag on the list (rows of %d)", (int)ui_touch_drag.row);
+	}
+	if (ui_touch_drag.dragging)
+	{
+		/* (the finger going up or left: on down the list) */
+		long rows = (ui_touch_drag.start - at) / ui_touch_drag.row;
+
+		if (rows != ui_touch_drag.rows_done)
+		{
+			browser_view_drag((int)(rows - ui_touch_drag.rows_done));
+			ui_touch_drag.rows_done = rows;
+		}
+	}
+	return ui_touch_drag.dragging;
+}
+
 /* the pointer's motion, clicks and wheel since the last frame, as the first
 player's controller events */
 static void ui_widgets_process_mouse(
@@ -6649,6 +6794,7 @@ static void ui_widgets_process_mouse(
 	struct ui_mouse_target *target;
 	short controller_index = 0;
 	boolean present = halo_ui_pointer_update(ui_mouse_menus_active(), &pointer);
+	boolean touch_dragging;
 
 	ui_widget_port_pointer_state.present = present;
 	ui_widget_port_pointer_state.held = present && pointer.held;
@@ -6657,11 +6803,24 @@ static void ui_widgets_process_mouse(
 		ui_widget_port_pointer_state.x = pointer.x;
 		ui_widget_port_pointer_state.y = pointer.y;
 	}
+	touch_dragging = ui_touch_drag_update(&pointer, present);
 	if (!present || virtual_keyboard_active())
 	{
 		ui_mouse_press_count = 0;
 		ui_mouse_hover_pending = FALSE;
 		ui_mouse_click_pending = FALSE;
+	}
+	else if (touch_dragging)
+	{
+		/* (a finger's drag: the list's rows move, nothing highlighted or
+		tapped by it; the steps a game's own list took, posted) */
+		ui_mouse_hover_pending = FALSE;
+		ui_mouse_click_pending = FALSE;
+		if (ui_mouse_press_count)
+		{
+			event_manager_post_button(controller_index, ui_mouse_presses[0]);
+			csmemmove(ui_mouse_presses, ui_mouse_presses + 1, --ui_mouse_press_count * sizeof(ui_mouse_presses[0]));
+		}
 	}
 	else if (ui_widget_port_pointer_state.dragging)
 	{

@@ -86,6 +86,15 @@ its password, its tag). Games of different hosts, the same name or not,
 are all kept. The new count; *lan_count the System Link rows left */
 int browser_list_merge_lan(struct p2p_lobby_entry *entries, int count, int *lan_count);
 
+/* a finger's drag in the menus (source/interface/ui_widget.c): rows to move
+the list on (the rows of the next list followed with the focus move that
+far, up to its ends, never wrapping, the row in focus staying where it is
+on the screen, so the choice moves with the list; a list that fits has
+nothing to move). browser_view_drag_unclaimed takes back what no such list
+took (the menus' own lists are stepped instead) */
+void browser_view_drag(int rows);
+int browser_view_drag_unclaimed(void);
+
 /* the view's first frame (the browser opened, or sorted again) */
 void browser_view_reset(struct browser_view *view);
 

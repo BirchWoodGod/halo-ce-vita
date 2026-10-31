@@ -3063,6 +3063,14 @@ static void forge_net_client_spawn(
 	platform_log("forge net: asked the host to spawn %s", forge_tag_leaf(tag_index));
 }
 
+/* (forge_touch.inc) whether the host is still to answer a grab, or its
+object is still to arrive */
+static boolean forge_net_grab_waiting(
+	void)
+{
+	return forge_net_client() && (forge_net.grant_pending || forge_net.grant_id != NONE);
+}
+
 static void forge_net_client_grab(
 	long object_index)
 {

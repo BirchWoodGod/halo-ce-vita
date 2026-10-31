@@ -22073,6 +22073,13 @@ static boolean mouse_on_screen(struct widget_instance *widget, char const *scree
 	return name && !strcmp(name, screen_tag);
 }
 
+/* (ui_widget.c, a finger's drag) the open scoreboard scrolls its rows by a
+drag of its own */
+boolean menu_functions_mouse_drag_own(void)
+{
+	return h3_scoreboard.open;
+}
+
 int menu_functions_mouse_kind(struct widget_instance *widget)
 {
 	char const *name = widget ? widget->name : NULL;

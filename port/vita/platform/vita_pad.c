@@ -33,9 +33,11 @@ is on now, the menus' or play's, with the settings read here.
 #include <math.h>
 #include <stdlib.h>
 
+#include "../../linux/game/forge_touch.h"
 #include "../../linux/game/game_chat.h"
 
 unsigned long system_milliseconds(void);
+long halo_screen_width(void);
 
 /* set while the game's menus are up (halo_ui_pointer_update, d3d8_gxm.c) */
 int vita_menus_active;
@@ -128,6 +130,38 @@ icons are; VITA_GLYPH_NONE if on none, or before the settings are read */
 int vita_pad_play_button_glyph(short gamepad_button)
 {
 	return vita_button_glyph(&icons_controls, gamepad_button, 0);
+}
+
+/* (Forge's monitor, port/linux/game/forge_touch.inc) the fingers on the
+front screen in the menus' 640x480, none with the panel's Touch in Forge off
+(HALO_FORGE_TOUCH, on unless 0) or the panel open; a finger in a touch zone
+marked: it counts for nothing there, zones off or not */
+long vita_pad_forge_touch(struct forge_touch_finger *fingers, long maximum)
+{
+	static int wanted = -1;
+	static unsigned long settings_seen;
+	struct vita_touch_contact contacts[FORGE_TOUCH_MAXIMUM_FINGERS];
+	long screen_width = halo_screen_width();
+	int count, index;
+
+	if (wanted < 0 || settings_seen != halo_settings_generation)
+	{
+		const char *value = getenv("HALO_FORGE_TOUCH");
+
+		settings_seen = halo_settings_generation;
+		wanted = !value || atoi(value) != 0;
+	}
+	if (!wanted || vita_settings_panel_open())
+		return 0;
+	count = vita_host_front_touches(contacts, maximum < FORGE_TOUCH_MAXIMUM_FINGERS ? (int)maximum :
+		FORGE_TOUCH_MAXIMUM_FINGERS);
+	for (index = 0; index < count; index++)
+	{
+		fingers[index].id = contacts[index].id;
+		fingers[index].reserved = vita_touch_zone_at(VITA_TOUCH_FRONT, contacts[index].x, contacts[index].y) >= 0;
+		vita_touch_to_menus((int)screen_width, contacts[index].x, contacts[index].y, &fingers[index].x, &fingers[index].y);
+	}
+	return count;
 }
 
 static int setting(const char *name, int fallback, int low, int high)

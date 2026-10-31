@@ -664,6 +664,9 @@ static struct setting settings[] = {
 	/* (File Share with friends, for the original menus: p2p_fileshare.h) */
 	PAGE_ROW("Share with friends", "Share your variants, send one, a friend's File Share", PAGE_FORGE,
 		PAGE_FSFRIENDS),
+	/* (the monitor's front screen: port/linux/game/forge_touch.inc) */
+	{ "Touch in Forge", "HALO_FORGE_TOUCH", 0, 2, { "1", "0" }, { "On", "Off" },
+		"Drag an object to move it; tap it, then drag the screen to turn it", 0, PAGE_FORGE },
 	/* (friends.fileshare: friends browse the files marked shared; files sent
 	and taken, asked each time) */
 	{ "Sharing", "HALO_FRIENDS_FILESHARE", 0, 2, { "true", "false" }, { "On", "Off" },
@@ -1819,9 +1822,11 @@ static int pc_menus_shown(void);
 static int setting_shown(const struct setting *setting)
 {
 	/* (Forge and File Share: the Halo 3 main menu has them; for the
-	original menus, the Halo CE Menu style, the panel does) */
+	original menus, the Halo CE Menu style, the panel does; and for every
+	style while a Forge game is played: its rows are that game's, Touch in
+	Forge, the magnets) */
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_FORGE)
-		return classic_panel();
+		return classic_panel() || forge_panel_ai_counts(NULL, NULL);
 	/* (the Halo 3 menus' report: with Menu style Halo 3) */
 	if (setting->variable && (!strcmp(setting->variable, "HALO_CARNAGE_REPORT") ||
 		!strcmp(setting->variable, "HALO_SCOREBOARD")))
