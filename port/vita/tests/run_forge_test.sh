@@ -445,6 +445,8 @@ touch_check() {
 	expect "$n" "the properties opened over a carried object" "ui: screen pc.h3.forge.properties.screen"
 	sed -n '/test command at tick 49[89]:/,$p' "$log" | grep -aq "holding boulder" &&
 		echo "  ok: $n: it waited in the hand" || fail "$n: the properties lost what the finger carried"
+	expect "$n" "a drag from a spawn marker carried it" "forge touch: dragging a marker"
+	expect "$n" "and left it where the finger went" "forge: moved the initial spawn .* at 50\\.[0-9]+ -90\\.[0-9]+"
 	sed -n '/test command at tick 5[01][0-9]: forge where/,$p' "$log" | grep -aq "holding nothing" &&
 		echo "  ok: $n: closed, the finger gone: let go" || fail "$n: still held after the menu closed"
 }
@@ -1326,6 +1328,9 @@ touch_runs() {
 	# (carried, the properties opened: it waits in the hand, the finger gone)
 	c="$c;L480:forge touch $at;L482:forge touch $from;L486:forge press x 2;L492:forge touch up;L498:forge where"
 	c="$c;L502:forge closemenus;L510:forge where"
+	# (a spawn marker looked down on, at the middle of the screen: dragged and let go)
+	c="$c;L520:forge camera 50 -90 6 0 -89;L530:forge spawnpoint initial;L536:forge drop;L542:forge spawns;L550:forge touch 320 240"
+	c="$c;L552:forge touch 360 240;L556:forge touch 400 200;L560:forge touch up;L566:forge spawns"
 	ai_run "$name" 30 "$c" HALO_TEST_FORGE_PACKS=none HALO_SCREEN_WIDTH=$width
 }
 
