@@ -1331,7 +1331,7 @@ touch_runs() {
 	# (a spawn marker looked down on, at the middle of the screen: dragged and let go)
 	c="$c;L520:forge camera 50 -90 6 0 -89;L530:forge spawnpoint initial;L536:forge drop;L542:forge spawns;L550:forge touch 320 240"
 	c="$c;L552:forge touch 360 240;L556:forge touch 400 200;L560:forge touch up;L566:forge spawns"
-	ai_run "$name" 30 "$c" HALO_TEST_FORGE_PACKS=none HALO_SCREEN_WIDTH=$width
+	ai_run "$name" 30 "$c" HALO_TEST_FORGE_PACKS=none $width
 }
 
 floodcov_runs() {
@@ -1556,7 +1556,7 @@ for c in $cases; do
 	rotate)
 		rotate_runs & ;;
 	touch)
-		{ touch_runs touch 848; touch_runs touch-43 640; } & ;;
+		{ touch_runs touch HALO_GL_VITA_DISPLAY=1; touch_runs touch-43 HALO_GL_VITA_DISPLAY=0; } & ;;
 	floodcov)
 		floodcov_runs & ;;
 	sentinels)
