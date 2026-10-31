@@ -245,11 +245,12 @@ boolean forge_blocks_extents(
 /* (tests) the console's "forge blocks ...": "ray" - a projectile's line
 (collision_test_line, the projectiles' flags) 50 world units along the
 first local player's view (the monitor's or the Spartan's), and what it
-meets; "projectiles" - each projectile in the world and where */
+meets; "ray rider" - the same at the first biped in a vehicle's seat;
+"projectiles" - each projectile in the world and where */
 boolean forge_blocks_command(
 	char const *arguments)
 {
-	if (!strcmp(arguments, "ray"))
+	if (!strcmp(arguments, "ray") || !strcmp(arguments, "ray rider"))
 	{
 		struct observer_result const *camera = observer_get_camera(0);
 		long player_index = local_player_get_player_index(0);
@@ -262,6 +263,29 @@ boolean forge_blocks_command(
 		end.x = camera->position.x + camera->forward.i * 50.0f;
 		end.y = camera->position.y + camera->forward.j * 50.0f;
 		end.z = camera->position.z + camera->forward.k * 50.0f;
+		if (arguments[3])
+		{
+			struct object_iterator iterator;
+			struct object_datum *object;
+			boolean found = FALSE;
+
+			object_iterator_new(&iterator, _object_mask_biped, 0);
+			while (!found && (object = object_iterator_next(&iterator)) != NULL)
+			{
+				if (object->object.parent_object_index == NONE)
+					continue;
+				found = TRUE;
+				/* (past it, along the line from the view to its centre) */
+				end.x = camera->position.x + (object->object.bounding_sphere_center.x - camera->position.x) * 2.0f;
+				end.y = camera->position.y + (object->object.bounding_sphere_center.y - camera->position.y) * 2.0f;
+				end.z = camera->position.z + (object->object.bounding_sphere_center.z - camera->position.z) * 2.0f;
+			}
+			if (!found)
+			{
+				platform_log("forge: blocks: no rider");
+				return TRUE;
+			}
+		}
 		if (!collision_test_line(_collision_test_for_projectiles_flags, &camera->position, &end, unit_index, &collision))
 		{
 			platform_log("forge: blocks: ray from %.2f %.2f %.2f meets nothing", camera->position.x, camera->position.y,

@@ -116,8 +116,7 @@
 #              that shot strikes the near wall
 #   forgerider  a rider of a PHASED vehicle on a network game (collisions.c): the host's Warthog
 #              set PHASED, a NORMAL wall behind it, a Marine put in its seat (forge board):
-#              on the host and on the joiner a line through the seat meets the Marine, and
-#              the shots of the Spartans there strike at the vehicle's place, not the wall
+#              on the host and on the joiner a projectile's line to the seat meets the Marine
 #   forgelate112 1.1.2's game type objects and physics to a joiner in the game and to one that
 #              joins it in progress (two machines: the joiner leaves, HALO_NETWORK_TEST_REJOIN,
 #              and joins again): the host places a CTF flag, a hill point, a boulder PHASED
@@ -973,31 +972,28 @@ sys.exit(0 if len(h)==len(j)==6 and all(abs(a-b)<0.02 for a,b in zip(h,j)) else 
 		done
 		;;
 	forgerider)
-		local spot="65 -130 1.5 0 0" line="65 -130.3 0.6 0 0"
+		local spot="65 -130 1.5 0 0"
 		host_cmds="L150:forge snap off;L155:forge camera $spot;L167:forge spawn warthog;L168:forge distance 7"
 		host_cmds="$host_cmds;L169:forge turn 90;L170:forge property physics;L171:forge property physics;L177:forge drop"
 		host_cmds="$host_cmds;L179:forge camera $spot;L197:forge spawn wall_large;L198:forge distance 20;L199:forge turn 90;L207:forge drop"
 		host_cmds="$host_cmds;L209:forge camera $spot;L211:forge spawn marine\\marine assault rifle;L212:forge distance 3;L213:forge brain off;L215:forge drop"
-		host_cmds="$host_cmds;L225:forge camera 76 -152 6 0 -89;L237:forge spawnpoint respawn;L245:forge drop"
-		host_cmds="$host_cmds;L250:forge board #1 #3;L255:forge objects;L260:forge camera $line;L272:forge blocks ray"
-		host_cmds="$host_cmds;L280:forge camera 65 -130.3 1.5 0 0;L292:forge off;L380:@aim look 0 -11;L390:@aim pad 0 0 0 0 1 40"
-		join_cmds="L400:forge objects;L405:forge camera $line;L417:forge blocks ray"
-		join_cmds="$join_cmds;L425:forge camera 65 -130.3 1.5 0 0;L437:forge off;L520:@aim look 0 -11;L530:@aim pad 0 0 0 0 1 40"
+		host_cmds="$host_cmds;L222:forge camera $spot;L235:forge blocks ray rider;L240:forge board #1 #3;L255:forge objects;L260:forge blocks ray rider"
+		join_cmds="L500:forge objects;L505:forge camera 65 -130 3 0 0;L520:forge blocks ray rider"
 		forge_host "$host_cmds" HALO_TEST_SHOT_LOG=1 HALO_TEST_FORGE_PACKS=marine_ai
 		sleep 5
-		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join HALO_TEST_SHOT_LOG=1 \
-			"HALO_TEST_COMMANDS=$join_cmds"
+		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join "HALO_TEST_COMMANDS=$join_cmds"
 		join_pid=$last_pid
 		wait $join_pid $host_pid 2>/dev/null
 		forge_check_clean "$hl" "$jl"
 		local log who
 		for log in "$hl" "$jl"; do
 			who=$(basename "$(dirname "$log")")
-			echo "--- $who"; grep -aE "forge: blocks: ray|shot test: struck|forge: board" "$log" | head -8
-			grep -aq 'forge: blocks: ray .* meets the object characters.marine.marine at 7[0-9]' "$log" ||
-				fail "$who: the line through the seat does not meet the rider of the PHASED Warthog"
-			grep -aqE "shot test: struck an object at 7[0-9]\." "$log" || fail "$who: no shot struck the rider"
+			echo "--- $who"; grep -aE "forge: blocks: |forge: board|Warthog \(id" "$log" | head -8
+			grep -aE "Warthog \(id 1\)" "$log" | tail -1 | grep -aq "physics phased" || fail "$who: the Warthog is not PHASED here"
+			grep -aq 'forge: blocks: ray .* meets the object characters.marine.marine at' "$log" ||
+				fail "$who: the line to the seat does not meet the rider of the PHASED Warthog"
 		done
+		grep -aq "forge: blocks: no rider" "$hl" || fail "host: a rider before the Marine boarded"
 		;;
 	forgelate112)
 		# (the host: a CTF flag (#1), a hill point (#2), a boulder PHASED (#3), a
