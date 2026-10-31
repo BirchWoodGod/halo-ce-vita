@@ -2267,7 +2267,8 @@ static long forge_object_under_crosshair_at(
 			FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
 			FLAG(_collision_test_objects_bit) | FLAG(_collision_test_objects_bipeds_bit) |
 			FLAG(_collision_test_objects_vehicles_bit) | FLAG(_collision_test_objects_scenery_bit) |
-			FLAG(_collision_test_objects_machines_bit) | FLAG(_collision_test_objects_controls_bit),
+			FLAG(_collision_test_objects_machines_bit) | FLAG(_collision_test_objects_controls_bit) |
+			FLAG(_collision_test_forge_phased_objects_bit),
 			&position,
 			&vector,
 			ignored,

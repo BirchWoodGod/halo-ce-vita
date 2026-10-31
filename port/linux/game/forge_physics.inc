@@ -20,7 +20,8 @@ properties window's PHYSICS row, for any placed object but a character.
   projectile's line still meets it: the engine's vector test does not read
   the switch, as for a scripted object; so a PHASED object also carries
   _object_forge_phased_bit, which the vector tests of collisions.c read: shots
-  pass it, a scripted object's behaviour as it was.)
+  pass it, a scripted object's behaviour as it was. The monitor's crosshair
+  asks for it, _collision_test_forge_phased_objects_bit: it is still grabbed.)
 
 Every machine of a network Forge game sets the switch on its own copy (a
 joiner's movement is its own until the host corrects it), from the entry's

@@ -105,6 +105,11 @@
 #              or HALO_TEST_VITA_JOINER's build: a 1.1.1 one) plays a Forge game whose map
 #              variant is of 1.1.1's format (forge_files_test --write's good.hmv: no
 #              teleporter, game type object or physics): not refused, has its 5 objects
+#   forgephase shots at a PHASED object on a network game (forge_physics.inc): the host's
+#              Spartan and the joiner's, on two firing lines, fire at a PHASED wall with a
+#              NORMAL one behind it: on both machines both shots strike the far wall; the
+#              host sets the near walls NORMAL, the joiner fires again: on both machines
+#              that shot strikes the near wall
 #   forgelate112 1.1.2's game type objects and physics to a joiner in the game and to one that
 #              joins it in progress (two machines: the joiner leaves, HALO_NETWORK_TEST_REJOIN,
 #              and joins again): the host places a CTF flag, a hill point, a boulder PHASED
@@ -874,6 +879,53 @@ forge_case() {
 		playing=$(grep -a "network test: tick" "$jl" | grep -ac "| playing")
 		echo "the joiner's lines playing the Forge game: $playing"
 		[ "$playing" -ge 10 ] || fail "the joiner did not play the Forge game"
+		;;
+	forgephase)
+		# (two firing lines, +x from a respawn point each: a PHASED wall 7 ahead, a NORMAL one 20
+		# ahead; the host comes back on one, the joiner, killed by the host, on the other)
+		local spot="65 -130 1.5 0 0" spot2="76 -152 1.5 0 0" line
+		host_cmds="L150:forge snap off"
+		local t=155 near=1
+		for line in "$spot" "$spot2"; do
+			host_cmds="$host_cmds;L$t:forge camera $line;L$((t + 12)):forge spawn wall_large;L$((t + 13)):forge distance 7"
+			host_cmds="$host_cmds;L$((t + 14)):forge turn 90;L$((t + 15)):forge property physics;L$((t + 16)):forge property physics"
+			host_cmds="$host_cmds;L$((t + 22)):forge drop;L$((t + 30)):forge camera $line;L$((t + 42)):forge spawn wall_large"
+			host_cmds="$host_cmds;L$((t + 43)):forge distance 20;L$((t + 44)):forge turn 90;L$((t + 52)):forge drop"
+			t=$((t + 60))
+		done
+		host_cmds="$host_cmds;L280:forge camera 65 -130 6 0 -89;L292:forge spawnpoint respawn;L300:forge drop"
+		host_cmds="$host_cmds;L305:forge camera 76 -152 6 0 -89;L317:forge spawnpoint respawn;L325:forge drop"
+		host_cmds="$host_cmds;L330:forge spawns;L335:forge objects;L340:forge off;L420:(unit_kill (unit (list_get (players) 0)))"
+		host_cmds="$host_cmds;L700:@aim look 0 0;L710:forge blocks ray"
+		host_cmds="$host_cmds;L715:@aim pad 0 0 0 0 1 40;L1000:forge on;L1010:forge camera $spot;L1025:forge grab #1"
+		host_cmds="$host_cmds;L1027:forge property physics;L1035:forge drop;L1040:forge camera $spot2;L1055:forge grab #3"
+		host_cmds="$host_cmds;L1057:forge property physics;L1065:forge drop;L1080:forge objects"
+		join_cmds="L350:forge off;L380:forge objects;L700:@aim look 0 0;L710:forge blocks ray;L715:@aim pad 0 0 0 0 1 40"
+		join_cmds="$join_cmds;L1250:forge objects;L1260:@aim look 0 0;L1270:forge blocks ray;L1275:@aim pad 0 0 0 0 1 40;L1400:forge objects"
+		forge_host "$host_cmds" HALO_TEST_SHOT_LOG=1 $(forge_shots mpforge-shots/forgephase-host)
+		sleep 5
+		run_copy joiner "$lan" "$vita" "$cpu_b" HALO_NET_ONLINE=false HALO_NETWORK_TEST=join HALO_TEST_SHOT_LOG=1 \
+			"HALO_TEST_COMMANDS=$join_cmds" $(forge_shots mpforge-shots/forgephase-joiner)
+		join_pid=$last_pid
+		wait $join_pid $host_pid 2>/dev/null
+		forge_check_clean "$hl" "$jl"
+		echo "--- host"; grep -aE "forge: blocks: ray|shot test: struck|forge: #[13]'s physics" "$hl" | head -20
+		echo "--- joiner"; grep -aE "forge: blocks: ray|shot test: struck|forge: #[13]'s physics" "$jl" | head -20
+		sed -n '/test command at tick 380: forge objects$/,/test command at tick/p' "$jl" | grep -a "Large Wall" > "$out/joiner-walls.txt"
+		[ "$(grep -ac "physics phased (no collision)" "$out/joiner-walls.txt")" = 2 ] || fail "the joiner's copies of the near walls are not PHASED"
+		sed -n '/test command at tick 1250: forge objects$/,/test command at tick/p' "$jl" | grep -a "Large Wall" > "$out/joiner-walls2.txt"
+		[ "$(grep -acE "physics normal$" "$out/joiner-walls2.txt")" = 4 ] || fail "the joiner's copies of the walls were not all set NORMAL"
+		# (the far walls: x 85 on the line at y -130, x 96 on the one at y -152; the near: x 72, x 83)
+		local log who
+		for log in "$hl" "$jl"; do
+			who=$(basename "$(dirname "$log")")
+			grep -aqE "shot test: struck an object at 84\.[0-9]+ -1[23][0-9]" "$log" || fail "$who: no shot on the line at y -130 struck the far wall"
+			grep -aqE "shot test: struck an object at 95\.[0-9]+ -1[45][0-9]" "$log" || fail "$who: no shot on the line at y -152 struck the far wall"
+			[ "$(grep -acE "shot test: struck an object at (7[12]\.[0-9]+ -1[23]|8[23]\.[0-9]+ -1[45])[0-9]" "$log")" = 1 ] ||
+				fail "$who: not exactly one shot (the joiner's, the walls set NORMAL) stopped at a near wall"
+			sed -n '/test command at tick 1250: forge objects$/q;p' "$jl" | grep -aqE "shot test: struck an object at (7[12]|8[23])\." &&
+				fail "joiner: a shot stopped at a PHASED wall"
+		done
 		;;
 	forgelate112)
 		# (the host: a CTF flag (#1), a hill point (#2), a boulder PHASED (#3), a

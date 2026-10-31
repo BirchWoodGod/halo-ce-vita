@@ -853,7 +853,8 @@ boolean collision_test_vector(
 							if (object->object.next_object_index == NONE &&
 								(object_index == ignore_object_index ||
 									TEST_FLAG(object->object.flags, _object_invisible_bit) ||
-									TEST_FLAG(object->object.flags, _object_forge_phased_bit) ||
+									(TEST_FLAG(object->object.flags, _object_forge_phased_bit) &&
+										!TEST_FLAG(flags, _collision_test_forge_phased_objects_bit)) ||
 									!TEST_FLAG(flags, object->object.type + _collision_test_objects_first_type_bit) ||
 									!fast_vector_intersects_sphere_inline(
 										&point_value,
@@ -2096,7 +2097,8 @@ static boolean object_test_vector(
 
 		if (object_index != ignore_object_index &&
 			!TEST_FLAG(object->object.flags, _object_invisible_bit) &&
-			!TEST_FLAG(object->object.flags, _object_forge_phased_bit) &&
+			(!TEST_FLAG(object->object.flags, _object_forge_phased_bit) ||
+				TEST_FLAG(flags, _collision_test_forge_phased_objects_bit)) &&
 			TEST_FLAG(flags, object->object.type + _collision_test_objects_first_type_bit) &&
 			fast_vector_intersects_sphere(
 				point,

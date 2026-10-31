@@ -193,6 +193,11 @@
 #               screenshot) and a Warthog FIXED let go in the air (it stays there; a NORMAL one
 #               falls); the properties window's PHYSICS row (screenshot); saved as version 7
 #               (forge_files_test --dump: fixed and phased as set)
+#   phaseshot   a PHASED object and shots (forge_physics.inc, 1.1.2): in a Forge game of Blood
+#               Gulch a PHASED wall with a NORMAL one behind it; the monitor's crosshair still
+#               finds the PHASED wall (it can be grabbed), a projectile's line meets the one
+#               behind; the Spartan fires a real weapon: every shot strikes the far wall; the
+#               near wall set NORMAL, the same shots strike it (HALO_TEST_SHOT_LOG)
 #   precision   nudge, magnets, the position readout (forge_precision.inc, 1.1.2): in a Forge
 #               game of Blood Gulch, snapping off, a large platform; a second held a tenth
 #               of a world unit off its side: the magnets draw it flush (4 world units
@@ -334,7 +339,7 @@ out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_forge_test.$$}
 export HALO_MENUS_FOLDER=${HALO_MENUS_FOLDER:-$root/port/vita/app0/menus/}
 . "$here/test_out.sh"
 test_out_begin "$out"
-cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives flagground flagswap physics precision allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
+cases=${*:-v1 budget fly b30 off files variants edit fileshare fstouch panel packs packnote packcopy smallmap aiteam aioff round aisave airespawn aicap aimarker spawns spawnplay teleport objectives flagground flagswap physics phaseshot precision allai allaimenu aicopy flood clearai clearaimenu rotate floodcov sentinels marines aivariant pelican aimapfallback blocks lobbycost mpvariant}
 ce_maps=${HALO_TEST_CE_MAPS:-$root/../custom-maps-dl}
 status=0
 fail() { echo "FAIL: $1"; status=1; }
@@ -1112,6 +1117,22 @@ physics_runs() {
 	"$out/forge_files_test" --dump "$store/forge/bloodgulch/physics_test.hmv" > "$out/physics/dump.txt" 2>&1
 }
 
+phaseshot_runs() {
+	local spot="65 -130 1.5 0 0"
+	local c="L240:forge snap off;L250:forge camera $spot;L262:forge spawn wall_large;L263:forge distance 7"
+	c="$c;L264:forge turn 90;L265:forge property physics;L266:forge property physics;L272:forge drop"
+	c="$c;L274:forge camera $spot;L278:forge where"
+	c="$c;L280:forge camera $spot;L292:forge spawn wall_large;L293:forge distance 20;L294:forge turn 90;L302:forge drop"
+	c="$c;L310:forge objects;L320:forge camera $spot;L335:forge where;L336:forge blocks ray"
+	c="$c;L340:@shot 00-phased-from-the-monitor;L350:forge off;L420:@aim look 0 0;L428:forge where;L430:forge blocks ray"
+	c="$c;L435:@aim pad 0 0 0 0 1 40;L445:@shot 01-firing-at-phased;L520:forge on"
+	c="$c;L530:forge camera $spot;L545:forge grab #1;L547:forge property physics;L555:forge drop;L560:forge objects"
+	c="$c;L570:forge camera $spot;L585:forge off;L650:@aim look 0 0;L658:forge where;L660:forge blocks ray"
+	c="$c;L665:@aim pad 0 0 0 0 1 40;L675:@shot 02-firing-at-normal"
+	run phaseshot 32 "" "$c" "" HALO_MENU_STYLE=classic HALO_SYSTEM_LINK_TEST=forge:9 HALO_TEST_FORGE_PACKS=none \
+		HALO_GL_VITA_DISPLAY=1 HALO_RENDER_SCALE=1 HALO_TEST_SHOT_LOG=1
+}
+
 precision_commands() { # the properties' shot's name
 	local c="L240:forge snap off;L250:forge camera 75 -152 2 0 0;L262:forge spawn platform_large;L263:forge distance 5"
 	c="$c;L272:forge drop;L280:forge camera 79.1 -152 2 0 0;L292:forge spawn platform_large;L293:forge distance 5"
@@ -1458,6 +1479,8 @@ for c in $cases; do
 		teleport_runs & ;;
 	physics)
 		physics_runs & ;;
+	phaseshot)
+		phaseshot_runs & ;;
 	precision)
 		precision_runs & ;;
 	objectives)
@@ -1892,6 +1915,32 @@ for c in $cases; do
 			echo "  ok: precision: with the magnets off, the third stays where it is held" ||
 			fail "precision: the third platform moved with the magnets off"
 		checked precision-es && expect precision-es "the position readout in Spanish too" "menus: forge properties: at "
+		continue
+	fi
+	if [ "$c" = phaseshot ]; then
+		checked phaseshot || continue
+		log="$out/phaseshot/run.log"
+		expect phaseshot "the near wall phased" "forge: #1's physics phased"
+		expect phaseshot "then set normal" "forge: #1's physics normal"
+		# (the only object there, PHASED: the monitor can still aim at it, to grab it)
+		sed -n '/test command at tick 278: forge where$/,/test command at tick/p' "$log" | grep -aq "aiming at wall_large" &&
+			echo "  ok: phaseshot: the monitor's crosshair finds a PHASED object" ||
+			fail "phaseshot: the monitor cannot aim at a PHASED object"
+		# (fired from x 65: the near wall stands at x 72, the far one at x 85)
+		rays=$(grep -a "forge: blocks: ray from" "$log")
+		grep -aq "meets the object forge.blocks.wall_large at 84" <<< "$(sed -n 2p <<< "$rays")" &&
+			grep -aq "meets the object forge.blocks.wall_large at 71" <<< "$(sed -n 3p <<< "$rays")" &&
+			echo "  ok: phaseshot: a projectile's line passes the PHASED wall, stops at it NORMAL" ||
+			fail "phaseshot: the line of a shot: $rays"
+		shots=$(grep -a "shot test: struck" "$log")
+		first=$(sed -n '/test command at tick 435: /,/test command at tick 545: /p' "$log" | grep -a "shot test: struck")
+		second=$(sed -n '/test command at tick 665: /,$p' "$log" | grep -a "shot test: struck")
+		if [ -n "$first" ] && [ -n "$second" ] && ! grep -aqv "struck an object at 84\." <<< "$first" &&
+			! grep -aqv "struck an object at 71\." <<< "$second"; then
+			echo "  ok: phaseshot: fired shots pass the PHASED wall and strike the one behind; NORMAL, they strike it"
+		else
+			fail "phaseshot: fired shots: $shots"
+		fi
 		continue
 	fi
 	if [ "$c" = physics ]; then
