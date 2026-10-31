@@ -785,12 +785,13 @@ boolean network_game_server_send_message_to_client_machine(
 this host, a stand-in for a dedicated server of OpenCE's, refuses every
 joiner with that code (run_netns_crossplay_test.sh opencerefuse); -1 none */
 static long network_game_server_test_refusal(
-	void)
+	struct transport_address const *source_address)
 {
 #ifndef HALO_RELEASE
 	const char *value = getenv("HALO_TEST_HOST_REFUSE");
 
-	if (value && value[0])
+	/* (never this machine's own client: its game is the stand-in) */
+	if (value && value[0] && source_address->address.long_words[0] != 0x7F000001)
 		return strtol(value, NULL, 10) & 0xFFFF;
 #endif
 	return -1;
@@ -2177,7 +2178,7 @@ static boolean network_game_server_handle_message_client_join_game_request(
 				FALSE);
 			if ((network_game_server_get_state(server, NULL) == _network_game_server_state_pregame || late_join) &&
 				network_game_server_game_is_open(server) &&
-				!full && network_game_server_test_refusal() < 0)
+				!full && network_game_server_test_refusal(&source_address) < 0)
 			{
 				byte join_game_token[JOIN_GAME_TOKEN_LENGTH];
 
@@ -2364,8 +2365,8 @@ static boolean network_game_server_handle_message_client_join_game_request(
 				struct network_message *reply;
 
 				rejection.reason = full ? _rejection_code_game_is_full : _network_game_server_rejection_reason_game_not_open;
-				if (network_game_server_test_refusal() >= 0)
-					rejection.reason = (word)network_game_server_test_refusal();
+				if (network_game_server_test_refusal(&source_address) >= 0)
+					rejection.reason = (word)network_game_server_test_refusal(&source_address);
 				network_event(
 					"client machine '%s' @%s tried to join game when they should not be",
 					join_game_request.machine_name,

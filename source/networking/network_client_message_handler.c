@@ -1099,6 +1099,9 @@ static boolean network_game_client_receive_game_settings_piece(
 						piece->total_size);
 				}
 #endif
+				/* (a test's stand-in for a PC host: its own client plays on) */
+				if (global_network_game_server_get())
+					network_game_record_test_own_copy(network_game_client_settings_staging, piece->total_size);
 				/* port: a record a host sent, checked (a PC host's options
 				and co-op switches on the crossplay wire) */
 				if (!network_game_record_decode_version(network_game_record_format_current(), record_version,

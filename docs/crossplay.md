@@ -1779,6 +1779,44 @@ gxm-null` debug build with `--netversions-test-key`):
 | `tools/vita_abi_check.py` (release configuration); `ninja vita` (`--lto off --pgo off --portable --release`); a `--release` Linux build; Blood Gulch 60 s (release and debug builds, 3 bots, internet play on: the fetch tried GitHub and found no name server in the namespace) | 0 unsafe declarations; eboot.bin and halo.vpk built (the release key, no test hook); 0 asserts |
 | `run_netns_crossplay_test.sh crossversion`: OpenCE 337b05cf (39) read as 40 by our copies (`HALO_TEST_VERSION_HEARD=39:40`), with a table `join 40 rules 39` kept beside our client | PASS: LAN and server browser, every step (discover ... stability; "network version 40, played by 39's rules (the crossplay version table 1)"); without the table refused on the LAN ("a newer PC build") and listed as another version online, never joined; no packet left the test's network |
 
+### 10.14 Network versions 40 and 41 joined (Oct 31 2026)
+
+Branch fix/crossplay-net41 (from integration/1.1.2-insider.1). OpenCE raised
+to 40 (475ae67f, a larger join request) and 41 (cf9fad60: votes, map vote, a
+co-op switch, one refusal code) and its servers followed.
+
+**Source: clean-room.** `docs/opence-net41-spec.md` (facts, layouts, how to
+run it) was written by a separate agent; the code here is ours from that
+document and `docs/opence-net39-spec.md`. The implementer opened nothing of
+OpenCE's: da8d4556 (build-335, 41) and 475ae67f (40) ran only as black boxes,
+built by build_pc_crossplay.sh with no patch.
+
+**What 40 and 41 changed** (spec 0): nothing a game plays. Our client joins
+29, 32, 38, 39, 40 and 41; hosts still announce 32. 40 and 41 play 39's rules:
+
+| What | Their meaning | Here |
+|---|---|---|
+| version | 40, 41 (an exact match, as before) | in the list; `network_wire_v40_rules`, `network_wire_v41_rules` |
+| join request | 346 bytes to a host of 40 or more: 234 zero bytes more (an empty pass and proof). A host of 40 given 112 drops the connection with no code | `network_wire_join_request_padding` (by the version announced as well as the rules a table gives it), `create_network_game_join_request_padded`: the encoded 112 bytes, the zeros, the packet's type. **The message table stays 0x70**: every older wire, Vita, beta and PC client still joins our hosts as before, byte for byte |
+| refusal codes 8-13 | a dedicated server's VPN rules (40), too many from one address (41) | words on the crossplay wire from a PC host alone (`network_wire_rejection_text`, fixed strings, Spanish too); nothing else from the host is shown; a number past 13 stays the generic failure; never a retry; in menu style Halo 3 back to the games browser |
+| co-op byte's bit 2 (0x04) | the host is a dedicated server (41) | known from 41 alone; read into `network_game_record_host_is_dedicated`, not kept in the record; the "waiting for the host" hint left out. Bit 3 and up still refused |
+| further option byte 10 | Force Team Spawns, the host's rule (39's build-323, no raise) | 0 or 1 from 39, else refused; bytes 11-15 stay reserved: **a bug in shipped 1.1.1, on 39 hosts too** |
+| King's state | 20 bytes more in a Multi-Hill game (39's build-323, no raise): a count, 0 to 4, and four hill ids | `network_game_record_king_state_valid`: exactly stock or stock + 20, count checked, from 39's rules alone; the first hill played and drawn, the other ids read by nothing: **a bug in shipped 1.1.1, every such state was refused** |
+| kinds 78, 79, 93, 94, 95, 92 | votes, map votes, fire origins, build report | dropped by kind, unread (spec 3.1, 3.2, 5.1) |
+
+**Not done, by decision:** the Discord pass and proof (they stay zero: spec
+7.1), the client's build report, votes and map votes (our players are eligible
+non-voters and sit out map votes), master lists, hosting at 41, the protected
+map loosening (spec 4.6), drawing hills 2-5 (a Vita player sees one hill).
+**A Vita behind a VPN, WARP, Tor or a datacenter address cannot get into a
+default server of 40 or more** (code 8), and is told so. Nothing of ours may
+route crossplay through the Linode relay (relays stay off on this wire).
+
+**Table:** `join 41 rules 39` must never be signed (spec 6, 7.7): 1.1.1 would
+send 112 bytes. A later raise that changes nothing can be `join N rules 41`.
+
+@@TESTS@@
+
 ## 11. Licensing and credit
 
 **Licences:**

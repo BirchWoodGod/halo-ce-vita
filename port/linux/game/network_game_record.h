@@ -91,6 +91,11 @@ long network_game_record_test_stand_in(
 	void *record,
 	long size,
 	long capacity);
+/* (the same) the copy the stand-in host's own client reads: what it sent
+others made harmless, so that its game goes on */
+void network_game_record_test_own_copy(
+	void *record,
+	long size);
 /* whether a host's King state of size bytes is one to take: exactly
 stock_size, or, in a game of 39 or more (multi_hill), a Multi-Hill game's 20
 bytes more with an extra hill count of 0 to 4 (docs/opence-net41-spec.md

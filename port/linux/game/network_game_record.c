@@ -275,6 +275,24 @@ long network_game_record_test_stand_in(
 	return size;
 }
 
+void network_game_record_test_own_copy(
+	void *record,
+	long size)
+{
+#ifndef HALO_RELEASE
+	byte *bytes = (byte *)record;
+
+	if (getenv("HALO_TEST_RECORD_FURTHER") && size > HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET + FURTHER_OPTIONS_SIZE)
+	{
+		bytes[offsetof(struct network_game, cooperative_flags)] = 0;
+		memset(bytes + HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET, 0, FURTHER_OPTIONS_SIZE);
+	}
+#else
+	(void)record;
+	(void)size;
+#endif
+}
+
 boolean network_game_record_king_state_valid(
 	void const *buffer,
 	long size,
