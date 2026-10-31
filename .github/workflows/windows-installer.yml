@@ -8,6 +8,7 @@ on:
   push:
     paths:
       - "tools/installer/**"
+      - "tools/release/ed25519_rfc8032.py"
       - ".github/workflows/windows-installer.yml"
   workflow_dispatch:
 

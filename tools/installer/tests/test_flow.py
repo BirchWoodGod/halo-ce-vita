@@ -1050,10 +1050,12 @@ def test_destination_on_pc(root, tmp_path, monkeypatch):
     window = wizard(root, tmp_path)
     window.platform.set("pc")
     window.game_bytes = 1 << 30
+    window.download_build.set(False)  # (the download: test_pc_download.py)
     window.show("destination")
     root.update()
     assert window.install_folder.get() == hcv.default_install_folder()
-    assert list(checks(window)) == ["Create a desktop shortcut", "Create an applications menu entry"]
+    assert list(checks(window)) == ["Download the PC build", "Create a desktop shortcut",
+                                    "Create an applications menu entry"]
     assert window.desktop_shortcut.get() and window.start_menu.get()
     assert "Browse..." in buttons(window)
     assert window.space.get().startswith("Space needed: 1.0 GB") and "Space free: " in window.space.get()
@@ -1129,7 +1131,9 @@ def test_automatic_on_pc_end_to_end(root, tmp_path, monkeypatch):
     wait_for_finish(window, root)
     assert not errors and window.outcome == "done"
     assert window.title_label.cget("text") == "Setup completed"
-    assert list(checks(window)) == ["Launch Halo CE"] and window.launch.get()
+    # (an archive of the player's: installed, never started by Setup. A checked download is:
+    # test_pc_download.py)
+    assert "Launch Halo CE" not in checks(window)
     assert window.next_button.cget("text") == "Finish"
     assert window.back_button.instate(["disabled"]) and window.cancel_button.instate(["disabled"])
     folder = tmp_path / "Halo CE"
@@ -1139,16 +1143,15 @@ def test_automatic_on_pc_end_to_end(root, tmp_path, monkeypatch):
     assert hcv.check_install(str(folder)) == ([], [])
     assert tree(mcc) == before  # only read
     assert not list((tmp_path / "out").glob("*")) if (tmp_path / "out").exists() else True  # no second copy
-    runs = []
-    monkeypatch.setattr(hcv, "launch_pc", runs.append)
+    monkeypatch.setattr(hcv, "launch_pc", lambda folder: pytest.fail("started"))
     window.next_button.invoke()
-    assert runs == [str(folder)]
 
 
 def test_launch_can_be_unticked(root, tmp_path, monkeypatch):
     window = wizard(root, tmp_path)
     window.platform.set("pc")
     window.outcome = "done"
+    window.build_verified = True
     window.show("finish")
     window.launch.set(False)
     monkeypatch.setattr(hcv, "launch_pc", lambda folder: pytest.fail("started"))
@@ -1393,6 +1396,7 @@ def test_repair_asks_for_what_it_needs(root, tmp_path, monkeypatch):
     advance(window, root, "maintenance", "game_files")
     window.mode.set("manual")
     window.xbox_source.set(str(disc(tmp_path)))
+    window.download_build.set(False)
     advance(window, root, "destination")
     entries = [widget for widget in all_widgets(window.body) if widget.winfo_class() == "TEntry"]
     assert entries[0].instate(["disabled"])  # the folder is the install's

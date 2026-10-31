@@ -30,7 +30,7 @@ halo_ce_vita_installer.write_icon(icon)
 
 a = Analysis(
     [os.path.join(here, "halo_ce_vita_installer.py")],
-    pathex=[here],
+    pathex=[here, os.path.join(here, "..", "release")],  # (ed25519_rfc8032: the download's check)
     binaries=[],
     datas=datas,
     hiddenimports=[],

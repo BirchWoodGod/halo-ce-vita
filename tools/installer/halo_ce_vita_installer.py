@@ -67,6 +67,7 @@ import random
 import re
 import shutil
 import socket
+import ssl
 import stat
 import struct
 import subprocess
@@ -75,11 +76,19 @@ import tarfile
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import zipfile
 import zlib
 from array import array
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
+
+# (the Ed25519 check of the release tools; the one-file program has it from
+# the spec's pathex)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "release"))
+import ed25519_rfc8032 as ed25519  # noqa: E402
 
 VERSION = "1.1.2"
 RELEASES_URL = "https://github.com/BirchWoodGod/halo-ce-vita/releases/latest"
@@ -2671,6 +2680,7 @@ class PcPackage:
     kind: str  # "zip" or "tar"
     version: str
     files: List[PackageFile]
+    verified: bool = False  # this tool downloaded it and its signature checked (download_pc_build)
 
     @property
     def size(self) -> int:
@@ -2742,6 +2752,163 @@ def read_pc_package(path: str) -> PcPackage:
         raise InstallerError("%s is too large to be a PC build." % path)
     found = _PACKAGE_NAME.search(prefix or os.path.basename(path)) or _PACKAGE_NAME.search(os.path.basename(path))
     return PcPackage(path, kind, found.group(1) if found else VERSION, files)
+
+
+# The PC build downloaded from the newest release, checked as the game checks
+# its updates (port/vita/host/vita_update_verify.c, tools/release/README.md,
+# "The PC builds' manifest"): the signature of halo-update-pc.txt first, by the
+# release key built in here, before a byte of it is read; then its exact form,
+# this system's row and the release's name for it, a version not older than the
+# one installed; then the archive, no longer than the manifest says, its SHA-512
+# the manifest's; only then is it read (read_pc_package). HTTPS only, GitHub's
+# hosts alone, redirects too.
+RELEASE_PUBLIC_KEY = "65b2979d2f239b9530c649a4761e99f8ebbc2fd39a45e246f694d9950f16f537"  # vita_update_key.h's
+RELEASE_DOWNLOADS = PROJECT_URL + "/releases"
+PC_MANIFEST = "halo-update-pc.txt"
+PC_SIGNATURE = PC_MANIFEST + ".sig"
+PC_MANIFEST_MAXIMUM = 1024
+PC_SIGNATURE_MAXIMUM = 130
+PC_DOWNLOAD_MAXIMUM = 1 << 30
+PC_DOWNLOAD_ESTIMATE = 300 << 20  # (the Installing bar's share, and the space page's, before the size is known)
+DOWNLOAD_TIMEOUT = 30
+DOWNLOAD_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
+_PC_MANIFEST_FORM = re.compile(
+    r"halo-ce-vita-update-pc 1\nversion (?P<version>[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(?:-(?:beta|rc)\.[0-9]{1,3})?)\n"
+    r"(?P<rows>(?:(?:windows|linux) [0-9a-z._-]{1,95} [1-9][0-9]{0,9} [0-9a-f]{128}\n){1,2})")
+
+
+def check_download_url(url: str) -> None:
+    """Refuses anything but HTTPS to GitHub's hosts: asked, or a redirect's."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        raise InstallerError("The download was sent to an address that is not valid.")
+    if parts.scheme != "https" or host not in DOWNLOAD_HOSTS or port not in (None, 443) or parts.username is not None:
+        raise InstallerError("The download was sent somewhere other than GitHub (%s), so Setup stopped." % host)
+
+
+class _GitHubRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        check_download_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def open_download(url: str):
+    """The answer of GitHub to url, to be read."""
+    check_download_url(url)
+    opener = urllib.request.build_opener(_GitHubRedirects,
+                                         urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+    request = urllib.request.Request(url, headers={"User-Agent": "%s-Setup/%s" % (APP_NAME.replace(" ", ""), VERSION)})
+    return opener.open(request, timeout=DOWNLOAD_TIMEOUT)
+
+
+def _read_small(url: str, limit: int) -> bytes:
+    with open_download(url) as answer:
+        data = answer.read(limit + 1)
+    if len(data) > limit:
+        raise InstallerError("The release's %s is too large: it is not the project's." % os.path.basename(url))
+    return data
+
+
+def version_order(version: str) -> Tuple[int, ...]:
+    """Sorts x.y.z-beta.n before x.y.z-rc.n before x.y.z."""
+    found = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:-(beta|rc)\.([0-9]+))?", version)
+    if not found:
+        return (0, 0, 0, 0, 0)
+    major, minor, patch, kind, number = found.groups()
+    return (int(major), int(minor), int(patch), {"beta": 0, "rc": 1, None: 2}[kind], int(number or 0))
+
+
+@dataclass
+class PcDownload:
+    version: str
+    file: str
+    size: int
+    sha512: str
+
+
+def verify_pc_manifest(text: bytes, signature: bytes, system: str, installed: str = "") -> PcDownload:
+    """This system's download, from the manifest and its signature as they
+    came from the network: refused unless signed by the release key, exactly
+    the manifest's form, the release's name for the file, and not older than
+    the version installed or this Setup."""
+    try:
+        signed = bytes.fromhex(signature.decode("ascii").rstrip("\r\n"))
+    except (UnicodeDecodeError, ValueError):
+        signed = b""
+    if not ed25519.verify(bytes.fromhex(RELEASE_PUBLIC_KEY), text, signed):
+        raise InstallerError("The download's signature is not the Halo CE project's, so Setup did not use it.")
+    form = _PC_MANIFEST_FORM.fullmatch(text.decode("ascii", "replace"))
+    if not form:
+        raise InstallerError("The release's list of PC builds is not in the right form.")
+    version = form.group("version")
+    rows = [line.split(" ") for line in form.group("rows").splitlines()]
+    if len({row[0] for row in rows}) != len(rows):
+        raise InstallerError("The release's list of PC builds names a system twice.")
+    row = next((row for row in rows if row[0] == system), None)
+    if row is None:
+        raise InstallerError("This release has no PC build for this system (%s)." % system)
+    suffix = "-pc-windows.zip" if system == "windows" else "-pc-linux.tar.gz"
+    if row[1] != "halo-ce-vita-%s%s" % (version, suffix):
+        raise InstallerError("The release's list of PC builds names another file (%s)." % row[1])
+    if int(row[2]) > PC_DOWNLOAD_MAXIMUM:
+        raise InstallerError("The PC build the release lists is too large.")
+    for floor in (installed, VERSION):  # (an old signed list played back: never a step down)
+        if floor and version_order(version) < version_order(floor):
+            raise InstallerError("The download is version %s, older than %s, so Setup did not use it."
+                                 % (version, floor))
+    return PcDownload(version, row[1], int(row[2]), row[3])
+
+
+def download_pc_build(folder: str, progress: Progress = _no_progress, log: Callable[[str], None] = print,
+                      installed: str = "") -> PcPackage:
+    """The newest release's PC build for this system in `folder`, verified:
+    what comes back is safe to install and to start. Raises InstallerError
+    and leaves no archive otherwise."""
+    system = _pc_builds_here_first()[0][0]
+    latest = RELEASE_DOWNLOADS + "/latest/download/"
+    try:
+        text = _read_small(latest + PC_MANIFEST, PC_MANIFEST_MAXIMUM)
+        signature = _read_small(latest + PC_SIGNATURE, PC_SIGNATURE_MAXIMUM)
+        download = verify_pc_manifest(text, signature, system, installed)
+        log("Signed by the release key: PC build %s for %s, %s" % (download.version, system,
+                                                                     human_size(download.size)))
+        if shutil.disk_usage(folder).free < download.size:
+            raise InstallerError("Not enough free space to download the PC build: %s needed."
+                                 % human_size(download.size))
+        path = os.path.join(folder, download.file)
+        partial = path + ".part"
+        digest = hashlib.sha512()
+        done = 0
+        url = "%s/download/v%s/%s" % (RELEASE_DOWNLOADS, download.version, download.file)
+        with open_download(url) as answer, open(partial, "wb") as file:
+            while True:
+                block = answer.read(1 << 20)
+                if not block:
+                    break
+                done += len(block)
+                if done > download.size:
+                    raise InstallerError("The download is longer than the release's list says, so Setup stopped.")
+                digest.update(block)
+                file.write(block)
+                progress(download.file, done, download.size)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            raise InstallerError("This release has no signed PC build to download yet. Get the archive from "
+                                 "%s and choose it instead." % RELEASES_URL)
+        raise InstallerError("GitHub answered %d to the download. Try again later." % error.code)
+    except (urllib.error.URLError, ssl.SSLError, OSError, EOFError) as error:
+        raise InstallerError("The download could not finish (%s). Check your connection and try again." % (error,))
+    if done != download.size or digest.hexdigest() != download.sha512:
+        os.remove(partial)
+        raise InstallerError("The download is not the file the release signed, so Setup threw it away.")
+    os.replace(partial, path)
+    log("%s matches its signed SHA-512" % download.file)
+    package = read_pc_package(path)
+    package.version = download.version
+    package.verified = True
+    return package
 
 
 def _package_readers(package: PcPackage):
@@ -2990,10 +3157,11 @@ def unregister_windows() -> None:
 
 
 def finish_pc_install(folder: str, version: str, files: Dict[str, int], desktop: bool, start_menu: bool,
-                      log: Callable[[str], None] = print) -> List[str]:
+                      log: Callable[[str], None] = print, verified: bool = False) -> List[str]:
     """What makes the files an install: the maps folder the game takes the
     folder by (as copy_to_pc_build), the shortcuts, the uninstaller and the
-    Apps & Features entry, and the record. Returns warnings."""
+    Apps & Features entry, and the record (`verified`: the program files came
+    from a checked download). Returns warnings."""
     data = pc_data_folder(folder)
     if data is None:
         raise InstallerError("No PC build in %s." % folder)
@@ -3014,7 +3182,7 @@ def finish_pc_install(folder: str, version: str, files: Dict[str, int], desktop:
     shortcuts, failed = make_shortcuts(folder, desktop, start_menu)
     warnings += failed
     record = {"format": 1, "name": APP_NAME, "version": version, "files": files, "game_files": game_files,
-              "desktop": desktop, "start_menu": start_menu, "shortcuts": shortcuts}
+              "desktop": desktop, "start_menu": start_menu, "shortcuts": shortcuts, "verified": bool(verified)}
     if sys.platform == "win32":
         uninstaller, command = write_uninstaller(folder)
         record["uninstaller"] = uninstaller
@@ -3112,6 +3280,11 @@ def roll_back_install(folder: str, before: set) -> None:
             os.rmdir(folder)
         except OSError:
             pass
+
+
+def installed_version(record: Optional[dict]) -> str:
+    version = (record or {}).get("version")
+    return version if isinstance(version, str) else ""
 
 
 def launch_pc(folder: str) -> None:
@@ -3296,6 +3469,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                                   "and, on Windows, the uninstaller and Apps & Features entry")
     step.add_argument("folder", nargs="?", help="the install folder (default: %s)" % default_install_folder())
     step.add_argument("--package", help="the PC build's archive (default: one next to this tool)")
+    step.add_argument("--download", action="store_true",
+                      help="download the newest release's PC build, checked by its signature")
     step.add_argument("--desktop-shortcut", action="store_true", help="make a desktop shortcut")
     step.add_argument("--start-menu", action="store_true", help="make a Start menu or applications menu entry")
     step = commands.add_parser("pc-uninstall", help="remove a PC install: the files it wrote and its shortcuts")
@@ -3391,18 +3566,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             _console_log("Done: %(copied)d copied, %(skipped)d already there" % result)
         elif arguments.command == "pc-install":
             package_path = arguments.package or (find_pc_packages() or [None])[0]
-            if not package_path:
-                raise InstallerError("No PC build next to this tool: give it (--package). Download "
-                                     "halo-ce-vita-<version>%s from %s" % (pc_package_suffix(), RELEASES_URL))
+            if not package_path and not arguments.download:
+                raise InstallerError("No PC build next to this tool: give it (--package) or get it (--download). "
+                                     "Download halo-ce-vita-<version>%s from %s" % (pc_package_suffix(), RELEASES_URL))
             folder = check_install_folder(arguments.folder or default_install_folder())
-            package = read_pc_package(package_path)
-            files = install_pc_package(package, folder, progress, _console_log)
+            with tempfile.TemporaryDirectory(prefix="halo-ce-setup-") as temporary:
+                if arguments.download:
+                    package = download_pc_build(temporary, progress, _console_log,
+                                                installed_version(read_install(folder)))
+                else:
+                    package = read_pc_package(package_path)
+                files = install_pc_package(package, folder, progress, _console_log)
             if pc_uploads(out):
                 copy_to_pc_build(out, folder, False, progress, _console_log)
             else:
                 _console_log("No game files gathered in %s: the game will ask for them." % out)
             finish_pc_install(folder, package.version, files, arguments.desktop_shortcut, arguments.start_menu,
-                              _console_log)
+                              _console_log, package.verified)
         elif arguments.command == "pc-uninstall":
             folder = arguments.folder or find_existing_install()
             if not folder:
@@ -3696,6 +3876,10 @@ class InstallerWindow:
         self.install_folder = var(value=self.existing or default_install_folder())
         self.package = var(value=(find_pc_packages() or [""])[0])
         self.package_found = bool(self.package.get())
+        self.download_build = tkinter.BooleanVar(value=not self.package_found)
+        self.download_folder = ""
+        # (the program files on disk came from a checked download: Launch is offered)
+        self.build_verified = False
         self.desktop_shortcut = tkinter.BooleanVar(value=True)
         self.start_menu = tkinter.BooleanVar(value=True)
         self.launch = tkinter.BooleanVar(value=True)
@@ -3954,7 +4138,8 @@ class InstallerWindow:
             self.root.destroy()
 
     def finish(self):
-        if self.outcome == "done" and self.action.get() != "uninstall" and self.on_pc and self.launch.get():
+        if self.outcome == "done" and self.action.get() != "uninstall" and self.on_pc and self.build_verified and \
+                self.launch.get():
             try:
                 launch_pc(self.installed_folder())
             except (OSError, InstallerError) as error:
@@ -4179,7 +4364,14 @@ class InstallerWindow:
                    state="disabled" if repairing else "normal")
         if self.package_found:
             self.text("PC build: %s" % os.path.basename(self.package.get()), pady=(0, px(8)))
+        elif self.downloading():
+            self.text("Setup will download the PC build from the project's GitHub releases and check its signature.",
+                      pady=(0, px(4)))
+            ttk.Checkbutton(self.body, text="Download the PC build", variable=self.download_build,
+                            command=lambda: self.show("destination")).pack(anchor="w", pady=(0, px(8)))
         else:
+            ttk.Checkbutton(self.body, text="Download the PC build", variable=self.download_build,
+                            command=lambda: self.show("destination")).pack(anchor="w", pady=(0, px(4)))
             kind = [("PC build", "*" + os.path.splitext(pc_package_suffix())[1]), ("All files", "*")]
             self.field("PC build (halo-ce-vita-<version>%s):" % pc_package_suffix(), self.package, pady=(0, 2),
                        browse=lambda: self.browse_file(self.package, kind))
@@ -4192,6 +4384,13 @@ class InstallerWindow:
             ttk.Checkbutton(self.body, text="Create a Start menu entry" if sys.platform == "win32" else
                             "Create an applications menu entry", variable=self.start_menu).pack(anchor="w")
 
+    def downloading(self) -> bool:
+        """The PC build comes from the releases, not from an archive here."""
+        return self.on_pc and not self.package_found and self.download_build.get()
+
+    def build_source(self) -> str:
+        return "Downloaded from the project's GitHub releases" if self.downloading() else self.package.get()
+
     def package_info(self, path: str) -> PcPackage:
         path = path.strip()
         if path not in self.package_cache:
@@ -4200,7 +4399,9 @@ class InstallerWindow:
 
     def needed_bytes(self) -> int:
         needed = self.game_bytes
-        if self.package.get().strip():
+        if self.downloading():
+            needed += PC_DOWNLOAD_ESTIMATE
+        elif self.package.get().strip():
             try:
                 needed += self.package_info(self.package.get()).size
             except InstallerError:
@@ -4275,7 +4476,8 @@ class InstallerWindow:
         from tkinter import messagebox
         try:
             folder = self.installed_folder()
-            self.package_info(self.package.get())
+            if not self.downloading():
+                self.package_info(self.package.get())
             needed, free = self.needed_bytes(), self.free_bytes(folder)
             if needed > free:
                 raise InstallerError("Not enough free space in %s: %s needed, %s free."
@@ -4336,7 +4538,7 @@ class InstallerWindow:
                 return lines + ["Every file is there and the right size. The shortcuts are made again."]
             if program:
                 lines.append("Program files to put back: %d" % len(program))
-                lines.append("    From: %s" % self.package.get())
+                lines.append("    From: %s" % self.build_source())
             if game:
                 lines += ["Game files to put back: %d" % len(game)] + self.source_lines()
             return lines
@@ -4345,7 +4547,7 @@ class InstallerWindow:
                                                    (self.start_menu.get(), "Start menu" if sys.platform == "win32"
                                                     else "applications menu")) if wanted]
             return ["Install on: PC", "Install folder:", "    %s" % self.install_folder.get(),
-                    "PC build:", "    %s" % self.package.get()] + self.source_lines() + [
+                    "PC build:", "    %s" % self.build_source()] + self.source_lines() + [
                 "Space needed: %s" % human_size(self.needed_bytes()),
                 "Shortcuts: %s" % (", ".join(shortcuts) or "none")]
         host, port = self._host_port()
@@ -4392,8 +4594,12 @@ class InstallerWindow:
             self.text(self.install_folder.get(), pady=(0, px(8)))
             self.text("The first load of each level takes a while: the game writes a cache file for it.",
                       pady=(0, px(10)))
-            self.ttk.Checkbutton(self.body, text="Launch Halo CE", variable=self.launch,
-                                 style="White.TCheckbutton").pack(anchor="w", pady=(0, px(10)))
+            if self.build_verified:
+                self.ttk.Checkbutton(self.body, text="Launch Halo CE", variable=self.launch,
+                                     style="White.TCheckbutton").pack(anchor="w", pady=(0, px(10)))
+            else:
+                self.text("Setup did not download this PC build itself, so it does not start it. Use the shortcut "
+                          "when you are ready.", pady=(0, px(10)))
             self.text("Click Finish to close Setup.")
         else:
             self.finish_vita()
@@ -4484,20 +4690,34 @@ class InstallerWindow:
         gather = action == "install" or bool(game)
         platform = _pc_builds_here_first()[0][0]
         tasks = []
-        if unpack:
-            package = self.package_info(self.package.get())
-            version = package.version
+        self.build_verified = bool(record.get("verified")) and not unpack
+        chosen: List[PcPackage] = []
+        if unpack and self.downloading():
+            installed = installed_version(record)
 
+            def fetched(step):
+                self.download_folder = tempfile.mkdtemp(prefix="halo-ce-setup-")
+                chosen.append(download_pc_build(self.download_folder, step, self.log, installed))
+            tasks.append(InstallTask("Downloading and checking the PC build", PC_DOWNLOAD_ESTIMATE, fetched))
+        elif unpack:
+            chosen.append(self.package_info(self.package.get()))
+        if unpack:
             def unpacked(step):
+                nonlocal version
+                package = chosen[0]
+                version = package.version
                 files.clear()
                 files.update(install_pc_package(package, folder, step, self.log))
-            tasks.append(InstallTask("Copying the program files", max(package.size, 1), unpacked))
+                self.build_verified = package.verified
+            tasks.append(InstallTask("Copying the program files",
+                                     max(chosen[0].size, 1) if chosen else PC_DOWNLOAD_ESTIMATE, unpacked))
         if gather:
             data = pc_data_folder(folder) or os.path.join(folder, "build", platform)
             tasks += self.game_tasks(data)
 
         def finished(step):
-            self.warnings = finish_pc_install(folder, version, files, desktop, start_menu, self.log)
+            self.warnings = finish_pc_install(folder, version, files, desktop, start_menu, self.log,
+                                              self.build_verified)
         tasks.append(InstallTask("Creating the shortcuts", 1 << 20, finished))
         return tasks
 
@@ -4547,9 +4767,17 @@ class InstallerWindow:
                 self.log("ERROR: %r" % (error,))
                 self.roll_back(folder)
                 self.messages.put(("end", "failed", "Unexpected problem: %r" % (error,)))
+            finally:
+                self.drop_download()
 
         self.worker = threading.Thread(target=run, daemon=True)
         self.worker.start()
+
+    def drop_download(self):
+        """The downloaded archive, not kept whatever came of it."""
+        if self.download_folder:
+            shutil.rmtree(self.download_folder, ignore_errors=True)
+            self.download_folder = ""
 
     def roll_back(self, folder: str):
         if self.rollback is not None:

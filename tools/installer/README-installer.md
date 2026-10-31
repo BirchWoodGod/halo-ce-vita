@@ -92,11 +92,15 @@ again. Uninstall removes the files of the record and the shortcuts, and no
 other file: your saved games (`%APPDATA%\halo`, `~/.local/share/halo-linux`) and
 what the game wrote beside itself stay.
 
-Setup does not download the PC build. The release's signed manifest
-(`halo-update.txt`, what the Vita's updater checks) covers only the VPK; the PC
-archives are not signed (`tools/release/README.md`), so the tool could not
-verify a download. Get the archive from the releases page. It is read as
-untrusted all the same, and its SHA-256 is written to the log.
+With no archive next to the tool, Setup downloads the PC build from the newest
+release and checks it the way the game checks its updates: the signature of
+`halo-update-pc.txt` by the release key built into the tool, then the file's
+size and SHA-512 (`tools/release/README.md`, "The PC builds' manifest"). If
+anything does not match it stops, keeps nothing and installs nothing. Untick
+**Download the PC build** to choose an archive you already have; an archive is
+read as untrusted all the same, and its SHA-256 is written to the log. **Launch
+Halo CE** on the last page starts only a build Setup downloaded and checked: an
+archive of yours installs, and you start it from its shortcut.
 
 For a Vita, the files are gathered in a folder first (by default
 `Documents/Halo CE Vita files`, about 2.5 GB with everything), laid out as
@@ -242,7 +246,7 @@ python3 halo_ce_vita_installer.py [--out FOLDER] check
 python3 halo_ce_vita_installer.py [--out FOLDER] upload 192.168.1.20 [--replace]
 python3 halo_ce_vita_installer.py vpk 192.168.1.20 [halo.vpk]
 python3 halo_ce_vita_installer.py [--out FOLDER] pc-copy [BUILD FOLDER] [--replace]
-python3 halo_ce_vita_installer.py [--out FOLDER] pc-install [FOLDER] [--package ARCHIVE] [--desktop-shortcut] [--start-menu]
+python3 halo_ce_vita_installer.py [--out FOLDER] pc-install [FOLDER] [--package ARCHIVE | --download] [--desktop-shortcut] [--start-menu]
 python3 halo_ce_vita_installer.py pc-uninstall [FOLDER]
 python3 halo_ce_vita_installer.py --uninstall [FOLDER]
 python3 halo_ce_vita_installer.py selftest
@@ -280,7 +284,13 @@ it prints nothing; `selftest --report FILE` writes its results to a file.)
   this system's build must be in it, every name is checked as above, links,
   devices and doubled names are refused, sizes are bounded, and each file is
   checked (CRC, size) and moved into place only once it is whole. Only the
-  archive next to the tool or the one you chose is used. Nothing is downloaded.
+  archive next to the tool, the one you chose or the checked download is used.
+- The PC download goes over HTTPS to GitHub's hosts alone, redirects too. The
+  signature is checked before the list is read and the archive is asked for
+  only after that; its size and SHA-512 are then the signed ones or it is
+  thrown away. A list older than the install or than Setup is refused. No key
+  but the release key's public half is in the tool. Launch starts only such a
+  download.
 - The install's record is only a file in a folder the user can write:
   uninstall and repair take its paths through the same checks, inside the
   install folder, and remove shortcuts only by their exact names. Uninstall

@@ -22,6 +22,8 @@ the platform:
 | `halo-ce-vita-<version>-pc-linux.tar.gz` | the PC build, Linux | `tools/package_pc.py linux` (CI's Linux job, artifact `halo-ce-vita-pc-linux`) |
 | `halo-update.txt` | the Vita updater's manifest: version, title ID, file, size, SHA-512 of the VPK | `sign_update.py` |
 | `halo-update.txt.sig` | the manifest's Ed25519 signature (128 hex digits) | `sign_update.py` |
+| `halo-update-pc.txt` | Setup's manifest of the PC builds: version, then each archive's file, size, SHA-512 | `sign_update.py --pc-windows --pc-linux` |
+| `halo-update-pc.txt.sig` | its Ed25519 signature | `sign_update.py` |
 | `halo.vpk` | the same VPK under its old name, **1.1.1 releases only** | `sign_update.py --legacy-name` |
 
 The Vita's updater (from 1.1.1) downloads the file the signed manifest
@@ -41,8 +43,43 @@ ninja linux
 python3 tools/package_pc.py linux       # dist/halo-ce-vita-<version>-pc-linux.tar.gz
 ```
 
-The PC files are not signed for an updater: the PC build never downloads
-itself (port/linux/README.md, "Updates").
+The PC build never downloads itself (port/linux/README.md, "Updates"); the
+install helper does, and takes only a signed archive.
+
+### The PC builds' manifest
+
+`halo-update-pc.txt` is a file of its own, not rows in `halo-update.txt`: the
+game reads that one's exact form, so a row more would break every Vita's
+update check. Same key, its own first line, so neither passes for the other:
+
+```
+halo-ce-vita-update-pc 1
+version 1.1.2
+windows halo-ce-vita-1.1.2-pc-windows.zip <size> <sha512>
+linux halo-ce-vita-1.1.2-pc-linux.tar.gz <size> <sha512>
+```
+
+Sign it with the VPK (or alone, leaving out `--vpk`):
+
+```
+python3 tools/release/sign_update.py --key ~/halo-update-key/halo-update.key \
+    --vpk build/vita/halo.vpk --version 1.1.2 --out release-files/ \
+    --pc-windows dist/halo-ce-vita-1.1.2-pc-windows.zip \
+    --pc-linux dist/halo-ce-vita-1.1.2-pc-linux.tar.gz
+python3 tools/release/verify_update.py --pc --dir release-files/ --version 1.1.2
+```
+
+Upload `halo-update-pc.txt`, its `.sig` and both archives to the release. Setup
+asks `releases/latest/download/halo-update-pc.txt` and its `.sig`, so only a
+Latest release is offered. It checks the signature first, with the key built
+into it (`RELEASE_PUBLIC_KEY`: keep it equal to `vita_update_key.h`'s, a test
+says so), then the form, this system's row, the release's file name and a
+version not older than the one installed or Setup's own. It then downloads the
+archive from `releases/download/v<version>/`, no longer than signed, and
+compares its SHA-512. HTTPS to GitHub's hosts only, redirects too. Anything else
+stops the install and nothing is kept. A release without these files: Setup says
+there is no signed PC build yet and the player can choose an archive instead,
+which installs but which Setup does not start.
 
 A release without the manifest and signature still installs with VitaShell
 as before; the in-game download refuses it ("the server answered 404").
