@@ -27,7 +27,7 @@ def test_nothing_there(tmp_path):
     assert not status.complete and status.missing == ["bitmaps.map", "sounds.map", "loc.map"]
     text = hcv.pc_files_help(status.missing)
     for words in ("bitmaps.map, sounds.map, loc.map", "custom_edition", "halocesetup_en_1.00.exe",
-                  hcv.CE_INSTALLER_URL, "Step 3"):
+                  hcv.CE_INSTALLER_URL, "Halo PC files step"):
         assert words in text
 
 

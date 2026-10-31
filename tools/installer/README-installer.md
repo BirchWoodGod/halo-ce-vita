@@ -1,10 +1,10 @@
-# Install helper for Halo CE for PS Vita
+# Halo CE Setup
 
-`halo_ce_vita_installer.py` gathers your own game files in the layout the
-Vita build needs (the main [README](../../README.md#install) gives it) and
-copies them to the Vita over VitaShell's FTP. It is one Python file for
-Windows, Linux and macOS; `HaloCEVitaInstaller.exe` is the same tool as one
-Windows program, with ffmpeg inside it.
+`halo_ce_vita_installer.py` is a standard Setup wizard for Halo CE: it installs
+the game on a PS Vita, over VitaShell's FTP, or on this PC, from your own game
+files. It is one Python file for Windows, Linux and macOS;
+`HaloCEVitaInstaller.exe` is the same tool as one Windows program, with ffmpeg
+inside it.
 
 **No game data comes with it.** Every step reads your own files: your Xbox
 disc image or your own Halo: The Master Chief Collection, your Halo PC
@@ -23,37 +23,101 @@ files.
   Python file below is the same tool, readable.
 - **Any system with Python 3.8 or later:** `python3 halo_ce_vita_installer.py`
   opens the window (on Linux, tkinter may be a separate package:
-  `python3-tk` or `tk`). The movie step needs ffmpeg installed. For the
-  window's Modern look, `python3 -m pip install -r requirements.txt` (see
-  [The window's look](#the-windows-look)); without it the window has its
-  classic look, the default.
+  `python3-tk` or `tk`). Converting the movies needs ffmpeg installed.
 - **Without the window:** `python3 halo_ce_vita_installer.py --help` lists
-  the same steps as commands (see below).
+  the same work as commands (see below).
 
-The window walks through five steps, listed on its left with each one's
-state (done, skipped, or what it needs: required, optional). Each can be skipped (**Skip this step**) and run again: files already
-in place are kept. A step's progress shows the file it is on; **Show
-details** opens the log. The last page sums up what was gathered and copied
-and what to do next on the Vita.
+Put the VPK or the PC build's archive next to the tool and Setup finds it by
+itself.
 
-The files are gathered in an output folder first (by default
+## The wizard
+
+Next, next, finish, with **< Back**, **Next >** and **Cancel** at the bottom
+right. Cancel asks first.
+
+1. **Welcome.** The fan-project notice.
+2. **License Agreement.** The GPL's text. Next stays off until you accept.
+   No game data is included.
+3. **Where to Install.** PS Vita or PC. Platforms that are not ready yet are
+   listed greyed out and cannot be picked.
+4. **Game Files.** One page.
+   - **Automatic** takes everything from your own Halo: The Master Chief
+     Collection, found the way the game does (see [the files](#the-files)).
+   - **Manual**: your Xbox disc image or game folder, the Halo Custom Edition
+     installer or folder (required on the Vita, optional on PC), and on the
+     Vita whether to convert the disc's movies. If MCC is not found, Manual is
+     selected and the page says why.
+5. **Destination.**
+   - **Vita:** its address, as VitaShell shows it, with **Test connection**;
+     the VPK; the folder the files are gathered in on their way (about 2.5 GB).
+   - **PC:** the install folder (`%LOCALAPPDATA%\Programs\Halo CE`,
+     `~/.local/share/halo-ce` on Linux: no admin needed), with **Browse**, the
+     space needed and free, and check boxes for a desktop shortcut and a Start
+     menu entry. If no PC build is next to the tool, you choose its archive
+     here.
+6. **Ready to Install.** A plain list of your choices, and the **Install**
+   button.
+7. **Installing.** One progress bar with the current file, doing everything in
+   order. A new PC install that is cancelled or fails is taken back; what
+   already reached the Vita stays, so a second try goes on from there.
+8. **Finish.** "Setup completed", with **Launch Halo CE** on PC, or what is
+   left to do on the Vita. If it stopped, **< Back** goes to Ready to Install
+   to try again.
+
+Adding a game later is one entry in `GAMES`: a game page then shows up by
+itself. `install_flow()` gives the pages of each choice.
+
+### A PC install
+
+Like any installer, for the current user:
+
+- the PC build's archive, `halo-ce-vita-<version>-pc-windows.zip` or
+  `-pc-linux.tar.gz`, unpacked into the install folder;
+- the game files in the folder of its program, `build/windows` or
+  `build/linux`, where the game looks (without the movies: the PC build plays
+  none), gathered straight there, with no second copy. A `maps` folder is made
+  there even with MCC's files alone, as the game needs one to take that folder
+  for its data;
+- the shortcuts: on Windows a desktop shortcut and a Start menu entry, which
+  start `build\windows\halo.exe` in the install folder; on Linux `.desktop`
+  files in `~/Desktop` and `~/.local/share/applications`;
+- on Windows `uninstall.exe` in the folder, and an Apps & Features entry under
+  `HKCU` (`Software\Microsoft\Windows\CurrentVersion\Uninstall\HaloCE`);
+- `halo-ce-install.json` in the folder: every file written and its size.
+
+Run Setup again and it offers **Repair** (it checks every file of that record
+and puts back what is missing or the wrong size: the PC build from its archive,
+the game files from the source you choose), **Uninstall**, or the whole wizard
+again. Uninstall removes the files of the record and the shortcuts, and no
+other file: your saved games (`%APPDATA%\halo`, `~/.local/share/halo-linux`) and
+what the game wrote beside itself stay.
+
+Setup does not download the PC build. The release's signed manifest
+(`halo-update.txt`, what the Vita's updater checks) covers only the VPK; the PC
+archives are not signed (`tools/release/README.md`), so the tool could not
+verify a download. Get the archive from the releases page. It is read as
+untrusted all the same, and its SHA-256 is written to the log.
+
+For a Vita, the files are gathered in a folder first (by default
 `Documents/Halo CE Vita files`, about 2.5 GB with everything), laid out as
-on the Vita:
+the game reads them, and stay there afterwards, so a copy that stopped can go on:
 
 ```
 Halo CE Vita files/
     default.xbe          -> ux0:data/haloce-vita/default.xbe
     maps/*.map           -> ux0:data/haloce-vita/maps/
     movies/*.mp4         -> ux0:data/haloce-vita/movies/
-    mcc/halo1/...        -> ux0:data/haloce-vita/mcc/halo1/...   (from MCC, step 1)
+    mcc/halo1/...        -> ux0:data/haloce-vita/mcc/halo1/...   (from MCC)
 ```
 
 Custom maps you put in that `maps` folder yourself are copied too.
 
-## The steps
+## The files
 
-1. **Game files**, one of two ways (run the step again with the other to
-   have both):
+What each source gives, and how it is checked. In the window they are the Game
+Files page; on the command line, the commands below.
+
+1. **Game files**, one of two ways:
    - **Your Xbox game.** Choose your Xbox Halo disc image (`.iso`, `.xiso`:
      an XISO made by extract-xiso, or a full disc image) or an already
      unpacked game folder. The `maps` folder and `default.xbe` are taken out.
@@ -66,7 +130,7 @@ Custom maps you put in that `maps` folder yourself are copied too.
      [docs/mcc_cea_maps.md](../../docs/mcc_cea_maps.md)). The tool finds
      MCC's folder by itself (Steam's `libraryfolders.vdf` and, on Windows,
      the registry: Steam's folder and MCC's Steam uninstall entry; also the
-     Xbox app's `XboxGames` folders), or choose it with Choose folder...
+     Xbox app's `XboxGames` folders), or choose it with Browse...
      (Steam: right-click the game, Manage, Browse local files; its `halo1`
      folder or a Steam library works too). It copies exactly what the game
      reads, about 1.4 GB, to `ux0:data/haloce-vita/mcc/`:
@@ -88,7 +152,8 @@ Custom maps you put in that `maps` folder yourself are copied too.
      `bitmaps.map` must be there, or nothing is copied. Nothing of MCC goes
      to the `maps` folder.
 
-2. **Movies (optional).** The disc's Bink movies (`bink/*.bik`) are
+2. **Movies (optional, Vita only).** The PC build skips movies, and MCC has
+   none. The disc's Bink movies (`bink/*.bik`) are
    converted with ffmpeg to H.264 MP4s, 640 wide, as the README's Movies
    section does. Both choices are H.264 Constrained Baseline with no
    B-frames, the only kind the Vita plays cleanly (High profile's B-frames
@@ -96,22 +161,23 @@ Custom maps you put in that `maps` folder yourself are copied too.
    quality the same profile at a higher quality (`-crf 18 -preset slow`,
    larger files, slower to convert). The game runs without them: each
    missing movie is skipped (no intro, no attract videos, no credits movie)
-   and the main menu comes up ready to play. Skip the step with **Next** to
-   save the few minutes it takes.
-3. **Halo PC files (required).** Halo Custom Edition's `bitmaps.map`,
-   `sounds.map` and `loc.map` are required. The page says at the top
-   whether the output folder has all three, or which are missing and where
-   to get them; the Copy page says so too, and copying without them asks
-   first. They count as there when they are in the output folder's `maps`
+   and the main menu comes up ready to play. Untick the box to save the few
+   minutes it takes.
+3. **Halo PC files (required on the Vita, optional on PC).** Halo Custom
+   Edition's `bitmaps.map`, `sounds.map` and `loc.map`. Setup will not go past
+   Game Files on the Vita without them, and says which are missing and where to
+   get them. They count as there when they are in the gathered `maps`
    or in the MCC files of step 1 (`mcc/halo1/maps/custom_edition`, which
    the builds that play MCC's maps read when the `maps` folder has none: an
-   MCC-only install needs nothing more here). Builds before
-   1.1.1-insider.25 read them from `maps` only: this step puts them there.
+   MCC-only install needs nothing more, which is why Automatic does not ask).
+   Builds before 1.1.1-insider.25 read them from `maps` only: this step puts
+   them there.
    They come from one of:
    - **Halo: The Master Chief Collection** on Steam: its
      `halo1/maps/custom_edition` folder, found by itself in your Steam
      libraries (`libraryfolders.vdf`, the registry), or chosen with
-     Folder... Not the maps directly in `halo1/maps`: those are MCC's own
+     Folder... (the wizard fills the field in when it finds one of these). Not
+     the maps directly in `halo1/maps`: those are MCC's own
      and do not work.
    - **The Halo Custom Edition installer**
      ([halomaps.org](https://www.halomaps.org/hce/detail.cfm?fid=410)).
@@ -128,54 +194,39 @@ Custom maps you put in that `maps` folder yourself are copied too.
      `halocesetup*.exe` in your Downloads is picked up by itself too.
 
    Each map's header is checked (the right kind of resource map).
-4. **Copy to the Vita.** On the Vita, open VitaShell and press SELECT: it
-   shows an address like `ftp://192.168.1.20:1337`. Type it in the tool and
-   press Copy. **Keep the Vita awake** while it copies (touch the screen now
+4. **Sending it to the Vita.** On the Vita, open VitaShell and press SELECT: it
+   shows an address like `ftp://192.168.1.20:1337`. **Keep the Vita awake** while it copies (touch the screen now
    and then, or turn off auto-standby in the Vita's power settings): if it
    sleeps, the connection drops. The tool tries again by itself a few times;
-   if it gives up, press Copy again: files already on the Vita with the right
-   size are skipped, so it goes on from where it stopped. Every file is
-   checked by its size on the Vita after copying. "Copy files already on the
-   Vita again" replaces them all.
-5. **The VPK.** Download `halo-ce-vita-<version>-vita.vpk` from the
+   if it gives up, press **< Back** and Install again: files already on the
+   Vita with the right size are skipped, so it goes on from where it stopped.
+   Every file is checked by its size on the Vita after copying. The command
+   line's `upload --replace` copies files already there again.
+5. **The VPK (Vita).** Download `halo-ce-vita-<version>-vita.vpk` from the
    [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest)
    (a VPK next to the tool is picked up by itself). The tool copies it to
    `ux0:data/`. Then, on the Vita, leave FTP mode, open `ux0:data/` in
    VitaShell, press Cross on the VPK and confirm. The tool cannot install
-   it: only VitaShell on the Vita can.
+   it: only VitaShell on the Vita can. Finish says so too.
 
 Still needed on the Vita, as the README says: HENkaku/Enso, VitaShell, and the
 shader compiler `ur0:data/libshacccg.suprx` (ShaRKF00D extracts it).
 
 ## The window's look
 
-By default the window has a classic look: Tk's own grey widgets in its
-Windows 95/98-style theme, a white header band, the steps as a list with
-check boxes, and for each page a small pixelated picture of the port
-running on a PS Vita. The pictures are the project's own screenshots
-(`docs/screenshots`, the ones the README shows), shrunk to 76x43 pixels and
-a few colours by `make_pictures.py` into `pictures/` (about 10 KB in all) and
-zoomed by whole pixels in the window. There is no box art, logo or other
-artwork. Without the `pictures` folder the window works the same, without
-pictures.
+The window is ttk's native theme: `vista` on Windows, `aqua` on macOS, `clam`
+elsewhere, with the system's own fonts. The only colour Setup sets is the white
+of the band at the top and of the first and last pages, as a Windows wizard has
+it. The picture on those two pages and the icon are drawn by the tool itself
+(`sidebar_png`, `icon_png`): no box art, logos or other artwork, and no image
+files. On Windows the window is DPI aware, so its text is sharp on scaled
+displays.
 
-The **Modern look** check box at the bottom left switches to the
-[Sun Valley ttk theme](https://github.com/rdbende/Sun-Valley-ttk-theme)
-(`sv-ttk`, MIT licence), Windows 11's light and dark styles for Tk's own
-widgets, which follows the system's dark or light setting
-([darkdetect](https://github.com/albertosottile/darkdetect), BSD 3-clause
-licence) until **Dark mode** is switched. Both are pinned in
-`requirements.txt` and are inside `HaloCEVitaInstaller.exe`, with their
-licences (in its `licenses` folder); without them there is only the classic
-look. The look chosen is kept in a small settings file:
+Setup keeps one small file, for where it installed:
 `%APPDATA%\HaloCEVita\installer-settings.json` on Windows,
 `~/.config/halo-ce-vita/installer-settings.json` on Linux
 (`$XDG_CONFIG_HOME`), `~/Library/Application Support/HaloCEVita/` on macOS.
-`HCV_THEME=classic`, `light`, `dark`, `modern` (light or dark as the system
-is) or `plain` (Tk's platform theme, as the first beta's window had) picks
-one for a run. On Windows the window is DPI aware, so its text is sharp on
-scaled displays. Its icon is drawn by the tool itself (a plain arrow into a
-tray; no game artwork).
+What it did last is in `setup-log.txt` beside it.
 
 ## Command line
 
@@ -190,12 +241,20 @@ python3 halo_ce_vita_installer.py check-installer "any name.exe"
 python3 halo_ce_vita_installer.py [--out FOLDER] check
 python3 halo_ce_vita_installer.py [--out FOLDER] upload 192.168.1.20 [--replace]
 python3 halo_ce_vita_installer.py vpk 192.168.1.20 [halo.vpk]
+python3 halo_ce_vita_installer.py [--out FOLDER] pc-copy [BUILD FOLDER] [--replace]
+python3 halo_ce_vita_installer.py [--out FOLDER] pc-install [FOLDER] [--package ARCHIVE] [--desktop-shortcut] [--start-menu]
+python3 halo_ce_vita_installer.py pc-uninstall [FOLDER]
+python3 halo_ce_vita_installer.py --uninstall [FOLDER]
 python3 halo_ce_vita_installer.py selftest
 ```
 
 `check` says whether the output folder has the required Halo Custom
 Edition files (and, if not, which are missing and where to get them; exit
-code 1); `upload` warns the same way but copies the rest.
+code 1); `upload` warns the same way but copies the rest. Automatic is `mcc`
+with no folder, then `upload` and `vpk`, or `pc-install`, which does what the
+wizard's PC install does with what is in the output folder (`--out`). `pc-copy`
+copies the gathered files into a PC build you unpacked yourself. `--uninstall`
+is the window's uninstaller, which Apps & Features runs.
 
 (`HaloCEVitaInstaller.exe` takes the same commands, but as a windowed program
 it prints nothing; `selftest --report FILE` writes its results to a file.)
@@ -214,7 +273,23 @@ it prints nothing; `selftest --report FILE` writes its results to a file.)
   Vita), and the data connection goes only to the Vita's own address.
 - MCC's folder is only read: the tool copies the files it names (fixed
   names, never a name read from MCC), into the output folder.
-- No shell is used to run anything; ffmpeg is run with an argument list.
+- The copy to a PC build uses the same checked names, writes only inside the
+  build's data folder, refuses to write through a link, and moves each file
+  into place only once it is whole.
+- The PC build's archive is read as untrusted before a byte of it is written:
+  this system's build must be in it, every name is checked as above, links,
+  devices and doubled names are refused, sizes are bounded, and each file is
+  checked (CRC, size) and moved into place only once it is whole. Only the
+  archive next to the tool or the one you chose is used. Nothing is downloaded.
+- The install's record is only a file in a folder the user can write:
+  uninstall and repair take its paths through the same checks, inside the
+  install folder, and remove shortcuts only by their exact names. Uninstall
+  never deletes a folder's contents wholesale.
+- Windows' registry is written under `HKCU` only, in the one key above.
+- No shell runs anything that holds a name or a path: ffmpeg and the game run
+  with an argument list; PowerShell makes the shortcuts from a fixed line, which
+  reads the paths from the environment; the temporary uninstaller's clean-up is
+  a fixed `cmd` line, reading its folder from the environment too.
 - The Windows build downloads ffmpeg from one fixed address and refuses it
   unless its SHA-256 matches (`build_windows.py`).
 
@@ -230,12 +305,14 @@ files with MCC's headers; Windows' registry mocked), a small XDVDFS image, an LZ
 compressor (the decoder's other half) and cabinets, a Windows program with a
 cabinet in its resources, fake resource maps, a stand-in ffmpeg, and a local
 FTP server that answers like VitaShell (its LIST format, no NLST, no SIZE, a
-connection that drops on demand, doubled transfer replies). The window's
-tests run where there is a display (every page, a step run through it, the
-sidebar's states, the details, the Done page, the classic look by default,
-the Modern look's light and dark with sv-ttk and its setting kept,
-`HCV_THEME`, each page's picture, and the window without its pictures or
-sv-ttk).
+connection that drops on demand, doubled transfer replies), a stand-in Steam
+library and PC build archives, good and hostile. Each test has a home folder of
+its own, so a real Steam or MCC is never read. The Windows parts of a PC install
+run anywhere, against a stand-in registry and PowerShell. The window's tests run
+where there is a display: every page fits, Next and Back, the license's gate,
+greyed platforms, MCC found and not found, every field's check, Test connection,
+Automatic and Manual through to a real install, the Vita's run, a failure and
+Back, Cancel, repair and uninstall.
 
 ## Building the Windows program
 
@@ -250,9 +327,8 @@ out). It downloads FFmpeg 9.0.2 (gyan.dev's essentials build, GPL v3) from a
 fixed address, checks its SHA-256, and builds
 `tools/installer/dist/HaloCEVitaInstaller.exe` with PyInstaller; ffmpeg's
 LICENSE and README.txt (which names its source) go inside next to it, and
-so do the window's pictures (`pictures/`), its Modern look's theme (sv-ttk,
-darkdetect, their licences) and its icon, drawn into `build/` by the tool
-itself. The
+so do the project's `LICENSE`, which the License page shows, and the icon,
+drawn into `build/` by the tool itself. The
 GitHub Actions workflow `.github/workflows/windows-installer.yml` does the
 same on `windows-latest`, runs the tests and the program's selftest, and
 uploads the program as an artifact. Nothing it downloads is committed.
