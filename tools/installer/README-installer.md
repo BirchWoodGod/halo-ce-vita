@@ -103,8 +103,11 @@ choose one you already have: Setup warns that it is not signature-checked and
 asks first, reads it as untrusted all the same, writes its SHA-256 to the log, and
 compares it with the signed list. If its SHA-512 is the release's, it counts as a
 checked download. **Launch Halo CE** on the last page starts only a build checked
-in this run: an archive that does not match installs, and you start it from its
-shortcut. The version of an unchecked archive is only its file's name: it is
+and unpacked by this run of an install, never a repair (the record is a file you
+can write, and repair compares sizes alone): an archive that does not match
+installs, and you start it from its shortcut. A checked build is not put beside
+programs it does not hold, in the folders it installs into: those of an earlier
+install go, and any other stops the install until they are moved away. The version of an unchecked archive is only its file's name: it is
 never taken as the version a signed download may not be older than.
 
 For a Vita, the files are gathered in a folder first (by default

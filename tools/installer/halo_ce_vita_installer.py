@@ -2945,12 +2945,64 @@ def _package_readers(package: PcPackage):
     return archive, archive.extractfile
 
 
+# what a loader or a shell may run; on Linux the executable bit too
+_PROGRAM_NAME = re.compile(r".*\.(exe|dll|sys|com|scr|bat|cmd|ps1|pyd|sh|so(\.[0-9]+)*)", re.IGNORECASE)
+
+
+def stray_programs(package: PcPackage, folder: str) -> List[str]:
+    """Programs and libraries in the folders this package installs into that
+    it does not hold: what a checked build would load or run beside its own
+    files (Windows looks for DLLs beside halo.exe, launch_pc prefers a
+    halo.sh). Those folders alone, not their other subfolders: an install
+    folder may be anyone's. Relative paths, lowest first."""
+    wanted = {item.relative.lower() for item in package.files}
+    places = {()}
+    for item in package.files:
+        places.update(item.parts[:depth] for depth in range(1, len(item.parts)))
+    found = []
+    for place in places:
+        directory = os.path.join(folder, *place)
+        try:
+            names = os.listdir(directory)
+        except OSError:
+            continue
+        for name in names:
+            relative = "/".join(place + (name,))
+            full = os.path.join(directory, name)
+            if relative.lower() in wanted or not os.path.isfile(full):
+                continue
+            if _PROGRAM_NAME.fullmatch(name) or (sys.platform != "win32" and os.access(full, os.X_OK)):
+                found.append(relative)
+    return sorted(found)
+
+
+def clear_stray_programs(package: PcPackage, folder: str, log: Callable[[str], None] = print) -> None:
+    """Before a checked build goes in: the strays of an install Setup made
+    (the record names them) removed; any other, which may be someone's,
+    refused, and nothing written."""
+    record = read_install(folder) or {}
+    ours = {str(name).lower() for name in record.get("files", {})}
+    if isinstance(record.get("uninstaller"), str):
+        ours.add(record["uninstaller"].lower())
+    strays = stray_programs(package, folder)
+    others = [relative for relative in strays if relative.lower() not in ours]
+    if others:
+        raise InstallerError("%s has programs Setup did not put there (%s), which the checked build could load. Move "
+                             "them away or choose an empty folder." % (folder, ", ".join(others[:5])))
+    for relative in strays:
+        os.remove(_recorded_path(folder, relative))
+        log("Removed %s: not in the checked build" % relative)
+
+
 def install_pc_package(package: PcPackage, folder: str, progress: Progress = _no_progress,
                        log: Callable[[str], None] = print) -> Dict[str, int]:
     """The archive unpacked into `folder`, the release's layout kept: each
     file written beside its place, checked by its size (and CRC) and moved
-    in. Returns {relative path: size}."""
+    in. A checked build leaves no program beside it that it does not hold
+    (clear_stray_programs). Returns {relative path: size}."""
     os.makedirs(folder, exist_ok=True)
+    if package.verified:
+        clear_stray_programs(package, folder, log)
     log("SHA-256 of %s: %s" % (os.path.basename(package.path), file_sha256(package.path)))
     done = 0
     written: Dict[str, int] = {}
@@ -3906,8 +3958,8 @@ class InstallerWindow:
         self.package = var()
         self.download_build = tkinter.BooleanVar(value=True)
         self.download_folder = ""
-        # (the program files on disk came from a checked download: Launch is offered)
-        self.build_verified = False
+        # (a checked build was unpacked by this very run: only then is Launch offered)
+        self.launch_allowed = False
         self.desktop_shortcut = tkinter.BooleanVar(value=True)
         self.start_menu = tkinter.BooleanVar(value=True)
         self.launch = tkinter.BooleanVar(value=True)
@@ -4166,7 +4218,7 @@ class InstallerWindow:
             self.root.destroy()
 
     def finish(self):
-        if self.outcome == "done" and self.action.get() != "uninstall" and self.on_pc and self.build_verified and \
+        if self.outcome == "done" and self.action.get() != "uninstall" and self.on_pc and self.launch_allowed and \
                 self.launch.get():
             try:
                 launch_pc(self.installed_folder())
@@ -4629,12 +4681,12 @@ class InstallerWindow:
             self.text(self.install_folder.get(), pady=(0, px(8)))
             self.text("The first load of each level takes a while: the game writes a cache file for it.",
                       pady=(0, px(10)))
-            if self.build_verified:
+            if self.launch_allowed:
                 self.ttk.Checkbutton(self.body, text="Launch Halo CE", variable=self.launch,
                                      style="White.TCheckbutton").pack(anchor="w", pady=(0, px(10)))
             else:
-                self.text("Setup did not download this PC build itself, so it does not start it. Use the shortcut "
-                          "when you are ready.", pady=(0, px(10)))
+                self.text("Setup only starts a PC build it has just installed and checked, so it does not start "
+                          "it. Use the shortcut when you are ready.", pady=(0, px(10)))
             self.text("Click Finish to close Setup.")
         else:
             self.finish_vita()
@@ -4725,7 +4777,12 @@ class InstallerWindow:
         gather = action == "install" or bool(game)
         platform = _pc_builds_here_first()[0][0]
         tasks = []
-        self.build_verified = bool(record.get("verified")) and not unpack
+        # (the record's word carries over a repair that leaves the program alone,
+        # only to go on giving the signed download its floor: it is a file the
+        # user can write and repair compares sizes alone, so it never starts
+        # anything)
+        verified = record.get("verified") is True and not unpack
+        self.launch_allowed = False
         chosen: List[PcPackage] = []
         if unpack and self.downloading():
             installed = installed_version(record)
@@ -4741,12 +4798,13 @@ class InstallerWindow:
                                      lambda step: match_signed_package(chosen[0], self.log, installed)))
         if unpack:
             def unpacked(step):
-                nonlocal version
+                nonlocal version, verified
                 package = chosen[0]
                 version = package.version
                 files.clear()
                 files.update(install_pc_package(package, folder, step, self.log))
-                self.build_verified = package.verified
+                verified = package.verified
+                self.launch_allowed = package.verified and action == "install"
             tasks.append(InstallTask("Copying the program files",
                                      max(chosen[0].size, 1) if chosen else PC_DOWNLOAD_ESTIMATE, unpacked))
         if gather:
@@ -4754,8 +4812,7 @@ class InstallerWindow:
             tasks += self.game_tasks(data)
 
         def finished(step):
-            self.warnings = finish_pc_install(folder, version, files, desktop, start_menu, self.log,
-                                              self.build_verified)
+            self.warnings = finish_pc_install(folder, version, files, desktop, start_menu, self.log, verified)
         tasks.append(InstallTask("Creating the shortcuts", 1 << 20, finished))
         return tasks
 

@@ -1143,7 +1143,7 @@ def test_launch_can_be_unticked(root, tmp_path, monkeypatch):
     window = wizard(root, tmp_path)
     window.platform.set("pc")
     window.outcome = "done"
-    window.build_verified = True
+    window.launch_allowed = True
     window.show("finish")
     window.launch.set(False)
     monkeypatch.setattr(hcv, "launch_pc", lambda folder: pytest.fail("started"))

@@ -478,6 +478,105 @@ def test_the_download_can_be_turned_off_for_an_archive(root, tmp_path, monkeypat
     assert any(text.startswith("PC build (") for text in texts(window))
 
 
+# -- Launch: a checked unpack of this very run, and nothing beside it
+
+def verified_install(root, tmp_path, monkeypatch):
+    errors = complaints(monkeypatch)
+    fake_steam(tmp_path, monkeypatch)
+    window = wizard(root, tmp_path)
+    to_ready(window, root, tmp_path)
+    window.next_button.invoke()
+    wait_for_finish(window, root)
+    assert not errors and window.outcome == "done", window.reason
+    return tmp_path / "Halo CE"
+
+
+def test_a_repair_never_offers_launch(root, tmp_path, release, monkeypatch):
+    """A record is a file anyone can edit and repair compares sizes alone: a
+    same-size program swapped in, record still verified, is not started."""
+    folder = verified_install(root, tmp_path, monkeypatch)
+    program = folder / "build" / "linux" / "halo"
+    program.write_bytes(bytes(reversed(program.read_bytes())))
+    (folder / "build" / "linux" / "mcc" / "halo1" / "maps" / "a10.map").unlink()
+    monkeypatch.setattr(hcv, "launch_pc", lambda folder: pytest.fail("started"))
+    window = wizard(root, tmp_path)
+    assert window.flow()[:2] == ("welcome", "maintenance")
+    advance(window, root, "maintenance", "game_files", "ready")
+    window.next_button.invoke()
+    wait_for_finish(window, root)
+    assert window.outcome == "done", window.reason
+    assert "Launch Halo CE" not in checks(window)
+    assert any("does not start it" in text for text in texts(window))
+    window.next_button.invoke()
+    assert hcv.read_install(str(folder))["verified"] is True  # (still the signed download's floor)
+
+
+def test_a_repair_by_a_checked_download_does_not_offer_launch_either(root, tmp_path, release, monkeypatch):
+    folder = verified_install(root, tmp_path, monkeypatch)
+    (folder / "build" / "linux" / "halo").write_bytes(b"short")
+    monkeypatch.setattr(hcv, "launch_pc", lambda folder: pytest.fail("started"))
+    window = wizard(root, tmp_path)
+    advance(window, root, "maintenance", "destination", "ready")
+    window.next_button.invoke()
+    wait_for_finish(window, root)
+    assert window.outcome == "done", window.reason
+    assert "Launch Halo CE" not in checks(window)
+    window.next_button.invoke()
+
+
+@pytest.mark.parametrize("name", ["build/linux/libSDL3.so", "build/linux/evil.dll", "halo.sh.bat", "evil.sh", "lib/x.so.1.2"])
+def test_a_checked_install_refuses_programs_it_does_not_hold(tmp_path, release, name):
+    package, _ = fetch(tmp_path)
+    folder = tmp_path / "Halo CE"
+    stray = folder / name
+    stray.parent.mkdir(parents=True)
+    stray.write_bytes(b"someone's")
+    with pytest.raises(hcv.InstallerError, match="did not put there"):
+        hcv.install_pc_package(package, str(folder), log=lambda text: None)
+    assert stray.exists() and not (folder / "README.txt").exists()
+
+
+def test_a_checked_install_refuses_an_executable_of_any_name(tmp_path, release):
+    package, _ = fetch(tmp_path)
+    stray = tmp_path / "Halo CE" / "build" / "linux" / "helper"
+    stray.parent.mkdir(parents=True)
+    stray.write_bytes(b"#!/bin/sh\n")
+    stray.chmod(0o755)
+    with pytest.raises(hcv.InstallerError, match="did not put there"):
+        hcv.install_pc_package(package, str(tmp_path / "Halo CE"), log=lambda text: None)
+
+
+def test_a_checked_install_removes_an_earlier_install_s_extras(tmp_path, release):
+    """Over an unsigned install: its own leftovers go, the player's files stay,
+    and what the archive holds replaces what was there."""
+    package, _ = fetch(tmp_path)
+    folder = tmp_path / "Halo CE"
+    (folder / "build" / "linux").mkdir(parents=True)
+    (folder / "build" / "linux" / "old.so").write_bytes(b"from the unsigned build")
+    (folder / "build" / "linux" / "config.toml").write_text("the player's")
+    (folder / "build" / "linux" / "halo").write_bytes(b"from the unsigned build")
+    (folder / "elsewhere").mkdir()
+    (folder / "elsewhere" / "tool.exe").write_bytes(b"not a folder of the package's")
+    (folder / hcv.INSTALL_RECORD).write_text(hcv.json.dumps(
+        {"files": {"build/linux/old.so": 23, "build/linux/halo": 23}, "game_files": {}, "verified": False}))
+    logged = []
+    hcv.install_pc_package(package, str(folder), log=logged.append)
+    assert not (folder / "build" / "linux" / "old.so").exists()
+    assert (folder / "build" / "linux" / "config.toml").read_text() == "the player's"
+    assert (folder / "elsewhere" / "tool.exe").exists()
+    assert (folder / "build" / "linux" / "halo").read_bytes() != b"from the unsigned build"
+    assert any("old.so" in text for text in logged)
+
+
+def test_an_unchecked_install_leaves_the_folder_as_it_was(tmp_path, release):
+    package = hcv.read_pc_package(str(tmp_path / ARCHIVE))
+    stray = tmp_path / "Halo CE" / "build" / "linux" / "mine.so"
+    stray.parent.mkdir(parents=True)
+    stray.write_bytes(b"the user's own")
+    hcv.install_pc_package(package, str(tmp_path / "Halo CE"), log=lambda text: None)
+    assert stray.exists()
+
+
 # -- the real opener, over TLS to this machine
 
 @pytest.fixture
