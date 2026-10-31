@@ -319,6 +319,32 @@ int main(int argc, char **argv)
 		EXTEND((void)0);
 		check("v38_refuse_cooperative_bit2", !network_game_record_decode_version(_network_game_record_crossplay, 38,
 			extended, extended_size, &decoded, NULL), NULL);
+		check("v40_refuse_cooperative_bit2", !network_game_record_decode_version(_network_game_record_crossplay, 40,
+			extended, extended_size, &decoded, NULL), NULL);
+		/* (41: bit 2 the host's a dedicated server, kept apart from the record) */
+		check("v41_cooperative_bit2", network_game_record_decode_version(_network_game_record_crossplay, 41, extended,
+			extended_size, &decoded, NULL) && decoded.cooperative_flags == 0x00 && network_game_record_host_is_dedicated(),
+			NULL);
+		g->cooperative_flags = 0x08;
+		EXTEND((void)0);
+		check("v41_refuse_cooperative_bit3", !network_game_record_decode_version(_network_game_record_crossplay, 41,
+			extended, extended_size, &decoded, NULL), NULL);
+		/* (further byte 10, Force Team Spawns: reserved to 38, 0 or 1 from 39;
+		byte 11 reserved in every version) */
+		memcpy(&mutated, opence, sizeof(mutated));
+		EXTEND(further[10] = 1);
+		check("v38_refuse_force_team_spawns", !network_game_record_decode_version(_network_game_record_crossplay, 38,
+			extended, extended_size, &decoded, NULL), NULL);
+		check("v39_force_team_spawns", network_game_record_decode_version(_network_game_record_crossplay, 39, extended,
+			extended_size, &decoded, NULL) && !memcmp(&decoded, opence, sizeof(decoded)), NULL);
+		check("v41_force_team_spawns", network_game_record_decode_version(_network_game_record_crossplay, 41, extended,
+			extended_size, &decoded, NULL), NULL);
+		EXTEND(further[10] = 2);
+		check("v41_refuse_force_team_spawns_2", !network_game_record_decode_version(_network_game_record_crossplay, 41,
+			extended, extended_size, &decoded, NULL), NULL);
+		EXTEND(further[11] = 1);
+		check("v41_refuse_reserved_11", !network_game_record_decode_version(_network_game_record_crossplay, 41, extended,
+			extended_size, &decoded, NULL), NULL);
 #undef EXTEND
 	}
 

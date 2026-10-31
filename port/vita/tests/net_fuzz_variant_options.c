@@ -15,6 +15,10 @@ An input is a kind byte, then the bytes:
   2  a crossplay record of the input's own size (any size must be refused
      but the record's)
   3  the PC options alone (struct game_variant_options), checked
+An input of kind 15 (mod 16) is a host's King state instead: the next
+byte's low bit says whether the game is of 39 or more, the rest is a state of
+that size, stock 8 bytes here: any size but the stock one's or a Multi-Hill
+game's 20 more refused, a count outside 0 to 4 refused.
 A record that decodes must have options and switches in range (checked here
 on their own, field by field, as the game reads them), and encode again to
 the bytes it came from (crossplay), or to the betas' record (legacy).
@@ -102,6 +106,26 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	it is caught) */
 	game = malloc(sizeof(*game));
 	memset(game, 0xA5, sizeof(*game));
+	if (kind % 16 == 15)
+	{
+		long const stock_size = 8;
+		int multi_hill = size && (data[0] & 1);
+		long count = 0;
+		int taken;
+
+		if (size)
+		{
+			data++;
+			size--;
+		}
+		taken = network_game_record_king_state_valid(data, (long)size, stock_size, multi_hill);
+		if ((long)size == stock_size + 20)
+			memcpy(&count, data + stock_size, sizeof(count));
+		if (taken != ((long)size == stock_size || (multi_hill && (long)size == stock_size + 20 && count >= 0 && count <= 4)))
+			abort();
+		free(game);
+		return 0;
+	}
 	switch (kind % 4)
 	{
 	case 0:
@@ -149,12 +173,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	case 2:
 		/* (with bit 2 of the kind: a record of OpenCE's 38, 16 bytes longer;
 		taken, the record before its further options and its local data
-		again as the client keeps them, the co-op byte's bit 1 dropped;
-		with bit 3 too, of 39's, the same record) */
+		again as the client keeps them, the co-op byte's bits 1 and 2
+		dropped; with bit 3 too, of 39's, the same record; with bit 4 of 40's
+		or, with bit 3, 41's) */
 		if (kind & 4)
 		{
 			long local = HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET;
-			unsigned int version = (kind & 8) ? 39 : 38;
+			unsigned int version = (kind & 16) ? ((kind & 8) ? 41 : 40) : (kind & 8) ? 39 : 38;
 
 			record_size = network_game_record_wire_size(_network_game_record_crossplay, version);
 			memset(fuzz_record, 0, sizeof(fuzz_record));
@@ -163,8 +188,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 			if (network_game_record_decode_version(_network_game_record_crossplay, version, fuzz_record, record_size, game,
 				&why))
 			{
+				/* (a higher switch and a reserved byte stay refused: a next
+				reuse is noticed, not misread) */
+				byte const *further = fuzz_record + local;
+
 				if (why || !fuzz_options_in_range(&game->variant_options) ||
-					!network_game_cooperative_flags_valid(game->cooperative_flags))
+					!network_game_cooperative_flags_valid(game->cooperative_flags) ||
+					(fuzz_record[offsetof(struct network_game, cooperative_flags)] & (version >= 41 ? ~7 : ~3)) ||
+					further[10] > (version >= 39 ? 1 : 0) || further[11] || further[12] || further[13] || further[14] ||
+					further[15])
 				{
 					abort();
 				}
@@ -329,6 +361,102 @@ int net_fuzz_checks(void)
 #undef REFUSED
 	}
 	fuzz_check("unknown co-op switch refused", !network_game_cooperative_flags_valid(0x02));
+
+	/* Force Team Spawns (further byte 10) and the dedicated host's co-op
+	switch, each to its exact values and versions (docs/opence-net41-spec.md
+	7.6); the reserved bytes past it and the switch past it still refused */
+	{
+		static byte extended[HALO_PORT_NETWORK_GAME_SIZE + 16];
+		long const local = HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET;
+		long const cooperative = offsetof(struct network_game, cooperative_flags);
+		long const size = HALO_PORT_NETWORK_GAME_SIZE + 16;
+		static struct { unsigned int version; int offset; byte value; boolean taken; boolean dedicated; } const cases[] =
+		{
+			{ 38, 10, 1, FALSE, FALSE }, { 39, 10, 0, TRUE, FALSE }, { 39, 10, 1, TRUE, FALSE }, { 39, 10, 2, FALSE, FALSE },
+			{ 40, 10, 1, TRUE, FALSE }, { 41, 10, 1, TRUE, FALSE }, { 41, 10, 2, FALSE, FALSE }, { 41, 10, 0xFF, FALSE, FALSE },
+			{ 39, 11, 1, FALSE, FALSE }, { 41, 11, 1, FALSE, FALSE }, { 41, 12, 1, FALSE, FALSE }, { 41, 13, 1, FALSE, FALSE },
+			{ 41, 14, 1, FALSE, FALSE }, { 41, 15, 1, FALSE, FALSE },
+			{ 38, -1, 0x04, FALSE, FALSE }, { 39, -1, 0x04, FALSE, FALSE }, { 40, -1, 0x04, FALSE, FALSE },
+			{ 41, -1, 0x04, TRUE, TRUE }, { 41, -1, 0x07, TRUE, TRUE }, { 41, -1, 0x08, FALSE, FALSE },
+			{ 41, -1, 0x0C, FALSE, FALSE }, { 41, -1, 0x80, FALSE, FALSE }, { 39, -1, 0x03, TRUE, FALSE },
+		};
+		size_t index;
+
+		for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++)
+		{
+			boolean taken;
+
+			memset(extended, 0, sizeof(extended));
+			game_variant_options_default(NULL, &((struct network_game *)extended)->variant_options);
+			if (cases[index].offset >= 0)
+				extended[local + cases[index].offset] = cases[index].value;
+			else
+				extended[cooperative] = cases[index].value;
+			taken = network_game_record_decode_version(_network_game_record_crossplay, cases[index].version, extended, size,
+				&decoded, NULL);
+			fuzz_check("further byte 10, reserved bytes and co-op switches by version", taken == cases[index].taken);
+			if (taken)
+			{
+				fuzz_check("the dedicated host's switch read by 41 alone",
+					network_game_record_host_is_dedicated() == cases[index].dedicated);
+				fuzz_check("and kept out of the record", network_game_cooperative_flags_valid(decoded.cooperative_flags));
+			}
+		}
+		/* (a later record of an ordinary host, and any legacy one, say no) */
+		memset(extended, 0, sizeof(extended));
+		game_variant_options_default(NULL, &((struct network_game *)extended)->variant_options);
+		fuzz_check("a record of no dedicated host", network_game_record_decode_version(_network_game_record_crossplay, 41,
+			extended, size, &decoded, NULL) && !network_game_record_host_is_dedicated());
+		if (folder)
+		{
+			static byte seed[HALO_PORT_NETWORK_GAME_SIZE + 17];
+
+			seed[0] = 2 | 4 | 8 | 16;
+			memcpy(seed + 1, extended, (size_t)size);
+			seed[1 + cooperative] = 0x04;
+			seed[1 + local + 10] = 1;
+			net_fuzz_write_seed(folder, "record_41", seed, (unsigned long)size + 1);
+		}
+	}
+
+	/* the King state's sizes and counts (spec 7.6) */
+	{
+		enum { STOCK = 64 };
+		static byte state[STOCK + 32];
+		static long const counts[] = { -1, 0, 1, 4, 5, 0x7FFFFFFF, -0x7FFFFFFF - 1 };
+		size_t index;
+
+		memset(state, 0x5A, sizeof(state));
+		fuzz_check("King: the stock size", network_game_record_king_state_valid(state, STOCK, STOCK, FALSE) &&
+			network_game_record_king_state_valid(state, STOCK, STOCK, TRUE));
+		fuzz_check("King: one short, one long", !network_game_record_king_state_valid(state, STOCK - 1, STOCK, TRUE) &&
+			!network_game_record_king_state_valid(state, STOCK + 1, STOCK, TRUE) &&
+			!network_game_record_king_state_valid(state, STOCK + 19, STOCK, TRUE) &&
+			!network_game_record_king_state_valid(state, STOCK + 21, STOCK, TRUE) &&
+			!network_game_record_king_state_valid(state, 0, STOCK, TRUE) &&
+			!network_game_record_king_state_valid(state, -1, STOCK, TRUE));
+		for (index = 0; index < sizeof(counts) / sizeof(counts[0]); index++)
+		{
+			long const hills[4] = { -1, 0x7FFFFFFF, 3, 0 };
+			boolean in_range = counts[index] >= 0 && counts[index] <= 4;
+
+			memcpy(state + STOCK, &counts[index], 4);
+			memcpy(state + STOCK + 4, hills, sizeof(hills));
+			fuzz_check("King: a count's range, whatever the ids",
+				network_game_record_king_state_valid(state, STOCK + 20, STOCK, TRUE) == in_range);
+			fuzz_check("King: no tail before 39",
+				!network_game_record_king_state_valid(state, STOCK + 20, STOCK, FALSE));
+		}
+		if (folder)
+		{
+			static byte seed[STOCK + 22];
+
+			seed[0] = 15;
+			seed[1] = 1;
+			seed[2 + 8] = 1;
+			net_fuzz_write_seed(folder, "king_tail", seed, 2 + 8 + 20);
+		}
+	}
 
 	__builtin_printf("%s variant options: the record's two wires, defaults and ranges\n",
 		fuzz_failures ? "FAIL" : "PASS");
