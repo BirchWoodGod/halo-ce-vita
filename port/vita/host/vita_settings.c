@@ -1533,7 +1533,8 @@ extern volatile int halo_forge_request_network;
 
 /* the map variants listed (File Share's), the ones shown at once */
 #define FORGE_PANEL_MAXIMUM 32
-#define FORGE_PANEL_LINES 6
+/* (a Forge game's rows leave room for two) */
+#define FORGE_PANEL_LINES (forge_panel_ai_counts(NULL, NULL) ? 2 : 6)
 
 enum
 {
@@ -5308,10 +5309,11 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 		if (line->type == LINE_HEADING && (*headings)++ < skip)
 			continue;
 		/* (Modded maps: a gap between its switch and the maps; the Forge page:
-		before its File Share heading; the Mod manager: between its totals and
+		before its File Share heading, but for a Forge game's rows, which fill
+		it; the Mod manager: between its totals and
 		the entries) */
 		if (index && ((page == PAGE_MAPS && line->type != LINE_SETTING && lines[index - 1].type == LINE_SETTING) ||
-			(page == PAGE_FORGE && line->type == LINE_HEADING) ||
+			(page == PAGE_FORGE && line->type == LINE_HEADING && !forge_panel_ai_counts(NULL, NULL)) ||
 			(page == PAGE_MODS && line->type == LINE_MOD && lines[index - 1].type == LINE_INFO) ||
 			(page == PAGE_FRIENDS && line->type == LINE_INFO && lines[index - 1].type == LINE_SETTING)))
 		{
@@ -5480,7 +5482,7 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			}
 		}
 	}
-	if (page == PAGE_FORGE && forge_entry_count > FORGE_PANEL_LINES && length + 2 < size)
+	if (page == PAGE_FORGE && forge_entry_count > FORGE_PANEL_LINES && !forge_panel_ai_counts(NULL, NULL) && length + 2 < size)
 	{
 		length += snprintf(text + length, (size_t)(size - length), "\n\x04");
 		length += snprintf(text + length, (size_t)(size - length), T("(variants %d-%d of %d)"), forge_scroll + 1,
