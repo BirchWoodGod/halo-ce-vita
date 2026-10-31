@@ -234,6 +234,13 @@ int netversion_table_newer(const char *text, size_t size, const char *signature,
 
 	if (result != NETVERSION_TABLE_OK)
 		return result;
+	if (candidate.version < NETVERSION_TABLE_MINIMUM_VERSION)
+	{
+		if (error && error_size > 0)
+			snprintf(error, (size_t)error_size, "version %lu is older than this release takes (%lu)", candidate.version,
+				(unsigned long)NETVERSION_TABLE_MINIMUM_VERSION);
+		return NETVERSION_TABLE_TOO_OLD;
+	}
 	if (candidate.version <= current->version)
 	{
 		if (error && error_size > 0)

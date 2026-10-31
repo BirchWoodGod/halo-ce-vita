@@ -30,6 +30,7 @@
 #   elsewhere   a redirect to another host: refused, nothing kept
 #   keptbad     a kept table changed on the card: not taken at start (the
 #               built-in list), then the fetched one taken
+#   keptcut     a kept file cut short (a signature, no table): not taken, the built-in list
 #   off         network.crossplay_updates false: no request; the kept table
 #               still taken
 #   offline     internet play off (network.online false): no request
@@ -58,7 +59,7 @@ data=${HALO_TEST_DATA:-$root/../data2276}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_netversion_fetch_test.$$}
 key=${NETVERSIONS_TEST_KEY:-}
 . "$here/test_out.sh"
-cases=${*:-none good kept newer older badsig otherkey garbage unknownwire big chunked redirect elsewhere keptbad off offline autooff daily}
+cases=${*:-none good kept newer older badsig otherkey garbage unknownwire big chunked redirect elsewhere keptbad keptcut off offline autooff daily}
 parallel=${NETVERSIONS_PARALLEL:-6}
 [ -n "$key" ] && [ -r "$key" ] || { echo "SKIP: wants NETVERSIONS_TEST_KEY (a test key: make_update_key.py)"; exit 0; }
 public=$(sed -n 's/^# public key: //p' "$key")
@@ -113,7 +114,7 @@ run() { # NAME SECONDS URL-PATH KEPT-FROM [VAR=value...]: the game at its main m
 	rm -rf "${out:?}/$name"
 	mkdir -p "$out/$name/data" "$out/$name/save" "$out/$name/kept" "$out/$name/home"
 	ln -sfn "$(cd "$data" && pwd)/maps" "$out/$name/data/maps"
-	[ -n "$kept" ] && cp "$kept"/netversions.txt* "$out/$name/kept/"
+	[ -n "$kept" ] && cat "$kept/netversions.txt.sig" "$kept/netversions.txt" > "$out/$name/kept/netversions.kept"
 	cp "$binary" "$out/$name/halo"
 	(cd "$out/$name" && exec env -u DISPLAY -u WAYLAND_DISPLAY HOME="$out/$name/home" SDL_AUDIODRIVER=dummy \
 		SDL_VIDEODRIVER=offscreen HALO_DATA_ROOT="$out/$name/data" HALO_SAVE_ROOT="$out/$name/save" HALO_NO_VSYNC=1 \
@@ -132,12 +133,12 @@ requests() { # PATH-PREFIX: the requests the server had for it
 has() { grep -aq -- "$2" "$out/$1/run.log" || fail "$1" "${3:-no line: $2}"; }
 hasnt() { grep -aq -- "$2" "$out/$1/run.log" && fail "$1" "${3:-a line: $2}"; }
 kept_is() { # NAME FROM: the kept table is FROM's, byte for byte
-	cmp -s "$out/$1/kept/netversions.txt" "$out/served/$2/netversions.txt" &&
-		cmp -s "$out/$1/kept/netversions.txt.sig" "$out/served/$2/netversions.txt.sig" ||
-		fail "$1" "the kept table is not $2's"
+	cat "$out/served/$2/netversions.txt.sig" "$out/served/$2/netversions.txt" |
+		cmp -s - "$out/$1/kept/netversions.kept" || fail "$1" "the kept table is not $2's"
+	[ ! -e "$out/$1/kept/netversions.txt" ] && [ ! -e "$out/$1/kept/netversions.txt.sig" ] ||
+		fail "$1" "the table kept as two files"
 }
-nothing_kept() { [ -e "$out/$1/kept/netversions.txt" ] || [ -e "$out/$1/kept/netversions.txt.sig" ] &&
-	fail "$1" "a table kept"; ls "$out/$1/kept" | grep -q "\.new$" && fail "$1" "a download left behind"; return 0; }
+nothing_kept() { [ -e "$out/$1/kept/netversions.kept" ] && fail "$1" "a table kept"; ls "$out/$1/kept" | grep -q "\.new$" && fail "$1" "a download left behind"; return 0; }
 builtin="the crossplay wire joins 29, 32, 38 and 39"
 
 start_case() { # CASE: its run, in the background
@@ -157,6 +158,8 @@ start_case() { # CASE: its run, in the background
 	elsewhere) run elsewhere 25 elsewhere/v5 "" ;;
 	keptbad) mkdir -p "$out/keptbad-seed" && cp "$out/served/v5/"* "$out/keptbad-seed/" &&
 		sed -i 's/^version 5$/version 9/' "$out/keptbad-seed/netversions.txt" && run keptbad 25 files/v6 "$out/keptbad-seed" ;;
+	keptcut) mkdir -p "$out/keptcut-seed" && cp "$out/served/v5/"* "$out/keptcut-seed/" &&
+		: > "$out/keptcut-seed/netversions.txt" && run keptcut 25 files/none "$out/keptcut-seed" ;;
 	off) run off 25 files/v6 "$out/served/v5" HALO_NET_CROSSPLAY_UPDATES=false ;;
 	offline) run offline 25 files/v6 "" HALO_NET_ONLINE=false ;;
 	autooff) run autooff 25 files/v6 "" HALO_UPDATE_AUTO=false ;;
@@ -237,6 +240,9 @@ for case in $cases; do
 		has keptbad "the built-in list; $builtin"
 		has keptbad "the fetched table taken: version 6"
 		kept_is keptbad v6 ;;
+	keptcut)
+		has keptcut "the kept table .* not taken: "
+		has keptcut "the built-in list; $builtin" ;;
 	off)
 		has off "the kept table .* taken: version 5"
 		has off "not fetching the table: network.crossplay_updates is off"

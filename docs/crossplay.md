@@ -1742,7 +1742,8 @@ without a game update. Design agreed with the owner:
   `objects.githubusercontent.com`, 5 KB and 130 bytes at most, a fixed
   User-Agent, no token, no cookie. No new TLS root, host or port.
 - **When.** At start (WSAStartup) the kept table is read
-  (`ux0:data/haloce-vita/netversions.txt` and `.sig`; a PC's save folder);
+  (`ux0:data/haloce-vita/netversions.kept`, signature then table, one file
+  written whole; a PC's save folder);
   a small thread then fetches at once and once a day (30 min after a
   failure to reach GitHub), only while allowed: `network.crossplay_updates`
   (the Vita panel's Vita and PC > PC versions list: Auto / Built-in),

@@ -3,12 +3,13 @@ NETVERSION_FETCH.H
 
 The signed crossplay version table's fetch and keeping (netversion_table.h,
 netversion_fetch.c): the last good table kept on the memory card (the
-Vita's ux0:data/haloce-vita/netversions.txt and .sig; the PC's save folder)
+Vita's ux0:data/haloce-vita/netversions.kept; the PC's save folder)
 taken at start, then the owner's newest fetched from GitHub over the update
 check's HTTPS (its pinned authorities, a redirect only to GitHub's release
 storage, a few KB at most) at start and once a day while internet play is
 on, in the background. A table is taken only when its signature is the
-owner's, its form strict and its version higher than the one in effect;
+owner's, its form strict and its version higher than the one in effect and
+not below this release's NETVERSION_TABLE_MINIMUM_VERSION;
 anything else is logged and ignored, and the built-in list stands.
 
 Never asked of the network: with network.crossplay_updates false (the

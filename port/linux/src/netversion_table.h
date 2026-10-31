@@ -57,6 +57,19 @@ Only integers, strings and structures of them cross to the callers.
 #define NETVERSION_TABLE_MAGIC "halo-ce-vita-netversions 1"
 #define NETVERSION_TABLE_FILE "netversions.txt"
 #define NETVERSION_TABLE_SIGNATURE_FILE "netversions.txt.sig"
+/* what is kept on the card: the signature's 128 digits, a newline, the table,
+as one file written whole (config_file_replace), so that a card that fills
+or a game that stops can never leave a table with another's signature */
+#define NETVERSION_TABLE_KEPT_FILE "netversions.kept"
+
+/* The oldest table this release takes, kept or fetched, whatever the card
+holds: raised at each release to the newest table published
+(tools/release/README.md), so that a card emptied or a crash does not reopen
+a replay of an older signed table. Must never exceed a published version:
+no table is out yet, so 1 */
+#ifndef NETVERSION_TABLE_MINIMUM_VERSION
+#define NETVERSION_TABLE_MINIMUM_VERSION 1
+#endif
 
 enum
 {
@@ -67,6 +80,8 @@ enum
 	NETVERSION_TABLE_MAXIMUM_SIZE = 27 + 19 + NETVERSION_TABLE_MAXIMUM_ROWS * (13 + 64 + 1),
 	/* the signature file: 128 digits and a newline (CR LF taken) */
 	NETVERSION_TABLE_SIGNATURE_MAXIMUM_SIZE = 130,
+	NETVERSION_TABLE_KEPT_SIGNATURE_SIZE = 129,
+	NETVERSION_TABLE_KEPT_MAXIMUM_SIZE = NETVERSION_TABLE_KEPT_SIGNATURE_SIZE + NETVERSION_TABLE_MAXIMUM_SIZE,
 };
 
 enum
@@ -101,6 +116,8 @@ enum
 	NETVERSION_TABLE_TOO_LARGE = -3,
 	/* (netversion_table_newer) not newer than the table already had */
 	NETVERSION_TABLE_NOT_NEWER = -4,
+	/* (netversion_table_newer) older than this release takes */
+	NETVERSION_TABLE_TOO_OLD = -5,
 };
 
 /* the key a table must be signed with: the owner's release key, or a test
@@ -115,8 +132,9 @@ int netversion_table_check(const char *text, size_t size, const char *signature,
 	const unsigned char key[32], struct netversion_table *table, char *error, int error_size);
 
 /* a candidate taken in place of the table had (current, whose version 0 is
-none) only when it checks and is newer: NETVERSION_TABLE_OK (current
-replaced), else a code (current kept) */
+none) only when it checks, is not older than NETVERSION_TABLE_MINIMUM_VERSION
+and is newer: NETVERSION_TABLE_OK (current replaced), else a code (current
+kept) */
 int netversion_table_newer(const char *text, size_t size, const char *signature, size_t signature_size,
 	const unsigned char key[32], struct netversion_table *current, char *error, int error_size);
 

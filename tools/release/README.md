@@ -370,11 +370,17 @@ PC versions list Auto; `network.crossplay_updates`; a PC's `update.auto`
 false turns it off too), over the updater's HTTPS (GitHub's authorities
 built in, a redirect only to GitHub's release storage, at most 5 KB). It
 takes one only when the signature is the owner's, the form is exact and the
-version is higher than the one it has; it keeps that one on the memory card
-(`ux0:data/haloce-vita/netversions.txt` and `.sig`; a PC's save folder) for
-the next start, offline or not. Anything else is logged (`netversions:` in
+version is higher than the one it has and not below the build's
+`NETVERSION_TABLE_MINIMUM_VERSION`; it keeps that one on the memory card as one
+file written whole (`ux0:data/haloce-vita/netversions.kept`, the signature then
+the table; a PC's save folder) for the next start, offline or not. Anything else is logged (`netversions:` in
 halo.log) and ignored: the built-in list stands. A missing table (404) is
 the built-in list.
+
+**Each release:** set `NETVERSION_TABLE_MINIMUM_VERSION` in
+`port/linux/src/netversion_table.h` to the version of the newest table published
+when the build is made (never above it). That floor stands even on a card
+holding nothing, so an older signed table cannot be played back at that release.
 
 ### Once: make the release
 

@@ -12,8 +12,9 @@ that reached GitHub, RETRY_SECONDS since one that did not) and allowed
 update check's stack: the signature file and the table downloaded
 (posix_https_download: GitHub's authorities, no redirect but to GitHub's
 release storage, NETVERSION_TABLE_MAXIMUM_SIZE bytes at most), checked, and
-put in effect and kept only when newer than the table in effect. The
-downloads go to .new files beside the kept ones, removed after.
+put in effect and kept only when newer than the table in effect. Kept as one
+file written whole (NETVERSION_TABLE_KEPT_FILE). The downloads go to .new
+files beside it, removed after.
 
 Release builds ask FETCH_BASE alone. (tests only, never a release build)
 HALO_TEST_NETVERSIONS_URL another base, http:// to this machine alone (the
@@ -210,27 +211,34 @@ static void log_in_effect(const char *how)
 at a time) the kept table taken, once */
 static void load_kept(void)
 {
-	char path[PATH_SIZE], signature_path[PATH_SIZE], error[96], how[PATH_SIZE + 64];
+	char path[PATH_SIZE], error[96], how[PATH_SIZE + 64];
 	unsigned char key[32];
-	size_t size = 0, signature_size = 0;
-	char *text, *signature;
+	size_t size = 0;
+	char *kept;
 	int result;
 
-	kept_path(path, sizeof(path), NETVERSION_TABLE_FILE);
-	kept_path(signature_path, sizeof(signature_path), NETVERSION_TABLE_SIGNATURE_FILE);
-	text = read_bounded(path, NETVERSION_TABLE_MAXIMUM_SIZE, &size);
-	signature = read_bounded(signature_path, NETVERSION_TABLE_SIGNATURE_MAXIMUM_SIZE, &signature_size);
-	if (!text && !signature)
+	kept_path(path, sizeof(path), NETVERSION_TABLE_KEPT_FILE);
+	config_file_settle(path);
+	kept = read_bounded(path, NETVERSION_TABLE_KEPT_MAXIMUM_SIZE, &size);
+	if (!kept)
 	{
 		log_in_effect("no crossplay version table kept: the built-in list");
 		return;
 	}
 	netversion_table_public_key(key);
 	memset(&current, 0, sizeof(current));
-	result = netversion_table_newer(text ? text : "", size, signature, signature_size, key, &current, error,
-		(int)sizeof(error));
-	free(text);
-	free(signature);
+	if (size < NETVERSION_TABLE_KEPT_SIGNATURE_SIZE || kept[NETVERSION_TABLE_KEPT_SIGNATURE_SIZE - 1] != '\n')
+	{
+		result = NETVERSION_TABLE_MALFORMED;
+		snprintf(error, sizeof(error), "not a kept table");
+	}
+	else
+	{
+		result = netversion_table_newer(kept + NETVERSION_TABLE_KEPT_SIGNATURE_SIZE,
+			size - NETVERSION_TABLE_KEPT_SIGNATURE_SIZE, kept, NETVERSION_TABLE_KEPT_SIGNATURE_SIZE, key, &current, error,
+			(int)sizeof(error));
+	}
+	free(kept);
 	if (result != NETVERSION_TABLE_OK)
 	{
 		memset(&current, 0, sizeof(current));
@@ -242,6 +250,23 @@ static void load_kept(void)
 	snprintf(how, sizeof(how), "the kept table %s taken: version %lu, %d rows", path, current.version, current.count);
 	log_in_effect(how);
 	log_rows(&current);
+}
+
+/* the table and its signature as one file, whole or not at all: 1, else 0 */
+static int keep_table(const char *path, const char *text, size_t size, const char *signature)
+{
+	char *kept = malloc(NETVERSION_TABLE_KEPT_SIGNATURE_SIZE + size);
+	int written;
+
+	if (!kept)
+		return 0;
+	/* (its 128 digits, whichever line end the file had: it passed the check) */
+	memcpy(kept, signature, NETVERSION_TABLE_KEPT_SIGNATURE_SIZE - 1);
+	kept[NETVERSION_TABLE_KEPT_SIGNATURE_SIZE - 1] = '\n';
+	memcpy(kept + NETVERSION_TABLE_KEPT_SIGNATURE_SIZE, text, size);
+	written = config_file_replace(path, kept, NETVERSION_TABLE_KEPT_SIGNATURE_SIZE + size);
+	free(kept);
+	return written;
 }
 
 /* ---------- a fetch */
@@ -271,7 +296,7 @@ static int download(const char *base, const char *name, const char *path, unsign
 0 if it was not reached */
 static int fetch(void)
 {
-	char path[PATH_SIZE], signature_path[PATH_SIZE], kept[PATH_SIZE], kept_signature[PATH_SIZE];
+	char path[PATH_SIZE], signature_path[PATH_SIZE], kept[PATH_SIZE];
 	char error[256], how[160];
 	unsigned char key[32];
 	size_t size = 0, signature_size = 0;
@@ -282,8 +307,7 @@ static int fetch(void)
 
 	kept_path(path, sizeof(path), NETVERSION_TABLE_FILE ".new");
 	kept_path(signature_path, sizeof(signature_path), NETVERSION_TABLE_SIGNATURE_FILE ".new");
-	kept_path(kept, sizeof(kept), NETVERSION_TABLE_FILE);
-	kept_path(kept_signature, sizeof(kept_signature), NETVERSION_TABLE_SIGNATURE_FILE);
+	kept_path(kept, sizeof(kept), NETVERSION_TABLE_KEPT_FILE);
 	platform_log("netversions: fetching the crossplay version table (in effect: version %lu)", current.version);
 	if (!download(base, NETVERSION_TABLE_SIGNATURE_FILE, signature_path, NETVERSION_TABLE_SIGNATURE_MAXIMUM_SIZE, error,
 			(int)sizeof(error)) ||
@@ -316,7 +340,7 @@ static int fetch(void)
 	pthread_mutex_unlock(&fetch_lock);
 	network_wire_table_set(&candidate);
 	/* (kept for the next start: the exact bytes that were checked) */
-	if (!config_file_write(kept, text, size) || !config_file_write(kept_signature, signature, signature_size))
+	if (!keep_table(kept, text, size, signature))
 		platform_log("netversions: could not keep the table in %s", kept);
 	snprintf(how, sizeof(how), "the fetched table taken: version %lu, %d rows", candidate.version, candidate.count);
 	log_in_effect(how);

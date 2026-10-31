@@ -943,6 +943,22 @@ int config_file_write(const char *path, const char *text, size_t size)
 	return config_write_file_length(path, text, size);
 }
 
+int config_file_replace(const char *path, const char *text, size_t size)
+{
+#ifdef HALO_NOT_DESKTOP
+	return config_write_file_length(path, text, size);
+#else
+	char temporary[1100];
+
+	if (snprintf(temporary, sizeof(temporary), "%s.new", path) >= (int)sizeof(temporary))
+		return 0;
+	if (SDL_SaveFile(temporary, text, size) && SDL_RenamePath(temporary, path))
+		return 1;
+	SDL_RemovePath(temporary);
+	return 0;
+#endif
+}
+
 /* whether there is a file (or anything) at path */
 static int config_file_exists(const char *path)
 {
@@ -958,7 +974,7 @@ static int config_file_exists(const char *path)
 /* (a start after a write stopped between taking the old file away and
 putting the new one in place: the new one, whole - config_write_file_length
 removes the old one only once the new one is on the card) */
-static void config_file_settle(const char *path)
+void config_file_settle(const char *path)
 {
 #ifdef HALO_NOT_DESKTOP
 	char temporary[1100];

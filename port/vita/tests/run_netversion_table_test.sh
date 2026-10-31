@@ -88,4 +88,11 @@ ${FUZZ_CLANG:-clang} -m32 -O1 -fsanitize=address,undefined -fno-sanitize-recover
 	port/linux/src/p2p_crypto.c port/third_party/monocypher/monocypher.c port/third_party/monocypher/monocypher-ed25519.c
 NETVERSIONS_TEST_SEED=$seed NETVERSIONS_TEST_FILE="$table" NETVERSIONS_TEST_FILE_VERSION=6 \
 	"$out/netversion_table_test" || status=1
+# (a release whose minimum is above a table replayed)
+${FUZZ_CLANG:-clang} -m32 -O1 -fsanitize=address,undefined -fno-sanitize-recover=all $flags \
+	-DHALO_NETVERSIONS_TEST_KEY="\"$public\"" -DNETVERSION_TABLE_MINIMUM_VERSION=1000 \
+	-Wl,--unresolved-symbols=ignore-in-object-files \
+	-o "$out/netversion_table_minimum" "$here/netversion_table_test.c" port/linux/src/netversion_table.c \
+	port/linux/src/p2p_crypto.c port/third_party/monocypher/monocypher.c port/third_party/monocypher/monocypher-ed25519.c
+NETVERSIONS_TEST_SEED=$seed "$out/netversion_table_minimum" || status=1
 exit $status

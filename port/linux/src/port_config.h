@@ -29,6 +29,11 @@ void config_folder(char *path, size_t size);
 char *config_file_read(const char *path, size_t *size);
 /* a whole file written (replaced); 1 on success */
 int config_file_write(const char *path, const char *text, size_t size);
+/* ... whole or not at all, on every system: the old file or the new one is
+there, never part of one; 1 on success. A reader calls config_file_settle
+first */
+int config_file_replace(const char *path, const char *text, size_t size);
+void config_file_settle(const char *path);
 /* sets a boolean setting, and writes it into config.toml (only its line
 changes); 1 on success */
 int config_write_boolean(const char *name, int value);

@@ -290,6 +290,24 @@ int main(void)
 			error, (int)sizeof(error)) == NETVERSION_TABLE_TOO_LARGE, "a signature file larger than one: refused unread");
 	}
 
+#if NETVERSION_TABLE_MINIMUM_VERSION > 1
+	/* (built with a minimum of 1000) this release's oldest table: a replay
+	of an older one is not taken, on a card with nothing kept too */
+	memset(&current, 0, sizeof(current));
+	snprintf(tampered, sizeof(tampered), "%s", "halo-ce-vita-netversions 1\nversion 999\njoin 45 rules 39\n");
+	sign_body(tampered, strlen(tampered), seed, tampered_signature);
+	check(netversion_table_newer(tampered, strlen(tampered), tampered_signature, strlen(tampered_signature), public_key,
+		&current, error, (int)sizeof(error)) == NETVERSION_TABLE_TOO_OLD && current.version == 0 && !current.count,
+		"below this release's minimum, nothing had: not taken");
+	snprintf(tampered, sizeof(tampered), "%s", "halo-ce-vita-netversions 1\nversion 1000\njoin 45 rules 39\n");
+	sign_body(tampered, strlen(tampered), seed, tampered_signature);
+	check(netversion_table_newer(tampered, strlen(tampered), tampered_signature, strlen(tampered_signature), public_key,
+		&current, error, (int)sizeof(error)) == NETVERSION_TABLE_OK && current.version == 1000,
+		"this release's minimum itself: taken");
+	printf("%s (%d of %d checks failed)\n", failures ? "FAIL" : "PASS", failures, checks);
+	return failures != 0;
+#endif
+
 	/* the newest wins */
 	memset(&current, 0, sizeof(current));
 	sign_body(body, length, seed, signature);
