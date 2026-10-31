@@ -1189,7 +1189,8 @@ static void classic_text_fit_characters(struct widget_instance *widget, unsigned
 
 static void text_show(struct widget_instance *widget, char const *text)
 {
-	unsigned short characters[481];
+	/* (Forge's controls are the longest, Spanish on the Vita 597) */
+	unsigned short characters[801];
 	long length;
 
 	/* (Menu style Classic+: a row of the classic set's whose words are its row_name's, option_name's
