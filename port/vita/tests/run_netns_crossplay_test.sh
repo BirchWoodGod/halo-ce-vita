@@ -714,7 +714,7 @@ host_env() {
 			HALO_SERVER_NAME=XpServer HALO_NET_LOBBY_NAME=XpServer HALO_SERVER_MIN_PLAYERS=1
 			HALO_SERVER_LOBBY_SECONDS=5 HALO_SERVER_POSTGAME_SECONDS=5
 			HALO_SERVER_ROTATION=${XPPC_SERVER_ROTATION:-bloodgulch:slayer+score=$score_to_win,bloodgulch:team_slayer}
-			HALO_SERVER_MOTD=xp-motd-line ${server_extra:-}" ;;
+			HALO_SERVER_MOTD=xp-motd-line HALO_SERVER_AUTO_UPDATE=off ${server_extra:-}" ;;
 	*)
 		echo "HALO_NET_ONLINE=$online HALO_NET_HOST_PUBLIC=$public HALO_NETWORK_TEST_PUBLIC=$public
 			HALO_NETWORK_TEST=host:${host_game:-bloodgulch}:${host_variants:-slayer,ctf}
@@ -1244,7 +1244,9 @@ crossstandin)
 	# its record, refusals or King state made hostile by test-only settings,
 	# and our client joining it)
 	stand_in="HALO_TEST_CROSSPLAY_HOST=1 HALO_TEST_CROSSPLAY_HOST_VERSION=41"
-	seconds=${XPPC_STANDIN_SECONDS:-45}
+	# (the host's game starts late: a game under way lists as closed, and our
+	# client must find it open and join its lobby)
+	seconds=${XPPC_STANDIN_SECONDS:-70} start_delay=${XPPC_STANDIN_START:-25}
 	standin_case() { # standin_case NAME HOSTENV [HOSTGAME]
 		host_extra="$stand_in $2" host_variants=${3:-slayer} pair "lan-$1" lan ours ours
 	}
