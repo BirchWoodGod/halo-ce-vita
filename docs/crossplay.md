@@ -1815,7 +1815,35 @@ route crossplay through the Linode relay (relays stay off on this wire).
 **Table:** `join 41 rules 39` must never be signed (spec 6, 7.7): 1.1.1 would
 send 112 bytes. A later raise that changes nothing can be `join N rules 41`.
 
-@@TESTS@@
+**Tests** (OpenCE da8d4556 of 41, 475ae67f of 40, 337b05cf of 39, 7fb941b0 of
+38, 6ec42856 of 32, 8102e711 of 29, ChupathingyCE d7fafc81 announcing 38; ours
+the `--linux-net-vita --linux-d3d gxm-null` debug build, in the netns harness.
+`XPPC_TWO_COPIES=1`, new: two game copies at a time, so no late or back client
+and no OpenCE client beside ours on a server; crossplay_check.py's server
+check wants two players, so a dedicated server's run reports "stopped at join"
+and is read from its logs, as marked. Spec numbers in brackets):
+
+| Test | Result |
+|---|---|
+| `opencelan` 41 [T1], three copies, once | PASS every step, rejoin too; "network version 41's rules", 346 bytes |
+| `opencehost` 41, browser and invite [T1] | PASS every step |
+| `opencelan` 40 | PASS; 346 bytes |
+| `openceserver` 41, LAN and broker-listed [T2] | from the logs: both rotation games played, MOTD and next-game notices shown, `[OPENCE SERVER]`; no record refused |
+| join size [T3] | our client's log: 112 to 29, 38, 39 and ChupathingyCE, 346 to 40 and 41. **Bytes** net_fuzz messages: the 112 of every older wire, 234 zeros, the type; wire contract: legacy record 13,092 byte for byte, message numbers, advertisement, constants unchanged |
+| older peers on our host [T4] | `pcjoinsvita` with OpenCE 32 clients PASS; `run_netns_online_test.sh vitaonly code lan lobby` PASS. An OpenCE 39 client on a host test-built at 29/32 not run |
+| regressions [T5] | `opencelan` 32, 29, 39 PASS; 38 every game step, its host's own postgame fault as in 10.11 at stability; `chupaserver` our client joined both ways with 112 bytes, from the logs; `crossmixed` PASS |
+| `opencerefuse` [T6, T7]: a real 41 server, policy link, block, and closed with no list | PASS: code 8, 9, 9, the VPN words, one join request each |
+| address full [T8] | code and words by stand-in only (three copies not run) |
+| `crossstandin` [T9, T11-T13]: our build announcing 41 | PASS: codes 10-13 worded; 14, 255, 65535 generic; co-op 0x08, byte 11 = 1, byte 10 = 2 refused and named; byte 10 = 1 and co-op 0x04 played; King counts 0, 1, 4 taken, 5 and -1 refused with no state applied. A hill score and an end by King's score not reached: the test bots do not sit on a hill |
+| co-op on a dedicated server of 41 [T10] | `b30:coop` joined and played on LAN from the logs (0x04 taken). BSP switch not reached; the hint left out by unit reading only |
+| map vote [T14] | server with `HALO_SERVER_MAP_VOTE`: two games, nothing malformed; whether a vote really opened after a console-ended game is not shown by its log |
+| votes, AFK kick, table on a 1.1.1 build [T15, T16, T18] | not run (T15 needs three copies; T18's rows checked by network_wire_test) |
+| `crossfuzzclient` [T17], ASan + UBSan, 41 | two runs: no memory error. One debug assertion halt on the player host's game: objects.c #1177 `valid_real_matrix4x3`, from `item_update` on twinned object updates, not a 40 or 41 path, skipped in release builds, not repeated in run two (as 10.12's #958) |
+| leaks [T19] | no packet left the test's network, every run |
+| libFuzzer 240 s: variant_options (record of 41, King's sizes), messages, lobby, netversions | PASS, 58.0M, 15.8M, 0.7M, 0.3M runs |
+| unit: network_wire_test (all builds), wire contract, crossplay_guard, p2p_lobby, browser_list, vita_p2p, p2p_friends, netversion table and fetch harness, lang, `run_vita_settings_test.sh` (861 checks) | PASS |
+| [T20] `tools/vita_abi_check.py`; Vita `--lto off --pgo off --portable --release`, `ninja vita` | 0 unsafe declarations; eboot.bin and halo.vpk built, no test hook in them |
+
 
 ## 11. Licensing and credit
 
