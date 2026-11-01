@@ -1839,6 +1839,7 @@ and is read from its logs, as marked. Spec numbers in brackets):
 | map vote [T14] | server with `HALO_SERVER_MAP_VOTE`: two games, nothing malformed; whether a vote really opened after a console-ended game is not shown by its log |
 | votes, AFK kick, table on a 1.1.1 build [T15, T16, T18] | not run (T15 needs three copies; T18's rows checked by network_wire_test) |
 | `crossfuzzclient` [T17], ASan + UBSan, 41 | two runs: no memory error. One debug assertion halt on the player host's game: objects.c #1177 `valid_real_matrix4x3`, from `item_update` on twinned object updates, not a 40 or 41 path, skipped in release builds, not repeated in run two (as 10.12's #958) |
+| `crossversion`: the real 39 read as 42, a test table `join 42 rules 39` | PASS: LAN and browser, every step; 39 ignored the longer request (spec 2.1's observation); no table: refused and said |
 | leaks [T19] | no packet left the test's network, every run |
 | libFuzzer 240 s: variant_options (record of 41, King's sizes), messages, lobby, netversions | PASS, 58.0M, 15.8M, 0.7M, 0.3M runs |
 | unit: network_wire_test (all builds), wire contract, crossplay_guard, p2p_lobby, browser_list, vita_p2p, p2p_friends, netversion table and fetch harness, lang, `run_vita_settings_test.sh` (861 checks) | PASS |
