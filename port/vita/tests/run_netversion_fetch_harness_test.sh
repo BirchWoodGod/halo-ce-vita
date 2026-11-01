@@ -140,7 +140,7 @@ kept_is() { # NAME FROM: the kept table is FROM's, byte for byte
 		fail "$1" "the table kept as two files"
 }
 nothing_kept() { [ -e "$out/$1/kept/netversions.kept" ] && fail "$1" "a table kept"; ls "$out/$1/kept" | grep -q "\.new$" && fail "$1" "a download left behind"; return 0; }
-builtin="the crossplay wire joins 29, 32, 38 and 39"
+builtin="the crossplay wire joins 29, 32, 38, 39, 40 and 41"
 
 start_case() { # CASE: its run, in the background
 	case $1 in
