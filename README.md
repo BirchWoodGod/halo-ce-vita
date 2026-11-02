@@ -41,7 +41,7 @@ It is not an emulator: the game's own code is compiled for the Vita's ARM
 processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 > [!NOTE]
-> **[1.1.0](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest) is the current release**, and this README describes it.
+> **[1.1.1](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest) is the current release**, and this README describes it.
 > Install it over 1.0.3 or any 1.1.0 beta: maps, saves and settings carry over.
 
 > [!IMPORTANT]
@@ -59,11 +59,11 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 <div align="center">
 
-### Install tutorial
+### Watch it
 
-[![Halo CE Vita Install Tutorial | v1.1.0 beta.3, on YouTube](https://img.youtube.com/vi/x46zLnwlRUU/hqdefault.jpg)](https://youtu.be/x46zLnwlRUU)
+[![Halo CE Vita v1.1.0 Release | Multiplayer and Crossplay, on YouTube](https://img.youtube.com/vi/rMou5dtYy3k/hqdefault.jpg)](https://youtu.be/rMou5dtYy3k)
 
-<sub><i><a href="https://youtu.be/x46zLnwlRUU">Halo CE Vita Install Tutorial | v1.1.0 beta.3</a></i></sub>
+<sub><i><a href="https://youtu.be/rMou5dtYy3k">Halo CE Vita v1.1.0 Release | Multiplayer and Crossplay</a></i></sub>
 
 </div>
 
@@ -285,6 +285,10 @@ and 2, keep movies 640 wide: wider ones can play without a picture, #38).
 
 ## PC version
 
+> [!WARNING]
+> **Experimental.** The PC builds are new in 1.1.1 and less tested than the
+> Vita build. Expect rough edges, and report problems like any other.
+
 The same port runs on PC, Windows and Linux. It plays online with the
 Vitas: your games show up in their browsers as **VITA (PC)**.
 
@@ -425,6 +429,12 @@ a restart):
 | **Same Wi-Fi** (the default) | System link: Vitas on the same Wi-Fi network see each other's games. |
 | **Online** (experimental) | Internet play: the server browser, Join by code, and your own public or private games. |
 | **Ad hoc** (experimental) | Vitas side by side, no router: pick the same **Ad hoc room** on each, then **Join the room** (the system's dialog joins the room's group). Nothing goes to the internet. |
+
+> [!TIP]
+> **Playing on PC?** 1.1.1 has an experimental [PC version](#pc-version) of
+> this port. [OpenCE](https://github.com/OpenCommunityEdition/OpenCE), the
+> community version this port builds on, is the other option: with
+> **Crossplay** on, the Vita joins OpenCE hosts and servers.
 
 ### The multiplayer menus
 
@@ -953,4 +963,6 @@ executable and other game content belong to their owners and are not
 included.
 
 This project is not affiliated with or endorsed by Microsoft or Bungie,
-and it contains no game assets.
+and it contains no game assets. See [LEGAL.md](LEGAL.md) for the project's
+research purpose, copyright notice and how rights holders can send a
+takedown request.
