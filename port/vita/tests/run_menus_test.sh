@@ -934,7 +934,14 @@ for case in $cases; do
 			"HALO_TEST_TAPS=5000:320,180>320,380 8000:320,380>320,180"
 		log=$out/touchdrag_classic/run.log
 		[ "$(grep -ac "menus: a drag's step" "$log")" -ge 1 ] || fail touchdrag_classic "no step of the game's own list"
-		grep -aE "menus: a drag|test drag|ui: screen" "$log" | cut -c1-80 > "$out/touchdrag_classic/steps.txt" ;;
+		grep -aE "menus: a drag|test drag|ui: screen" "$log" | cut -c1-80 > "$out/touchdrag_classic/steps.txt"
+		# (the finger down steps the highlight on down the list, the finger up back; none after the other way)
+		sed -n '/test drag: 320,180 to 320,380/,/test drag: 320,380 to 320,180/p' "$out/touchdrag_classic/steps.txt" | grep -q "drag's step on" ||
+			fail touchdrag_classic "a finger down did not step the highlight down"
+		sed -n '/test drag: 320,180 to 320,380/,/test drag: 320,380 to 320,180/p' "$out/touchdrag_classic/steps.txt" | grep -q "drag's step back" &&
+			fail touchdrag_classic "a finger down stepped the highlight up"
+		sed -n '/test drag: 320,380 to 320,180/,$p' "$out/touchdrag_classic/steps.txt" | grep -q "drag's step back" ||
+			fail touchdrag_classic "a finger up did not step the highlight up" ;;
 	h3browser)
 		# (down five to BROWSE GAMES, A: the profile (A joins, A the profile, A): the games
 		# browser; A on the first game - the fullest Vita game, locked -: its password; A: typed,
