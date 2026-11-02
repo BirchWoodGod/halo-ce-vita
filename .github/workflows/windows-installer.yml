@@ -5,11 +5,11 @@ name: Windows install tool
 # download, checked by SHA-256: build_windows.py), checked by its selftest
 # and uploaded as an artifact. Only runs when the tool changes.
 on:
+  # (run by hand or at a release tag only: every push used to build on
+  # the private repo's paid runners)
   push:
-    paths:
-      - "tools/installer/**"
-      - "tools/release/ed25519_rfc8032.py"
-      - ".github/workflows/windows-installer.yml"
+    tags:
+      - "v*"
   workflow_dispatch:
 
 concurrency:

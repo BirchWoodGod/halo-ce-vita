@@ -22,14 +22,11 @@ name: Build
 # halo-ce-vita-<version>-pc-windows.zip, uploaded beside the Vita's
 # halo-ce-vita-<version>-vita.vpk: tools/release/README.md.)
 on:
+  # (run by hand or at a release tag only: every push used to build on
+  # the private repo's paid runners)
   push:
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "research/**"
-      # (the install tool has its own workflow, windows-installer.yml)
-      - "tools/installer/**"
-      - ".github/workflows/windows-installer.yml"
+    tags:
+      - "v*"
   workflow_dispatch:
 
 concurrency:
