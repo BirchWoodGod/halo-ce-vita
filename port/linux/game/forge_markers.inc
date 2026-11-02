@@ -689,6 +689,16 @@ static void forge_marker_held_update(
 	real_vector3d down;
 	struct collision_result collision;
 	struct forge_placed *placed = forge_placed_of_id(forge_globals.held_marker_id);
+	/* (what a marker is put on: the structure and the solid objects - scenery,
+	machines, controls -, so that it stands on a crate or a ledge's object where
+	the crosshair meets it, as an object put there would; never a PHASED
+	object, which a player falls through, nor the monitor's own unit) */
+	unsigned long flags = FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
+		FLAG(_collision_test_objects_bit) | FLAG(_collision_test_objects_scenery_bit) |
+		FLAG(_collision_test_objects_machines_bit) | FLAG(_collision_test_objects_controls_bit);
+	long player_index = local_player_get_player_index(forge_globals.local_player_index);
+	long ignored = forge_globals.unit_index != NONE ? forge_globals.unit_index :
+		player_index != NONE ? player_get(player_index)->unit_index : NONE;
 
 	if (!placed && !forge_spawn_of_id(forge_globals.held_marker_id))
 	{
@@ -705,8 +715,7 @@ static void forge_marker_held_update(
 		along.i = forward.i * forge_globals.held_distance;
 		along.j = forward.j * forge_globals.held_distance;
 		along.k = forward.k * forge_globals.held_distance;
-		if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit),
-			&position, &along, NONE, &collision))
+		if (collision_test_vector(flags, &position, &along, ignored, &collision))
 		{
 			real t = MAX(collision.t * forge_globals.held_distance - 0.1f, 0.f);
 
@@ -731,8 +740,7 @@ static void forge_marker_held_update(
 	down.i = 0.f;
 	down.j = 0.f;
 	down.k = -4.f;
-	if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit), &position,
-		&down, NONE, &collision))
+	if (collision_test_vector(flags, &position, &down, ignored, &collision))
 	{
 		/* (a little over it: a character placed there stands on it, never
 		in it) */
