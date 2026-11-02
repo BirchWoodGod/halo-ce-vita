@@ -1742,6 +1742,11 @@ __thread void *(*scene_pack_big_alloc)(unsigned long size);
 __thread void (*scene_pack_big_free)(void *data, unsigned long size);
 __thread void *(*scene_pack_big_grow)(void *data, unsigned long size, unsigned long new_size);
 __thread boolean scene_pack_big_only;
+/* (the backdrop's build, scene_packs.c) whether the C heap can take a block of
+size bytes with room to spare - the Vita's has 15 MB free at the main menu, and
+the window, with the Halo PC pictures read, 3-4 MB short of the 17 MB the build
+holds at once (1.1.2, no_smoke._): one of the two 6 MB blocks goes there */
+__thread boolean (*scene_pack_heap_room)(unsigned long size);
 __thread void *(*scene_pack_scratch_alloc)(unsigned long size);
 __thread void (*scene_pack_scratch_free)(void *data, unsigned long size);
 
@@ -4256,8 +4261,15 @@ static boolean build_many_once(
 
 			if (backdrop_bsp_range(state, reader.file_length, &bsp_offset, &bsp_size, &bsp_address))
 			{
-				bsp_bytes = scene_pack_big_alloc ? scene_pack_big_alloc(bsp_size) : NULL;
-				bsp_big = bsp_bytes != NULL;
+				/* (the structure bsp's read buffer - 6 MB, let go once the pack is
+				made - on the C heap when it has the room with plenty over, so the
+				window has the blob's: scene_pack_heap_room) */
+				bsp_bytes = scene_pack_heap_room && scene_pack_heap_room(bsp_size) ? malloc(bsp_size) : NULL;
+				if (!bsp_bytes && scene_pack_big_alloc)
+				{
+					bsp_bytes = scene_pack_big_alloc(bsp_size);
+					bsp_big = bsp_bytes != NULL;
+				}
 				if (!bsp_bytes && !scene_pack_big_only)
 					bsp_bytes = malloc(bsp_size);
 				bsp_bytes_size = bsp_size;

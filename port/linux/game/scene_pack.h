@@ -453,6 +453,7 @@ source's tag data when the scratch is too small - the hooks' alone, never
 the C heap's: none from them is the build's failure ("no room in the memory
 window"), not a C heap the system's libraries share run dry (the Vita) */
 extern __thread boolean scene_pack_big_only;
+extern __thread boolean (*scene_pack_heap_room)(unsigned long size);
 /* (the packs' worker, scene_packs.c) where a build's copy of its source
 map's tag data comes from when the scratch it was given is too small for it
 (the menus' backdrop loaded beside the menus takes 8.7 MB of the tag cache's
