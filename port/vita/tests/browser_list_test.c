@@ -382,18 +382,18 @@ static void drags(void)
 	check(target == 4 && view.offset == 0 && view.row == 4, "drag: the view before");
 	browser_view_drag(3);
 	target = browser_view_follow(&view, 12, 30, 4, target, 0);
-	check(target == 7 && view.offset == 3 && view.row == 4, "drag: 3 rows on, the focused row where it was");
+	check(target == 4 && view.offset == 3 && view.row == 1, "drag: 3 rows on, the choice stays on its row");
 	check(browser_view_drag_unclaimed() == 0, "drag: the list took it");
 	browser_view_drag(100);
 	target = browser_view_follow(&view, 12, 30, 4, target, 0);
-	check(view.offset == 18 && target == 22, "drag: the end of the list stops it, no wrap");
+	check(view.offset == 18 && target == 18 && view.row == 0, "drag: the end of the list stops it, the choice at the edge");
 	browser_view_drag(-100);
 	target = browser_view_follow(&view, 12, 30, 4, target, 0);
-	check(view.offset == 0 && target == 4, "drag: the top stops it, no wrap");
+	check(view.offset == 0 && target == 11 && view.row == 11, "drag: the top stops it, the choice at the edge");
 	/* (the finger's first touch moved the focus to another row) */
 	browser_view_drag(2);
 	target = browser_view_follow(&view, 12, 30, 9, target, 0);
-	check(view.offset == 2 && view.row == 9 && target == 11, "drag: from the row touched");
+	check(view.offset == 2 && view.row == 7 && target == 9, "drag: from the row touched, it stays chosen");
 	/* (a list with no focus takes nothing: the menus step the focused one) */
 	browser_view_drag(2);
 	browser_view_follow(&view, 12, 30, -1, target, 0);
