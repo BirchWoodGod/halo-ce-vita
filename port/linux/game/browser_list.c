@@ -323,8 +323,13 @@ int browser_view_follow(
 			/* (the row the finger's first touch put the focus on, if it did) */
 			if (focused_row < view->visible)
 				view->row = focused_row;
+			/* (as a phone's: the rows move with the finger and the one chosen goes with its row, not
+			staying on the same place of the screen; it stops at the edge of the rows when its row
+			leaves them) */
+			int held = view->offset + view->row;
+
 			view->offset = clamp(view->offset + moved, 0, count - rows);
-			chosen = view->offset + view->row;
+			chosen = clamp(held, view->offset, view->offset + rows - 1);
 			focused_row = -1;
 		}
 	}

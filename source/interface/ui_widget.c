@@ -6644,8 +6644,8 @@ void ui_widget_port_pointer_drag(
 drags) moves the list it is on: past VITA_TAP_SLOP's distance, in the menus'
 pixels, it is a drag, never a tap or a highlight, and a row goes by for each
 row's height the finger goes. The port's lists move by themselves
-(browser_view_drag); the game's own step, as the d-pad, stopping at their
-ends where the d-pad would wrap. Any screen, any Menu style; the pad does as
+(browser_view_drag); the game's own step, as the d-pad but following the finger
+(down = on down the list), stopping at their ends where the d-pad would wrap. Any screen, any Menu style; the pad does as
 it did. A screen with a drag of its own says so
 (menu_functions_mouse_drag_own) */
 #define UI_TOUCH_DRAG_SLOP 21
@@ -6704,24 +6704,27 @@ steps on the game's own list */
 static void ui_touch_drag_step(
 	struct widget_instance *widget)
 {
-	long rows = browser_view_drag_unclaimed();
+	/* (the rows asked for are the port's lists': finger up = later rows. The game's own list has no
+	view of its own to move, so its highlight follows the finger: finger down, highlight down) */
+	long asked = browser_view_drag_unclaimed();
+	long rows = -asked;
 	short back, forward;
 
-	if (!rows || !widget)
+	if (!asked || !widget)
 		return;
 	ui_mouse_list_directions(widget, &back, &forward);
 	/* (a step a frame, the rest asked for again; the end of the list ends
 	them) */
 	if (ui_mouse_press_count)
 	{
-		browser_view_drag((int)rows);
+		browser_view_drag((int)asked);
 		return;
 	}
 	if (!ui_touch_drag_can_step(widget, rows > 0))
 		return;
 	platform_log("menus: a drag's step %s", rows > 0 ? "on" : "back");
 	ui_mouse_press(rows > 0 ? forward : back);
-	browser_view_drag((int)(rows > 0 ? rows - 1 : rows + 1));
+	browser_view_drag((int)-(rows > 0 ? rows - 1 : rows + 1));
 }
 
 /* TRUE while a finger's moves are a drag's */

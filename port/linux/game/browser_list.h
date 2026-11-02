@@ -88,8 +88,8 @@ int browser_list_merge_lan(struct p2p_lobby_entry *entries, int count, int *lan_
 
 /* a finger's drag in the menus (source/interface/ui_widget.c): rows to move
 the list on (the rows of the next list followed with the focus move that
-far, up to its ends, never wrapping, the row in focus staying where it is
-on the screen, so the choice moves with the list; a list that fits has
+far, up to its ends, never wrapping, the choice staying on its row as the list moves
+under the finger and stopping at the edge of the rows; a list that fits has
 nothing to move). browser_view_drag_unclaimed takes back what no such list
 took (the menus' own lists are stepped instead) */
 void browser_view_drag(int rows);

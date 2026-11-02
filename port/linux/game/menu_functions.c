@@ -10218,8 +10218,12 @@ static void browser_update(struct widget_instance *list)
 	{
 #ifndef HALO_RELEASE
 		/* (the tests': each game chosen, said once) */
+		static int last_offset = -1;
+		boolean moved_rows = menu_functions.view.offset != last_offset;
+
+		last_offset = menu_functions.view.offset;
 		if (getenv("HALO_TEST_BROWSER_GAMES") &&
-			(!menu_functions.chosen_valid || strcmp(menu_functions.chosen.id, menu_functions.games[target].id)))
+			(moved_rows || !menu_functions.chosen_valid || strcmp(menu_functions.chosen.id, menu_functions.games[target].id)))
 		{
 			platform_log("menus: the server browser's game %d of %ld chosen: %s (rows from %d)",
 				browser_list_game_number(menu_functions.games, (int)menu_functions.game_count, (int)target),
