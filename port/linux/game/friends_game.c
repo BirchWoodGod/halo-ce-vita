@@ -85,6 +85,10 @@ read for it */
 int menu_functions_players_open(boolean main_menu_loaded);
 void menu_functions_players_button(boolean main_menu_loaded);
 
+/* fileshare_friends.c's: each frame; whether its question is up */
+void fileshare_friends_update(boolean main_menu_loaded, boolean other_question);
+boolean fileshare_friends_asking(void);
+
 #define FRIENDS_ACTIVITY_INTERVAL 1000
 
 static struct
@@ -239,7 +243,7 @@ static void friends_game_invites(boolean main_menu_loaded)
 		}
 		return;
 	}
-	if (!main_menu_loaded || state != SYSTEM_LINK_STATE_MENUS || platform_question_asking())
+	if (!main_menu_loaded || state != SYSTEM_LINK_STATE_MENUS || platform_question_asking() || fileshare_friends_asking())
 		return;
 	if (!p2p_friends_take_invite(&invite))
 		return;
@@ -408,8 +412,11 @@ static void friends_game_party_invites(boolean main_menu_loaded)
 		}
 		return;
 	}
-	if (friends_game.asking[0] || !main_menu_loaded || state != SYSTEM_LINK_STATE_MENUS || platform_question_asking())
+	if (friends_game.asking[0] || !main_menu_loaded || state != SYSTEM_LINK_STATE_MENUS || platform_question_asking() ||
+		fileshare_friends_asking())
+	{
 		return;
+	}
 	if (!p2p_party_take_invite(&invite))
 		return;
 	snprintf(friends_game.party_asking, sizeof(friends_game.party_asking), "%s", invite.id);
@@ -497,6 +504,9 @@ void friends_game_update(boolean main_menu_loaded)
 	}
 	friends_game_invites(main_menu_loaded);
 	friends_game_party_invites(main_menu_loaded);
+	/* (File Share with friends: this machine's list, the files read and
+	saved, a friend's offer asked: fileshare_friends.c) */
+	fileshare_friends_update(main_menu_loaded, friends_game.asking[0] || friends_game.party_asking[0]);
 	/* (in a party: the lobbies' NETWORK ONLINE, a party plays online:
 	menu_functions.c) */
 	if (main_menu_loaded)

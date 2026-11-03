@@ -51,6 +51,15 @@ void forge_blocks_snap(
 	real_vector3d const *forward,
 	real_vector3d const *up);
 
+/* (forge_precision.inc's magnets) a block's half extents along each world
+axis as it is turned (forward, up): FALSE for an object that is not a
+block */
+boolean forge_blocks_extents(
+	long object_index,
+	real_vector3d const *forward,
+	real_vector3d const *up,
+	real_vector3d *half);
+
 /* (tests) the console's "forge blocks <what>" (forge_blocks.c): TRUE if it
 was understood */
 boolean forge_blocks_command(

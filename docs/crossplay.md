@@ -386,6 +386,13 @@ crossplay wire (section 8), and the "19" number is never released.
 
 ### 5.2 The signed crossplay table (phase 2, used by servers from phase 1)
 
+**Built (Oct 29 2026, for 1.1.1's hotfix): section 10.13.** The design the
+owner agreed then is narrower than this plan: one key (the release key), a
+strict text table (`netversions.txt` and `.sig`) on a GitHub release of its
+own, rows that only point a version at rules already built in or refuse
+one; no announce change, no limits block. The plan below is kept for its
+reasoning.
+
 **Floor.** The table is built in as the floor: announce 32, accept exactly 29
 and 32 (not 30 or 31), each game by its host's version's rules (since Oct 19
 2026: 10.9; 29 and 29..29 before that) for
@@ -692,7 +699,7 @@ What crossplay changes:
 | Cheats (speed, aimbot, god mode via host rules) | host | OpenCE v9 speed-hack kick and bans (ours); clients enforce the host's rules (v8, ours). Port votekick (G10) for mixed lobbies. Hardware ids are self-reported (they deter, they don't prove). |
 | Flooding | signalling, tunnel, host | Existing budgets (signalling 8-publish bucket, 256 askers; tunnel 2000 pkt/s on servers; 6 joins/min/address on servers). Recheck them against 128-slot PC clients joining 16-slot games. |
 | Spoofed datagrams | client | OpenCE's rule (datagrams attributed by source only; game messages in datagrams ignored) plus ours (spoofed virtual sources dropped, c87c7aff). |
-| Forged or rolled-back version table | table fetch | Ed25519 with two keys, serial monotonic, widen-only, size cap, kill switch. The private key is offline. |
+| Forged or rolled-back version table | table fetch | Ed25519 with the one release key, version only goes up, a per-release minimum in the binary, kept as one atomic file, size cap. A table selects built-in rules only, can refuse a version (never 32, what Vitas host; a kill switch stops honest hosts only, a hostile PC host can announce another version). The private key is offline. |
 | Chat or voice abuse from PC players | 1.1.1 | Chat stays ours-only (PC builds have none). Voice from PC players follows our defaults: off in public games, per-player mute, at most 4 decoded. |
 | Leaking addresses | signalling | Same as today: addresses go only to proven joiners. The relay hides the Vita's address only between our builds; PC peers see it. Note this in the setting's help. |
 
@@ -885,7 +892,7 @@ order follows the phases; tasks within a phase run in parallel up to the
 
 | Task | What | Days | Test |
 |---|---|---|---|
-| T10 Signed table | Fetch, cache, verify (Ed25519, two keys), widen-only, kill switch; key generation and signing script for the owner (offline); `HALO_CROSSPLAY_TABLE` override for tests | 4–5 | Unit + fuzz; netns serves a signed table from the test broker host over HTTP (local, no internet) |
+| T10 Signed table | Fetch, cache, verify (Ed25519, one key), kill switch; key generation and signing script for the owner (offline); `HALO_CROSSPLAY_TABLE` override for tests | 4–5 | Unit + fuzz; netns serves a signed table from the test broker host over HTTP (local, no internet) |
 | T11 Client guardrails | Refusals of section 6, browser badges (PC / Vita / dedicated), clear messages | 3–4 | netns `crossrefuse`: co-op refused, a second local player refused, missing map named (T3's text); `crossbig`: an OpenCE host of 128 joined after asking once (done Oct 11, 10.3) |
 | T12 Browser for PC games | List hceu games (OpenCE/Chupa/Damnation hosts and servers), passwords (Argon2id cost on Vita: measure), invite link entry; optionally halo.milenko.org's list (**owner decision**: a third-party service; ask its operator first) | 3–4 | netns `browseropence` |
 | T13 Votekick | Port OpenCE 3b20ef87 (78/79) | 3 | OpenCE harness test `votekick_count.c` ported; netns mixed vote |
@@ -998,7 +1005,8 @@ first failing stage, next to an OpenCE-client control that passes.
 | `damnserver` | XFAIL | LAN: version; internet by invite: signal |
 | `crossrefuse` | XFAIL | no right refusal message yet (T11); refused for the network version instead |
 | `crossmaps` (T3) | XFAIL | version (OpenCE hosts on Blood Gulch and on `custom_maps\pcgulch`, had and lacked; the OpenCE controls pass). The map check itself runs today against our build standing in for a PC host: `run_crossplay_maps_test.sh` |
-| `crossmixed`, `crossversion` | SKIP | wait for T4 and T10 |
+| `crossmixed` | SKIP | wait for T4 |
+| `crossversion` | built (10.13) | a test table, a test key |
 
 **Findings for the wire tasks:**
 - **G2 seen live.** Our client reads OpenCE's 0x02 "in progress" flag as
@@ -1689,6 +1697,154 @@ already" log change), not the wire.
    vita_abi_check, a Vita release build.
 7. docs/crossplay.md: a 10.x section with the table above; note what the
    owner must decide (hosting at N, new discovery paths).
+
+**Since 10.13:** when the spec (step 3) says N changes nothing a game plays
+beyond one of our built-in versions (as 39 was 38 plus labels), the tests
+of step 6 can run against the new PC build with no code change (our copies
+join it once a test table says `join N rules M`), and the owner signs a
+table row instead of a release: every 1.1.1 and later build joins N within
+a day. Code (steps 5, 7) is only needed when N changes a message, the
+record, or a value's meaning.
+
+### 10.13 The signed crossplay version table (Oct 29 2026)
+
+Branch fix/111-netversion-table (from release-1.1.1, v1.1.1). The owner's
+goal: when OpenCE or ChupathingyCE bump their network version, Vitas join
+without a game update. Design agreed with the owner:
+
+- **What it says.** `netversions.txt`, strict text read by length
+  (`port/linux/src/netversion_table.h`): `halo-ce-vita-netversions 1`, a
+  `version` that only goes up, then rows in order of network version:
+  `join <N> rules <M>` (N is joined and played by the built-in rules of M:
+  29, 32, 38 or 39 in 1.1.1) and `refuse <N> <reason>` (N is not joined;
+  the browser shows the reason). At most 64 rows, about 5 KB.
+- **What it can't do.** Select anything but behaviour already built in: no
+  code, no message formats, no new rules. A built-in version keeps its own
+  rules whatever a row says (a row may refuse it: a kill switch). 18 (the
+  Vitas' wire) is never the table's. Hosting is unchanged: our hosts still
+  announce 32. With no table, or one equal to the built-in list, behaviour
+  is exactly 1.1.1's.
+- **Forward rows.** A join row whose rules this build lacks (a newer
+  build's wire) is not joined and the browser says "needs a newer Halo CE
+  for PS Vita - update to join"; one table serves every build.
+- **Trust.** Ed25519 with the release key (the update manifest's and
+  testers.txt's), the signature in `netversions.txt.sig` beside it, checked
+  before a byte of the table is parsed. The magic line keeps a table from
+  ever reading as a manifest or tester list and vice versa. A replayed
+  older table is refused (its version is not higher than the one in effect
+  and kept). Test builds alone can take another key
+  (`configure.py --netversions-test-key`, refused with `--release`).
+- **Where.** A pre-release (never Latest) of BirchWoodGod/halo-ce-vita
+  tagged `crossplay-table`; the game asks
+  `github.com/.../releases/download/crossplay-table/netversions.txt` and
+  `.sig` with `posix_https_download`: the updater's TLS, GitHub's pinned
+  authorities, a redirect only to `release-assets.githubusercontent.com` /
+  `objects.githubusercontent.com`, 5 KB and 130 bytes at most, a fixed
+  User-Agent, no token, no cookie. No new TLS root, host or port.
+- **When.** At start (WSAStartup) the kept table is read
+  (`ux0:data/haloce-vita/netversions.kept`, signature then table, one file
+  written whole; a PC's save folder);
+  a small thread then fetches at once and once a day (30 min after a
+  failure to reach GitHub), only while allowed: `network.crossplay_updates`
+  (the Vita panel's Vita and PC > PC versions list: Auto / Built-in),
+  internet play on (`network.online`: the Vita's Connection Online), not ad
+  hoc, an address, and on a PC `update.auto`; never on a dedicated server
+  or a build without the crossplay wire. Every outcome is one
+  `netversions:` line in halo.log (taken with each row and the list joined,
+  not newer, refused and why, not fetching and why).
+- **What uses it.** `network_wire.c`: `network_wire_version_accepted_on`,
+  `network_wire_of_version`, the joined list's text and "nearest" version
+  (browser rows, the LAN join refusal), and `network_wire_choose_version`:
+  a game of N joined by M's rules sets the game's crossplay version to M,
+  so every rule test (`network_wire_v30_rules` ... `_v39_rules`, the
+  record size, effects' count) and every flag meaning read by version
+  (`network_wire_rules_version`: the listing's dedicated bit, its kind
+  byte, the advertisement's 0x04) are M's. Greyed rows say the table's
+  reason (`Can't join: <reason> (network N)`).
+
+**Tool:** `tools/release/sign_netversions.py` (like `sign_testers.py`; the
+owner's commands: tools/release/README.md, "Crossplay version table").
+
+**Tests** (a throwaway key; ours the `--linux-net-vita --linux-d3d
+gxm-null` debug build with `--netversions-test-key`):
+
+| Test | Result |
+|---|---|
+| `run_netversion_table_test.sh`: the tool (make, show, remove, refusals) and the C reader with ASan + UBSan (signature, 44 malformed forms, size, the newest winning) | PASS (84 checks) |
+| `run_network_wire_test.sh`: a table's rows in every build (Vita, PC, release, server, non-Vita) | PASS |
+| `run_net_fuzz_test.sh` target `netversions` (as fetched and as signed, then the wire's answers), libFuzzer 300 s | PASS: 435,015 runs, no crash (a first run's one finding was the target's own check: a `refuse 18` row, which the wire rightly ignores; kept as case `refuse-18`) |
+| `run_netversion_fetch_harness_test.sh` (18 cases: none, good, kept, newer, older, badsig, otherkey, garbage, unknownwire, big, chunked, redirect, elsewhere, keptbad, off, offline, autooff, daily) | PASS |
+| regressions against OpenCE 337b05cf (39), no table: `opencelan`, `opencehost`, `browserboth`, `h3pcjoin`; `run_netns_online_test.sh code` | PASS each |
+| `run_vita_settings_test.sh` (the new row, Spanish too), `run_lang_test.sh`, `run_p2p_lobby_test.sh`, `run_p2p_friends_test.sh`, `run_vita_p2p_test.sh`, `run_crossplay_guard_test.sh`, `run_browser_list_test.sh`, `run_tester_list_test.sh`, `run_update_check_test.sh`; `run_menus_test.sh` | PASS; menus all but h3friendsbackup, h3mods and h3profiles, which fail the same (more) on release-1.1.1's own build here |
+| `tools/vita_abi_check.py` (release configuration); `ninja vita` (`--lto off --pgo off --portable --release`); a `--release` Linux build; Blood Gulch 60 s (release and debug builds, 3 bots, internet play on: the fetch tried GitHub and found no name server in the namespace) | 0 unsafe declarations; eboot.bin and halo.vpk built (the release key, no test hook); 0 asserts |
+| `run_netns_crossplay_test.sh crossversion`: OpenCE 337b05cf (39) read as 40 by our copies (`HALO_TEST_VERSION_HEARD=39:40`), with a table `join 40 rules 39` kept beside our client | PASS: LAN and server browser, every step (discover ... stability; "network version 40, played by 39's rules (the crossplay version table 1)"); without the table refused on the LAN ("a newer PC build") and listed as another version online, never joined; no packet left the test's network |
+
+### 10.14 Network versions 40 and 41 joined (Oct 31 2026)
+
+Branch fix/crossplay-net41 (from integration/1.1.2-insider.1). OpenCE raised
+to 40 (475ae67f, a larger join request) and 41 (cf9fad60: votes, map vote, a
+co-op switch, one refusal code) and its servers followed.
+
+**Source: clean-room.** `docs/opence-net41-spec.md` (facts, layouts, how to
+run it) was written by a separate agent; the code here is ours from that
+document and `docs/opence-net39-spec.md`. The implementer opened nothing of
+OpenCE's: da8d4556 (build-335, 41) and 475ae67f (40) ran only as black boxes,
+built by build_pc_crossplay.sh with no patch.
+
+**What 40 and 41 changed** (spec 0): nothing a game plays. Our client joins
+29, 32, 38, 39, 40 and 41; hosts still announce 32. 40 and 41 play 39's rules:
+
+| What | Their meaning | Here |
+|---|---|---|
+| version | 40, 41 (an exact match, as before) | in the list; `network_wire_v40_rules`, `network_wire_v41_rules` |
+| join request | 346 bytes to a host of 40 or more: 234 zero bytes more (an empty pass and proof). A host of 40 given 112 drops the connection with no code | `network_wire_join_request_padding` (by the version announced as well as the rules a table gives it), `create_network_game_join_request_padded`: the encoded 112 bytes, the zeros, the packet's type. **The message table stays 0x70**: every older wire, Vita, beta and PC client still joins our hosts as before, byte for byte |
+| refusal codes 8-13 | a dedicated server's VPN rules (40), too many from one address (41) | words on the crossplay wire from a PC host alone (`network_wire_rejection_text`, fixed strings, Spanish too); nothing else from the host is shown; a number past 13 stays the generic failure; never a retry; in menu style Halo 3 back to the games browser |
+| co-op byte's bit 2 (0x04) | the host is a dedicated server (41) | known from 41 alone; read into `network_game_record_host_is_dedicated`, not kept in the record; the "waiting for the host" hint left out. Bit 3 and up still refused |
+| further option byte 10 | Force Team Spawns, the host's rule (39's build-323, no raise) | 0 or 1 from 39, else refused; bytes 11-15 stay reserved: **a bug in shipped 1.1.1, on 39 hosts too** |
+| King's state | 20 bytes more in a Multi-Hill game (39's build-323, no raise): a count, 0 to 4, and four hill ids | `network_game_record_king_state_valid`: exactly stock or stock + 20, count checked, from 39's rules alone; the first hill played and drawn, the other ids read by nothing: **a bug in shipped 1.1.1, every such state was refused** |
+| kinds 78, 79, 93, 94, 95, 92 | votes, map votes, fire origins, build report | dropped by kind, unread (spec 3.1, 3.2, 5.1) |
+
+**Not done, by decision:** the Discord pass and proof (they stay zero: spec
+7.1), the client's build report, votes and map votes (our players are eligible
+non-voters and sit out map votes), master lists, hosting at 41, the protected
+map loosening (spec 4.6), drawing hills 2-5 (a Vita player sees one hill).
+**A Vita behind a VPN, WARP, Tor or a datacenter address cannot get into a
+default server of 40 or more** (code 8), and is told so. Nothing of ours may
+route crossplay through the Linode relay (relays stay off on this wire).
+
+**Table:** `join 41 rules 39` must never be signed (spec 6, 7.7): 1.1.1 would
+send 112 bytes. A later raise that changes nothing can be `join N rules 41`.
+
+**Tests** (OpenCE da8d4556 of 41, 475ae67f of 40, 337b05cf of 39, 7fb941b0 of
+38, 6ec42856 of 32, 8102e711 of 29, ChupathingyCE d7fafc81 announcing 38; ours
+the `--linux-net-vita --linux-d3d gxm-null` debug build, in the netns harness.
+`XPPC_TWO_COPIES=1`, new: two game copies at a time, so no late or back client
+and no OpenCE client beside ours on a server; crossplay_check.py's server
+check wants two players, so a dedicated server's run reports "stopped at join"
+and is read from its logs, as marked. Spec numbers in brackets):
+
+| Test | Result |
+|---|---|
+| `opencelan` 41 [T1], three copies, once | PASS every step, rejoin too; "network version 41's rules", 346 bytes |
+| `opencehost` 41, browser and invite [T1] | PASS every step |
+| `opencelan` 40 | PASS; 346 bytes |
+| `openceserver` 41, LAN and broker-listed [T2] | from the logs: both rotation games played, MOTD and next-game notices shown, `[OPENCE SERVER]`; no record refused |
+| join size [T3] | our client's log: 112 to 29, 38, 39 and ChupathingyCE, 346 to 40 and 41. **Bytes** net_fuzz messages: the 112 of every older wire, 234 zeros, the type; wire contract: legacy record 13,092 byte for byte, message numbers, advertisement, constants unchanged |
+| older peers on our host [T4] | `pcjoinsvita` with OpenCE 32 clients PASS; `run_netns_online_test.sh vitaonly code lan lobby` PASS. An OpenCE 39 client on a host test-built at 29/32 not run |
+| regressions [T5] | `opencelan` 32, 29, 39 PASS; 38 every game step, its host's own postgame fault as in 10.11 at stability; `chupaserver` our client joined both ways with 112 bytes, from the logs; `crossmixed` PASS |
+| `opencerefuse` [T6, T7]: a real 41 server, policy link, block, and closed with no list | PASS: code 8, 9, 9, the VPN words, one join request each |
+| address full [T8] | code and words by stand-in only (three copies not run) |
+| `crossstandin` [T9, T11-T13]: our build announcing 41 | PASS: codes 10-13 worded; 14, 255, 65535 generic; co-op 0x08, byte 11 = 1, byte 10 = 2 refused and named; byte 10 = 1 and co-op 0x04 played; King counts 0, 1, 4 taken, 5 and -1 refused with no state applied. A hill score and an end by King's score not reached: the test bots do not sit on a hill |
+| co-op on a dedicated server of 41 [T10] | `b30:coop` joined and played on LAN from the logs (0x04 taken). BSP switch not reached; the hint left out by unit reading only |
+| map vote [T14] | server with `HALO_SERVER_MAP_VOTE`: two games, nothing malformed; whether a vote really opened after a console-ended game is not shown by its log |
+| votes, AFK kick, table on a 1.1.1 build [T15, T16, T18] | not run (T15 needs three copies; T18's rows checked by network_wire_test) |
+| `crossfuzzclient` [T17], ASan + UBSan, 41 | two runs: no memory error. One debug assertion halt on the player host's game: objects.c #1177 `valid_real_matrix4x3`, from `item_update` on twinned object updates, not a 40 or 41 path, skipped in release builds, not repeated in run two (as 10.12's #958) |
+| `crossversion`: the real 39 read as 42, a test table `join 42 rules 39` | PASS: LAN and browser, every step; 39 ignored the longer request (spec 2.1's observation); no table: refused and said |
+| leaks [T19] | no packet left the test's network, every run |
+| libFuzzer 240 s: variant_options (record of 41, King's sizes), messages, lobby, netversions | PASS, 58.0M, 15.8M, 0.7M, 0.3M runs |
+| unit: network_wire_test (all builds), wire contract, crossplay_guard, p2p_lobby, browser_list, vita_p2p, p2p_friends, netversion table and fetch harness, lang, `run_vita_settings_test.sh` (861 checks) | PASS |
+| [T20] `tools/vita_abi_check.py`; Vita `--lto off --pgo off --portable --release`, `ninja vita` | 0 unsafe declarations; eboot.bin and halo.vpk built, no test hook in them |
+
 
 ## 11. Licensing and credit
 

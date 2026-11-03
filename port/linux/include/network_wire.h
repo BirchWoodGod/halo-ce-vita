@@ -32,8 +32,12 @@ always on the legacy wire (no PC reaches ad hoc; the servers stay off the
 crossplay wire), and so is a build that does not play as a Vita.
 
 The versions a crossplay client joins, and the one a crossplay host
-announces, are a list built in (a signed table widens it later:
-docs/crossplay.md 5.2, T10): exactly the pinned OpenCE's. Not 26 or 27
+announces, are a list built in: exactly the pinned OpenCE's. The signed
+crossplay version table (netversion_table.h, docs/crossplay.md 10.13) can
+add versions that play as a built-in one does (OpenCE 40 played by 39's
+rules) and refuse any but 32, with a reason for the browser; it never remaps a
+built-in version, never changes what a host announces, and selects only
+rules built in here. Not 26 or 27
 beside it: 28 plays a script's switch_bsp, the flashlight and dynamic lights
 and a second weapon picked up while firing otherwise than they do, with no
 message changed to tell, so a client of one with a host of the other plays
@@ -69,10 +73,16 @@ ChupathingyCE's since a501871f (0.7.5a) */
 /* ... 38, OpenCE's and ChupathingyCE's servers' since Oct 23 2026
 (network_wire_v33_rules ...), still ChupathingyCE's [C] servers' */
 #define HALO_PORT_CROSSPLAY_38_NETWORK_VERSION 38
-/* ... and the newest one its clients join, OpenCE's since 815d3a0c (Oct 25
-2026: its dedicated server; docs/opence-net39-spec.md), played by 38's rules
-with 39's two meanings (network_wire_v39_rules) */
-#define HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION 39
+/* ... 39, OpenCE's since 815d3a0c (Oct 25 2026: its dedicated server;
+docs/opence-net39-spec.md), played by 38's rules with 39's two meanings
+(network_wire_v39_rules) */
+#define HALO_PORT_CROSSPLAY_39_NETWORK_VERSION 39
+/* ... 40, OpenCE's 475ae67f (Oct 2026: a larger join request; 39's rules and
+network_wire_v40_rules, docs/opence-net41-spec.md) */
+#define HALO_PORT_CROSSPLAY_40_NETWORK_VERSION 40
+/* ... and the newest one its clients join, OpenCE's since cf9fad60 (40's
+rules and network_wire_v41_rules, docs/opence-net41-spec.md) */
+#define HALO_PORT_CROSSPLAY_NEWEST_NETWORK_VERSION 41
 
 /* a Vita's game on the crossplay wire says it is a Vita's: this bit in its
 advertisement's flags (HALO_PORT_ADVERTISED_FLAGS_OFFSET; OpenCE's 0x01 and
@@ -120,12 +130,36 @@ HALO_PORT_CROSSPLAY_NETWORK_VERSION (32); in test builds alone
 HALO_TEST_CROSSPLAY_HOST_VERSION may name another the wire joins (29) */
 unsigned int network_wire_host_version(void);
 /* ... of this machine's game: 18 on the legacy wire, the game's crossplay
-version (the host's, joined or hosted) on the crossplay wire */
+version (the host's, joined or hosted; for a version the crossplay version
+table adds, the built-in one whose rules it plays) on the crossplay wire */
 unsigned int network_wire_version(void);
 /* whether a host announcing the version can be joined on that wire:
-legacy, exactly 18; crossplay, the accepted list (29, 32, 38 and 39) */
+legacy, exactly 18; crossplay, the accepted list (29, 32, 38, 39, 40 and 41, and
+what the crossplay version table adds, less what it refuses) */
 int network_wire_version_accepted_on(int crossplay, unsigned int version);
-/* the crossplay versions joined, for a log line or a message ("29, 32, 38 and 39") */
+/* the built-in crossplay version whose rules a host announcing this version
+plays (the version itself when built in; the table's row's rules for one it
+adds), for everything a version's number decides (the record's size, the
+flags' meanings, network_wire_v30_rules ...); a version not joined is given
+back as it is */
+unsigned int network_wire_rules_version(unsigned int version);
+/* why the crossplay version table says a version is not joined (its refuse
+row's reason, or a newer build's rules): 1 and the reason, else 0 */
+int network_wire_crossplay_refusal(unsigned int version, char *reason, int size);
+/* whether a version is one of the crossplay rules built in (29, 32, 38, 39, 40, 41) */
+int network_wire_rules_built_in(unsigned int rules);
+/* the crossplay version table in effect (netversion_fetch.c, as one
+checks; NULL: none, the built-in list alone), and its version (0: none) */
+struct netversion_table;
+void network_wire_table_set(const struct netversion_table *table);
+unsigned long network_wire_table_version(void);
+/* (automated tests only, never in release builds) the network version a
+host's listing or advertisement says, as this machine reads it:
+HALO_TEST_VERSION_HEARD=39:40 reads 39 as 40 (a PC host of a version no
+build has yet, played by a real OpenCE of 39: crossversion); the version
+itself otherwise */
+unsigned int network_wire_version_heard(unsigned int version);
+/* the crossplay versions joined, for a log line or a message ("29, 32, 38, 39, 40 and 41") */
 void network_wire_crossplay_versions_text(char *text, int size);
 /* the crossplay version a player should look for instead of a host's
 version not joined: the lowest joined above it, else the highest joined
@@ -198,13 +232,42 @@ plays: its rules are 38's. Two values mean something new from a host of 39:
   server's word filter) on the crossplay wire, not this project's "Vitas
   only", which only a Vita's host on the legacy wire sends
   (network_wire_rejection_is_name_refused).
+- a host's King state may be 20 bytes longer, in a Multi-Hill game
+  (game_engine_king_read_network_state), and a game record's further option
+  10 is Force Team Spawns, 0 or 1 (network_game_record.c): both came with
+  OpenCE's build-323, with no raise of 39 (docs/opence-net41-spec.md 4.2, 4.3).
 A client's build report (kind 92) goes from a client to its host alone and
 a host that does not know it drops it: ours never sends it. */
 int network_wire_v39_rules(void);
+/* 40: a join request of 346 bytes (network_wire_join_request_padding, the
+one difference a client of 40 has to make). 41: the record's co-op switches
+hold bit 2, the host is a dedicated server (network_game_record.c). Neither
+changes what a game plays. The other changes of 40 and 41 (the votes, the
+map vote) are in messages this build does not read and drops by kind */
+int network_wire_v40_rules(void);
+int network_wire_v41_rules(void);
+/* the zero bytes a join request of this machine's game carries past the 0x70
+every other wire has (0 on any wire but 40 and up): the empty pass and proof
+of OpenCE's 40. By the version the host announces as well as the rules it
+is played by: a host of 40 or more drops a shorter request with no word,
+whatever a table's row calls its rules */
+#define NETWORK_WIRE_V40_JOIN_REQUEST_PADDING 234
+int network_wire_join_request_padding(void);
 /* nonzero when a host's refusal of this machine's join with this code
 means its player name was refused (OpenCE 39's code 7: a crossplay game
 whose host is not a Vita), rather than this project's "Vitas only" */
 int network_wire_rejection_is_name_refused(int code);
+/* the words for a refusal only OpenCE's hosts send (40's and 41's codes 8 to
+13): fixed text in the player's language, or NULL when the code is not one of
+them or this game is not a PC host's on the crossplay wire. A code the host
+makes up stays the generic failure. Never a reason to try again */
+#define NETWORK_WIRE_REJECTION_VPN_LINK_REQUIRED 8
+#define NETWORK_WIRE_REJECTION_VPN_BLOCKED 9
+#define NETWORK_WIRE_REJECTION_VPN_LINK_INVALID 10
+#define NETWORK_WIRE_REJECTION_VPN_LINK_TOO_NEW 11
+#define NETWORK_WIRE_REJECTION_VPN_LINK_IN_USE 12
+#define NETWORK_WIRE_REJECTION_ADDRESS_FULL 13
+const char *network_wire_rejection_text(int code);
 
 /* hosting: whether the next game this machine hosts takes OpenCE's PC
 players too (network_wire_host_audience: everyone), on the crossplay wire;

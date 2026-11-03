@@ -41,7 +41,7 @@ It is not an emulator: the game's own code is compiled for the Vita's ARM
 processor, and its Direct3D rendering is translated to the Vita's GPU.
 
 > [!NOTE]
-> **[1.1.1](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest) is the current release**, and this README describes it.
+> **[1.1.2](https://github.com/BirchWoodGod/halo-ce-vita/releases/latest) is the current release**, and this README describes it.
 > Install it over 1.0.3 or any 1.1.0 beta: maps, saves and settings carry over.
 
 > [!IMPORTANT]
@@ -92,7 +92,7 @@ processor, and its Direct3D rendering is translated to the Vita's GPU.
 | 🧠 **[Fourth CPU core](#more-performance-with-plugins-optional)** | With the CapUnlocker plugin. |
 | 📊 **Latency meter** | Your ping in network games, and a Ping column on the scoreboard. |
 | 🇪🇸 **Spanish** | The port's own text in Spanish (settings panel > Audio > Language). |
-| 🧰 **[Windows install tool](#easy-install-windows-tool)** | Gathers your files and copies them to the Vita. |
+| 🧰 **[Windows install tool](#easy-install-windows-tool)** | Gathers your files and copies them to the Vita or a PC build. |
 | 🎮 **Controls** | A settings panel in tabs (**SELECT + D-pad down**), button remapping, touch zones, gyro aiming and PlayStation button icons. |
 
 ## What works
@@ -131,8 +131,9 @@ Prefer a video? The [install tutorial](https://youtu.be/x46zLnwlRUU) walks throu
 - The shader compiler `ur0:data/libshacccg.suprx`: if you don't have it, run
   [ShaRKF00D](https://github.com/Rinnegatamante/ShaRKF00D/releases) once.
 - About 1.5 GB free on `ux0:`.
-- Your own **Xbox** copy of Halo: Combat Evolved (disc or image). The PC
-  version's maps don't work.
+- Your own **Xbox** copy of Halo: Combat Evolved (disc or image), or your
+  own Halo: The Master Chief Collection on Steam. The PC version's maps don't
+  work.
 - For online play and Custom Edition maps: the free
   [Halo Custom Edition installer](https://www.halomaps.org/hce/detail.cfm?fid=410)
   (see [Halo PC files](#halo-pc-files)).
@@ -141,10 +142,20 @@ Prefer a video? The [install tutorial](https://youtu.be/x46zLnwlRUU) walks throu
 
 Download **`HaloCEVitaInstaller.exe`** from the
 [releases](https://github.com/BirchWoodGod/halo-ce-vita/releases) and run it.
-It takes the game files from your disc image (or, for the builds that play
-MCC's maps, from your own Halo: The Master Chief Collection on Steam),
-converts the movies, gets the Halo PC files, and copies everything plus the
-VPK to the Vita over VitaShell's FTP. Then install that VPK from `ux0:data/` with VitaShell.
+
+It's a normal Setup wizard: Next, Next, Finish.
+
+1. Accept the license, then choose where to install: PS Vita or PC. Platforms
+   that aren't ready yet are greyed out.
+2. Choose **Automatic**, which takes everything from your own Halo: The Master
+   Chief Collection on Steam, or **Manual**, where you pick your Xbox disc
+   image, the Halo Custom Edition files and the movies on one page.
+3. Give it the Vita's address, or a folder on PC, and press **Install**. One
+   progress bar does the rest: the Vita gets everything over VitaShell's FTP
+   plus the VPK, and a PC gets a real install with shortcuts and an uninstaller.
+4. On the Vita, then install that VPK from `ux0:data/` with VitaShell. Finish
+   tells you how. For PC, put `halo-ce-vita-<version>-pc-windows.zip` next to
+   the tool.
 
 The tool isn't signed: if Windows says "Windows protected your PC", click
 **More info**, then **Run anyway**. Details:

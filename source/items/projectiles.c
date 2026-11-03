@@ -977,6 +977,17 @@ boolean projectile_update(
 			if (collision.plane.n.k > 0.3f)
 				SET_FLAG(projectile->projectile.flags, _projectile_collided_once_bit, TRUE);
 
+#if defined(HALO_LINUX) && !defined(HALO_VITA) && !defined(HALO_RELEASE)
+			/* port: (automated tests, HALO_TEST_SHOT_LOG=1) what a shot struck and
+			where: run_forge_test.sh phaseshot, netns forgephase */
+			if (getenv("HALO_TEST_SHOT_LOG"))
+			{
+				platform_log("shot test: struck %s at %.2f %.2f %.2f",
+					collision.type == _collision_result_object ? "an object" :
+					collision.type == _collision_result_structure ? "the structure" : "something else",
+					collision.point.x, collision.point.y, collision.point.z);
+			}
+#endif
 			projectile->projectile.ignore_object_index = NONE;
 			projectile_collision(
 				projectile_index,

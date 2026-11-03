@@ -143,6 +143,29 @@ A finger coming down counts as input for the screen's dimming.
 `HALO_PAD_FILE` (debug, `vita_input.c`) takes `tl tr el er rl rr` for the
 zones (touched at their middle, inside every guard's border).
 
+**Touch in the menus** (`source/interface/ui_widget.c`): the front screen is
+the menus' pointer in every Menu style: a finger highlights what it is on, a
+tap picks it, and a drag past 24 pixels moves the list under it, up to its
+ends, never wrapping, and picks nothing. The buttons do as ever.
+
+**Touch in Forge** (`port/linux/game/forge_touch.inc`; on by default, Touch in
+Forge on the settings panel's Forge page, there in every Menu style during a
+Forge game; `HALO_FORGE_TOUCH`): while the monitor flies, on the front screen:
+
+| Gesture | What it does |
+| --- | --- |
+| Drag an object or a spawn marker | carried under the finger at its distance, dropped when lifted |
+| A second finger while carrying | turns it (across: yaw, up and down: pitch) |
+| Tap an object | selects it (its name and a hint on the HUD); a tap on nothing lets it go |
+| Drag on nothing, with one selected | turns it where it stands, dropped in place when lifted |
+| Drag while holding an object with R | turns it, in rotate mode's snapping |
+
+Each is the pad's own grab, turn and drop: in a network Forge game the host
+grants and checks them, undo takes each back, and nothing new goes on the wire.
+Roll stays on the pad. A finger that comes down in a touch zone counts for
+nothing, and the rear pad is not used (the hands holding the Vita rest there).
+As the Spartan the front screen is the touch zones as ever.
+
 **Gyro aiming** (`vita_controls.c`, `vita_input.c`; Controls, Gyro aiming
 and the Gyro settings page, Off by default): the gyroscope's samples (`sceMotionGetSensorState`, every sample
 since the last frame, radians a second about the Vita's axes) go through a

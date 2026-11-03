@@ -151,6 +151,16 @@ int vita_host_restart_game(void) { restarts_asked++; return 0x80010013; }
 /* (port/linux/src/network_wire.c's: the wire of the game hosted or joined,
 a test's; and whether the public games list PC games, a test's) */
 static int test_crossplay_wire, test_pc_games;
+/* the last setting put in effect at once (port_config.c's) */
+static char test_override_name[64], test_override_text[64];
+
+int config_set_override(const char *name, const char *text)
+{
+	snprintf(test_override_name, sizeof(test_override_name), "%s", name);
+	snprintf(test_override_text, sizeof(test_override_text), "%s", text);
+	return 1;
+}
+
 int network_wire_crossplay(void) { return test_crossplay_wire; }
 /* (the map in play: never deleted) */
 int halo_cache_map_in_use(const char *name) { return !strcmp(name, "inplay"); }
@@ -223,6 +233,11 @@ int forge_panel_ai_counts(int *alive, int *dead)
 	return test_forge_playing;
 }
 void forge_panel_clear_ai(int all) { test_forge_cleared = all; }
+static int test_forge_magnets = 1, test_forge_nudge = 5;
+int forge_panel_magnets(void) { return test_forge_magnets; }
+void forge_panel_magnets_set(int on) { test_forge_magnets = on; }
+int forge_panel_nudge_centimetres(void) { return test_forge_nudge; }
+void forge_panel_nudge_step(int step) { test_forge_nudge = step > 0 ? (test_forge_nudge == 25 ? 1 : test_forge_nudge == 1 ? 5 : test_forge_nudge * 2) : 5; }
 static struct forge_store_entry test_forge_entries[4];
 static int test_forge_count, test_forge_deleted;
 int forge_store_list(const char *map_name, struct forge_store_entry *entries, int capacity)
@@ -552,6 +567,115 @@ static void test_friend(const char *id, int kind, const char *name, const char *
 	entry->players = joinable ? 5 : 0;
 	entry->maximum = joinable ? 16 : 0;
 	snprintf(entry->activity, sizeof(entry->activity), "%s", activity);
+}
+/* (File Share with friends, p2p_fileshare.h: the test's - the marks kept
+here, the last send, browse and download said, a friend's two files) */
+static char test_fs_marked[16][96];
+static int test_fs_marked_count;
+static char test_fs_sent[160], test_fs_browsed[32], test_fs_downloaded[32], test_fs_status[160];
+static int test_fs_state = P2P_FILESHARE_BROWSE_LISTED;
+static struct p2p_fileshare_local test_fs_local[2];
+static int test_fs_local_count;
+int p2p_fileshare_sharing(void)
+{
+	return 1;
+}
+int p2p_fileshare_marked(int kind, const char *map, const char *file)
+{
+	char key[96];
+	int index;
+
+	snprintf(key, sizeof(key), "%d:%s:%s", kind, map, file);
+	for (index = 0; index < test_fs_marked_count; index++)
+		if (!strcmp(test_fs_marked[index], key))
+			return 1;
+	return 0;
+}
+int p2p_fileshare_mark(int kind, const char *map, const char *file, int shared)
+{
+	char key[96];
+	int index;
+
+	snprintf(key, sizeof(key), "%d:%s:%s", kind, map, file);
+	for (index = 0; index < test_fs_marked_count; index++)
+		if (!strcmp(test_fs_marked[index], key))
+			break;
+	if (shared && index == test_fs_marked_count && test_fs_marked_count < 16)
+		snprintf(test_fs_marked[test_fs_marked_count++], sizeof(test_fs_marked[0]), "%s", key);
+	else if (!shared && index < test_fs_marked_count)
+		test_fs_marked[index][0] = 0;
+	return P2P_FILESHARE_DONE;
+}
+int p2p_fileshare_local(struct p2p_fileshare_local *entries, int maximum_count)
+{
+	int count = test_fs_local_count < maximum_count ? test_fs_local_count : maximum_count;
+
+	memcpy(entries, test_fs_local, sizeof(entries[0]) * (size_t)count);
+	return count;
+}
+void p2p_fileshare_refresh(void)
+{
+}
+int p2p_fileshare_browse(const char *friend_id)
+{
+	snprintf(test_fs_browsed, sizeof(test_fs_browsed), "%s", friend_id);
+	return P2P_FILESHARE_DONE;
+}
+int p2p_fileshare_browse_state(char *friend_name, char *friend_id, struct p2p_fileshare_remote *entries,
+	int maximum_count, int *count)
+{
+	if (friend_name)
+		snprintf(friend_name, P2P_FRIEND_NAME_SIZE, "Bravo");
+	if (friend_id)
+		snprintf(friend_id, P2P_FRIEND_ID_SIZE, "b1");
+	if (count)
+		*count = 0;
+	if (entries && maximum_count >= 2 && test_fs_state == P2P_FILESHARE_BROWSE_LISTED)
+	{
+		memset(entries, 0, sizeof(entries[0]) * 2);
+		snprintf(entries[0].id, sizeof(entries[0].id), "00112233aabbccdd");
+		entries[0].kind = P2P_FILESHARE_KIND_MAP_VARIANT;
+		snprintf(entries[0].map, sizeof(entries[0].map), "bloodgulch");
+		snprintf(entries[0].title, sizeof(entries[0].title), "Tower Wars");
+		entries[0].size = 5000;
+		snprintf(entries[1].id, sizeof(entries[1].id), "4455667788990011");
+		entries[1].kind = P2P_FILESHARE_KIND_GAME_VARIANT;
+		snprintf(entries[1].title, sizeof(entries[1].title), "Swords");
+		entries[1].size = P2P_FILESHARE_GAME_VARIANT_BYTES;
+		if (count)
+			*count = 2;
+	}
+	return test_fs_state;
+}
+int p2p_fileshare_download(const char *file_id)
+{
+	snprintf(test_fs_downloaded, sizeof(test_fs_downloaded), "%s", file_id);
+	return P2P_FILESHARE_DONE;
+}
+int p2p_fileshare_send(const char *friend_id, int kind, const char *map, const char *file)
+{
+	snprintf(test_fs_sent, sizeof(test_fs_sent), "%s %d %s %s", friend_id, kind, map, file);
+	return P2P_FILESHARE_DONE;
+}
+unsigned long p2p_fileshare_status(char *text, int size)
+{
+	if (text && size > 0)
+		snprintf(text, (size_t)size, "%s", test_fs_status);
+	return test_fs_status[0] ? 1 : 0;
+}
+int p2p_fileshare_progress(int *percent)
+{
+	if (percent)
+		*percent = 0;
+	return 0;
+}
+const char *p2p_fileshare_outcome_text(int outcome)
+{
+	return outcome == P2P_FILESHARE_DONE ? "Done" : "Refused";
+}
+const char *p2p_fileshare_kind_text(int kind)
+{
+	return kind == P2P_FILESHARE_KIND_GAME_VARIANT ? "game variant" : "map variant";
 }
 /* (the flaming helmet, p2p_friends.h: whether this machine is a listed
 tester, the test's) */
@@ -2867,6 +2991,20 @@ static void test_multiplayer_tab(void)
 		!strcmp(getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST"), "true"), "PC mouse aim assist Off: HALO_NET_BLOCK_MOUSE_AIM_ASSIST true");
 	press(VITA_BUTTON_LEFT);
 	check(!strcmp(getenv("HALO_NET_BLOCK_MOUSE_AIM_ASSIST"), "false"), "PC mouse aim assist their choice again: false");
+	/* (network.crossplay_updates: the signed crossplay version table's
+	fetch, netversion_fetch.h; read as each fetch is due) */
+	to_line("PC versions list");
+	check(strstr(menu, "\nPC versions list\x02  Auto >") && !setting_named("HALO_NET_CROSSPLAY_UPDATES")->restart,
+		"PC versions list: Auto as shipped, live");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nPC versions list\x02< Built-in  ") && getenv("HALO_NET_CROSSPLAY_UPDATES") &&
+		!strcmp(getenv("HALO_NET_CROSSPLAY_UPDATES"), "false"), "PC versions list Built-in: HALO_NET_CROSSPLAY_UPDATES false");
+	check(!strcmp(test_override_name, "network.crossplay_updates") && !strcmp(test_override_text, "false"),
+		"PC versions list Built-in: in effect at once (config_set_override: the fetch reads config_boolean)");
+	press(VITA_BUTTON_LEFT);
+	check(!strcmp(getenv("HALO_NET_CROSSPLAY_UPDATES"), "true"), "PC versions list Auto again: true");
+	check(!strcmp(test_override_name, "network.crossplay_updates") && !strcmp(test_override_text, "true"),
+		"PC versions list Auto: in effect at once");
 	/* (bots.online: on this page with the other rows of the games hosted
 	online, not on the tab - the tab is a screen's height; while it fills,
 	the bots' skill, vehicles and routes under it, the tab's own rows) */
@@ -2954,6 +3092,14 @@ static void test_forge_page(void)
 	test_forge_entry("chillout", "cold.hmv", "Cold", 5, 0);
 	open_panel();
 	check(to_tab("Game") && !strstr(menu, "\nForge"), "Menu style Halo 3: no Forge row (the Halo 3 main menu has FORGE)");
+	test_forge_playing = 1;
+	press(VITA_BUTTON_R);
+	press(VITA_BUTTON_L);
+	check(to_tab("Game") && strstr(menu, "\nForge and File Share\x02") != NULL,
+		"Menu style Halo 3, a Forge game: its row (Touch in Forge, the magnets)");
+	test_forge_playing = 0;
+	press(VITA_BUTTON_R);
+	press(VITA_BUTTON_L);
 	vita_settings_set("HALO_MENU_STYLE", "classic");
 	press(VITA_BUTTON_R);
 	press(VITA_BUTTON_L);
@@ -2962,16 +3108,28 @@ static void test_forge_page(void)
 		"variants; the tab fits");
 	check(open_page("Forge") && strstr(menu, "\n\x03Game > Forge and File Share\n"), "the Forge page");
 	printf("%s\n--\n", menu);
-	check(!strcmp(menu_line(2, line, sizeof(line)), "Map\x02  Blood Gulch") &&
-		!strcmp(menu_line(3, line, sizeof(line)), "Map variant\x02  None >") &&
-		!strcmp(menu_line(4, line, sizeof(line)), "Network\x02  Local >") &&
-		!strcmp(menu_line(5, line, sizeof(line)), "Start Forge\x02  >") && !menu_line(6, line, sizeof(line))[0] &&
-		!strcmp(menu_line(7, line, sizeof(line)), "\x08" "File Share") &&
+	check(!strcmp(menu_line(2, line, sizeof(line)), "Share with friends\x02  >") &&
+		!strcmp(menu_line(3, line, sizeof(line)), "Touch in Forge\x02  On >") &&
+		!strcmp(menu_line(4, line, sizeof(line)), "Map\x02  Blood Gulch") &&
+		!strcmp(menu_line(5, line, sizeof(line)), "Map variant\x02  None >") &&
+		!strcmp(menu_line(6, line, sizeof(line)), "Network\x02  Local >") &&
+		!strcmp(menu_line(7, line, sizeof(line)), "Start Forge\x02  >") && !menu_line(8, line, sizeof(line))[0] &&
+		!strcmp(menu_line(9, line, sizeof(line)), "\x08" "File Share") &&
 		strstr(menu, "\nGulch A\x02  Blood Gulch\n") && strstr(menu, "\nDamaged file\x02  Blood Gulch\n") &&
 		strstr(menu, "\nCold\x02  Chill Out\n") && menu_fits() && menu_height_fits(),
-		"Forge: Map (Blood Gulch first), Map variant (None), Network (Local), Start Forge; File Share's map variants, each fits");
-	check(menu_selected == 2 && strstr(menu, "\n\x05The multiplayer map to edit\n") &&
-		strstr(menu, "Left/right: change"), "Map chosen first, its help");
+		"Forge: Touch in Forge (On), Map (Blood Gulch first), Map variant (None), Network (Local), Start Forge; File Share's map variants, each fits");
+	/* Touch in Forge: on as shipped; off and on again (HALO_FORGE_TOUCH) */
+	to_line("Touch in Forge");
+	check(strstr(menu, "\n\x05" "Drag an object to move it; tap it, then drag the screen to turn it\n") != NULL, "Touch in Forge's help");
+	press(VITA_BUTTON_RIGHT);
+	check(strstr(menu, "\nTouch in Forge\x02< Off  \n") != NULL && getenv("HALO_FORGE_TOUCH") && !strcmp(getenv("HALO_FORGE_TOUCH"), "0"),
+		"Touch in Forge: right, Off (HALO_FORGE_TOUCH 0)");
+	press(VITA_BUTTON_LEFT);
+	check(strstr(menu, "\nTouch in Forge\x02  On >\n") != NULL && getenv("HALO_FORGE_TOUCH") && !strcmp(getenv("HALO_FORGE_TOUCH"), "1"),
+		"Touch in Forge: left, On");
+	to_line("Map");
+	check(menu_selected == 4 && strstr(menu, "\n\x05The multiplayer map to edit\n") &&
+		strstr(menu, "Left/right: change"), "Map chosen (under File Share with friends), its help");
 	press(VITA_BUTTON_RIGHT);
 	check(strstr(menu, "\nMap\x02  Chill Out\n") != NULL, "right: Chill Out (Battle Creek is not in the maps folder)");
 	press(VITA_BUTTON_RIGHT);
@@ -3056,6 +3214,108 @@ static void test_forge_page(void)
 	press(VITA_BUTTON_CIRCLE);
 	frame(0);
 	check(!menu_visible, "closed");
+}
+
+/* Game > Forge and File Share > Share with friends (p2p_fileshare.h,
+the test's): its row on the Forge page, Share with friends, this Vita's
+files (its map variants, its game variants from the game's list) with their
+marks - left and right change one -, cross on one: Send to a friend's page,
+cross on a friend online sends it; cross on a friend online on the page:
+their File Share's page, cross on a file asks DOWNLOAD first; circle back
+each step; the pages fit */
+static void test_fileshare_friends_page(void)
+{
+	char line[128];
+
+	test_forge_count = 0;
+	test_forge_entry("bloodgulch", "gulch_a.hmv", "Gulch A", 3, 0);
+	test_forge_entry("bloodgulch", "bad.hmv", NULL, 0, 1);
+	test_forge_entry("chillout", "cold.hmv", "Cold", 5, 0);
+	memset(test_fs_local, 0, sizeof(test_fs_local));
+	test_fs_local[0].kind = P2P_FILESHARE_KIND_GAME_VARIANT;
+	snprintf(test_fs_local[0].file, sizeof(test_fs_local[0].file), "4F2A00C1");
+	snprintf(test_fs_local[0].title, sizeof(test_fs_local[0].title), "Swords");
+	test_fs_local_count = 1;
+	test_fs_marked_count = 0;
+	test_friend_count = 0;
+	test_friend("b1", P2P_FRIEND_KIND_FRIEND, "Bravo", "RYQS-BU47-4JPF", 1, 0, "In the menus");
+	test_friend("c1", P2P_FRIEND_KIND_FRIEND, "Charlie", "AAZQ-L3GC-JLTL", 0, 0, "Offline");
+	open_panel();
+	vita_settings_set("HALO_MENU_STYLE", "classic");
+	press(VITA_BUTTON_R);
+	press(VITA_BUTTON_L);
+	check(to_tab("Game") && open_page("Forge"), "file share: the Forge page");
+	check(strstr(menu, "\nShare with friends\x02  >\n") != NULL && menu_height_fits(),
+		"file share: Share with friends' row on the Forge page, which fits");
+	check(open_page("Share with friends") && strstr(menu, "> Share with friends\n"), "file share: its page");
+	printf("%s\n--\n", menu);
+	check(strstr(menu, "\nSharing\x02  On >\n") && strstr(menu, "\nGulch A\x02< Not shared >\n") &&
+		strstr(menu, "\nCold\x02< Not shared >\n") && strstr(menu, "\nSwords\x02< Not shared >\n") &&
+		!strstr(menu, "bad.hmv") && strstr(menu, "\nBravo\x02  File Share\n") && !strstr(menu, "\nCharlie\x02"),
+		"file share: the setting, the files (not the damaged one; the game variant too), the friends online only");
+	check(menu_fits() && menu_height_fits(), "file share: the page fits");
+	to_line("Gulch A");
+	check(strstr(menu, "Left/right: share  Cross: send") && strstr(menu, "\n\x05" "Blood Gulch: only you see it\n"),
+		"file share: a file's help and buttons");
+	press(VITA_BUTTON_RIGHT);
+	check(p2p_fileshare_marked(P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "gulch_a.hmv") &&
+		strstr(menu, "\nGulch A\x02< Shared >\n") && strstr(menu, "is shared with your friends"),
+		"file share: right: shared, said");
+	press(VITA_BUTTON_LEFT);
+	check(!p2p_fileshare_marked(P2P_FILESHARE_KIND_MAP_VARIANT, "bloodgulch", "gulch_a.hmv") &&
+		strstr(menu, "is no longer shared"), "file share: left: no longer shared");
+	to_line("Swords");
+	press(VITA_BUTTON_RIGHT);
+	check(p2p_fileshare_marked(P2P_FILESHARE_KIND_GAME_VARIANT, "", "4F2A00C1"), "file share: the game variant shared");
+	/* send to a friend */
+	to_line("Gulch A");
+	press(VITA_BUTTON_CROSS);
+	check(strstr(menu, "Send to a friend\n") && strstr(menu, "Send \"Gulch A\" to") && strstr(menu, "\nBravo\x02  Send\n") &&
+		menu_fits() && menu_height_fits(), "file share: cross: Send to a friend's page, the friends online");
+	to_line("Bravo");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(test_fs_sent, "b1 1 bloodgulch gulch_a.hmv") && strstr(menu, "> Share with friends\n") &&
+		strstr(menu, "Sending \"Gulch A\" to Bravo"), "file share: cross on a friend: sent, back on the page, said");
+	/* a friend's File Share */
+	to_line("Bravo");
+	check(strstr(menu, "Cross: their File Share") != NULL, "file share: a friend's buttons");
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(test_fs_browsed, "b1") && strstr(menu, "A friend's File Share\n") &&
+		strstr(menu, "\nTower Wars\x02  Blood Gulch\n") && strstr(menu, "\nSwords\x02  Game variant\n") && menu_fits() &&
+		menu_height_fits(), "file share: cross on a friend: their File Share, their files");
+	to_line("Tower Wars");
+	check(strstr(menu, "map variant, 5 KB, Bravo's") && strstr(menu, "Cross: download  Triangle: ask again"),
+		"file share: a friend's file's help and buttons");
+	press(VITA_BUTTON_CROSS);
+	check(!strncmp(menu, "DOWNLOAD", 8) && strstr(menu, "Tower Wars") && strstr(menu, "Bravo's map variant") &&
+		!test_fs_downloaded[0], "file share: cross asks before downloading");
+	press(VITA_BUTTON_CIRCLE);
+	check(!test_fs_downloaded[0] && strstr(menu, "A friend's File Share\n"), "file share: circle: not downloaded");
+	press(VITA_BUTTON_CROSS);
+	press(VITA_BUTTON_CROSS);
+	check(!strcmp(test_fs_downloaded, "00112233aabbccdd") && strstr(menu, "Downloading \"Tower Wars\""),
+		"file share: cross, cross: downloaded, said");
+	/* (their sharing off) */
+	test_fs_state = P2P_FILESHARE_BROWSE_NOT_SHARING;
+	clock_us += 1000000;
+	frame(0);
+	check(strstr(menu, "Bravo isn't sharing files") && !strstr(menu, "\nTower Wars\x02"), "file share: not sharing: said");
+	test_fs_state = P2P_FILESHARE_BROWSE_LISTED;
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "> Share with friends\n") && strstr(menu, "\nSharing\x02"),
+		"file share: circle: back on Share with friends");
+	to_line("Sharing");
+	press(VITA_BUTTON_RIGHT);
+	check(getenv("HALO_FRIENDS_FILESHARE") && !strcmp(getenv("HALO_FRIENDS_FILESHARE"), "false"),
+		"file share: Share with friends off");
+	press(VITA_BUTTON_LEFT);
+	press(VITA_BUTTON_CIRCLE);
+	check(strstr(menu, "Forge and File Share\n") != NULL, "file share: circle: the Forge page");
+	(void)line;
+	press(VITA_BUTTON_CIRCLE);
+	vita_settings_set("HALO_MENU_STYLE", "halo3");
+	press(VITA_BUTTON_CIRCLE);
+	frame(0);
 }
 
 /* Game > Appearance's Player model (port/linux/game/player_models.c): shown
@@ -3410,6 +3670,10 @@ static void test_tab_layouts(void)
 		{ PAGE_MENUS, "Scoreboard", "HALO_CLASSIC_SCOREBOARD", "classic|halo3", 0, "classic" },
 		/* (Forge and File Share, shown with Menu style Halo CE: under Menus) */
 		{ TAB_GAME, "Forge and File Share", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_FORGE },
+		/* (File Share with friends: its page on Forge and File Share's) */
+		{ PAGE_FORGE, "Share with friends", NULL, NULL, 0, NULL, ACTION_PAGE, PAGE_FSFRIENDS },
+		{ PAGE_FORGE, "Touch in Forge", "HALO_FORGE_TOUCH", "1|0", 0, "1" },
+		{ PAGE_FSFRIENDS, "Sharing", "HALO_FRIENDS_FILESHARE", "true|false", 0, "true" },
 		{ TAB_GAME, "Button icons", "HALO_BUTTON_ICONS", "xbox|playstation", 0,
 			VITA_BUTTON_ICONS_DEFAULT ? "playstation" : "xbox" },
 		{ TAB_GAME, "Language", "HALO_LANGUAGE", languages, 0, "auto" },
@@ -3529,7 +3793,7 @@ static void test_tab_layouts(void)
 			old |= !strcmp(pages[index].name, "Screen") || !strcmp(pages[index].name, "First person") ||
 				!strcmp(pages[index].name, "Advanced") || !strcmp(pages[index].name, "General") ||
 				!strcmp(pages[index].name, "Graphics") || !strcmp(pages[index].name, "Audio");
-		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 18 &&
+		check(!old && PAGE_GRAPHICS_DETAIL == TAB_COUNT && PAGE_COUNT == TAB_COUNT + 21 &&
 			!strcmp(pages[PAGE_GRAPHICS_DETAIL].name, "Detail") && !strcmp(pages[PAGE_GRAPHICS_PERFORMANCE].name, "Performance") &&
 			!strcmp(pages[PAGE_BUTTONS].name, "Button layout") && !strcmp(pages[PAGE_TOUCH].name, "Touch zones") &&
 			!strcmp(pages[PAGE_GYRO].name, "Gyro settings") && !strcmp(pages[PAGE_PLAY].name, "Play") &&
@@ -3539,10 +3803,12 @@ static void test_tab_layouts(void)
 			!strcmp(pages[PAGE_CROSSPLAY].name, "Vita and PC") && !strcmp(pages[PAGE_PLAYERS].name, "Players") &&
 			!strcmp(pages[PAGE_INFECTION].name, "Infection") && !strcmp(pages[PAGE_MENUS].name, "Menus") &&
 			!strcmp(pages[PAGE_CHAT].name, "Chat") && !strcmp(pages[PAGE_APPEARANCE].name, "Appearance") &&
-			pages[PAGE_APPEARANCE].tab == TAB_GAME,
+			pages[PAGE_APPEARANCE].tab == TAB_GAME && !strcmp(pages[PAGE_FSFRIENDS].name, "Share with friends") &&
+			!strcmp(pages[PAGE_FSSEND].name, "Send to a friend") && !strcmp(pages[PAGE_FSBROWSE].name, "A friend's File Share"),
 			"the pages rows open: Detail, Performance, Button layout, Touch zones, Gyro settings, Play, Modded maps, Vita and PC, A/B "
-			"switches, Forge and File Share, Mod manager, Friends, Party, Players, Infection, Menus, Chat, Appearance (Game's; no "
-			"Screen, First person or Advanced page; no General, Graphics or Audio tab)");
+			"switches, Forge and File Share, Mod manager, Friends, Party, Players, Infection, Menus, Chat, Appearance (Game's), "
+			"Share with friends, Send to a friend, A friend's File Share (no Screen, First person or Advanced page; no General, "
+			"Graphics or Audio tab)");
 	}
 	{
 		/* (Infection's page: its six rows, on it alone, each default the
@@ -3702,8 +3968,8 @@ the Campaign screen) and Online games (now Visibility, by OpenCE's name);
 and the rows added since (Sun rays, Button icons, Map downloads, Max
 players, Visibility, Fourth core helpers, Latency meter, Particles,
 First-person legs, MCC mods, PC map vehicles, Sharp interface, Player model,
-PC mouse aim assist, Carnage report, Field of view, Chat, Chat filter, Online
-bots, Scoreboard; the Play page's two texts) */
+PC mouse aim assist, PC versions list, Carnage report, Field of view, Chat,
+Chat filter, Online bots, Scoreboard; the Play page's two texts) */
 static void test_variables_kept(void)
 {
 	static const char *const variables[] = {
@@ -3728,7 +3994,8 @@ static void test_variables_kept(void)
 		"HALO_LANGUAGE", "HALO_UPDATE_CHANNEL", "HALO_PARTICLE_BUDGET", "HALO_FIRST_PERSON_LEGS", "HALO_RAGDOLLS",
 		"HALO_MCC_MODS", "HALO_CONTENT_ROOT", "HALO_PC_MAP_VEHICLES", "HALO_SHARP_UI", "HALO_PLAYER_MODEL", "HALO_ARMOR_COLOR", "HALO_VISOR_COLOR",
 		"HALO_FRIENDS_APPEAR_OFFLINE",
-		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_ANTICHEAT",
+		"HALO_FRIENDS_JOIN", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", "HALO_NET_CROSSPLAY_UPDATES", "HALO_NET_ANTICHEAT", "HALO_FRIENDS_FILESHARE",
+		"HALO_FORGE_TOUCH",
 		"HALO_INFECTION_ZOMBIES", "HALO_INFECTION_SPEED", "HALO_INFECTION_TIME", "HALO_INFECTION_RESPAWN",
 		"HALO_INFECTION_SHIELDS", "HALO_INFECTION_TOUGH",
 		"HALO_CARNAGE_REPORT", "HALO_FLAMING_HELMET", "HALO_FIELD_OF_VIEW", "HALO_BRIGHTNESS", "HALO_CLOCK_GOVERNOR", "HALO_BATTERY_LOG",
@@ -5745,6 +6012,7 @@ int main(void)
 	test_multiplayer_tab();
 
 	test_forge_page();
+	test_fileshare_friends_page();
 	test_player_model_row();
 	test_appearance_page();
 

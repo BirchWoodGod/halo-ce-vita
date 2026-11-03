@@ -15,6 +15,10 @@ The game settings record on the legacy Vita wire and on the crossplay wire
 #include "network_wire.h"
 #include "halo_port_limits.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 /* ---------- the layouts */
 
 typedef char network_game_record_options_offset_assert[
@@ -180,8 +184,11 @@ enum
 	/* (the further options' bytes: network_rules.h's NETWORK_RULES_OPTION_*) */
 	FURTHER_OPTION_MODE = 0,
 	FURTHER_OPTION_HARDCORE = 1,
-	/* (bytes 10 to 15 reserved, 0) */
-	FURTHER_OPTION_RESERVED = 10,
+	/* (byte 10, OpenCE's Force Team Spawns from 39: 0 or 1, the host's rule
+	alone, taken and not kept; docs/opence-net41-spec.md 4.2) */
+	FURTHER_OPTION_FORCE_TEAM_SPAWNS = 10,
+	/* (bytes 11 to 15 reserved, 0, and so byte 10 before 39) */
+	FURTHER_OPTION_RESERVED = 11,
 	/* (the modes: network_rules.h's NETWORK_RULES_MODE_*) */
 	FURTHER_MODE_NONE = 0,
 	FURTHER_MODE_SWAT,
@@ -191,7 +198,20 @@ enum
 	/* (the co-op byte's bit 1, version 33: the players' hits spare their AI
 	allies, ChupathingyCE's _network_game_cooperative_no_ally_damage_bit) */
 	COOPERATIVE_NO_ALLY_DAMAGE_BIT = 1,
+	/* (bit 2, version 41: the host is a dedicated server, with no player of
+	its own to wait for at a loading zone. Kept apart from the record:
+	network_game_record_host_is_dedicated) */
+	COOPERATIVE_DEDICATED_HOST_BIT = 2,
 };
+
+/* (the last record taken: its host's co-op switch of 41) */
+static boolean network_game_record_dedicated_host = FALSE;
+
+boolean network_game_record_host_is_dedicated(
+	void)
+{
+	return network_game_record_dedicated_host;
+}
 
 long network_game_record_wire_size(
 	short format,
@@ -225,6 +245,74 @@ static char const *further_options_game_type(
 	if (further[FURTHER_OPTION_HARDCORE])
 		return "OpenCE's Hardcore game type, which this build does not play";
 	return NULL;
+}
+
+long network_game_record_test_stand_in(
+	void *record,
+	long size,
+	long capacity)
+{
+#ifndef HALO_RELEASE
+	const char *value = getenv("HALO_TEST_RECORD_FURTHER");
+	unsigned int cooperative, option_10, option_11;
+	byte *bytes = (byte *)record;
+	long local = HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET;
+
+	if (value && network_wire_crossplay() && size + FURTHER_OPTIONS_SIZE <= capacity &&
+		sscanf(value, "%u:%u:%u", &cooperative, &option_10, &option_11) == 3)
+	{
+		memmove(bytes + local + FURTHER_OPTIONS_SIZE, bytes + local, (size_t)(size - local));
+		memset(bytes + local, 0, FURTHER_OPTIONS_SIZE);
+		bytes[offsetof(struct network_game, cooperative_flags)] = (byte)cooperative;
+		bytes[local + FURTHER_OPTION_FORCE_TEAM_SPAWNS] = (byte)option_10;
+		bytes[local + FURTHER_OPTION_RESERVED] = (byte)option_11;
+		return size + FURTHER_OPTIONS_SIZE;
+	}
+#else
+	(void)record;
+	(void)capacity;
+#endif
+	return size;
+}
+
+void network_game_record_test_own_copy(
+	void *record,
+	long size)
+{
+#ifndef HALO_RELEASE
+	byte *bytes = (byte *)record;
+
+	if (getenv("HALO_TEST_RECORD_FURTHER") && size > HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET + FURTHER_OPTIONS_SIZE)
+	{
+		bytes[offsetof(struct network_game, cooperative_flags)] = 0;
+		memset(bytes + HALO_PORT_NETWORK_GAME_LOCAL_DATA_OFFSET, 0, FURTHER_OPTIONS_SIZE);
+	}
+#else
+	(void)record;
+	(void)size;
+#endif
+}
+
+boolean network_game_record_king_state_valid(
+	void const *buffer,
+	long size,
+	long stock_size,
+	boolean multi_hill)
+{
+	enum
+	{
+		/* (a count, then four hill ids, unused 0: nothing here reads an id) */
+		KING_EXTRA_HILLS_MAXIMUM = 4,
+		KING_EXTRA_HILLS_SIZE = 4 + KING_EXTRA_HILLS_MAXIMUM * 4,
+	};
+	long count;
+
+	if (size == stock_size)
+		return TRUE;
+	if (!multi_hill || size != stock_size + KING_EXTRA_HILLS_SIZE)
+		return FALSE;
+	csmemcpy(&count, (byte const *)buffer + stock_size, sizeof(count));
+	return count >= 0 && count <= KING_EXTRA_HILLS_MAXIMUM;
 }
 
 boolean network_game_record_decode(
@@ -272,6 +360,8 @@ boolean network_game_record_decode_version(
 		code reads none of it) */
 		if (version >= 33)
 			cooperative_known |= (byte)FLAG(COOPERATIVE_NO_ALLY_DAMAGE_BIT);
+		if (version >= 41)
+			cooperative_known |= (byte)FLAG(COOPERATIVE_DEDICATED_HOST_BIT);
 		if (game->cooperative_flags & ~cooperative_known)
 			reason = "co-op switches this game does not know";
 		else if (!game_variant_options_valid(&game->variant_options))
@@ -280,11 +370,15 @@ boolean network_game_record_decode_version(
 			reason = "OpenCE's gametype options out of range";
 		else if (further)
 			reason = further_options_game_type(further, game);
+		if (!reason && further && further[FURTHER_OPTION_FORCE_TEAM_SPAWNS] > (version >= 39 ? 1 : 0))
+			reason = version >= 39 ? "OpenCE's gametype options out of range" : "OpenCE's reserved gametype options not zero";
 		for (index = FURTHER_OPTION_RESERVED; !reason && further && index < FURTHER_OPTIONS_SIZE; index++)
 		{
 			if (further[index])
 				reason = "OpenCE's reserved gametype options not zero";
 		}
+		if (!reason)
+			network_game_record_dedicated_host = TEST_FLAG(game->cooperative_flags, COOPERATIVE_DEDICATED_HOST_BIT);
 		game->cooperative_flags &= (byte)(FLAG(NUMBER_OF_NETWORK_GAME_COOPERATIVE_FLAGS) - 1);
 	}
 	else
@@ -292,6 +386,7 @@ boolean network_game_record_decode_version(
 		csmemcpy(game, bytes, HALO_PORT_NETWORK_GAME_VARIANT_OPTIONS_OFFSET);
 		/* (the betas send the Xbox's padding: never a switch) */
 		game->cooperative_flags = 0;
+		network_game_record_dedicated_host = FALSE;
 		game_variant_options_default(&game->variant, &game->variant_options);
 		/* (the host's local data, which the client puts its own over:
 		network_game_client_game_settings_updated) */

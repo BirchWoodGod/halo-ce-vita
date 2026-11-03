@@ -22,6 +22,8 @@ the platform:
 | `halo-ce-vita-<version>-pc-linux.tar.gz` | the PC build, Linux | `tools/package_pc.py linux` (CI's Linux job, artifact `halo-ce-vita-pc-linux`) |
 | `halo-update.txt` | the Vita updater's manifest: version, title ID, file, size, SHA-512 of the VPK | `sign_update.py` |
 | `halo-update.txt.sig` | the manifest's Ed25519 signature (128 hex digits) | `sign_update.py` |
+| `halo-update-pc.txt` | Setup's manifest of the PC builds: version, then each archive's file, size, SHA-512 | `sign_update.py --pc-windows --pc-linux` |
+| `halo-update-pc.txt.sig` | its Ed25519 signature | `sign_update.py` |
 | `halo.vpk` | the same VPK under its old name, **1.1.1 releases only** | `sign_update.py --legacy-name` |
 
 The Vita's updater (from 1.1.1) downloads the file the signed manifest
@@ -41,8 +43,43 @@ ninja linux
 python3 tools/package_pc.py linux       # dist/halo-ce-vita-<version>-pc-linux.tar.gz
 ```
 
-The PC files are not signed for an updater: the PC build never downloads
-itself (port/linux/README.md, "Updates").
+The PC build never downloads itself (port/linux/README.md, "Updates"); the
+install helper does, and takes only a signed archive.
+
+### The PC builds' manifest
+
+`halo-update-pc.txt` is a file of its own, not rows in `halo-update.txt`: the
+game reads that one's exact form, so a row more would break every Vita's
+update check. Same key, its own first line, so neither passes for the other:
+
+```
+halo-ce-vita-update-pc 1
+version 1.1.2
+windows halo-ce-vita-1.1.2-pc-windows.zip <size> <sha512>
+linux halo-ce-vita-1.1.2-pc-linux.tar.gz <size> <sha512>
+```
+
+Sign it with the VPK (or alone, leaving out `--vpk`):
+
+```
+python3 tools/release/sign_update.py --key ~/halo-update-key/halo-update.key \
+    --vpk build/vita/halo.vpk --version 1.1.2 --out release-files/ \
+    --pc-windows dist/halo-ce-vita-1.1.2-pc-windows.zip \
+    --pc-linux dist/halo-ce-vita-1.1.2-pc-linux.tar.gz
+python3 tools/release/verify_update.py --pc --dir release-files/ --version 1.1.2
+```
+
+Upload `halo-update-pc.txt`, its `.sig` and both archives to the release. Setup
+asks `releases/latest/download/halo-update-pc.txt` and its `.sig`, so only a
+Latest release is offered. It checks the signature first, with the key built
+into it (`RELEASE_PUBLIC_KEY`: keep it equal to `vita_update_key.h`'s, a test
+says so), then the form, this system's row, the release's file name and a
+version not older than the one installed or Setup's own. It then downloads the
+archive from `releases/download/v<version>/`, no longer than signed, and
+compares its SHA-512. HTTPS to GitHub's hosts only, redirects too. Anything else
+stops the install and nothing is kept. A release without these files: Setup says
+there is no signed PC build yet and the player can choose an archive instead,
+which installs but which Setup does not start.
 
 A release without the manifest and signature still installs with VitaShell
 as before; the in-game download refuses it ("the server answered 404").
@@ -161,8 +198,11 @@ the build is a release build:
 | `--vita-version VERSION` | the version the build says it is, in place of `vita_version.h`'s: the Vita's and the PC builds' (Linux, Windows) alike; `tools/package_pc.py` names its files for it |
 
 `build.ninja` then says "TEST BUILD of the updater", and `sign_update.py`
-refuses that tree's `build/vita/halo.vpk` without `--test-build`. Files a
-test build downloads must still be signed by its key.
+refuses that tree's `build/vita/halo.vpk` without `--test-build`. A PC build
+made without `--release` (which is every build a test key can be in) logs
+`HALO-CE-VITA-TEST-BUILD` at start, and `sign_update.py` refuses an archive
+holding that text without `--test-build` too. Files a test build downloads
+must still be signed by its key.
 
 ### Making test builds A (1.1.0-beta.3) and B (1.1.0-beta.4)
 
@@ -305,3 +345,118 @@ a modified host, System Link, ad hoc and online co-op in namespaces; a
 throwaway key: configure with `--testers-test-key <its public key>`, test
 builds only, refused with `--release`; `HALO_TEST_TESTERS_KEY=<its private
 key file>`).
+
+## Crossplay version table
+
+When OpenCE or ChupathingyCE raise their network version and the new
+version plays a game exactly as one this build already has rules for (as
+OpenCE's 39 is 38's game with its dedicated-server flags), a signed table
+tells every Vita and PC build to join it, with no game update. The table
+can only point a network version at rules already built in (29, 32, 38,
+39 in 1.1.1, and 40, 41 from 1.1.2: `HALO_PORT_CROSSPLAY_*NETWORK_VERSION` in
+`port/linux/include/network_wire.h`), or refuse a version with a short
+reason the browser shows. It never carries code or a message layout, never
+remaps a built-in version, and never changes what our hosts announce (32).
+The file's form is `port/linux/src/netversion_table.h`; the game's side is
+`port/linux/src/netversion_fetch.c` (docs/crossplay.md 10.13).
+
+It is signed with the release key above (the same private key file, the
+same `HALO_RELEASE_PUBLIC_KEY`). The game fetches two files from a GitHub
+release of their own, tag `crossplay-table`, in this repository's releases
+(`BirchWoodGod/halo-ce-vita`):
+
+    https://github.com/BirchWoodGod/halo-ce-vita/releases/download/crossplay-table/netversions.txt
+    https://github.com/BirchWoodGod/halo-ce-vita/releases/download/crossplay-table/netversions.txt.sig
+
+at start and once a day while internet play is on (Settings: Vita and PC,
+PC versions list Auto; `network.crossplay_updates`; a PC's `update.auto`
+false turns it off too), over the updater's HTTPS (GitHub's authorities
+built in, a redirect only to GitHub's release storage, at most 5 KB). It
+takes one only when the signature is the owner's, the form is exact and the
+version is higher than the one it has and not below the build's
+`NETVERSION_TABLE_MINIMUM_VERSION`; it keeps that one on the memory card as one
+file written whole (`ux0:data/haloce-vita/netversions.kept`, the signature then
+the table; a PC's save folder) for the next start, offline or not. Anything else is logged (`netversions:` in
+halo.log) and ignored: the built-in list stands. A missing table (404) is
+the built-in list.
+
+**Each release:** set `NETVERSION_TABLE_MINIMUM_VERSION` in
+`port/linux/src/netversion_table.h` to the version of the newest table published
+when the build is made (never above it). That floor stands even on a card
+holding nothing, so an older signed table cannot be played back at that release.
+
+### Once: make the release
+
+```
+gh release create crossplay-table --repo BirchWoodGod/halo-ce-vita --prerelease --latest=false \
+    --title "Crossplay version table" \
+    --notes "Data for the game's crossplay browser (signed). Not a game release: nothing to install."
+```
+
+It must stay a **pre-release, never Latest**: the Stable update check asks
+GitHub for the latest release, and a table release marked Latest would hide
+the real one from it. Its tag is no version (`crossplay-table`), so every
+update check and updater skips it.
+
+### Each change: sign and upload
+
+On your machine, with the key plugged in, in a folder outside git (the
+table is public, but keep one working copy; the newest is always the one
+on the release):
+
+```
+# the current one, to change it (skip for the first table)
+gh release download crossplay-table --repo BirchWoodGod/halo-ce-vita --dir ~/netversions --clobber \
+    --pattern 'netversions.txt*'
+
+# show it, checked with the release key
+python3 tools/release/sign_netversions.py --table ~/netversions/netversions.txt --show
+
+# OpenCE moved to 40, and the crossplay tests passed with 40 played by 39's rules:
+python3 tools/release/sign_netversions.py --key ~/halo-update-key/halo-update.key \
+    --table ~/netversions/netversions.txt --join 40:39
+
+# a version known not to work, the reason the browser shows (1-64 of
+# A-Z a-z 0-9 space . , : ; ! ? ' ( ) / + -)
+python3 tools/release/sign_netversions.py --key ~/halo-update-key/halo-update.key \
+    --table ~/netversions/netversions.txt --refuse 41 "OpenCE 41 changed the game settings; wait for an update"
+
+# take a row off
+python3 tools/release/sign_netversions.py --key ~/halo-update-key/halo-update.key \
+    --table ~/netversions/netversions.txt --remove 41
+
+# upload both, replacing the old ones
+gh release upload crossplay-table --repo BirchWoodGod/halo-ce-vita --clobber \
+    ~/netversions/netversions.txt ~/netversions/netversions.txt.sig
+```
+
+Each change writes the table with its version one higher (or `--version N`,
+higher still), signs it into `netversions.txt.sig` beside it and checks both
+as the game does; `--show` and every change print what a build of this
+source makes of each row. The tool refuses a key that is not the release
+key, a version that does not go up, 18 (the Vitas' own version), `--refuse 32`
+(what a Vita hosting for everyone announces: Vitas could no longer join each
+other; a table never changes what a host plays), a row for a built-in version,
+rules this source has not got (`--allow-newer-rules` for a
+newer build's wire: older builds then say "needs a newer Halo CE for PS
+Vita"), and a reason out of its characters. Never upload a table without its
+`.sig` from the same run: the game takes neither then. Players get it at
+their next start (or within a day); a Vita that never goes online keeps the
+built-in list.
+
+Only widen to a version after the crossplay tests pass against that exact
+PC build (docs/crossplay.md 10.12's checklist; `run_netns_crossplay_test.sh
+crossversion` shows the mechanism). A raise that changes a message or the
+settings record needs a game update, not a table row: refuse it meanwhile
+if its hosts are listed and players keep trying.
+
+### Tests
+
+`port/vita/tests/run_netversion_table_test.sh` (the tool and the reader,
+ASan), `run_network_wire_test.sh` (what the wire makes of a table),
+`run_net_fuzz_test.sh` target `netversions`,
+`run_netversion_fetch_harness_test.sh` (the fetch, keeping and settings in
+the game, against a local server) and `run_netns_crossplay_test.sh
+crossversion` (an OpenCE host of 39 read as 40, joined only with a table),
+all with a throwaway key: configure with `--netversions-test-key <its public
+key>` (test builds only, refused with `--release`).

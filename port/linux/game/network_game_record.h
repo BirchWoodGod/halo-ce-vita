@@ -78,6 +78,33 @@ boolean network_game_record_decode_version(
 long network_game_record_wire_size(
 	short format,
 	unsigned int version);
+/* whether the last record taken said its host is a dedicated server (the
+co-op switch of OpenCE's 41: docs/opence-net41-spec.md 3.4). A label from the
+host, read only to leave out a hint */
+boolean network_game_record_host_is_dedicated(
+	void);
+/* (automated tests only, never in release builds) HALO_TEST_RECORD_FURTHER=
+co-op byte:further byte 10:further byte 11: this host, a stand-in for a PC
+host of 35 or more, sends its record of size bytes in OpenCE's form with
+those values; its new size. Otherwise size */
+long network_game_record_test_stand_in(
+	void *record,
+	long size,
+	long capacity);
+/* (the same) the copy the stand-in host's own client reads: what it sent
+others made harmless, so that its game goes on */
+void network_game_record_test_own_copy(
+	void *record,
+	long size);
+/* whether a host's King state of size bytes is one to take: exactly
+stock_size, or, in a game of 39 or more (multi_hill), a Multi-Hill game's 20
+bytes more with an extra hill count of 0 to 4 (docs/opence-net41-spec.md
+4.3). Nothing else, whatever it holds. buffer holds size bytes */
+boolean network_game_record_king_state_valid(
+	void const *buffer,
+	long size,
+	long stock_size,
+	boolean multi_hill);
 /* whether co-op's switches are ones this game knows */
 boolean network_game_cooperative_flags_valid(
 	byte flags);

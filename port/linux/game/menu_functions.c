@@ -96,6 +96,7 @@ for a gamepad); a test build's HALO_TEST_TEXT_INPUT answers in its place,
 #include "../src/p2p.h"
 #include "../src/p2p_friends.h"
 #include "../src/p2p_party.h"
+#include "../src/p2p_fileshare.h"
 #include "../src/crossplay_guard.h"
 #include "network_wire.h"
 #include "network_anticheat.h"
@@ -450,6 +451,21 @@ enum
 	_function_online_host_edit,
 	/* (Menu style Online: CUSTOMIZATION's colour grid) */
 	_function_online_custom_grid,
+	/* (File Share with friends: the sharing question, send to a friend, a
+	friend's File Share) */
+	_function_fileshare_share_ask,
+	_function_fileshare_share_option,
+	_function_fileshare_send_init,
+	_function_fileshare_send_act,
+	_function_fileshare_friend_init,
+	_function_fileshare_friend_ask,
+	_function_fileshare_friend_download,
+	_function_fileshare_friend_refresh,
+	_function_fileshare_friend_page_up,
+	_function_fileshare_friend_page_down,
+	/* (1.1.2, the Forge menu's MAGNETS and NUDGE: forge.c forge_precision.inc) */
+	_function_forge_magnets,
+	_function_forge_nudge_step,
 };
 
 /* in port_game_data_input_names' order */
@@ -525,6 +541,11 @@ enum
 	/* (Menu style Online: HOST SETTINGS' rows) */
 	_input_online_host,
 	_input_h3_content_notice,
+	/* (File Share with friends) */
+	_input_fileshare_share,
+	_input_fileshare_send,
+	_input_fileshare_friend,
+	_input_fileshare_friend_question,
 };
 
 /* what a line of typing is for */
@@ -782,6 +803,7 @@ static struct
 	next frame (pc_menu_functions_local_lobby_after_game) */
 	boolean dispose_pending;
 } h3_local;
+static boolean row_column(struct widget_instance *row, char const *name, char const *text);
 static boolean h3_mp_local_start(void);
 static void h3_mp_local_update(boolean main_menu_loaded);
 /* (the live lobby, Menu style Halo 3: h3_live) */
@@ -849,13 +871,375 @@ static boolean classic_text_wraps(struct widget_instance *widget)
 	return FALSE;
 }
 
-static void text_show(struct widget_instance *widget, char const *text)
+static void h3_capitals(char *text);
+long menu_tags_stand_in(long tag_index);
+
+/* a list's rows (its children named row_... or item_...), at most maximum: the screens of
+Menu style Classic+ show fewer than the Halo 3 set's */
+static int list_rows(struct widget_instance *list, int maximum)
+{
+	struct widget_instance *child;
+	int rows = 0;
+
+	for (child = list ? list->child : NULL; child; child = child->next)
+	{
+		if (child->name && (!strncmp(child->name, "row_", 4) || !strncmp(child->name, "item_", 5)))
+			rows++;
+	}
+	return rows > 0 && rows < maximum ? rows : maximum;
+}
+
+/* (Menu style Classic+: menus/classic, the port's screens in the original menus' look) whether a
+text box is one of theirs (pc\ce\..., pc\cp\..., pc\classic\...) */
+static boolean classic_widget(struct widget_instance *widget)
+{
+	static char const *const prefixes[] = { "pc\\ce\\", "pc\\cp\\", "pc\\classic\\" };
+	char const *name = widget && widget->definition_tag_index != NONE ? tag_get_name(widget->definition_tag_index) : NULL;
+	int index;
+
+	for (index = 0; name && index < (int)NUMBEROF(prefixes); index++)
+	{
+		if (!strncmp(name, prefixes[index], strlen(prefixes[index])))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* a text box's text, UTF-16 (length with its end) */
+static void text_set(struct widget_instance *widget, unsigned short const *characters, long length)
+{
+	widget->parameters.text_box.text = ui_widget_realloc(widget->parameters.text_box.text,
+		(word)(length * sizeof(wchar_t)), __FILE__, __LINE__);
+	if (widget->parameters.text_box.text)
+		memcpy(widget->parameters.text_box.text, characters, length * sizeof(wchar_t));
+}
+
+/* (classic_text_fit) a row's name's room when its tag at the right of the row takes some of it:
+the width it may have, 0 none */
+static short classic_room_limit;
+
+/* whether the text (UTF-16) fits the box: its widest line and its lines within it */
+static boolean text_fits(struct widget_instance *widget, unsigned short const *characters)
+{
+	short room_width, room_height, text_width, text_height;
+
+	if (!ui_widget_port_text_measure(widget, (wchar_t const *)characters, &room_width, &room_height, &text_width,
+		&text_height))
+	{
+		return TRUE;
+	}
+	if (classic_room_limit > 0 && classic_room_limit < room_width)
+		room_width = classic_room_limit;
+	return text_width <= room_width && text_height <= room_height;
+}
+
+/* (Menu style Classic+) a row's name's room: up to its tag's words at the right of the row
+(row_tag, right-aligned), with a gap; 0 when the row has no tag shown */
+static short classic_name_room(struct widget_instance *widget)
+{
+	struct widget_instance *tag = NULL, *sibling;
+	short room_width, room_height, text_width = 0, text_height, name_left, name_right, tag_left, tag_right;
+
+	if (!widget->parent || !widget->name || strcmp(widget->name, "row_name"))
+		return 0;
+	for (sibling = widget->parent->child; sibling; sibling = sibling->next)
+	{
+		if (sibling->name && (!strcmp(sibling->name, "row_tag") || !strcmp(sibling->name, "row_note")) &&
+			sibling->type == _ui_widget_type_text_box)
+			tag = sibling;
+	}
+	if (!tag || !tag->parameters.text_box.text || !tag->parameters.text_box.text[0] ||
+		(tag->parameters.text_box.text[0] == ' ' && !tag->parameters.text_box.text[1]))
+	{
+		return 0;
+	}
+	ui_widget_port_text_measure(tag, tag->parameters.text_box.text, &room_width, &room_height, &text_width, &text_height);
+	ui_widget_port_text_box_span(widget, &name_left, &name_right);
+	ui_widget_port_text_box_span(tag, &tag_left, &tag_right);
+	return (short)MAX(tag_right - text_width - 12 - name_left, 16);
+}
+
+/* (Menu style Classic+) a button key's words, as the Xbox's: "=" and the word in capitals
+(=ACCEPT); the keys' text boxes a_label, x_label, y_label, toggle */
+static boolean classic_key_words(struct widget_instance *widget, char const *text, char *words, int size)
+{
+	static char const *const keys[] = { "a_label", "b_label", "x_label", "y_label", "toggle" };
+	int index;
+
+	if (!widget->name || !text || !*text || text[0] == '=')
+		return FALSE;
+	for (index = 0; index < (int)NUMBEROF(keys); index++)
+	{
+		if (!strcmp(widget->name, keys[index]))
+		{
+			/* (the controller's buttons' names stay English in a translation - Select, Back -: the
+			Xbox's key words are the port's own, translated) */
+			if (!strcmp(text, T("Select")))
+				snprintf(words, (size_t)size, "%s", T("=SELECT"));
+			else if (!strcmp(text, T("Back")))
+				snprintf(words, (size_t)size, "%s", T("=BACK"));
+			else
+			{
+				snprintf(words, (size_t)size, "=%s", text);
+				h3_capitals(words);
+			}
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+/* (Menu style Classic+) a text shown whole, never cut nor ended in "...": in its box if it fits
+there; else in the box's smaller twin (<name>_small beside it, ui.map's small_ui: the original
+menus' smaller font) if it has one, on one line or broken into lines there; else broken into
+lines in the box itself - at the spaces, and a word wider than the box at the letter that
+fits (a text box draws a line as long as it is, cut at its edge: the line breaks are the
+game's "\r"). A text that fits nowhere is said ("menus: classic text does not fit") */
+static void classic_text_fit_characters(struct widget_instance *widget, unsigned short *characters, long length,
+	char const *text);
+
+static void classic_text_fit(struct widget_instance *widget, char const *text)
 {
 	unsigned short characters[481];
 	long length;
 
 	if (!widget || widget->type != _ui_widget_type_text_box)
 		return;
+	length = halo_menus_utf16(text ? text : "", characters, (long)NUMBEROF(characters));
+	classic_text_fit_characters(widget, characters, length, text ? text : "");
+}
+
+/* (ui_widget.c, as a text box of a string list is drawn: its string copied in) the string fitted to
+the box as classic_text_fit fits the port's text - its own line breaks for the Halo 3 set's wider
+lines rejoined, broken again for this box -, on Menu style Classic+'s screens; a string that fits is
+left as it is */
+void ui_widget_port_classic_fit(struct widget_instance *widget)
+{
+	unsigned short characters[481];
+	long length;
+
+	if (!widget || widget->type != _ui_widget_type_text_box || !widget->parameters.text_box.text ||
+		!halo_menu_style_classic_plus() || !classic_widget(widget) ||
+		text_fits(widget, (unsigned short const *)widget->parameters.text_box.text))
+	{
+		return;
+	}
+	for (length = 0; length < (long)NUMBEROF(characters) - 1 && widget->parameters.text_box.text[length]; length++)
+		characters[length] = widget->parameters.text_box.text[length];
+	characters[length++] = 0;
+	classic_text_fit_characters(widget, characters, length, "(a string list's)");
+}
+
+static void classic_text_fit_characters(struct widget_instance *widget, unsigned short *characters, long length,
+	char const *text)
+{
+	static unsigned short const empty[1] = { 0 };
+	unsigned short lines[481 + 64];
+	struct widget_instance *twin = NULL, *target, *sibling;
+	long index, kept, line_start;
+	char twin_name[96];
+
+	/* (the menus' fonts draw Latin-1: a character beyond it a "?") */
+	for (index = 0; index < length - 1; index++)
+	{
+		if (characters[index] > 0xFF)
+			characters[index] = '?';
+	}
+	if (widget->name && widget->parent)
+	{
+		snprintf(twin_name, sizeof(twin_name), "%s_small", widget->name);
+		for (sibling = widget->parent->child; sibling; sibling = sibling->next)
+		{
+			if (sibling->name && !strcmp(sibling->name, twin_name) && sibling->type == _ui_widget_type_text_box)
+				twin = sibling;
+		}
+	}
+	if (twin)
+		text_set(twin, empty, 1);
+	/* (a row's tag - ONLINE, REQUEST - beside a name that needs its room - a friend's of 16 letters -:
+	left out, the name whole; the description's panel says the same) */
+	if (widget->name && widget->parent && (!strcmp(widget->name, "row_tag") || !strcmp(widget->name, "row_note")) &&
+		length > 1)
+	{
+		struct widget_instance *row_name = NULL;
+
+		for (sibling = widget->parent->child; sibling; sibling = sibling->next)
+		{
+			if (sibling->name && !strcmp(sibling->name, "row_name") && sibling->type == _ui_widget_type_text_box)
+				row_name = sibling;
+		}
+		text_set(widget, characters, length);
+		if (row_name && row_name->parameters.text_box.text && row_name->parameters.text_box.text[0])
+		{
+			short room = classic_name_room(row_name), room_width, room_height, text_width, text_height;
+
+			ui_widget_port_text_measure(row_name, row_name->parameters.text_box.text, &room_width, &room_height,
+				&text_width, &text_height);
+			if (room > 0 && text_width > room)
+			{
+				static unsigned short const space[2] = { ' ', 0 };
+
+				text_set(widget, space, 2);
+			}
+		}
+		return;
+	}
+	classic_room_limit = classic_name_room(widget);
+	if (length <= 1 || text_fits(widget, characters))
+	{
+		text_set(widget, characters, length);
+		classic_room_limit = 0;
+		return;
+	}
+	text_set(widget, empty, 1);
+	target = twin ? twin : widget;
+	if (twin && text_fits(twin, characters))
+	{
+		text_set(twin, characters, length);
+		classic_room_limit = 0;
+		return;
+	}
+	/* (a line break of the text's own inside a sentence - its words broken for the Halo 3 set's
+	wider lines - a space again, so the sentence is broken for this box; a short line's break - a
+	list's, "Objects: 5" - and a blank line kept) */
+	{
+		long line_length = 0;
+
+		for (index = 0; index < length - 1; index++)
+		{
+			if (characters[index] == '\r' && characters[index + 1] == '\n')
+			{
+				boolean blank_before = index >= 2 && characters[index - 1] == '\n';
+				boolean blank_after = index + 2 < length - 1 && characters[index + 2] == '\r';
+
+				if (line_length > 30 && !blank_before && !blank_after)
+				{
+					characters[index] = ' ';
+					memmove(&characters[index + 1], &characters[index + 2], (length - index - 2) * sizeof(*characters));
+					length--;
+					continue;
+				}
+				line_length = 0;
+				index++;
+				continue;
+			}
+			line_length++;
+		}
+	}
+	/* (broken into lines: each as many words as fit, a word too wide for a line at its letter) */
+	kept = 0;
+	line_start = 0;
+	index = 0;
+	while (index < length - 1 && kept < (long)NUMBEROF(lines) - 66)
+	{
+		long word_end = index, before = kept;
+
+		/* (the next word, with the spaces before it) */
+		while (word_end < length - 1 && characters[word_end] == ' ')
+			word_end++;
+		while (word_end < length - 1 && characters[word_end] != ' ')
+			word_end++;
+		memcpy(&lines[kept], &characters[index], (word_end - index) * sizeof(*lines));
+		kept += word_end - index;
+		lines[kept] = 0;
+		if (before > line_start && !text_fits(target, &lines[line_start]))
+		{
+			/* (onto a new line, without its spaces) */
+			long from = index;
+
+			while (from < word_end && characters[from] == ' ')
+				from++;
+			kept = before;
+			lines[kept++] = '\r';
+			line_start = kept;
+			memcpy(&lines[kept], &characters[from], (word_end - from) * sizeof(*lines));
+			kept += word_end - from;
+			lines[kept] = 0;
+		}
+		/* (a word wider than a line alone: broken at the letter that fits) */
+		while (kept - line_start > 1 && !text_fits(target, &lines[line_start]))
+		{
+			long fit = kept - 1;
+
+			while (fit > line_start + 1)
+			{
+				unsigned short held = lines[fit];
+				boolean fits;
+
+				lines[fit] = 0;
+				fits = text_fits(target, &lines[line_start]);
+				lines[fit] = held;
+				if (fits)
+					break;
+				fit--;
+			}
+			memmove(&lines[fit + 1], &lines[fit], (kept - fit + 1) * sizeof(*lines));
+			lines[fit] = '\r';
+			kept++;
+			line_start = fit + 1;
+		}
+		index = word_end;
+	}
+	lines[kept] = 0;
+	text_set(target, lines, kept + 1);
+	if (!text_fits(target, lines))
+		platform_log("menus: classic text does not fit: %s \"%s\"", tag_get_name(target->definition_tag_index), text);
+	classic_room_limit = 0;
+}
+
+static void text_show(struct widget_instance *widget, char const *text)
+{
+	/* (Forge's controls are the longest, Spanish on the Vita 597) */
+	unsigned short characters[801];
+	long length;
+
+	/* (Menu style Classic+: a row of the classic set's whose words are its row_name's, option_name's
+	or label's; a row with a value's box too - row_tag, value - "LABEL: VALUE" split between them,
+	the value at the right, as the original menus' settings show theirs) */
+	if (widget && widget->type != _ui_widget_type_text_box && halo_menu_style_classic_plus() && classic_widget(widget))
+	{
+		struct widget_instance *child, *name = NULL, *value = NULL;
+
+		for (child = widget->child; child; child = child->next)
+		{
+			if (!child->name || child->type != _ui_widget_type_text_box)
+				continue;
+			if (!strcmp(child->name, "row_name") || !strcmp(child->name, "option_name") || !strcmp(child->name, "label"))
+				name = child;
+			else if (!strcmp(child->name, "row_tag") || !strcmp(child->name, "value"))
+				value = child;
+		}
+		if (name)
+		{
+			char const *colon = value && text ? strstr(text, ": ") : NULL;
+
+			if (colon)
+			{
+				char label[160];
+
+				snprintf(label, sizeof(label), "%.*s", (int)MIN((long)(colon - text), (long)sizeof(label) - 1), text);
+				text_show(value, colon + 2);
+				text_show(name, label);
+			}
+			else
+			{
+				if (value)
+					text_show(value, " ");
+				text_show(name, text);
+			}
+			return;
+		}
+	}
+	if (!widget || widget->type != _ui_widget_type_text_box)
+		return;
+	/* (Menu style Classic+'s screens: shown whole, in the box's smaller twin or on lines) */
+	if (halo_menu_style_classic_plus() && classic_widget(widget) && text && *text)
+	{
+		char words[128];
+
+		classic_text_fit(widget, classic_key_words(widget, text, words, (int)sizeof(words)) ? words : text);
+		return;
+	}
 	if (classic_text_wraps(widget))
 	{
 		h3_dialog_text_wrapped(widget, text ? text : "");
@@ -1442,6 +1826,14 @@ static void h3_capitals(char *text)
 	{
 		if (*text >= 'a' && *text <= 'z')
 			*text = (char)(*text - 'a' + 'A');
+		/* (UTF-8's Latin-1 small letters too, \xc3\xa0 to \xc3\xbe but the division sign: a
+		translation's "RÁPIDO", not "RáPIDO") */
+		else if ((unsigned char)text[0] == 0xC3 && (unsigned char)text[1] >= 0xA0 && (unsigned char)text[1] <= 0xBE &&
+			(unsigned char)text[1] != 0xB7)
+		{
+			text[1] = (char)((unsigned char)text[1] - 0x20);
+			text++;
+		}
 	}
 }
 
@@ -2796,7 +3188,11 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 	if (!h3_forge.initialized)
 		h3_forge_lobby_initialize();
 	/* ("MAP: BLOOD GULCH - MY FORT", Halo 3's: the map and its variant) */
-	if (h3_forge.variant_file[0])
+	if (h3_forge.variant_file[0] && halo_menu_style_classic_plus())
+		/* (Menu style Classic+: its rows are narrower than Halo 3's: the map; the variant's name, as long
+		as it may be, in the description's caption - "<variant> on <map>") */
+		snprintf(text, sizeof(text), "%s: %s", T("MAP"), T(forge_map_name(h3_forge.map)));
+	else if (h3_forge.variant_file[0])
 		snprintf(text, sizeof(text), "%s: %s - %s", T("MAP"), T(forge_map_name(h3_forge.map)), h3_forge.variant_title);
 	else
 		snprintf(text, sizeof(text), "%s: %s", T("MAP"), T(forge_map_name(h3_forge.map)));
@@ -2809,7 +3205,10 @@ static void h3_forge_lobby_update(struct widget_instance *widget)
 
 		for (pack = 0; pack < forge_pack_count(); pack++)
 			on += forge_pack_enabled(pack) ? 1 : 0;
-		snprintf(text, sizeof(text), T("%s: %d OF %d"), T("EXTRA OBJECTS"), on, forge_pack_count());
+		if (halo_menu_style_classic_plus())
+			snprintf(text, sizeof(text), "%s: %d/%d", T("EXTRA OBJECTS"), on, forge_pack_count());
+		else
+			snprintf(text, sizeof(text), T("%s: %d OF %d"), T("EXTRA OBJECTS"), on, forge_pack_count());
 		h3_capitals(text);
 		text_show(named(screen, "packs_row"), text);
 		/* (the player waits for them here: a map's copy shares the memory
@@ -3204,6 +3603,11 @@ static void h3_forge_title_update(struct widget_instance *widget)
 		text_show(named(screen, "redo"), text);
 		snprintf(text, sizeof(text), "%s: %s", T("SNAP"), forge_snap_enabled() ? T("ON") : T("OFF"));
 		text_show(named(screen, "snap"), text);
+		/* (1.1.2: the blocks' magnets, the nudge's step) */
+		snprintf(text, sizeof(text), "%s: %s", T("MAGNETS"), forge_panel_magnets() ? T("ON") : T("OFF"));
+		text_show(named(screen, "magnets"), text);
+		snprintf(text, sizeof(text), T("NUDGE: %d CM"), forge_panel_nudge_centimetres());
+		text_show(named(screen, "nudge"), text);
 		snprintf(text, sizeof(text), "%s: %s", T("ALL AI"), forge_ai_all_state() == _forge_ai_all_on ? T("ON") : forge_ai_all_state() == _forge_ai_all_off ? T("OFF") : T("MIXED"));
 		text_show(named(screen, "allai"), text);
 		/* (CLEAR DEAD AI and CLEAR ALL AI with how many each takes) */
@@ -3252,13 +3656,21 @@ an Xbox pad's or a PlayStation's, by SDL's names for its buttons) */
 static void h3_forge_controls_update(struct widget_instance *widget)
 {
 	char const *controls;
-	char text[640];
+	/* (1.1.2: the nudge, a pad's: forge_precision.inc) */
+	char const *nudge = "";
+	char const *touch = "";
+	char text[768];
 
 #ifdef HALO_VITA
 	controls = T("Fly: left stick. Up: Cross. Down: D-pad down.\nFaster: hold L. Look: right stick.\n"
 		"Grab, drop: R. Copy: Circle. Delete: Triangle.\nObjects: Square. Holding one: its properties.\n"
 		"Rotate: hold L + right stick; with R: roll.\nL + left stick: distance. L + D-pad right: snap.\n"
 		"Upright: D-pad left. Speed: D-pad right.\nSpartan: Select + D-pad up.");
+	nudge = T("Nudge: L + D-pad up, then L + sticks.");
+	/* (the front screen, forge_touch.inc, unless the panel's Touch in Forge
+	is off) */
+	if (!getenv("HALO_FORGE_TOUCH") || atoi(getenv("HALO_FORGE_TOUCH")))
+		touch = T("Touch: drag an object. Tap it, then drag to turn it.");
 #elif defined(H3_BUTTON_ICONS)
 	switch (halo_button_icons_shown())
 	{
@@ -3267,12 +3679,14 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 			"Grab, drop: RT. Copy: B. Delete: Y.\nObjects: X. Holding one: its properties.\n"
 			"Rotate: hold LT + right stick; with RT: roll.\nLT + left stick: distance. LT + LB: snap.\n"
 			"Upright: RB. Speed: LB.\nSpartan: Back + right stick click.");
+		nudge = T("Nudge: LT + right stick click, then LT + sticks.");
 		break;
 	case _halo_button_icons_playstation:
 		controls = T("Fly: left stick. Up: Cross. Down: L3.\nFaster: hold L2. Look: right stick.\n"
 			"Grab, drop: R2. Copy: Circle. Delete: Triangle.\nObjects: Square. Holding one: its properties.\n"
 			"Rotate: hold L2 + right stick; with R2: roll.\nL2 + left stick: distance. L2 + L1: snap.\n"
 			"Upright: R1. Speed: L1.\nSpartan: Share + R3.");
+		nudge = T("Nudge: L2 + R3, then L2 + sticks.");
 		break;
 	default:
 		controls = T("Fly: W A S D. Up: Space. Down: C.\nFaster: Shift. Look: mouse.\n"
@@ -3288,9 +3702,10 @@ static void h3_forge_controls_update(struct widget_instance *widget)
 		"Upright: X. Speed: Q.\nSpartan: Tab, or F1 + Z.");
 #endif
 	/* (and a character's RESPAWN, Oct 22 2026: dead, it comes back; the
-	player spawn points, the browser's SPAWNING) */
-	snprintf(text, sizeof(text), "%s\n%s\n%s", controls, T("AI respawn: a character's properties, RESPAWN."),
-		T("Spawn points: Objects, SPAWNING. Held: team, game type."));
+	player spawn points, the browser's SPAWNING; the teleporters, its
+	TELEPORTERS, 1.1.2) */
+	snprintf(text, sizeof(text), "%s\n%s\n%s%s%s%s%s", controls, T("AI respawn: a character's properties, RESPAWN."),
+		T("Spawns, teleporters: Objects. Held: team, channel."), nudge[0] ? "\n" : "", nudge, touch[0] ? "\n" : "", touch);
 	text_show(widget, text);
 }
 
@@ -7774,6 +8189,48 @@ static void h3_gametype_copy_typed(char const *typed)
 	}
 }
 
+/* (fileshare_friends.c) a game variant a friend sent, checked there, saved
+as a new game type of the player's as COPY saves one (playlist_profile_new,
+then its rules over the new file's): its own name, else with a number after
+it, no other game type's or saved file's; TRUE with the name saved */
+boolean menu_functions_gametype_save_received(struct game_variant const *received, char *saved, int saved_size,
+	char *why, int why_size)
+{
+	struct game_variant variant = *received;
+	wchar_t name[H3_GAMETYPE_NAME_LENGTH + 1];
+	char base[H3_GAMETYPE_NAME_LENGTH + 1], unique[48];
+	long profile_index;
+	int index;
+
+	/* (its name as ASCII: a name typed here is; the list's names read) */
+	for (index = 0; index < H3_GAMETYPE_NAME_LENGTH && variant.human_readable_game_description[index]; index++)
+		base[index] = player_name_character_ascii(variant.human_readable_game_description[index]);
+	base[index] = 0;
+	h3_gametypes_read();
+	h3_gametype_unique_name(base, unique, sizeof(unique));
+	if (!h3_gametype_name_check(unique, name, NULL, why, why_size))
+	{
+		h3_gametype_unique_name("Shared", unique, sizeof(unique));
+		if (!h3_gametype_name_check(unique, name, NULL, why, why_size))
+			return FALSE;
+	}
+	profile_index = playlist_profile_new(0, name);
+	if (profile_index == NONE)
+	{
+		snprintf(why, (size_t)why_size, "%s", T("a new game type couldn't be made"));
+		return FALSE;
+	}
+	variant.flags &= ~H3_GAMETYPE_SYSTEM_DEFAULT_FLAG;
+	memcpy(variant.human_readable_game_description, name, sizeof(variant.human_readable_game_description));
+	playlist_profile_save(profile_index, &variant);
+	h3_gametype_write_wait(profile_index);
+	h3_gametypes.changed = TRUE;
+	h3_gametypes_read();
+	snprintf(saved, (size_t)saved_size, "%s", unique);
+	platform_log("menus: h3 gametypes: \"%s\" saved, a friend's", unique);
+	return TRUE;
+}
+
 /* the chosen game type renamed as typed, as the Xbox's name edit and SAVE
 CHANGES rename it (its variant's name saved: the file and SaveMeta.xbx) */
 static void h3_gametype_rename_typed(char const *typed)
@@ -8054,7 +8511,9 @@ static void h3_gametypes_update(struct widget_instance *list)
 		type = h3_gametypes_item_type((short)item);
 		if (type == NONE)
 		{
-			snprintf(text, sizeof(text), "%s", T("CREATE NEW GAME TYPE"));
+			/* (Menu style Classic+: the words that fit its rows in their large font) */
+			snprintf(text, sizeof(text), "%s", halo_menu_style_classic_plus() ? T("ADD GAME TYPE") :
+				T("CREATE NEW GAME TYPE"));
 			line[0] = 0;
 		}
 		else
@@ -8063,7 +8522,9 @@ static void h3_gametypes_update(struct widget_instance *list)
 			h3_capitals(text);
 			if (h3_gametypes.damaged[type])
 				snprintf(line, sizeof(line), "%s", T("DAMAGED"));
-			else if (type >= h3_gametypes.saved_count)
+			/* (Menu style Classic+: no BUILT-IN column - the original list has none -; the
+			description's panel says whose it is) */
+			else if (type >= h3_gametypes.saved_count && !halo_menu_style_classic_plus())
 				snprintf(line, sizeof(line), "%s", T("BUILT-IN"));
 			else
 				line[0] = 0;
@@ -8197,7 +8658,7 @@ static void h3_gametype_bases_update(struct widget_instance *list)
 		if (child == list->focused_child)
 			focused_row = index;
 	}
-	target = browser_view_follow(&h3_gametypes.base_view, H3_GAMETYPE_BASE_ROWS, bases, (int)focused_row,
+	target = browser_view_follow(&h3_gametypes.base_view, list_rows(list, H3_GAMETYPE_BASE_ROWS), bases, (int)focused_row,
 		h3_gametypes.base_cursor, h3_gametypes.page);
 	h3_gametypes.page = 0;
 	h3_gametypes.base_cursor = (short)MAX(target, 0);
@@ -8376,7 +8837,8 @@ static void h3_gametypes_main_loop(void)
 	index--;
 	if (h3_gametypes.open_pending != _h3_gametype_open_none)
 	{
-		long list = tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\gametypes\\screen");
+		/* (Menu style Classic+: the classic set's screens standing for them, menu_tags_stand_in) */
+		long list = menu_tags_stand_in(tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\gametypes\\screen"));
 		long next = tag_loaded(UI_WIDGET_DEFINITION_TAG, h3_gametypes.open_pending == _h3_gametype_open_editor ?
 			"pc\\h3\\gtedit\\screen" : "pc\\h3\\gtdel\\screen");
 
@@ -8389,7 +8851,7 @@ static void h3_gametypes_main_loop(void)
 	}
 	if (h3_gametypes.leave_pending)
 	{
-		long editor = tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\gtedit\\screen");
+		long editor = menu_tags_stand_in(tag_loaded(UI_WIDGET_DEFINITION_TAG, "pc\\h3\\gtedit\\screen"));
 
 		h3_gametypes.leave_pending = FALSE;
 		if (active && editor != NONE && active->definition_tag_index == editor)
@@ -8784,6 +9246,13 @@ static boolean row_column(struct widget_instance *row, char const *name, char co
 
 	if (!widget || widget->type != _ui_widget_type_text_box)
 		return FALSE;
+	/* (Menu style Classic+'s screens: never cut nor ended in "...": shown whole, in the box's
+	smaller twin or on lines) */
+	if (halo_menu_style_classic_plus() && classic_widget(widget))
+	{
+		classic_text_fit(widget, text && *text ? text : "-");
+		return FALSE;
+	}
 	length = halo_menus_utf16(text && *text ? text : "-", characters, (long)NUMBEROF(characters));
 	for (index = 0; index < length - 1; index++)
 	{
@@ -9749,8 +10218,12 @@ static void browser_update(struct widget_instance *list)
 	{
 #ifndef HALO_RELEASE
 		/* (the tests': each game chosen, said once) */
+		static int last_offset = -1;
+		boolean moved_rows = menu_functions.view.offset != last_offset;
+
+		last_offset = menu_functions.view.offset;
 		if (getenv("HALO_TEST_BROWSER_GAMES") &&
-			(!menu_functions.chosen_valid || strcmp(menu_functions.chosen.id, menu_functions.games[target].id)))
+			(moved_rows || !menu_functions.chosen_valid || strcmp(menu_functions.chosen.id, menu_functions.games[target].id)))
 		{
 			platform_log("menus: the server browser's game %d of %ld chosen: %s (rows from %d)",
 				browser_list_game_number(menu_functions.games, (int)menu_functions.game_count, (int)target),
@@ -10342,7 +10815,8 @@ static void h3_variant_details(struct forge_store_entry const *entry, boolean in
 	int length = 0;
 
 	text[0] = 0;
-	if (in_fileshare)
+	/* (Menu style Classic+'s File Share: the map is in the row's column) */
+	if (in_fileshare && !halo_menu_style_classic_plus())
 		length += snprintf(text + length, (size_t)(size - length), T("Map: %s\n"), h3_variant_map_name(entry->map_name));
 	if (entry->damaged)
 	{
@@ -10433,7 +10907,9 @@ static void h3_forge_variants_update(struct widget_instance *list)
 			continue;
 		h3_forge_pick_rows((int)shown_index, &entry);
 		snprintf(text, sizeof(text), "%s", entry ? entry->title : T(forge_map_name(h3_forge.pick_map)));
-		h3_capitals(text);
+		/* (Menu style Classic+: a variant's name as it was typed, the map's in capitals) */
+		if (!entry || !halo_menu_style_classic_plus())
+			h3_capitals(text);
 		text_show(child, text);
 		if (index == h3_forge.variant_view.row)
 			focus = child;
@@ -10807,16 +11283,65 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		return;
 	}
 	text_show(named(screen, "name"), properties.name);
+	/* (1.1.2: where it is, metres) */
+	if (properties.has_position)
+		snprintf(text, sizeof(text), T("X %.2f  Y %.2f  Z %.2f m"), properties.position[0], properties.position[1],
+			properties.position[2]);
+	else
+		text[0] = 0;
+	text_show(named(screen, "position"), text);
 	for (row = 0, child = list->child; child; child = child->next, row++)
 	{
 		/* (a player spawn point's four rows: its team, game type, kind and
 		yaw - forge_spawns.inc) */
 		if (properties.spawn)
 		{
+			boolean teleporter = properties.spawn_kind == _forge_spawn_teleporter_sender ||
+				properties.spawn_kind == _forge_spawn_teleporter_receiver;
+			boolean objective = properties.spawn_kind >= _forge_spawn_flag;
 			boolean shown = row <= _forge_property_yaw;
 
-			switch (row)
+			switch (objective ? row + 200 : teleporter ? row + 100 : row)
 			{
+			/* (a game type object's four: its index - a CTF flag's team, a
+			hill's number, a ball's, a checkpoint's order -, its game type,
+			whether the game type has it whole, its yaw - forge_netgame.inc) */
+			case _forge_property_team + 200:
+				if (properties.spawn_kind == _forge_spawn_flag)
+					snprintf(text, sizeof(text), "%s: %s", T("TEAM"), properties.channel == 0 ? T("RED") : T("BLUE"));
+				else if (properties.spawn_kind == _forge_spawn_hill)
+					snprintf(text, sizeof(text), T("HILL: %d"), properties.channel + 1);
+				else if (properties.spawn_kind == _forge_spawn_oddball)
+					snprintf(text, sizeof(text), T("BALL: %d"), properties.channel + 1);
+				else
+					snprintf(text, sizeof(text), T("ORDER: %d"), properties.channel + 1);
+				break;
+			case _forge_property_respawn + 200:
+				snprintf(text, sizeof(text), "%s: %s", T("GAME TYPE"), properties.spawn_kind == _forge_spawn_flag ? T("CTF") :
+					properties.spawn_kind == _forge_spawn_hill ? T("KING OF THE HILL") :
+					properties.spawn_kind == _forge_spawn_oddball ? T("ODDBALL") : T("RACE"));
+				break;
+			case _forge_property_place_at_start + 200:
+				snprintf(text, sizeof(text), "%s: %s", T("COMPLETE"), properties.linked ? T("YES") : T("NO"));
+				break;
+			case _forge_property_yaw + 200:
+				snprintf(text, sizeof(text), "%s: %d\xc2\xb0", T("YAW"), properties.yaw);
+				break;
+			/* (a teleporter's four: its channel, whether its channel has the
+			other end, sender or receiver, its yaw - forge_netgame.inc) */
+			case _forge_property_team + 100:
+				snprintf(text, sizeof(text), T("CHANNEL: %d"), properties.channel + 1);
+				break;
+			case _forge_property_respawn + 100:
+				snprintf(text, sizeof(text), "%s: %s", T("LINKED"), properties.linked ? T("YES") : T("NO"));
+				break;
+			case _forge_property_place_at_start + 100:
+				snprintf(text, sizeof(text), "%s: %s", T("TELEPORTER"), properties.spawn_kind == _forge_spawn_teleporter_sender ?
+					T("SENDER") : T("RECEIVER"));
+				break;
+			case _forge_property_yaw + 100:
+				snprintf(text, sizeof(text), "%s: %d\xc2\xb0", T("YAW"), properties.yaw);
+				break;
 			case _forge_property_team:
 				snprintf(text, sizeof(text), "%s: %s", T("TEAM"), properties.team == 0 ? T("RED") : properties.team == 1 ?
 					T("BLUE") : T("ANY"));
@@ -10871,16 +11396,31 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		case _forge_property_ai_team:
 			snprintf(text, sizeof(text), "%s: %s", T("AI TEAM"), properties.ai_team_name);
 			break;
-		default:
+		case _forge_property_ai_brain:
 			snprintf(text, sizeof(text), "%s: %s", T("AI"), properties.ai_on ? T("ON") : T("OFF"));
 			break;
+		case _forge_property_physics:
+			snprintf(text, sizeof(text), "%s: %s", T("PHYSICS"), properties.physics == _forge_physics_fixed ? T("FIXED") :
+				properties.physics == _forge_physics_phased ? T("PHASED") : T("NORMAL"));
+			break;
+		default:
+			text[0] = 0;
+			break;
 		}
-		/* (a character's own rows: hidden for any other object; the rest
-		shown again after a spawn point's) */
-		if (row >= _forge_property_ai_team)
+		/* (a character's own rows: hidden for any other object, its
+		physics' for a character; the rest shown again after a spawn
+		point's) */
+		if (row == _forge_property_ai_team || row == _forge_property_ai_brain || row == _forge_property_physics)
 		{
-			widget_instance_set_visibility_recursive(child, properties.ai);
-			child->disabled = !properties.ai;
+			boolean shown = row == _forge_property_physics ? properties.has_physics : properties.ai;
+
+			widget_instance_set_visibility_recursive(child, shown);
+			child->disabled = !shown;
+		}
+		else if (row > _forge_property_physics)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
 		}
 		else if (child->disabled)
 		{
@@ -10890,7 +11430,14 @@ static void h3_forge_properties_update(struct widget_instance *list)
 		text_show(child, text);
 		child->animation.current_frame_index = child == list->focused_child ? 1 : 0;
 	}
-	if (properties.spawn)
+	if (properties.spawn && properties.spawn_kind >= _forge_spawn_flag)
+		snprintf(text, sizeof(text), "%s: game type object %d, index %d, %s, yaw %d", properties.name, properties.spawn_kind,
+			properties.channel, properties.linked ? "complete" : "not complete", properties.yaw);
+	else if (properties.spawn && (properties.spawn_kind == _forge_spawn_teleporter_sender ||
+		properties.spawn_kind == _forge_spawn_teleporter_receiver))
+		snprintf(text, sizeof(text), "%s: teleporter %s, channel %d, yaw %d", properties.name,
+			properties.spawn_kind == _forge_spawn_teleporter_sender ? "sender" : "receiver", properties.channel, properties.yaw);
+	else if (properties.spawn)
 		snprintf(text, sizeof(text), "%s: spawn point, team %d, game type %s, %s, yaw %d", properties.name, properties.team,
 			properties.game_type_name, properties.spawn_kind == _forge_spawn_initial ? "initial spawn" : "respawn point",
 			properties.yaw);
@@ -10899,13 +11446,16 @@ static void h3_forge_properties_update(struct widget_instance *list)
 			properties.team, properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
 			properties.pitch, properties.roll, properties.ai_team, properties.ai_on ? "on" : "off");
 	else
-		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, yaw %d pitch %d roll %d", properties.name, properties.team,
-			properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
-			properties.pitch, properties.roll);
+		snprintf(text, sizeof(text), "%s: team %d, respawn %d, %s, yaw %d pitch %d roll %d, physics %d", properties.name,
+			properties.team, properties.respawn_seconds, properties.place_at_start ? "at start" : "not at start", properties.yaw,
+			properties.pitch, properties.roll, properties.physics);
 	if (strcmp(text, said))
 	{
 		snprintf(said, sizeof(said), "%s", text);
 		platform_log("menus: forge properties: %s", said);
+		if (properties.has_position)
+			platform_log("menus: forge properties: at %.2f %.2f %.2f m", properties.position[0], properties.position[1],
+				properties.position[2]);
 	}
 }
 
@@ -10990,6 +11540,9 @@ static void h3_fileshare_status(char const *format, ...)
 /* (port fileshare) the rows (row_0 to row_11: row_name, row_map), the
 kind, the chosen one's picture and details, what the last action came to;
 a name typed for Rename taken */
+/* (File Share with friends, below) a game type's saved game folder's name */
+static boolean h3_fsfriends_folder(long profile_index, char *folder, int size);
+
 static void h3_fileshare_update(struct widget_instance *list)
 {
 	struct widget_instance *screen = screen_of(list);
@@ -11028,7 +11581,7 @@ static void h3_fileshare_update(struct widget_instance *list)
 			focused_row = index;
 		index++;
 	}
-	target = browser_view_follow(&h3_fileshare.view, VARIANT_ROWS, count, (int)focused_row, h3_fileshare.chosen,
+	target = browser_view_follow(&h3_fileshare.view, list_rows(list, VARIANT_ROWS), count, (int)focused_row, h3_fileshare.chosen,
 		h3_fileshare.page);
 	h3_fileshare.page = 0;
 	h3_fileshare.chosen = target;
@@ -11051,7 +11604,10 @@ static void h3_fileshare_update(struct widget_instance *list)
 		{
 			struct forge_store_entry const *entry = &h3_variants.entries[shown];
 
-			if (entry->damaged)
+			/* (Menu style Classic+: a damaged file by its file's name too - two would look alike) */
+			if (entry->damaged && halo_menu_style_classic_plus())
+				snprintf(text, sizeof(text), "%s: %s", T("Damaged file"), entry->file_name);
+			else if (entry->damaged)
 				snprintf(text, sizeof(text), "%s", T("DAMAGED FILE"));
 			else
 				snprintf(text, sizeof(text), "%s", entry->title);
@@ -11062,9 +11618,19 @@ static void h3_fileshare_update(struct widget_instance *list)
 			snprintf(text, sizeof(text), "%s", h3_mp.gametype_names[shown]);
 			line[0] = 0;
 		}
-		h3_capitals(text);
-		text_show(named(child, "row_name"), text);
-		text_show(named(child, "row_map"), line);
+		if (halo_menu_style_classic_plus())
+		{
+			/* (Menu style Classic+: the name as it was typed, as the original menus' list of games
+			shows a game's, whole: classic_text_fit) */
+			text_show(named(child, "row_name"), text);
+			text_show(named(child, "row_map"), line[0] ? line : " ");
+		}
+		else
+		{
+			h3_capitals(text);
+			text_show(named(child, "row_name"), text);
+			text_show(named(child, "row_map"), line);
+		}
 		if (index == h3_fileshare.view.row)
 			focus = child;
 		index++;
@@ -11077,8 +11643,13 @@ static void h3_fileshare_update(struct widget_instance *list)
 			child->animation.current_frame_index = child == focus ? 1 : 0;
 	}
 	/* (the kind, the count, the pane, the status) */
-	snprintf(text, sizeof(text), "%s  \xc2\xb7  %s", h3_fileshare.kind == _fileshare_map_variants ? T("MAP VARIANTS") :
-		T("map variants"), h3_fileshare.kind == _fileshare_game_variants ? T("GAME VARIANTS") : T("game variants"));
+	if (halo_menu_style_classic_plus())
+		/* (Menu style Classic+: the kind shown, between the spinners' arrows) */
+		snprintf(text, sizeof(text), "%s", h3_fileshare.kind == _fileshare_map_variants ? T("MAP VARIANTS") :
+			T("GAME VARIANTS"));
+	else
+		snprintf(text, sizeof(text), "%s  \xc2\xb7  %s", h3_fileshare.kind == _fileshare_map_variants ? T("MAP VARIANTS") :
+			T("map variants"), h3_fileshare.kind == _fileshare_game_variants ? T("GAME VARIANTS") : T("game variants"));
 	text_show(named(screen, "kind"), text);
 	snprintf(text, sizeof(text), h3_fileshare.kind == _fileshare_map_variants ? T("%d map variants") :
 		T("%d game variants"), count);
@@ -11096,6 +11667,18 @@ static void h3_fileshare_update(struct widget_instance *list)
 		}
 		text_show(named(screen, "info_name"), entry->title);
 		h3_variant_details(entry, TRUE, text, sizeof(text));
+		/* (File Share with friends: shared or not, and Start's question) */
+		if (!entry->damaged)
+		{
+			int length = (int)strlen(text);
+
+			if (length && text[length - 1] != '\n' && length < (int)sizeof(text) - 1)
+				text[length++] = '\n', text[length] = 0;
+			snprintf(text + length, sizeof(text) - (size_t)length, "%s",
+				p2p_fileshare_marked(P2P_FILESHARE_KIND_MAP_VARIANT, entry->map_name, entry->file_name) ?
+				T("Shared with friends. Start: sharing, send to a friend.") :
+				T("Start: share with friends, send to a friend."));
+		}
 		text_show(named(screen, "info_text"), text);
 		snprintf(line, sizeof(line), "%s (%s)", entry->title, entry->map_name);
 	}
@@ -11104,7 +11687,20 @@ static void h3_fileshare_update(struct widget_instance *list)
 		if (found)
 			widget_instance_set_visibility_recursive(found, FALSE);
 		text_show(named(screen, "info_name"), h3_mp.gametype_names[target]);
-		text_show(named(screen, "info_text"), T("A game variant.\nGame variants are made and changed in\nMULTIPLAYER, EDIT GAME TYPES."));
+		/* (the player's own: shared or not, and Start's question) */
+		if (!TEST_FLAG(h3_mp.gametypes[target], _saved_game_file_index_read_only_bit))
+		{
+			char folder[P2P_FILESHARE_FILE_SIZE];
+			boolean shared = h3_fsfriends_folder(h3_mp.gametypes[target], folder, sizeof(folder)) &&
+				p2p_fileshare_marked(P2P_FILESHARE_KIND_GAME_VARIANT, "", folder);
+
+			snprintf(text, sizeof(text), "%s\n%s", T("A game variant of yours, made in\nMULTIPLAYER, EDIT GAME TYPES."),
+				shared ? T("Shared with friends. Start: sharing, send to a friend.") :
+				T("Start: share with friends, send to a friend."));
+			text_show(named(screen, "info_text"), text);
+		}
+		else
+			text_show(named(screen, "info_text"), T("A game variant.\nGame variants are made and changed in\nMULTIPLAYER, EDIT GAME TYPES."));
 		snprintf(line, sizeof(line), "%s", h3_mp.gametype_names[target]);
 	}
 	else
@@ -11607,6 +12203,9 @@ The entry chosen stays chosen by its id and kind as the list changes */
 #define H3_FRIENDS_BACKUP_CODE_ONLY 1005
 #define H3_FRIENDS_BACKUP_CONFIRM 1006
 #define H3_FRIENDS_BACKUP_CANCEL 1007
+/* (a friend online's FILE SHARE: their shared files, p2p_fileshare.h) */
+#define H3_FRIENDS_FILESHARE 1008
+static boolean h3_fsfriends_browse(struct p2p_friend_entry const *entry);
 
 
 /* the three rows of the screen's own */
@@ -11640,7 +12239,7 @@ static struct
 	/* the options' question: its entry, and what each of its rows does;
 	(FRIEND CODE BACKUP's) its own title and words */
 	struct p2p_friend_entry options_entry;
-	int options[3];
+	int options[4];
 	int option_count;
 	/* (the options' screen opened from the list: closing it opens the list's
 	screen again, whose init keeps the chosen row, not the top's) */
@@ -11864,6 +12463,14 @@ static void h3_backup_question(char const *title, char const *text, int first, i
 	memset(&h3_friends.options_entry, 0, sizeof(h3_friends.options_entry));
 	snprintf(h3_friends.options_title, sizeof(h3_friends.options_title), "%s", title);
 	snprintf(h3_friends.options_text, sizeof(h3_friends.options_text), "%s", text);
+	if (halo_menu_style_classic_plus())
+	{
+		/* (Menu style Halo CE: the box wraps the words itself; Halo 3's line breaks left it ragged) */
+		char *newline;
+
+		for (newline = h3_friends.options_text; (newline = strchr(newline, '\n')) != NULL; newline++)
+			*newline = ' ';
+	}
 	h3_friends.options[0] = first;
 	h3_friends.options[1] = second;
 	h3_friends.option_count = 2;
@@ -12420,6 +13027,9 @@ static boolean h3_friends_options_ask(void)
 			h3_friends.options[h3_friends.option_count++] = H3_FRIENDS_PARTY_INVITE;
 		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_REMOVE;
 		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_BLOCK;
+		/* (a friend online: their File Share, after the rows that were there) */
+		if (entry->online)
+			h3_friends.options[h3_friends.option_count++] = H3_FRIENDS_FILESHARE;
 		break;
 	case P2P_FRIEND_KIND_REQUEST:
 		h3_friends.options[h3_friends.option_count++] = P2P_FRIENDS_ACCEPT;
@@ -12450,6 +13060,8 @@ static char const *h3_friends_option_name(int action)
 		return T("INVITE TO PARTY");
 	case H3_FRIENDS_PARTY_KICK:
 		return T("REMOVE FROM PARTY");
+	case H3_FRIENDS_FILESHARE:
+		return T("FILE SHARE");
 	case H3_FRIENDS_BACKUP_EXPORT:
 		return T("BACK UP FRIEND CODE");
 	case H3_FRIENDS_BACKUP_RESTORE:
@@ -12505,7 +13117,7 @@ static void h3_friends_options_update(struct widget_instance *list)
 	{
 		long option;
 
-		if (strncmp(child->name, "option_", 7) || !(child->name[7] >= '1' && child->name[7] <= '3'))
+		if (strncmp(child->name, "option_", 7) || !(child->name[7] >= '1' && child->name[7] <= '4'))
 			continue;
 		option = child->name[7] - '1';
 		if (option < h3_friends.option_count)
@@ -12537,6 +13149,11 @@ static void h3_friends_option(struct widget_instance *widget)
 		h3_friends.options_title[0] = 0;
 		h3_friends.option_count = 0;
 		h3_backup_option(chosen);
+		return;
+	}
+	if (h3_friends.options[option] == H3_FRIENDS_FILESHARE)
+	{
+		h3_fsfriends_browse(&h3_friends.options_entry);
 		return;
 	}
 	if (h3_friends.options[option] == H3_FRIENDS_PARTY_INVITE || h3_friends.options[option] == H3_FRIENDS_PARTY_KICK)
@@ -13657,7 +14274,7 @@ static void h3_players_update(struct widget_instance *list)
 		text_show(named(screen, "detail"), text);
 	}
 	else
-		text_show(named(screen, "detail"), h3_players.count ? "" : T("No network game: players show here in one"));
+		text_show(named(screen, "detail"), h3_players.count ? "" : T("No network game yet: its players show here"));
 	text_show(named(screen, "players_message"), h3_players.message[0] &&
 		system_milliseconds() - h3_players.message_time < H3_PLAYERS_MESSAGE_MILLISECONDS ? h3_players.message : "");
 	p2p_friends_status(status, sizeof(status));
@@ -16577,6 +17194,604 @@ static void h3_invite_update(struct widget_instance *list)
 		snprintf(h3_invite.said, sizeof(h3_invite.said), "%s", text);
 		platform_log("menus: h3 invite: %s", text);
 	}
+}
+
+/* ---- File Share with friends (port/linux/src/p2p_fileshare.h;
+docs/fileshare-friends.md): File Share's Start on a file opens its sharing
+question (halo3/fileshare.xml, classic/fileshare.xml's cp/ set): SHARE WITH
+FRIENDS or STOP SHARING (its mark: friends see it in this machine's File
+Share), and SEND TO A FRIEND (the friends online; the friend is asked
+before anything is sent). The FRIENDS screen's options on a friend online
+add FILE SHARE: their shared files, each downloaded after DOWNLOAD's
+question (checked by the validator before it is saved). Every function
+finds its widgets by their last names, so the Halo 3 and the Classic+ sets
+(and the Online style's Halo 3 screens) are filled alike. The settings
+panel's Friends and Forge and File Share pages do the same for the
+original menus. */
+
+#define H3_FSFRIENDS_ROWS 12
+#define H3_FSFRIENDS_SEND_ROWS 10
+/* (a friend's File Share's screen and the friend picker, opened at the next
+frame as the question that asked for them closes) */
+#define H3_FSFRIENDS_FRIEND_SCREEN "h3/fileshare/friend/screen"
+#define H3_FSFRIENDS_SEND_SCREEN "h3/fileshare/send/screen"
+
+static struct
+{
+	/* the file of the sharing question (File Share's chosen) */
+	int kind;
+	char map[P2P_FILESHARE_MAP_SIZE];
+	char file[P2P_FILESHARE_FILE_SIZE];
+	char title[64];
+	/* the friends online (SEND TO A FRIEND), the one chosen */
+	struct p2p_friend_entry friends[P2P_FRIENDS_MAXIMUM];
+	int friend_count;
+	struct browser_view send_view;
+	char send_chosen[P2P_FRIEND_ID_SIZE];
+	struct widget_instance *send_list;
+	long send_list_creation_time;
+	/* a friend's File Share: their files as listed, the one chosen */
+	struct p2p_fileshare_remote remote[P2P_FILESHARE_SHARED_MAXIMUM];
+	int remote_count;
+	int state;
+	char friend_name[P2P_FRIEND_NAME_SIZE];
+	char friend_id[P2P_FRIEND_ID_SIZE];
+	struct browser_view view;
+	int chosen;
+	int page;
+	struct widget_instance *list;
+	long list_creation_time;
+	/* the file DOWNLOAD asks about */
+	struct p2p_fileshare_remote asked;
+	char message[P2P_FILESHARE_TEXT_SIZE];
+	unsigned long message_time;
+	/* the screen opened at the next frame ("" none) */
+	char open_pending[64];
+	char said[256];
+} h3_fsfriends;
+
+static void h3_fsfriends_message(char const *format, ...)
+{
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(h3_fsfriends.message, sizeof(h3_fsfriends.message), format, arguments);
+	va_end(arguments);
+	h3_fsfriends.message_time = system_milliseconds() ? system_milliseconds() : 1;
+	platform_log("menus: fileshare friends: %s", h3_fsfriends.message);
+}
+
+/* a game type's saved game folder's name (the last part of its path) */
+static boolean h3_fsfriends_folder(long profile_index, char *folder, int size)
+{
+	char full[MAXIMUM_FILENAME_LENGTH + 1];
+	char const *last;
+	int index;
+
+	if (profile_index == NONE || !saved_game_file_get_path_to_enclosing_directory(profile_index, full))
+		return FALSE;
+	for (index = (int)strlen(full); index > 0 && (full[index - 1] == '\\' || full[index - 1] == '/'); index--)
+		full[index - 1] = 0;
+	last = strrchr(full, '\\');
+	if (!last)
+		last = strrchr(full, '/');
+	last = last ? last + 1 : full;
+	if (!last[0] || (int)strlen(last) >= size)
+		return FALSE;
+	snprintf(folder, (size_t)size, "%s", last);
+	return TRUE;
+}
+
+/* File Share's chosen file as the sharing question's (its kind, map, file
+and title): FALSE, said, if it is none that can be shared */
+static boolean h3_fsfriends_chosen_file(void)
+{
+	h3_fsfriends.file[0] = 0;
+	h3_fsfriends.map[0] = 0;
+	if (h3_fileshare.kind == _fileshare_map_variants)
+	{
+		struct forge_store_entry const *entry = h3_fileshare_entry();
+
+		if (!entry)
+		{
+			h3_fileshare_status("%s", T("There is no map variant to share."));
+			return FALSE;
+		}
+		if (entry->damaged)
+		{
+			h3_fileshare_status("%s", T("This file is damaged and can't be shared."));
+			return FALSE;
+		}
+		h3_fsfriends.kind = P2P_FILESHARE_KIND_MAP_VARIANT;
+		snprintf(h3_fsfriends.map, sizeof(h3_fsfriends.map), "%s", entry->map_name);
+		snprintf(h3_fsfriends.file, sizeof(h3_fsfriends.file), "%s", entry->file_name);
+		snprintf(h3_fsfriends.title, sizeof(h3_fsfriends.title), "%s", entry->title);
+		return TRUE;
+	}
+	if (h3_fileshare.chosen < 0 || h3_fileshare.chosen >= h3_mp.gametype_count)
+	{
+		h3_fileshare_status("%s", T("There is no game variant to share."));
+		return FALSE;
+	}
+	if (TEST_FLAG(h3_mp.gametypes[h3_fileshare.chosen], _saved_game_file_index_read_only_bit))
+	{
+		h3_fileshare_status("%s", T("The game's own game types aren't shared: copy one in EDIT GAME TYPES."));
+		return FALSE;
+	}
+	if (!h3_fsfriends_folder(h3_mp.gametypes[h3_fileshare.chosen], h3_fsfriends.file, sizeof(h3_fsfriends.file)))
+	{
+		h3_fileshare_status("%s", T("That game type can't be read now."));
+		return FALSE;
+	}
+	h3_fsfriends.kind = P2P_FILESHARE_KIND_GAME_VARIANT;
+	snprintf(h3_fsfriends.title, sizeof(h3_fsfriends.title), "%s", h3_mp.gametype_names[h3_fileshare.chosen]);
+	return TRUE;
+}
+
+/* (port fileshare share ask: Start on a file) the sharing question opens */
+static boolean h3_fsfriends_share_ask(void)
+{
+	if (!h3_fsfriends_chosen_file())
+		return FALSE;
+	platform_log("menus: fileshare friends: sharing %s %s (%s)", p2p_fileshare_kind_text(h3_fsfriends.kind),
+		h3_fsfriends.title, p2p_fileshare_marked(h3_fsfriends.kind, h3_fsfriends.map, h3_fsfriends.file) ? "shared" :
+		"not shared");
+	return TRUE;
+}
+
+/* (port fileshare share) the question's words and rows: option_1 SHARE WITH
+FRIENDS or STOP SHARING, option_2 SEND TO A FRIEND, option_3 sharing with
+friends on or off (friends.fileshare: every file's) */
+static void h3_fsfriends_share_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child;
+	boolean shared = p2p_fileshare_marked(h3_fsfriends.kind, h3_fsfriends.map, h3_fsfriends.file);
+	char text[320];
+	int length;
+
+	text_show(named(screen, "share_title"), h3_fsfriends.title);
+	if (h3_fsfriends.kind == P2P_FILESHARE_KIND_MAP_VARIANT)
+		length = snprintf(text, sizeof(text), T("A map variant of %s.\n"), h3_variant_map_name(h3_fsfriends.map));
+	else
+		length = snprintf(text, sizeof(text), "%s", T("A game variant.\n"));
+	length += snprintf(text + length, sizeof(text) - (size_t)length, "%s", shared ?
+		T("Shared: your friends see it in your File Share and can download it.") :
+		T("Not shared: only you see it."));
+	if (!p2p_fileshare_sharing() && length < (int)sizeof(text))
+		snprintf(text + length, sizeof(text) - (size_t)length, "\n%s",
+			T("Sharing with friends is off: nothing is shared, sent or taken."));
+	text_show(named(screen, "share_text"), text);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strcmp(child->name, "option_1"))
+			text_show(child, shared ? T("STOP SHARING") : T("SHARE WITH FRIENDS"));
+		else if (!strcmp(child->name, "option_2"))
+			text_show(child, T("SEND TO A FRIEND"));
+		else if (!strcmp(child->name, "option_3"))
+			text_show(child, p2p_fileshare_sharing() ? T("ALL SHARING: ON") : T("ALL SHARING: OFF"));
+	}
+}
+
+/* (port fileshare share option: a row of the question) */
+static void h3_fsfriends_share_option(struct widget_instance *widget)
+{
+	if (!widget || !h3_fsfriends.file[0])
+		return;
+	if (!strcmp(widget->name, "option_1"))
+	{
+		boolean shared = p2p_fileshare_marked(h3_fsfriends.kind, h3_fsfriends.map, h3_fsfriends.file);
+		int outcome = p2p_fileshare_mark(h3_fsfriends.kind, h3_fsfriends.map, h3_fsfriends.file, !shared);
+
+		if (outcome != P2P_FILESHARE_DONE)
+			h3_fileshare_status("%s", p2p_fileshare_outcome_text(outcome));
+		else if (shared)
+			h3_fileshare_status(T("\"%s\" is no longer shared."), h3_fsfriends.title);
+		else
+			h3_fileshare_status(T("\"%s\" is shared with your friends."), h3_fsfriends.title);
+	}
+	else if (!strcmp(widget->name, "option_2"))
+		snprintf(h3_fsfriends.open_pending, sizeof(h3_fsfriends.open_pending), "%s", H3_FSFRIENDS_SEND_SCREEN);
+	else if (!strcmp(widget->name, "option_3"))
+	{
+		/* (friends.fileshare, every file's: the settings panel's Sharing too) */
+		boolean on = !p2p_fileshare_sharing();
+
+		setting_set("HALO_FRIENDS_FILESHARE", on ? "true" : "false");
+		h3_fileshare_status("%s", on ? T("Sharing with friends is on: they see the files you share.") :
+			T("Sharing with friends is off: nothing is shared, sent or taken."));
+	}
+}
+
+static void h3_fsfriends_send_refresh(void)
+{
+	int index;
+
+	h3_friends_refresh(TRUE);
+	h3_fsfriends.friend_count = 0;
+	for (index = 0; index < h3_friends.count && h3_fsfriends.friend_count < P2P_FRIENDS_MAXIMUM; index++)
+	{
+		if (h3_friends.entries[index].kind == P2P_FRIEND_KIND_FRIEND && h3_friends.entries[index].online)
+			h3_fsfriends.friends[h3_fsfriends.friend_count++] = h3_friends.entries[index];
+	}
+}
+
+/* (port fileshare send init) the friends online */
+static void h3_fsfriends_send_initialize(void)
+{
+	browser_view_reset(&h3_fsfriends.send_view);
+	h3_fsfriends.send_chosen[0] = 0;
+	h3_fsfriends.message[0] = 0;
+	h3_fsfriends_send_refresh();
+	platform_log("menus: fileshare friends: send \"%s\": %d friends online", h3_fsfriends.title,
+		h3_fsfriends.friend_count);
+}
+
+/* the friend chosen in a list of rows row_<n> (1 first): its index */
+static int h3_fsfriends_row_item(struct widget_instance *widget, struct browser_view const *view)
+{
+	if (widget && !strncmp(widget->name, "row_", 4) && widget->name[4] >= '0' && widget->name[4] <= '9')
+	{
+		long row = atol(widget->name + 4) - 1;
+
+		if (row >= 0 && row < view->visible)
+			return (int)(view->offset + row);
+	}
+	return -1;
+}
+
+/* (port fileshare send act: a friend's Cross) the file sent: they are asked */
+static void h3_fsfriends_send_act(struct widget_instance *widget)
+{
+	int item = h3_fsfriends_row_item(widget, &h3_fsfriends.send_view), outcome;
+
+	if (item < 0 || item >= h3_fsfriends.friend_count || !h3_fsfriends.file[0])
+		return;
+	outcome = p2p_fileshare_send(h3_fsfriends.friends[item].id, h3_fsfriends.kind, h3_fsfriends.map, h3_fsfriends.file);
+	if (outcome == P2P_FILESHARE_DONE)
+		h3_fileshare_status(T("Sending \"%s\" to %s: they're asked first."), h3_fsfriends.title,
+			h3_fsfriends.friends[item].name);
+	else
+		h3_fileshare_status("%s", p2p_fileshare_outcome_text(outcome));
+	platform_log("menus: fileshare friends: send to %s: %s", h3_fsfriends.friends[item].name,
+		p2p_fileshare_outcome_text(outcome));
+}
+
+/* (port fileshare send) the friends online, each with what they are doing */
+static void h3_fsfriends_send_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focused = list->focused_child, *focus = NULL;
+	long index, focused_row = NONE, target;
+	char text[192];
+
+	if (list != h3_fsfriends.send_list || list->creation_time != h3_fsfriends.send_list_creation_time)
+	{
+		h3_fsfriends.send_list = list;
+		h3_fsfriends.send_list_creation_time = list->creation_time;
+		browser_view_reset(&h3_fsfriends.send_view);
+		focused = NULL;
+	}
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == focused)
+			focused_row = index;
+		index++;
+	}
+	target = browser_view_follow(&h3_fsfriends.send_view, H3_FSFRIENDS_SEND_ROWS, h3_fsfriends.friend_count,
+		(int)focused_row, 0, 0);
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		struct p2p_friend_entry const *entry;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (index >= h3_fsfriends.send_view.visible)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+			index++;
+			continue;
+		}
+		widget_instance_set_visibility_recursive(child, TRUE);
+		child->disabled = FALSE;
+		entry = &h3_fsfriends.friends[h3_fsfriends.send_view.offset + index];
+		row_column(child, "row_name", entry->name);
+		row_column(child, "row_state", entry->activity);
+		if (index == h3_fsfriends.send_view.row)
+			focus = child;
+		index++;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
+	}
+	(void)target;
+	snprintf(text, sizeof(text), T("%d ONLINE"), h3_fsfriends.friend_count);
+	text_show(named(screen, "send_status"), text);
+	if (!h3_fsfriends.friend_count)
+		snprintf(text, sizeof(text), "%s", T("None of your friends is online."));
+	else
+		snprintf(text, sizeof(text), h3_buttons(T("\"%s\": Cross sends it to a friend, who is asked first.")),
+			h3_fsfriends.title);
+	text_show(named(screen, "send_help"), text);
+	if ((child = named(screen, "a_butn")) != NULL)
+		widget_instance_set_visibility_recursive(child, h3_fsfriends.friend_count > 0);
+	if ((child = named(screen, "a_label")) != NULL)
+		widget_instance_set_visibility_recursive(child, h3_fsfriends.friend_count > 0);
+}
+
+/* (the FRIENDS screen's FILE SHARE on a friend) their File Share asked for,
+its screen opened at the next frame: FALSE, said, if it can't be */
+static boolean h3_fsfriends_browse(struct p2p_friend_entry const *entry)
+{
+	char current_id[P2P_FRIEND_ID_SIZE];
+	int outcome = p2p_fileshare_browse(entry->id);
+
+	p2p_fileshare_browse_state(NULL, current_id, NULL, 0, NULL);
+	platform_log("menus: fileshare friends: %s's File Share: %s", entry->name, p2p_fileshare_outcome_text(outcome));
+	if (outcome != P2P_FILESHARE_DONE && !(outcome == P2P_FILESHARE_TOO_SOON && !strcmp(current_id, entry->id)))
+	{
+		h3_friends_message(p2p_fileshare_outcome_text(outcome));
+		return FALSE;
+	}
+	snprintf(h3_fsfriends.friend_name, sizeof(h3_fsfriends.friend_name), "%s", entry->name);
+	snprintf(h3_fsfriends.friend_id, sizeof(h3_fsfriends.friend_id), "%s", entry->id);
+	snprintf(h3_fsfriends.open_pending, sizeof(h3_fsfriends.open_pending), "%s", H3_FSFRIENDS_FRIEND_SCREEN);
+	return TRUE;
+}
+
+/* (port fileshare friend init) */
+static void h3_fsfriends_friend_initialize(void)
+{
+	browser_view_reset(&h3_fsfriends.view);
+	h3_fsfriends.chosen = 0;
+	h3_fsfriends.page = 0;
+	h3_fsfriends.message[0] = 0;
+	h3_fsfriends.said[0] = 0;
+	p2p_fileshare_status(NULL, 0);
+}
+
+static struct p2p_fileshare_remote const *h3_fsfriends_chosen_remote(void)
+{
+	if (h3_fsfriends.state != P2P_FILESHARE_BROWSE_LISTED || h3_fsfriends.chosen < 0 ||
+		h3_fsfriends.chosen >= h3_fsfriends.remote_count)
+	{
+		return NULL;
+	}
+	return &h3_fsfriends.remote[h3_fsfriends.chosen];
+}
+
+/* a remote file's kind and map, as a row and the details say it */
+static void h3_fsfriends_remote_where(struct p2p_fileshare_remote const *remote, char *text, int size)
+{
+	if (remote->kind == P2P_FILESHARE_KIND_MAP_VARIANT)
+		snprintf(text, (size_t)size, "%s", h3_variant_map_name(remote->map));
+	else
+		snprintf(text, (size_t)size, "%s", T("Game variant"));
+}
+
+/* (port fileshare friend) a friend's File Share: what the ask came to, their
+files (row_<n>: row_name, row_map), the chosen one's details, the
+transfers' last word */
+static void h3_fsfriends_friend_update(struct widget_instance *list)
+{
+	struct widget_instance *screen = screen_of(list);
+	struct widget_instance *child, *focused = list->focused_child, *focus = NULL;
+	long index, focused_row = NONE, target;
+	char text[320], where[64], name[P2P_FRIEND_NAME_SIZE], status[P2P_FILESHARE_TEXT_SIZE];
+	int percent = 0, length;
+
+	h3_fsfriends.state = p2p_fileshare_browse_state(name, NULL, h3_fsfriends.remote, P2P_FILESHARE_SHARED_MAXIMUM,
+		&h3_fsfriends.remote_count);
+	if (h3_fsfriends.state != P2P_FILESHARE_BROWSE_LISTED)
+		h3_fsfriends.remote_count = 0;
+	if (name[0])
+		snprintf(h3_fsfriends.friend_name, sizeof(h3_fsfriends.friend_name), "%s", name);
+	if (list != h3_fsfriends.list || list->creation_time != h3_fsfriends.list_creation_time)
+	{
+		h3_fsfriends.list = list;
+		h3_fsfriends.list_creation_time = list->creation_time;
+		browser_view_reset(&h3_fsfriends.view);
+		focused = NULL;
+	}
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (child == focused)
+			focused_row = index;
+		index++;
+	}
+	/* (the rows the screen has: Halo 3's 12, Classic+'s 8 across the screen, as FILE SHARE's) */
+	target = browser_view_follow(&h3_fsfriends.view, index > 0 && index < H3_FSFRIENDS_ROWS ? (int)index :
+		H3_FSFRIENDS_ROWS, h3_fsfriends.remote_count, (int)focused_row, h3_fsfriends.chosen, h3_fsfriends.page);
+	h3_fsfriends.page = 0;
+	h3_fsfriends.chosen = (int)target;
+	for (index = 0, child = list->child; child; child = child->next)
+	{
+		struct p2p_fileshare_remote const *remote;
+
+		if (strncmp(child->name, "row_", 4))
+			continue;
+		if (index >= h3_fsfriends.view.visible)
+		{
+			widget_instance_set_visibility_recursive(child, FALSE);
+			child->disabled = TRUE;
+			index++;
+			continue;
+		}
+		widget_instance_set_visibility_recursive(child, TRUE);
+		child->disabled = FALSE;
+		remote = &h3_fsfriends.remote[h3_fsfriends.view.offset + index];
+		h3_fsfriends_remote_where(remote, where, sizeof(where));
+		row_column(child, "row_name", remote->title);
+		row_column(child, "row_map", where);
+		if (index == h3_fsfriends.view.row)
+			focus = child;
+		index++;
+	}
+	if (focus && focus != list->focused_child)
+		ui_widget_port_give_focus(list, focus);
+	for (child = list->child; child; child = child->next)
+	{
+		if (!strncmp(child->name, "row_", 4))
+			child->animation.current_frame_index = child == focus ? 1 : 0;
+	}
+	/* (the title, what the ask came to) */
+	snprintf(text, sizeof(text), T("%s'S FILE SHARE"), h3_fsfriends.friend_name);
+	for (length = 0; text[length]; length++)
+		text[length] = (char)toupper((unsigned char)text[length]);
+	text_show(named(screen, "friend_title"), text);
+	switch (h3_fsfriends.state)
+	{
+	case P2P_FILESHARE_BROWSE_ASKING:
+		snprintf(text, sizeof(text), T("Asking %s for their files..."), h3_fsfriends.friend_name);
+		break;
+	case P2P_FILESHARE_BROWSE_LISTED:
+		if (h3_fsfriends.remote_count)
+			snprintf(text, sizeof(text), T("%d shared files"), h3_fsfriends.remote_count);
+		else
+			snprintf(text, sizeof(text), T("%s shares no files."), h3_fsfriends.friend_name);
+		break;
+	case P2P_FILESHARE_BROWSE_NOT_SHARING:
+		snprintf(text, sizeof(text), T("%s isn't sharing files."), h3_fsfriends.friend_name);
+		break;
+	case P2P_FILESHARE_BROWSE_TOO_SOON:
+		snprintf(text, sizeof(text), "%s", T("Asked a moment ago: wait, then ask again."));
+		break;
+	case P2P_FILESHARE_BROWSE_NO_ANSWER:
+		snprintf(text, sizeof(text), T("%s didn't answer (offline, or an older version)."), h3_fsfriends.friend_name);
+		break;
+	default:
+		snprintf(text, sizeof(text), "%s", T("Choose a friend online on the FRIENDS screen."));
+		break;
+	}
+	text_show(named(screen, "friend_count"), text);
+	/* (the chosen one's details) */
+	if (target >= 0 && target < h3_fsfriends.remote_count)
+	{
+		struct p2p_fileshare_remote const *remote = &h3_fsfriends.remote[target];
+		short map_index = remote->kind == P2P_FILESHARE_KIND_MAP_VARIANT ? forge_map_of_short(remote->map) : NONE;
+
+		if ((child = named(screen, "picture")) != NULL)
+		{
+			widget_instance_set_visibility_recursive(child, map_index != NONE);
+			child->animation.current_frame_index = map_index != NONE ? map_index : 0;
+		}
+		text_show(named(screen, "info_name"), remote->title);
+		h3_fsfriends_remote_where(remote, where, sizeof(where));
+		snprintf(text, sizeof(text), h3_buttons(T("%s\n%s\nSize: %d KB\n\nCross: download it (asked first).")),
+			p2p_fileshare_kind_text(remote->kind), where, (remote->size + 1023) / 1024);
+		text_show(named(screen, "info_text"), text);
+	}
+	else
+	{
+		if ((child = named(screen, "picture")) != NULL)
+			widget_instance_set_visibility_recursive(child, FALSE);
+		text_show(named(screen, "info_name"), "");
+		text_show(named(screen, "info_text"), h3_buttons(T("Triangle asks again.")));
+	}
+	/* (the transfers' last word: a download's progress) */
+	status[0] = 0;
+	p2p_fileshare_status(status, sizeof(status));
+	if (p2p_fileshare_progress(&percent) && percent > 0 && percent < 100)
+		snprintf(text, sizeof(text), T("Downloading: %d%%"), percent);
+	else
+		snprintf(text, sizeof(text), "%s", h3_fsfriends.message[0] && system_milliseconds() - h3_fsfriends.message_time <
+			H3_FRIENDS_MESSAGE_MILLISECONDS ? h3_fsfriends.message : status);
+	text_show(named(screen, "status"), text);
+	if ((child = named(screen, "a_butn")) != NULL)
+		widget_instance_set_visibility_recursive(child, h3_fsfriends.remote_count > 0);
+	if ((child = named(screen, "download")) != NULL)
+		widget_instance_set_visibility_recursive(child, h3_fsfriends.remote_count > 0);
+	{
+		char said[256];
+
+		snprintf(said, sizeof(said), "%s: state %d, %d files, %ld chosen", h3_fsfriends.friend_name, h3_fsfriends.state,
+			h3_fsfriends.remote_count, target);
+		if (strcmp(said, h3_fsfriends.said))
+		{
+			snprintf(h3_fsfriends.said, sizeof(h3_fsfriends.said), "%s", said);
+			platform_log("menus: fileshare friends: %s", said);
+		}
+	}
+}
+
+/* (port fileshare friend ask: a file's Cross) DOWNLOAD's question opens */
+static boolean h3_fsfriends_friend_ask(struct widget_instance *widget)
+{
+	struct p2p_fileshare_remote const *remote;
+	int item = h3_fsfriends_row_item(widget, &h3_fsfriends.view);
+
+	if (item >= 0 && item < h3_fsfriends.remote_count)
+		h3_fsfriends.chosen = item;
+	remote = h3_fsfriends_chosen_remote();
+	if (!remote)
+		return FALSE;
+	h3_fsfriends.asked = *remote;
+	return TRUE;
+}
+
+/* (port fileshare friend question) DOWNLOAD's words */
+static void h3_fsfriends_question_update(struct widget_instance *widget)
+{
+	char text[320], where[64];
+
+	h3_fsfriends_remote_where(&h3_fsfriends.asked, where, sizeof(where));
+	snprintf(text, sizeof(text), T("\"%s\", %s's %s (%s, %d KB).\n\nDownload it? It is checked before it's saved, and "
+		"%s is told."), h3_fsfriends.asked.title, h3_fsfriends.friend_name,
+		p2p_fileshare_kind_text(h3_fsfriends.asked.kind), where, (h3_fsfriends.asked.size + 1023) / 1024,
+		h3_fsfriends.friend_name);
+	text_show(widget, text);
+}
+
+/* (port fileshare friend download: DOWNLOAD's Cross) */
+static void h3_fsfriends_friend_download(void)
+{
+	int outcome = p2p_fileshare_download(h3_fsfriends.asked.id);
+
+	if (outcome == P2P_FILESHARE_DONE)
+		h3_fsfriends_message(T("Downloading \"%s\"..."), h3_fsfriends.asked.title);
+	else
+		h3_fsfriends_message("%s", p2p_fileshare_outcome_text(outcome));
+}
+
+/* (port fileshare friend refresh: Triangle) their File Share asked again */
+static void h3_fsfriends_friend_refresh(void)
+{
+	int outcome;
+
+	if (!h3_fsfriends.friend_id[0])
+		return;
+	outcome = p2p_fileshare_browse(h3_fsfriends.friend_id);
+	h3_fsfriends_message("%s", outcome == P2P_FILESHARE_DONE ? T("Asked again.") : p2p_fileshare_outcome_text(outcome));
+}
+
+/* (pc_menu_functions_update, at the menus) the screen asked for opened over
+the one up */
+static void h3_fsfriends_main_loop(void)
+{
+	struct widget_instance *active = NULL;
+	long screen, index;
+
+	if (!h3_fsfriends.open_pending[0])
+		return;
+	screen = menu_tags_ingame_screen(h3_fsfriends.open_pending);
+	for (index = 0; index < 4 && !active; index++)
+		active = ui_widget_port_active_screen((short)index);
+	if (screen != NONE && active)
+	{
+		platform_log("menus: fileshare friends: %s opens", h3_fsfriends.open_pending);
+		ui_widget_load_by_name_or_tag(NULL, screen, NULL, active->local_player_index, active->definition_tag_index, NONE,
+			NONE);
+	}
+	h3_fsfriends.open_pending[0] = 0;
 }
 
 /* ---- port h3 pregame: the Halo 3 pre-game lobby (halo3/pregame.xml),
@@ -19556,6 +20771,35 @@ boolean pc_menu_event_function_invoke(
 	case _function_h3_invite_act:
 		h3_invite_act(widget);
 		return TRUE;
+	/* (File Share with friends) */
+	case _function_fileshare_share_ask:
+		return h3_fsfriends_share_ask();
+	case _function_fileshare_share_option:
+		h3_fsfriends_share_option(widget);
+		return TRUE;
+	case _function_fileshare_send_init:
+		h3_fsfriends_send_initialize();
+		return TRUE;
+	case _function_fileshare_send_act:
+		h3_fsfriends_send_act(widget);
+		return TRUE;
+	case _function_fileshare_friend_init:
+		h3_fsfriends_friend_initialize();
+		return TRUE;
+	case _function_fileshare_friend_ask:
+		return h3_fsfriends_friend_ask(widget);
+	case _function_fileshare_friend_download:
+		h3_fsfriends_friend_download();
+		return TRUE;
+	case _function_fileshare_friend_refresh:
+		h3_fsfriends_friend_refresh();
+		return TRUE;
+	case _function_fileshare_friend_page_up:
+		h3_fsfriends.page = -1;
+		return TRUE;
+	case _function_fileshare_friend_page_down:
+		h3_fsfriends.page = 1;
+		return TRUE;
 	case _function_h3_live_leave:
 		/* (B on the lobby) */
 		h3_live_close("the host left the lobby");
@@ -19752,6 +20996,13 @@ boolean pc_menu_event_function_invoke(
 	case _function_forge_snap:
 		forge_snap_toggle_request();
 		return TRUE;
+	case _function_forge_magnets:
+		forge_panel_magnets_set(!forge_panel_magnets());
+		return TRUE;
+	case _function_forge_nudge_step:
+		/* (A, left or right: the next of 5, 10, 25, 1 cm) */
+		forge_panel_nudge_step(1);
+		return TRUE;
 	case _function_forge_property_next:
 	case _function_forge_property_previous:
 		forge_property_request((short)h3_child_index(widget), function_index == _function_forge_property_next ? 1 : -1);
@@ -19820,6 +21071,8 @@ boolean pc_menu_event_function_invoke(
 		h3_variants_list(_variants_fileshare, NULL, TRUE);
 		h3_mp_gametypes_read();
 		h3_fileshare.said[0] = 0;
+		/* (the list friends see read again: File Share with friends) */
+		p2p_fileshare_refresh();
 		return TRUE;
 	case _function_fileshare_focus:
 		browser_view_reset(&h3_fileshare.view);
@@ -20366,6 +21619,22 @@ void pc_menu_game_data_function_invoke(
 		if (widget->type == _ui_widget_type_column_list)
 			h3_invite_update(widget);
 		break;
+	/* (File Share with friends) */
+	case _input_fileshare_share:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_fsfriends_share_update(widget);
+		break;
+	case _input_fileshare_send:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_fsfriends_send_update(widget);
+		break;
+	case _input_fileshare_friend:
+		if (widget->type == _ui_widget_type_column_list)
+			h3_fsfriends_friend_update(widget);
+		break;
+	case _input_fileshare_friend_question:
+		h3_fsfriends_question_update(widget);
+		break;
 	case _input_h3_gametype_list:
 		if (widget->type == _ui_widget_type_column_list)
 			h3_gametypes_update(widget);
@@ -20558,8 +21827,9 @@ static void ce_lobby_update(struct widget_instance *list)
 	text_show(named(screen, "map_name"), map != NONE ? T(forge_map_name(map)) : "");
 	if (variant)
 	{
-		snprintf(text, sizeof(text), "%s:\r\n%s", T("MAP VARIANT"), ce_pregame.note[0] ? ce_pregame.note :
-			ce_pregame.title[0] ? ce_pregame.title : T("NONE"));
+		/* (Menu style Classic+'s field: one run of words, broken for its box) */
+		snprintf(text, sizeof(text), halo_menu_style_classic_plus() ? "%s: %s" : "%s:\r\n%s", T("MAP VARIANT"),
+			ce_pregame.note[0] ? ce_pregame.note : ce_pregame.title[0] ? ce_pregame.title : T("NONE"));
 		text_show(named(screen, "variant_value"), text);
 	}
 	else
@@ -20811,6 +22081,13 @@ static boolean mouse_on_screen(struct widget_instance *widget, char const *scree
 	char const *name = screen ? tag_get_name(screen->definition_tag_index) : NULL;
 
 	return name && !strcmp(name, screen_tag);
+}
+
+/* (ui_widget.c, a finger's drag) the open scoreboard scrolls its rows by a
+drag of its own */
+boolean menu_functions_mouse_drag_own(void)
+{
+	return h3_scoreboard.open;
 }
 
 int menu_functions_mouse_kind(struct widget_instance *widget)
@@ -21101,6 +22378,7 @@ void pc_menu_functions_update(
 		menu_functions.browse_lan_pending = FALSE;
 		h3_adhoc.open_then = FALSE;
 		h3_adhoc.then = _h3_adhoc_then_none;
+		h3_fsfriends.open_pending[0] = 0;
 		/* (ui.map's scripts start again with it: ring_loop awake; its
 		settings point read again, nothing kept in it, the ring not flown) */
 		h3_scenes.ring_asleep = FALSE;
@@ -21153,6 +22431,8 @@ while it closes: browser dispose) */
 	join_watch();
 	if (h3_adhoc.open_then)
 		h3_adhoc_go_on();
+	/* (File Share with friends: a friend's File Share, the friend picker) */
+	h3_fsfriends_main_loop();
 	if (menu_functions.open_system_link)
 	{
 		menu_functions.open_system_link = FALSE;

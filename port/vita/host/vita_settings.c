@@ -228,7 +228,11 @@ under File Share the map variants of every map (the first
 FORGE_PANEL_MAXIMUM), square deleting one after a confirmation. While a
 Forge game is played, Clear dead AI and Clear all AI (asked first) do what
 the Forge menu's CLEAR DEAD AI and CLEAR ALL AI do, each with how many it
-takes (forge.c forge_panel_ai_counts, forge_panel_clear_ai).
+takes (forge.c forge_panel_ai_counts, forge_panel_clear_ai); Magnets and Nudge
+step set the Forge game's blocks' magnets and its nudge (forge.c
+forge_precision.inc: 1.1.2). Touch in Forge (HALO_FORGE_TOUCH, on by
+default) is the monitor's front screen (forge_touch.inc); the page is there in
+any Menu style during a Forge game, its rows being that game's.
 
 Dev holds a few switches for testers (each a debug environment variable;
 most are read once, at start-up, and say so; the renderer's A/B ones on a
@@ -260,10 +264,12 @@ Multiplayer tab's way.
 
 #include "lang.h"
 #include "forge_store.h"
+#include "port_config.h"
 #include "mod_manager_share.h"
 #include "p2p.h"
 #include "p2p_friends.h"
 #include "p2p_party.h"
+#include "p2p_fileshare.h"
 #include "game_chat_share.h"
 #include "crossplay_guard.h"
 #include "system_link_shortcut.h"
@@ -346,6 +352,11 @@ enum
 	helmet; the colours were on Game's Menus page until RC2, the owner: "Why
 	is the armor color and visor color there?") */
 	PAGE_APPEARANCE,
+	/* (Game's Forge and File Share > Share with friends: p2p_fileshare.h;
+	its Send to a friend, and a friend's File Share: circle goes back to it) */
+	PAGE_FSFRIENDS,
+	PAGE_FSSEND,
+	PAGE_FSBROWSE,
 	PAGE_COUNT
 };
 
@@ -379,6 +390,9 @@ static const struct
 	{ "Menus", TAB_GAME },
 	{ "Chat", TAB_MULTIPLAYER },
 	{ "Appearance", TAB_GAME },
+	{ "Share with friends", TAB_GAME },
+	{ "Send to a friend", TAB_GAME },
+	{ "A friend's File Share", TAB_GAME },
 };
 /* the headings over a tab's rows, as Halo Online's settings have them
 (HUD, Interface...): each above the row it names, when that row is shown */
@@ -650,6 +664,16 @@ static struct setting settings[] = {
 	last row, under Updates, insider.21), shown with Menu style Halo CE; the
 	Halo 3 main menu has FORGE and FILE SHARE: setting_shown) */
 	PAGE_ROW("Forge and File Share", "Forge a map; your map variants (File Share)", TAB_GAME, PAGE_FORGE),
+	/* (File Share with friends, for the original menus: p2p_fileshare.h) */
+	PAGE_ROW("Share with friends", "Share your variants, send one, a friend's File Share", PAGE_FORGE,
+		PAGE_FSFRIENDS),
+	/* (the monitor's front screen: port/linux/game/forge_touch.inc) */
+	{ "Touch in Forge", "HALO_FORGE_TOUCH", 0, 2, { "1", "0" }, { "On", "Off" },
+		"Drag an object to move it; tap it, then drag the screen to turn it", 0, PAGE_FORGE },
+	/* (friends.fileshare: friends browse the files marked shared; files sent
+	and taken, asked each time) */
+	{ "Sharing", "HALO_FRIENDS_FILESHARE", 0, 2, { "true", "false" }, { "On", "Off" },
+		"Friends see the files you share; you send and take variants", 0, PAGE_FSFRIENDS },
 	/* (the game's button icons: the Xbox's, or the Vita button each is on,
 	in the menus and in play: vita_controls.h; not part of the layout,
 	which Reset controls and the page's summary leave out) */
@@ -849,6 +873,13 @@ static struct setting settings[] = {
 	Vita's own aim assist is the Gyro page's) */
 	{ "PC mouse aim assist", "HALO_NET_BLOCK_MOUSE_AIM_ASSIST", 0, 2, { "false", "true" },
 		{ "Their choice", "Off" }, "Everyone games: Off turns off OpenCE players' mouse aim assist", 0, PAGE_CROSSPLAY },
+	/* (network.crossplay_updates: the signed crossplay version table,
+	netversion_fetch.h: Auto fetches the owner's newest at start and once a
+	day while Online, so new PC versions are joined without an update;
+	Built-in keeps the list this version shipped with and the table last
+	kept. Read as each fetch is due) */
+	{ "PC versions list", "HALO_NET_CROSSPLAY_UPDATES", 0, 2, { "true", "false" }, { "Auto", "Built-in" },
+		"Auto: gets the signed list of PC versions you can join", 0, PAGE_CROSSPLAY },
 	/* (bots.online: the bots a game this Vita hosts Online fills its lobby
 	with, to its most players less one, leaving as players join: Full by
 	default; the Halo 3 GAME OPTIONS' BOTS sets it too. Live. On Vita and PC
@@ -1227,6 +1258,9 @@ enum
 	/* the Party page: the question before the leader removes a member */
 	SCREEN_PARTY_CONFIRM,
 	SCREEN_BAN_CONFIRM,
+	/* (File Share with friends: a friend's file, asked before it is
+	downloaded) */
+	SCREEN_FS_DOWNLOAD,
 };
 static int screen;
 /* the code being typed (eight characters of P2P_CODE_ALPHABET) and the
@@ -1493,6 +1527,12 @@ int forge_panel_map_available(int map_index);
 is played), and its dead or all of them cleared, at its next update */
 int forge_panel_ai_counts(int *alive, int *dead);
 void forge_panel_clear_ai(int all);
+/* the blocks' magnets on (1) or off, set; the nudge's step (centimetres),
+stepped (forge.c forge_precision.inc) */
+int forge_panel_magnets(void);
+void forge_panel_magnets_set(int on);
+int forge_panel_nudge_centimetres(void);
+void forge_panel_nudge_step(int step);
 /* (system_link_shortcut.c) the Forge game asked for: its map's index and
 its map variant's file name ("" none), with SYSTEM_LINK_REQUEST_FORGE */
 extern volatile int halo_forge_request_map;
@@ -1503,7 +1543,8 @@ extern volatile int halo_forge_request_network;
 
 /* the map variants listed (File Share's), the ones shown at once */
 #define FORGE_PANEL_MAXIMUM 32
-#define FORGE_PANEL_LINES 6
+/* (a Forge game's rows leave room for two) */
+#define FORGE_PANEL_LINES (forge_panel_ai_counts(NULL, NULL) ? 2 : 6)
 
 enum
 {
@@ -1515,6 +1556,10 @@ enum
 	/* (while a Forge game is played) */
 	FORGE_LINE_CLEAR_DEAD,
 	FORGE_LINE_CLEAR_ALL,
+	/* (1.1.2, while a Forge game is played: forge.c forge_precision.inc) the
+	blocks' magnets, the nudge's step */
+	FORGE_LINE_MAGNETS,
+	FORGE_LINE_NUDGE,
 	FORGE_LINE_COUNT
 };
 
@@ -1788,9 +1833,11 @@ static int pc_menus_shown(void);
 static int setting_shown(const struct setting *setting)
 {
 	/* (Forge and File Share: the Halo 3 main menu has them; for the
-	original menus, the Halo CE Menu style, the panel does) */
+	original menus, the Halo CE Menu style, the panel does; and for every
+	style while a Forge game is played: its rows are that game's, Touch in
+	Forge, the magnets) */
 	if (setting->action == ACTION_PAGE && setting->opens == PAGE_FORGE)
-		return classic_panel();
+		return classic_panel() || forge_panel_ai_counts(NULL, NULL);
 	/* (the Halo 3 menus' report: with Menu style Halo 3) */
 	if (setting->variable && (!strcmp(setting->variable, "HALO_CARNAGE_REPORT") ||
 		!strcmp(setting->variable, "HALO_SCOREBOARD")))
@@ -1901,6 +1948,10 @@ player_cosmetics.c; changed only by a press, change) */
 		unsetenv(setting->variable);
 	else
 		setenv(setting->variable, value, 1);
+	/* (the fetch asks config_boolean, which holds what was read at the start:
+	Built-in means no fetch from this press on, not from the next start) */
+	if (!strcmp(setting->variable, "HALO_NET_CROSSPLAY_UPDATES"))
+		config_set_override("network.crossplay_updates", value);
 }
 
 /* a Play page text set (typed, loaded or a test command's): kept
@@ -3472,6 +3523,11 @@ enum
 	LINE_HOST_PLAYER,
 	/* (the Chat page's: the game's players, chat_players_names) */
 	LINE_CHAT_PLAYER,
+	/* (File Share with friends' pages: this Vita's files, fs_files; the
+	friends online, indices into friends_view; a friend's files, fs_remote) */
+	LINE_FSFILE,
+	LINE_FSFRIEND,
+	LINE_FSREMOTE,
 	/* (a line that is not chosen: a warning, a note) */
 	LINE_INFO,
 	/* (a heading over rows: headings; not chosen either) */
@@ -3933,6 +3989,403 @@ static void ban_confirm_input(unsigned long pressed)
 	}
 }
 
+/* ---------- File Share with friends (p2p_fileshare.h; the design:
+docs/fileshare-friends.md)
+
+Game's Forge and File Share > Share with friends, for the original
+menus (the Halo 3, Online and Classic+ menus have FILE SHARE's Start and the
+FRIENDS screen's FILE SHARE): Share with friends (friends.fileshare), what
+the transfers came to, this Vita's files - its map variants (forge_store.c)
+and its player's own game variants (the game's list, p2p_fileshare_local,
+once internet play has run) - each Shared or not (left and right change
+it, cross sends it to a friend online: Send to a friend's page, the friend
+asked first), then the friends online (cross: their File Share's page, its
+files; cross on one asks DOWNLOAD first, then it comes, is checked and
+saved). A friend's offer is the overlay's question (friends_game.c), as an
+invite is. */
+
+static void show_list(void);
+
+#define FS_FILES_MAXIMUM (FORGE_PANEL_MAXIMUM + 32)
+#define FS_FILE_LINES 5
+#define FS_FRIEND_LINES 4
+
+static struct
+{
+	int kind;
+	char map[P2P_FILESHARE_MAP_SIZE];
+	char file[P2P_FILESHARE_FILE_SIZE];
+	char title[P2P_FILESHARE_TITLE_SIZE];
+} fs_files[FS_FILES_MAXIMUM];
+static int fs_file_count, fs_file_scroll;
+/* the friends online (indices into friends_view), and the scroll */
+static int fs_friends[P2P_FRIENDS_MAXIMUM];
+static int fs_friend_count, fs_friend_scroll;
+/* the file Send to a friend sends (an index into fs_files) */
+static int fs_send_index = -1;
+/* a friend's File Share as last read, the file asked about */
+static struct p2p_fileshare_remote fs_remote[P2P_FILESHARE_SHARED_MAXIMUM];
+static int fs_remote_count, fs_browse_state;
+static char fs_browse_name[P2P_FRIEND_NAME_SIZE];
+static int fs_download_index = -1;
+
+/* this Vita's files read again (the page opened, a mark changed) */
+static void fs_scan(void)
+{
+	static struct p2p_fileshare_local local[P2P_FILESHARE_LOCAL_MAXIMUM];
+	int index, count;
+
+	forge_scan();
+	fs_file_count = 0;
+	for (index = 0; index < forge_entry_count && fs_file_count < FS_FILES_MAXIMUM; index++)
+	{
+		if (forge_entries[index].damaged)
+			continue;
+		fs_files[fs_file_count].kind = P2P_FILESHARE_KIND_MAP_VARIANT;
+		snprintf(fs_files[fs_file_count].map, sizeof(fs_files[0].map), "%.31s", forge_entries[index].map_name);
+		snprintf(fs_files[fs_file_count].file, sizeof(fs_files[0].file), "%s", forge_entries[index].file_name);
+		snprintf(fs_files[fs_file_count].title, sizeof(fs_files[0].title), "%s", forge_entries[index].title);
+		fs_file_count++;
+	}
+	/* (the game variants: the game's list, as it gave it last) */
+	count = p2p_fileshare_local(local, P2P_FILESHARE_LOCAL_MAXIMUM);
+	for (index = 0; index < count && fs_file_count < FS_FILES_MAXIMUM; index++)
+	{
+		if (local[index].kind != P2P_FILESHARE_KIND_GAME_VARIANT || local[index].damaged)
+			continue;
+		fs_files[fs_file_count].kind = P2P_FILESHARE_KIND_GAME_VARIANT;
+		fs_files[fs_file_count].map[0] = 0;
+		snprintf(fs_files[fs_file_count].file, sizeof(fs_files[0].file), "%s", local[index].file);
+		snprintf(fs_files[fs_file_count].title, sizeof(fs_files[0].title), "%s", local[index].title);
+		fs_file_count++;
+	}
+	if (fs_file_scroll >= fs_file_count)
+		fs_file_scroll = 0;
+	p2p_fileshare_refresh();
+}
+
+/* the friends online again (twice a second at most), and a friend's File
+Share as it stands */
+static void fs_refresh(void)
+{
+	int index;
+
+	friends_refresh(0);
+	fs_friend_count = 0;
+	for (index = 0; index < friends_count && fs_friend_count < P2P_FRIENDS_MAXIMUM; index++)
+		if (friends_view[index].kind == P2P_FRIEND_KIND_FRIEND && friends_view[index].online)
+			fs_friends[fs_friend_count++] = index;
+	if (fs_friend_scroll >= fs_friend_count)
+		fs_friend_scroll = 0;
+	fs_browse_state = p2p_fileshare_browse_state(fs_browse_name, NULL, fs_remote, P2P_FILESHARE_SHARED_MAXIMUM,
+		&fs_remote_count);
+	if (fs_browse_state != P2P_FILESHARE_BROWSE_LISTED)
+		fs_remote_count = 0;
+}
+
+/* the line a page's top says: what the transfers came to, a download's
+progress, a friend's File Share's state */
+static void fs_status_text(char *text, int size)
+{
+	int percent = 0;
+
+	if (page == PAGE_FSBROWSE && fs_browse_state != P2P_FILESHARE_BROWSE_LISTED)
+	{
+		switch (fs_browse_state)
+		{
+		case P2P_FILESHARE_BROWSE_ASKING:
+			snprintf(text, (size_t)size, T("Asking %.16s for their files..."), fs_browse_name);
+			return;
+		case P2P_FILESHARE_BROWSE_NOT_SHARING:
+			snprintf(text, (size_t)size, T("%.16s isn't sharing files"), fs_browse_name);
+			return;
+		case P2P_FILESHARE_BROWSE_TOO_SOON:
+			snprintf(text, (size_t)size, "%s", T("Asked a moment ago: Triangle asks again"));
+			return;
+		case P2P_FILESHARE_BROWSE_NO_ANSWER:
+			snprintf(text, (size_t)size, T("%.16s didn't answer"), fs_browse_name);
+			return;
+		}
+	}
+	if (page == PAGE_FSSEND && fs_send_index >= 0 && fs_send_index < fs_file_count)
+	{
+		snprintf(text, (size_t)size, T("Send \"%.24s\" to (they're asked first):"), fs_files[fs_send_index].title);
+		return;
+	}
+	if (p2p_fileshare_progress(&percent) && percent > 0 && percent < 100)
+	{
+		snprintf(text, (size_t)size, T("Downloading: %d%%"), percent);
+		return;
+	}
+	if (page == PAGE_FSBROWSE && !fs_remote_count)
+	{
+		snprintf(text, (size_t)size, T("%.16s shares no files"), fs_browse_name);
+		return;
+	}
+	text[0] = 0;
+	p2p_fileshare_status(text, size);
+	if (!text[0])
+		snprintf(text, (size_t)size, "%s", page == PAGE_FSBROWSE ? T("Cross: download one (asked first)") :
+			T("Left/right: share a file; cross: send it"));
+}
+
+/* the pages' lines (page_lines) */
+static int fs_page_lines(struct line *lines, int count)
+{
+	int index;
+
+	lines[count].type = LINE_INFO;
+	fs_status_text(lines[count].text, (int)sizeof(lines[0].text));
+	count++;
+	if (page == PAGE_FSFRIENDS)
+	{
+		lines[count].type = LINE_HEADING;
+		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Your files"));
+		if (!fs_file_count)
+		{
+			lines[count].type = LINE_INFO;
+			snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("No map variants yet: save one in Forge"));
+		}
+		for (index = 0; index < fs_file_count; index++)
+		{
+			lines[count].type = LINE_FSFILE;
+			lines[count++].index = index;
+		}
+		lines[count].type = LINE_HEADING;
+		snprintf(lines[count++].text, sizeof(lines[0].text), "%s", T("Friends online"));
+	}
+	if (page == PAGE_FSFRIENDS || page == PAGE_FSSEND)
+	{
+		if (!fs_friend_count)
+		{
+			lines[count].type = LINE_INFO;
+			p2p_friends_status(lines[count].text, (int)sizeof(lines[0].text));
+			count++;
+		}
+		for (index = 0; index < fs_friend_count; index++)
+		{
+			lines[count].type = LINE_FSFRIEND;
+			lines[count++].index = index;
+		}
+	}
+	if (page == PAGE_FSBROWSE)
+		for (index = 0; index < fs_remote_count; index++)
+		{
+			lines[count].type = LINE_FSREMOTE;
+			lines[count++].index = index;
+		}
+	return count;
+}
+
+/* a line's text (list_text): its label, then its value */
+static int fs_line_text(char *text, int size, const struct line *line)
+{
+	if (line->type == LINE_FSFILE)
+	{
+		const char *where = fs_files[line->index].kind == P2P_FILESHARE_KIND_MAP_VARIANT ?
+			forge_map_title(fs_files[line->index].map) : T("Game variant");
+
+		(void)where;
+		return snprintf(text, (size_t)size, "\n%.20s\x02< %s >", fs_files[line->index].title,
+			p2p_fileshare_marked(fs_files[line->index].kind, fs_files[line->index].map, fs_files[line->index].file) ?
+			T("Shared") : T("Not shared"));
+	}
+	if (line->type == LINE_FSFRIEND)
+		return snprintf(text, (size_t)size, "\n%.20s\x02  %s", friends_view[fs_friends[line->index]].name,
+			page == PAGE_FSSEND ? T("Send") : T("File Share"));
+	if (line->type == LINE_FSREMOTE)
+	{
+		const struct p2p_fileshare_remote *remote = &fs_remote[line->index];
+
+		return snprintf(text, (size_t)size, "\n%.20s\x02  %.16s", remote->title, remote->kind ==
+			P2P_FILESHARE_KIND_MAP_VARIANT ? forge_map_title(remote->map) : T("Game variant"));
+	}
+	return 0;
+}
+
+/* whether a line is out of its list's window (list_text skips it) */
+static int fs_line_hidden(const struct line *line)
+{
+	if (line->type == LINE_FSFILE)
+		return line->index < fs_file_scroll || line->index >= fs_file_scroll + FS_FILE_LINES;
+	if (line->type == LINE_FSFRIEND)
+		return line->index < fs_friend_scroll || line->index >= fs_friend_scroll + FS_FRIEND_LINES;
+	if (line->type == LINE_FSREMOTE)
+		return line->index < fs_file_scroll || line->index >= fs_file_scroll + FS_FILE_LINES + FS_FRIEND_LINES;
+	return 0;
+}
+
+/* the windows follow the line chosen */
+static void fs_follow(const struct line *line)
+{
+	int lines = line->type == LINE_FSFRIEND ? FS_FRIEND_LINES : line->type == LINE_FSREMOTE ?
+		FS_FILE_LINES + FS_FRIEND_LINES : FS_FILE_LINES;
+	int *scroll = line->type == LINE_FSFRIEND ? &fs_friend_scroll : &fs_file_scroll;
+
+	if (line->type != LINE_FSFILE && line->type != LINE_FSFRIEND && line->type != LINE_FSREMOTE)
+		return;
+	if (line->index < *scroll)
+		*scroll = line->index;
+	if (line->index >= *scroll + lines)
+		*scroll = line->index - lines + 1;
+}
+
+/* the help line of a line of theirs */
+static void fs_help(char *text, int size, const struct line *line)
+{
+	if (line->type == LINE_FSFILE)
+		snprintf(text, (size_t)size, "%.20s: %s", fs_files[line->index].kind == P2P_FILESHARE_KIND_MAP_VARIANT ?
+			forge_map_title(fs_files[line->index].map) : T("Game variant"), p2p_fileshare_marked(fs_files[line->index].kind,
+			fs_files[line->index].map, fs_files[line->index].file) ? T("your friends see it in your File Share") :
+			T("only you see it"));
+	else if (line->type == LINE_FSFRIEND)
+		snprintf(text, (size_t)size, "%.16s: %.50s", friends_view[fs_friends[line->index]].name,
+			friends_view[fs_friends[line->index]].activity);
+	else if (line->type == LINE_FSREMOTE)
+		snprintf(text, (size_t)size, T("%s, %d KB, %.16s's"), p2p_fileshare_kind_text(fs_remote[line->index].kind),
+			(fs_remote[line->index].size + 1023) / 1024, fs_browse_name);
+	else
+		text[0] = 0;
+}
+
+/* the buttons of a line of theirs */
+static const char *fs_footer(const struct line *line)
+{
+	if (line->type == LINE_FSFILE)
+		return T("Left/right: share  Cross: send  ");
+	if (line->type == LINE_FSFRIEND)
+		return page == PAGE_FSSEND ? T("Cross: send   ") : T("Cross: their File Share   ");
+	if (line->type == LINE_FSREMOTE)
+		return T("Cross: download  Triangle: ask again  ");
+	return "";
+}
+
+/* a line's buttons */
+static void fs_input(const struct line *line, unsigned long pressed)
+{
+	int outcome;
+
+	if (line->type == LINE_FSFILE && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT)))
+	{
+		const char *title = fs_files[line->index].title;
+		int shared = !p2p_fileshare_marked(fs_files[line->index].kind, fs_files[line->index].map,
+			fs_files[line->index].file);
+
+		outcome = p2p_fileshare_mark(fs_files[line->index].kind, fs_files[line->index].map, fs_files[line->index].file,
+			shared);
+		if (outcome == P2P_FILESHARE_DONE)
+			set_notice(shared ? T("\"%.24s\" is shared with your friends") : T("\"%.24s\" is no longer shared"), title);
+		else
+			set_notice("%s", p2p_fileshare_outcome_text(outcome));
+	}
+	else if (line->type == LINE_FSFILE && (pressed & VITA_BUTTON_CROSS))
+	{
+		fs_send_index = line->index;
+		page = PAGE_FSSEND;
+		page_selected[PAGE_FSSEND] = 0;
+		notice[0] = 0;
+	}
+	else if (line->type == LINE_FSFRIEND && (pressed & VITA_BUTTON_CROSS))
+	{
+		const struct p2p_friend_entry *entry = &friends_view[fs_friends[line->index]];
+
+		if (page == PAGE_FSSEND)
+		{
+			if (fs_send_index < 0 || fs_send_index >= fs_file_count)
+				return;
+			outcome = p2p_fileshare_send(entry->id, fs_files[fs_send_index].kind, fs_files[fs_send_index].map,
+				fs_files[fs_send_index].file);
+			{
+				char said[160];
+
+				snprintf(said, sizeof(said), "settings: file share: \"%s\" sent to %s: %s", fs_files[fs_send_index].title,
+					entry->name, p2p_fileshare_outcome_text(outcome));
+				vita_host_log(said);
+			}
+			page = PAGE_FSFRIENDS;
+			if (outcome == P2P_FILESHARE_DONE)
+				set_notice(T("Sending \"%.20s\" to %.16s: they're asked first"), fs_files[fs_send_index].title, entry->name);
+			else
+				set_notice("%s", p2p_fileshare_outcome_text(outcome));
+			return;
+		}
+		outcome = p2p_fileshare_browse(entry->id);
+		{
+			char said[160];
+
+			snprintf(said, sizeof(said), "settings: file share: %s's File Share: %s", entry->name,
+				p2p_fileshare_outcome_text(outcome));
+			vita_host_log(said);
+		}
+		if (outcome == P2P_FILESHARE_DONE || outcome == P2P_FILESHARE_TOO_SOON)
+		{
+			page = PAGE_FSBROWSE;
+			page_selected[PAGE_FSBROWSE] = 0;
+			fs_file_scroll = 0;
+			notice[0] = 0;
+		}
+		else
+			set_notice("%s", p2p_fileshare_outcome_text(outcome));
+	}
+	else if (line->type == LINE_FSREMOTE && (pressed & VITA_BUTTON_CROSS))
+	{
+		fs_download_index = line->index;
+		screen = SCREEN_FS_DOWNLOAD;
+	}
+	else if (line->type == LINE_FSREMOTE && (pressed & VITA_BUTTON_TRIANGLE))
+	{
+		char id[P2P_FRIEND_ID_SIZE];
+
+		p2p_fileshare_browse_state(NULL, id, NULL, 0, NULL);
+		outcome = p2p_fileshare_browse(id);
+		set_notice("%s", outcome == P2P_FILESHARE_DONE ? T("Asked again") : p2p_fileshare_outcome_text(outcome));
+	}
+}
+
+/* DOWNLOAD's question */
+static void show_fs_download(void)
+{
+	char text[640];
+	const struct p2p_fileshare_remote *remote = fs_download_index >= 0 && fs_download_index < fs_remote_count ?
+		&fs_remote[fs_download_index] : NULL;
+
+	if (!remote)
+	{
+		screen = SCREEN_LIST;
+		show_list();
+		return;
+	}
+	snprintf(text, sizeof(text), T("DOWNLOAD\n\n\"%.31s\", %.16s's %s\n(%.20s, %d KB)\n\nIt is checked before it's saved, and "
+		"%.16s is told.\nCross: download   O: back"), remote->title, fs_browse_name, p2p_fileshare_kind_text(remote->kind),
+		remote->kind == P2P_FILESHARE_KIND_MAP_VARIANT ? forge_map_title(remote->map) : T("Game variant"),
+		(remote->size + 1023) / 1024, fs_browse_name);
+	vgxm_menu_set(text, -1);
+}
+
+static void fs_download_input(unsigned long pressed)
+{
+	if (pressed & VITA_BUTTON_CIRCLE)
+		screen = SCREEN_LIST;
+	else if ((pressed & VITA_BUTTON_CROSS) && fs_download_index >= 0 && fs_download_index < fs_remote_count)
+	{
+		int outcome = p2p_fileshare_download(fs_remote[fs_download_index].id);
+
+		{
+			char said[160];
+
+			snprintf(said, sizeof(said), "settings: file share: download \"%s\": %s", fs_remote[fs_download_index].title,
+				p2p_fileshare_outcome_text(outcome));
+			vita_host_log(said);
+		}
+		if (outcome == P2P_FILESHARE_DONE)
+			set_notice(T("Downloading \"%.24s\"..."), fs_remote[fs_download_index].title);
+		else
+			set_notice("%s", p2p_fileshare_outcome_text(outcome));
+		fs_download_index = -1;
+		screen = SCREEN_LIST;
+	}
+}
+
 /* the lines of the page shown: its rows, each heading (headings) above the
 row it names (Game's Check for updates with the version and the answer
 under it), then the gyroscope's line (Gyro settings) or the maps (Modded
@@ -3945,6 +4398,8 @@ static int page_lines(struct line *lines)
 		friends_refresh(0);
 	if (page == PAGE_PARTY)
 		party_refresh(0);
+	if (page == PAGE_FSFRIENDS || page == PAGE_FSSEND || page == PAGE_FSBROWSE)
+		fs_refresh();
 	if (page == PAGE_PLAYERS)
 		host_players_refresh();
 	if (page == PAGE_CHAT)
@@ -4044,8 +4499,11 @@ static int page_lines(struct line *lines)
 
 		for (index = 0; index < FORGE_LINE_COUNT; index++)
 		{
-			if (!playing && (index == FORGE_LINE_CLEAR_DEAD || index == FORGE_LINE_CLEAR_ALL))
+			if (!playing && (index == FORGE_LINE_CLEAR_DEAD || index == FORGE_LINE_CLEAR_ALL || index == FORGE_LINE_MAGNETS ||
+				index == FORGE_LINE_NUDGE))
+			{
 				continue;
+			}
 			lines[count].type = LINE_FORGE;
 			lines[count++].index = index;
 		}
@@ -4188,6 +4646,8 @@ static int page_lines(struct line *lines)
 			lines[count++].index = index;
 		}
 	}
+	if (page == PAGE_FSFRIENDS || page == PAGE_FSSEND || page == PAGE_FSBROWSE)
+		count = fs_page_lines(lines, count);
 	return count;
 }
 
@@ -4484,6 +4944,8 @@ static void help_line(char *text, int size, const struct line *line)
 			line->index == FORGE_LINE_NETWORK ? T("Local: alone. Network: friends forge with you (8, never listed online)") :
 			line->index == FORGE_LINE_CLEAR_DEAD ? T("Dead AI you placed, out of the layout: room for more") :
 			line->index == FORGE_LINE_CLEAR_ALL ? T("Every AI you placed, alive or dead, out of the layout") :
+			line->index == FORGE_LINE_MAGNETS ? T("A block held near another snaps flush to its edges") :
+			line->index == FORGE_LINE_NUDGE ? T("Each nudge's move: hold L, click the right stick, flick") :
 			T("A local game: you fly as the monitor and place objects"));
 	else if (line && line->type == LINE_VARIANT)
 	{
@@ -4527,6 +4989,8 @@ static void help_line(char *text, int size, const struct line *line)
 		snprintf(text, (size_t)size, "%s", T("A ban keeps their PS Vita or PC out of your games"));
 	else if (line && line->type == LINE_CHAT_PLAYER)
 		snprintf(text, (size_t)size, "%s", T("Muted: their chat is hidden here; they're never told"));
+	else if (line && (line->type == LINE_FSFILE || line->type == LINE_FSFRIEND || line->type == LINE_FSREMOTE))
+		fs_help(text, size, line);
 	else if (line && line->type == LINE_FRIEND)
 	{
 		const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -4635,6 +5099,8 @@ static void footer_line(char *text, int size, const struct line *line)
 	else if (line && line->type == LINE_CHAT_PLAYER)
 		middle = chat_players_local[line->index] ? "" : chat_players_muted[line->index] ? T("Cross: unmute  ") :
 			T("Cross: mute  ");
+	else if (line && (line->type == LINE_FSFILE || line->type == LINE_FSFRIEND || line->type == LINE_FSREMOTE))
+		middle = fs_footer(line);
 	else if (line && line->type == LINE_FRIEND)
 	{
 		const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -4846,6 +5312,8 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			continue;
 		if (line->type == LINE_FRIEND && (line->index < friends_scroll || line->index >= friends_scroll + FRIEND_LINES))
 			continue;
+		if (fs_line_hidden(line))
+			continue;
 		if (line->type == LINE_PARTY_FRIEND && (line->index < party_friends_scroll ||
 			line->index >= party_friends_scroll + PARTY_FRIEND_LINES))
 		{
@@ -4855,10 +5323,11 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 		if (line->type == LINE_HEADING && (*headings)++ < skip)
 			continue;
 		/* (Modded maps: a gap between its switch and the maps; the Forge page:
-		before its File Share heading; the Mod manager: between its totals and
+		before its File Share heading, but for a Forge game's rows, which fill
+		it; the Mod manager: between its totals and
 		the entries) */
 		if (index && ((page == PAGE_MAPS && line->type != LINE_SETTING && lines[index - 1].type == LINE_SETTING) ||
-			(page == PAGE_FORGE && line->type == LINE_HEADING) ||
+			(page == PAGE_FORGE && line->type == LINE_HEADING && !forge_panel_ai_counts(NULL, NULL)) ||
 			(page == PAGE_MODS && line->type == LINE_MOD && lines[index - 1].type == LINE_INFO) ||
 			(page == PAGE_FRIENDS && line->type == LINE_INFO && lines[index - 1].type == LINE_SETTING)))
 		{
@@ -4888,6 +5357,12 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02%c %s %c", T("Network"),
 					forge_network ? '<' : ' ', !forge_network ? T("Local") : !strcmp(running_network, "online") ? T("Online") :
 					!strcmp(running_network, "adhoc") ? T("Ad hoc") : T("Same Wi-Fi"), forge_network ? ' ' : '>');
+			else if (line->index == FORGE_LINE_MAGNETS)
+				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02< %s >", T("Magnets"),
+					forge_panel_magnets() ? T("On") : T("Off"));
+			else if (line->index == FORGE_LINE_NUDGE)
+				length += snprintf(text + length, (size_t)(size - length), "\n%s\x02< %d cm >", T("Nudge step"),
+					forge_panel_nudge_centimetres());
 			else if (line->index == FORGE_LINE_CLEAR_DEAD || line->index == FORGE_LINE_CLEAR_ALL)
 			{
 				int alive = 0, dead = 0;
@@ -4942,6 +5417,8 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			length += snprintf(text + length, (size_t)(size - length), "\n%.15s\x02  %s",
 				chat_players_names[line->index], chat_players_local[line->index] ? T("You") :
 				chat_players_muted[line->index] ? T("Muted") : T("Chat shown"));
+		else if (line->type == LINE_FSFILE || line->type == LINE_FSFRIEND || line->type == LINE_FSREMOTE)
+			length += fs_line_text(text + length, size - length, line);
 		else if (line->type == LINE_FRIEND)
 		{
 			const struct p2p_friend_entry *entry = &friends_view[line->index];
@@ -5019,7 +5496,7 @@ static int list_text(char *text, int size, const struct line *lines, int count, 
 			}
 		}
 	}
-	if (page == PAGE_FORGE && forge_entry_count > FORGE_PANEL_LINES && length + 2 < size)
+	if (page == PAGE_FORGE && forge_entry_count > FORGE_PANEL_LINES && !forge_panel_ai_counts(NULL, NULL) && length + 2 < size)
 	{
 		length += snprintf(text + length, (size_t)(size - length), "\n\x04");
 		length += snprintf(text + length, (size_t)(size - length), T("(variants %d-%d of %d)"), forge_scroll + 1,
@@ -5141,6 +5618,8 @@ static void show_list(void)
 		if (entry >= mods_scroll + MAP_LINES)
 			mods_scroll = entry - MAP_LINES + 1;
 	}
+	if (count)
+		fs_follow(&lines[*selected]);
 	if (page == PAGE_FRIENDS && count && lines[*selected].type == LINE_FRIEND)
 	{
 		int entry = lines[*selected].index;
@@ -5717,6 +6196,8 @@ static void show(void)
 		show_large();
 	else if (screen == SCREEN_FORGE_DELETE)
 		show_forge_delete();
+	else if (screen == SCREEN_FS_DOWNLOAD)
+		show_fs_download();
 	else if (screen == SCREEN_FORGE_CLEAR)
 		show_forge_clear();
 	else if (screen == SCREEN_MOD_DETAILS)
@@ -6280,6 +6761,8 @@ static void act(const struct setting *setting)
 			maps_scan();
 		if (page == PAGE_FORGE)
 			forge_scan();
+		if (page == PAGE_FSFRIENDS)
+			fs_scan();
 		/* (the game looks: the page says so until it answers) */
 		if (page == PAGE_MODS)
 			mods_request_scan();
@@ -7586,6 +8069,13 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			show();
 		return 1;
 	}
+	if (screen == SCREEN_FS_DOWNLOAD)
+	{
+		fs_download_input(pressed);
+		if (pressed)
+			show();
+		return 1;
+	}
 	if (screen == SCREEN_FORGE_CLEAR)
 	{
 		forge_clear_input(pressed);
@@ -7617,7 +8107,8 @@ int vita_settings_input(const struct vita_host_pad *pad)
 		tab, or the page it is on: the Mod manager to Modded maps, Players
 		and Infection to Vita and PC. Party is the tab's: SELECT + left and
 		the multiplayer pause open it at once, "Multiplayer > Party") */
-		int parent = page == PAGE_PARTY ? tab : page_parent(page);
+		int parent = page == PAGE_PARTY ? tab : page == PAGE_FSSEND || page == PAGE_FSBROWSE ? PAGE_FSFRIENDS :
+			page_parent(page);
 
 		if (parent >= TAB_COUNT)
 		{
@@ -7691,6 +8182,8 @@ int vita_settings_input(const struct vita_host_pad *pad)
 			}
 			else if (line->type == LINE_HOST_PLAYER)
 				host_player_input(line, pressed);
+			else if (line->type == LINE_FSFILE || line->type == LINE_FSFRIEND || line->type == LINE_FSREMOTE)
+				fs_input(line, pressed);
 			else if (line->type == LINE_CHAT_PLAYER)
 				chat_player_input(line, pressed);
 			else if (pressed == VITA_BUTTON_TRIANGLE)
@@ -7731,6 +8224,10 @@ int vita_settings_input(const struct vita_host_pad *pad)
 				}
 				else if (line->index == FORGE_LINE_CLEAR_ALL && (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_RIGHT)))
 					screen = SCREEN_FORGE_CLEAR;
+				else if (line->index == FORGE_LINE_MAGNETS && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT | VITA_BUTTON_CROSS)))
+					forge_panel_magnets_set(!forge_panel_magnets());
+				else if (line->index == FORGE_LINE_NUDGE && (pressed & (VITA_BUTTON_LEFT | VITA_BUTTON_RIGHT)))
+					forge_panel_nudge_step(step);
 				else if (line->index == FORGE_LINE_START)
 				{
 					if (pressed & (VITA_BUTTON_CROSS | VITA_BUTTON_RIGHT))

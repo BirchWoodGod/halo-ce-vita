@@ -63,7 +63,7 @@ which every host takes: a joiner reads any hello of version 1 or more):
 CLEAR DEAD AI, CLEAR ALL AI, ALL AI, NEW ROUND); a client sends them only
 to a host of 2 or more - one of 1 (insider.21 and before) would count the
 record as malformed - and says "Only the host can do that" to an older one */
-#define FORGE_NET_HOST_VERSION 4
+#define FORGE_NET_HOST_VERSION 7
 #define FORGE_NET_HOST_VERSION_COMMANDS 2
 /* 3: it takes a spawn marker's move and its character's properties
 (_forge_net_request_set and _forge_net_request_property with
@@ -77,6 +77,27 @@ delete (_forge_net_request_delete with FORGE_NET_FLAG_SPAWN); a client asks
 them only of a host of 4 or more. An older joiner drops the entries (an
 unknown flag): it shows none */
 #define FORGE_NET_HOST_VERSION_PLAYER_SPAWNS 4
+/* 5: markers past the player spawn points (forge.h _forge_spawn_*: the
+teleporters' sender and receiver, forge_netgame.inc): the host sends them as
+entries with FORGE_NET_FLAG_MARKER too (an older joiner drops them: an
+unknown flag) and takes a client's spawn of one (_forge_net_request_spawn
+with FORGE_NET_FLAG_PLAYER_SPAWN, its aux the kind, below FORGE_NET_MARKER_
+KINDS); a client asks for one only of a host of 5 or more. Its move, its
+properties and its delete are a spawn point's (version 4's) */
+#define FORGE_NET_HOST_VERSION_MARKERS 5
+/* 6: game type objects (forge.h _forge_spawn_flag to _forge_spawn_race:
+the CTF flags' spots, hill points, oddball spawns, race checkpoints), markers
+as version 5's are, each its index in value (below its kind's: forge_net_
+marker_indices); a client asks for one only of a host of 6 or more */
+#define FORGE_NET_HOST_VERSION_OBJECTIVES 6
+/* 7: an object's physics (forge.h _forge_physics_*): the host's entries and
+links carry it in their step (0 normal, 1 fixed, 2 phased: an older joiner
+reads no step there and ignores it) and it takes the PHYSICS property
+(_forge_net_request_property, aux FORGE_NET_PROPERTY_PHYSICS); a client asks
+it only of a host of 7 or more */
+#define FORGE_NET_HOST_VERSION_PHYSICS 7
+#define FORGE_NET_PROPERTY_PHYSICS 9
+#define FORGE_NET_PHYSICS_MODES 3
 /* a joiner's capabilities (its answer's bits) */
 #define FORGE_NET_CAPABILITY_FORGE 0x00000001u
 #define FORGE_NET_CAPABILITIES_KNOWN FORGE_NET_CAPABILITY_FORGE
@@ -126,7 +147,7 @@ this of square */
 #define FORGE_NET_UNIT_TOLERANCE 0.02f
 #define FORGE_NET_SQUARE_TOLERANCE 0.05f
 /* the properties window's rows (forge.h NUMBER_OF_FORGE_PROPERTIES) */
-#define FORGE_NET_PROPERTY_COUNT 9
+#define FORGE_NET_PROPERTY_COUNT 10
 /* properties' ranges (forge_files.h's) */
 #define FORGE_NET_MAXIMUM_TEAM 7
 #define FORGE_NET_MAXIMUM_RESPAWN_SECONDS 600
@@ -166,8 +187,26 @@ enum
 	host waits for a machine's load, and was dropped. An older host drops it
 	unread (an invalid answer), as before */
 	_forge_net_lobby_building,
+	/* (a joiner's, right after its answer, to a host of version 5 or more;
+	1.1.2) the Forge features it plays, FORGE_NET_FEATURE_* bits in
+	capabilities, nothing else: a host whose layout uses one of them
+	refuses a joiner that does not say it plays them (an older build, which
+	never sends it) - its map would not be the host's. An older host drops
+	it unread (an unknown command): the answer's capabilities are never
+	changed, so a 1.1.2 joiner still plays a 1.1.1 host's games */
+	_forge_net_lobby_features,
 	NUMBER_OF_FORGE_NET_LOBBY_COMMANDS
 };
+
+/* (_forge_net_lobby_features) the 1.1.2 Forge features a joiner plays:
+the markers (teleporters), the game type objects, an object's physics */
+#define FORGE_NET_FEATURE_MARKERS 0x00000001u
+#define FORGE_NET_FEATURE_OBJECTIVES 0x00000002u
+#define FORGE_NET_FEATURE_PHYSICS 0x00000004u
+#define FORGE_NET_FEATURES_KNOWN 0x00000007u
+/* how long a host waits for an answered joiner's features before it
+refuses it from a layout that needs them */
+#define FORGE_NET_FEATURES_MILLISECONDS 2500
 
 /* why a joiner is refused */
 enum
@@ -253,7 +292,12 @@ enum
 	any, 0 red, 1 blue), record flags FORGE_NET_SPAWN_INITIAL alone, value
 	its game types (forge_files.h FORGE_FILE_GAME_TYPE_* bits, 0 all) */
 	FORGE_NET_FLAG_PLAYER_SPAWN = 1 << 6,
-	FORGE_NET_FLAGS_KNOWN = 0x7F,
+	/* (entry, with FORGE_NET_FLAG_PLAYER_SPAWN) a marker of a later kind than
+	a player spawn point's: aux its kind (FORGE_NET_SPAWN_KINDS to
+	FORGE_NET_MARKER_KINDS - 1), value its channel (a teleporter's: below
+	FORGE_NET_TELEPORTER_CHANNELS), team -1 */
+	FORGE_NET_FLAG_MARKER = 1 << 7,
+	FORGE_NET_FLAGS_KNOWN = 0xFF,
 };
 
 /* (a player spawn point's entry: forge_files.h FORGE_RECORD_SPAWN_INITIAL,
@@ -261,6 +305,14 @@ FORGE_FILE_SPAWN_GAME_TYPES_MASK) */
 #define FORGE_NET_SPAWN_INITIAL 0x08
 #define FORGE_NET_SPAWN_GAME_TYPES_MASK 0x3F
 #define FORGE_NET_SPAWN_KINDS 2
+/* every marker's kinds (forge.h NUMBER_OF_FORGE_MARKER_KINDS: the two
+teleporter ends after the spawn points) and a teleporter's channels
+(forge_files.h FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS) */
+#define FORGE_NET_MARKER_KINDS 8
+#define FORGE_NET_TELEPORTER_CHANNELS 16
+/* (version 6's) the first game type object's kind, and each one's indices
+(forge_files.h's: CTF teams, hills, balls, checkpoints) */
+#define FORGE_NET_FIRST_OBJECTIVE_KIND 4
 
 /* how a grant came */
 enum
@@ -557,6 +609,12 @@ int forge_net_layout_piece(
 	uint16_t serial,
 	int index,
 	struct forge_net_layout_entry *entry);
+
+/* a later marker kind's indices (its entry's value below it): a
+teleporter's channels, a game type object's (a CTF flag's teams, a hill's
+numbers, a ball's, a checkpoint's); 0 for a kind that is none */
+int forge_net_marker_indices(
+	int kind);
 
 /* a refusal's and an op's words (English, for the log) */
 char const *forge_net_refusal_name(

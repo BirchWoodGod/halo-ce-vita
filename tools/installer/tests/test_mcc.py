@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Step 1's other way: the Halo CE content of the player's own Halo: The
+"""The Automatic way: the Halo CE content of the player's own Halo: The
 Master Chief Collection, found (Steam's libraries, Windows' registry, mocked
 here), copied as the game reads it (ux0:data/haloce-vita/mcc/...), and nothing
 of the other games. Every MCC file here is made up (fakes.make_mcc)."""
@@ -169,7 +169,7 @@ def test_install_mcc_without_the_optional_files(tmp_path):
     log = []
     hcv.install_mcc_files(str(root), str(tmp_path / "out"), log=log.append)
     notes = "\n".join(line for line in log if line.startswith("Note:"))
-    assert "without sound effects" in notes and "step 3" in notes
+    assert "without sound effects" in notes and "Halo PC files step" in notes
     assert hcv.mcc_staged(str(tmp_path / "out"))
 
 

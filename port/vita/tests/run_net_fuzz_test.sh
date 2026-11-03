@@ -30,6 +30,10 @@
 #              found and the slur filter's mask (port/linux/game/
 #              game_chat_protocol.c, port/linux/src/chat_filter.c, its words
 #              port/vita/app0/chat/filter.txt), mutes and rates
+#   netversions  the signed crossplay version table (port/linux/src/
+#              netversion_table.c) as fetched (any signature) and as signed
+#              (the form's reader), then what the network wire makes of a
+#              table taken (port/linux/src/network_wire.c)
 #   actor_table  a client's table of the host's AI units, which a PC co-op
 #              host's actor states fill on the crossplay wire (its unit
 #              indices any 32-bit values; port/linux/game/network_actor_table.c),
@@ -44,7 +48,7 @@
 #                        (clang's i386 runtime, its COMDAT groups taken out
 #                        when it does not link as it is); what it finds goes
 #                        to NET_FUZZ_OUT (default a folder under TMPDIR)
-#   NET_FUZZ_TARGETS     the targets (default all ten)
+#   NET_FUZZ_TARGETS     the targets (default all eleven)
 #   NET_FUZZ_DEDICATED=1 builds them as the dedicated server's code
 #                        (HALO_DEDICATED_SERVER, HALO_NET_AS_VITA: its limits
 #                        on a peer's packets and an address's peers, its
@@ -60,7 +64,7 @@ out=${TMPDIR:-/tmp}/net_fuzz_test.$$
 test_out_begin "$out"
 clang=${CLANG:-$(sed -n 's/^linux_cc = //p' "$root/build.ninja" | head -1)}
 [ -n "$clang" ] || clang=clang
-targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share variant_options crossplay_maps lobby actor_table forge chat"}
+targets=${NET_FUZZ_TARGETS:-"p2p signal messages map_share variant_options crossplay_maps lobby actor_table forge chat netversions"}
 seconds=${NET_FUZZ_SECONDS:-0}
 mkdir -p "$out"
 cd "$root"
@@ -131,6 +135,8 @@ for target in $targets; do
 	actor_table) flags=$platform_flags; sources="port/vita/tests/net_fuzz_actor_table.c port/linux/game/network_actor_table.c" ;;
 	forge) flags=$platform_flags; sources="port/vita/tests/net_fuzz_forge.c" ;;
 	chat) flags=$platform_flags; sources="port/vita/tests/net_fuzz_chat.c" ;;
+	netversions) flags=$platform_flags; sources="port/vita/tests/net_fuzz_netversions.c port/linux/src/netversion_table.c
+		port/linux/src/p2p_crypto.c $monocypher" ;;
 	lobby) flags=$lobby_flags; sources="port/vita/tests/p2p_lobby_fuzz.c port/linux/src/p2p_crypto.c port/linux/src/crossplay_guard.c
 		port/linux/src/lang.c
 		$monocypher" ;;

@@ -478,6 +478,19 @@ void player_control_aim_test_command(
 		}
 #endif
 	}
+	else if (!strcmp(word, "look"))
+	{
+		/* ("look <yaw> <pitch>", degrees: the first local player turned there) */
+		float yaw = 0.f, pitch = 0.f;
+		real_euler_angles2d angles;
+		real_vector3d facing;
+
+		sscanf(arguments, " %*s %f %f", &yaw, &pitch);
+		angles.yaw = DEGREES_TO_RADIANS(yaw);
+		angles.pitch = DEGREES_TO_RADIANS(pitch);
+		vector3d_from_euler_angles2d(&facing, &angles);
+		player_control_set_facing(0, &facing);
+	}
 	else if (!strcmp(word, "face"))
 	{
 		long player_index = local_player_get_player_index(0);

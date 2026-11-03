@@ -44,19 +44,55 @@ enum
 	_forge_category_characters,
 	/* (the building blocks the game makes: forge_blocks.c) */
 	_forge_category_blocks,
+	/* (teleporters: SENDER and RECEIVER, linked by their channel, no tag of
+	the map's: forge_netgame.inc) */
+	_forge_category_teleporters,
+	/* (game type objects: CTF FLAG, HILL POINT, ODDBALL SPAWN, RACE
+	CHECKPOINT, the engine's netgame flags: forge_netgame.inc) */
+	_forge_category_objectives,
 	/* (the player spawn points, Halo 3's: RESPAWN POINT and INITIAL SPAWN,
-	no tag of the map's: forge_spawns.inc) */
+	no tag of the map's: forge_spawns.inc; last, as the browser's L from
+	the first category reaches it) */
 	_forge_category_spawning,
 	NUMBER_OF_FORGE_CATEGORIES
 };
 
-/* a player spawn point's kind (the SPAWNING category's items, in its order) */
+/* an object's physics (the properties' PHYSICS: Halo 3's Normal, Fixed,
+Phased; forge_files.h FORGE_RECORD_PHYSICS_*) */
+enum
+{
+	_forge_physics_normal = 0,
+	/* never moves: held where the editor put it */
+	_forge_physics_fixed,
+	/* no collision: players, vehicles and objects pass through it */
+	_forge_physics_phased,
+	NUMBER_OF_FORGE_PHYSICS_MODES
+};
+
+/* a layout's marker's kind (no object: drawn as a marker, forge_spawns.inc):
+a player spawn point (the SPAWNING category's items, in its order), a
+teleporter's end (the TELEPORTERS category's) */
 enum
 {
 	_forge_spawn_respawn = 0,
 	_forge_spawn_initial,
-	NUMBER_OF_FORGE_SPAWN_KINDS
+	NUMBER_OF_FORGE_SPAWN_KINDS,
+	_forge_spawn_teleporter_sender = NUMBER_OF_FORGE_SPAWN_KINDS,
+	_forge_spawn_teleporter_receiver,
+	/* (the OBJECTIVES category's: game type objects, each its index in
+	channel - a CTF flag's team, a hill's number, a ball's, a checkpoint's
+	order) */
+	_forge_spawn_flag,
+	_forge_spawn_hill,
+	_forge_spawn_oddball,
+	_forge_spawn_race,
+	NUMBER_OF_FORGE_MARKER_KINDS
 };
+/* each category of markers: its first kind and how many */
+#define FORGE_TELEPORTER_KINDS 2
+#define FORGE_OBJECTIVE_KINDS 4
+/* (forge_netgame.inc) a teleporter's channels (forge_files.h's) */
+#define FORGE_TELEPORTER_CHANNELS 16
 
 /* an object's properties (the properties window's rows, in its order; a
 character's AI team and brain only for a character): its exact angles
@@ -75,6 +111,9 @@ enum
 	_forge_property_reset_rotation,
 	_forge_property_ai_team,
 	_forge_property_ai_brain,
+	/* (1.1.2) an object's physics: normal, fixed, phased (not a
+	character's) */
+	_forge_property_physics,
 	NUMBER_OF_FORGE_PROPERTIES
 };
 
@@ -100,11 +139,23 @@ struct forge_properties
 	short ai_team;
 	char ai_team_name[32];
 	boolean ai_on;
+	/* (not a character's) its physics: _forge_physics_* */
+	boolean has_physics;
+	short physics;
+	/* where the object or marker is, metres (x, y, z) */
+	boolean has_position;
+	real position[3];
 	/* a player spawn point's (forge_spawns.inc): its kind
 	(_forge_spawn_*) and its game type, named */
 	boolean spawn;
 	short spawn_kind;
 	char game_type_name[32];
+	/* (a teleporter's: its kind is spawn_kind) its channel, and whether the
+	channel has the other end (a sender's receiver, a receiver's sender); a
+	game type object's index (a CTF flag's team, a hill's number, a ball's,
+	a checkpoint's order) */
+	short channel;
+	boolean linked;
 };
 
 /* what the monitor's controls ask of the flying camera this frame */
@@ -330,6 +381,18 @@ void forge_level_name(
 void forge_clear_ai_request(
 	boolean all);
 /* (the settings panel's Forge and File Share page, vita_settings.c, of
+another ABI: plain types only; forge_precision.inc) the magnets on (1) or
+off, set; the nudge's step in centimetres, stepped (1 or -1) */
+int forge_panel_magnets(
+	void);
+void forge_panel_magnets_set(
+	int on);
+int forge_panel_nudge_centimetres(
+	void);
+void forge_panel_nudge_step(
+	int step);
+
+/* (the settings panel's Forge and File Share page, vita_settings.c, of
 another ABI: plain types only) the layout's characters alive and dead, and
 whether a Forge game is played (its rows shown); the clearing asked */
 int forge_panel_ai_counts(
@@ -508,6 +571,13 @@ boolean forge_net_local_object(
 	long object_index);
 boolean forge_net_client_holds(
 	long object_index);
+
+/* ---------- prototypes/FORGE_NETGAME.INC (in forge.c) */
+
+/* (game_engine_ctf.c) whether this game's CTF flags are a layout's own: only
+then a team left no spawn by the flags' places keeps its spawns */
+boolean forge_netgame_custom_flags(
+	void);
 
 /* ---------- prototypes/FORGE_SPAWNS.INC (in forge.c) */
 

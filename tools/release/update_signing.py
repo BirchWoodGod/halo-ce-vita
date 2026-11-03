@@ -1,7 +1,8 @@
 """What the release tools share (make_update_key.py, sign_update.py,
 verify_update.py): the private key file's form, the manifest's text (as
-port/vita/host/vita_update_verify.c reads it), the signature file's, and
-reading a VPK's param.sfo.
+port/vita/host/vita_update_verify.c reads it), the PC builds' manifest (as
+tools/installer's Setup reads it), the signature file's, and reading a VPK's
+param.sfo.
 
 The private key file is text: comment lines (#) and one line of 64
 hexadecimal digits, the Ed25519 seed. It belongs on the owner's machine (an
@@ -14,6 +15,7 @@ import re
 import struct
 import subprocess
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -30,6 +32,15 @@ SIGNATURE = "halo-update.txt.sig"
 LEGACY_VPK = "halo.vpk"
 VPK = LEGACY_VPK
 VPK_MAXIMUM = 64 * 1024 * 1024
+# the PC builds' manifest: a file of its own beside the Vita's (the game reads
+# that one's exact form, so no row could be added to it), the same key, its
+# own first line so that neither can pass for the other (README.md,
+# "The PC builds' manifest")
+PC_MAGIC = "halo-ce-vita-update-pc 1"
+PC_MANIFEST = "halo-update-pc.txt"
+PC_SIGNATURE = "halo-update-pc.txt.sig"
+PC_SYSTEMS = {"windows": ("-pc-windows.zip", "build/windows/halo.exe"), "linux": ("-pc-linux.tar.gz", "build/linux/halo")}
+PC_MAXIMUM = 1 << 30
 TAG = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}(-(beta|rc)\.\d{1,3})?")
 TITLE = re.compile(r"[A-Z0-9]{9}")
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -133,6 +144,89 @@ def vpk_name(version):
     """the release's VPK for a version (port/vita/host/vita_update_verify.c's
     update_asset_vpk_name)"""
     return f"halo-ce-vita-{version}-vita.vpk"
+
+
+def pc_name(version, system):
+    """the release's archive of a PC build (tools/package_pc.py's name)"""
+    return f"halo-ce-vita-{version}{PC_SYSTEMS[system][0]}"
+
+
+# (in every build made without --release, in its log line at start: sdl_platform.c)
+TEST_BUILD_MARK = b"HALO-CE-VITA-TEST-BUILD"
+
+
+def pc_archive_names(path):
+    """the names in a PC build's archive; fails when it is no archive"""
+    try:
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as archive:
+                return archive.namelist()
+        if tarfile.is_tarfile(path):
+            with tarfile.open(path, "r:*") as archive:
+                return archive.getnames()
+    except (OSError, zipfile.BadZipFile, tarfile.TarError, EOFError) as error:
+        fail(f"{path} cannot be read: {error}")
+    fail(f"{path} is not a .zip or .tar.gz")
+
+
+def check_pc_archive(path, system):
+    """fails unless path holds this system's PC build (one top folder at most,
+    as tools/package_pc.py packs it)"""
+    wanted = PC_SYSTEMS[system][1]
+    if not any(name == wanted or name.split("/", 1)[-1] == wanted for name in pc_archive_names(path)):
+        fail(f"{path} has no {wanted}: not the {system} PC build")
+
+
+def pc_archive_is_test_build(path):
+    """whether a file in a PC build's archive holds TEST_BUILD_MARK: a build
+    made without --release, which may trust a test key (sdl_platform.c)"""
+    def holds(reader):
+        tail = b""
+        for block in iter(lambda: reader.read(1 << 20), b""):
+            if TEST_BUILD_MARK in tail + block:
+                return True
+            tail = block[-len(TEST_BUILD_MARK):]
+        return False
+    try:
+        if zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as archive:
+                for info in archive.infolist():
+                    if not info.is_dir():
+                        with archive.open(info) as reader:
+                            if holds(reader):
+                                return True
+            return False
+        with tarfile.open(path, "r:*") as archive:
+            for info in archive:
+                if info.isreg() and holds(archive.extractfile(info)):
+                    return True
+    except (OSError, zipfile.BadZipFile, tarfile.TarError, EOFError) as error:
+        fail(f"{path} cannot be read: {error}")
+    return False
+
+
+def pc_manifest_text(version, rows):
+    """rows: (system, file, size, sha512), windows before linux"""
+    lines = [PC_MAGIC, f"version {version}"]
+    lines += [f"{system} {file} {size} {sha512}" for system, file, size, sha512 in rows]
+    return "\n".join(lines) + "\n"
+
+
+def parse_pc_manifest(text):
+    """(version, {system: (file, size, sha512)}), as strictly as Setup reads
+    it, or None"""
+    pattern = (r"halo-ce-vita-update-pc 1\nversion (?P<version>[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(-(beta|rc)\.[0-9]{1,3})?)\n"
+               r"(?P<rows>((windows|linux) [0-9a-z._-]{1,95} [1-9][0-9]{0,9} [0-9a-f]{128}\n){1,2})")
+    match = re.fullmatch(pattern, text)
+    if not match:
+        return None
+    rows = {}
+    for line in match.group("rows").splitlines():
+        system, file, size, sha512 = line.split(" ")
+        if system in rows:
+            return None
+        rows[system] = (file, int(size), sha512)
+    return match.group("version"), rows
 
 
 def manifest_text(version, title, size, sha512, file=None):

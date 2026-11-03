@@ -5503,6 +5503,103 @@ boolean ui_widget_port_text_too_wide(
 	return text_bounds.x1 - text_bounds.x0 > width;
 }
 
+/* port: the room a text box's text has (its bounds less its text's offset)
+and what the text takes there in its font, as widget_instance_render_text_box
+draws it (a line as long as it is - the box does not wrap it, it cuts it -,
+a new one at each line break): its widest line and its lines' height (Menu style Classic+'s check that no text of the port's screens is
+cut: port/linux/game/menu_functions.c classic_text_fit) */
+boolean ui_widget_port_text_measure(
+	struct widget_instance *widget,
+	wchar_t const *text,
+	short *room_width,
+	short *room_height,
+	short *text_width,
+	short *text_height)
+{
+	struct ui_widget_definition *definition = ui_widget_definition_get(widget->definition_tag_index);
+	long font_index = definition->text_font.index;
+	rectangle2d bounds;
+	rectangle2d text_bounds;
+	rectangle2d cursor_bounds;
+	real_argb_color color = get_ui_argb_white();
+
+	*room_width = (short)(definition->bounds.x1 - definition->bounds.x0 - definition->horizontal_offset);
+	*room_height = (short)(definition->bounds.y1 - definition->bounds.y0 - definition->vertical_offset);
+	*text_width = *text_height = 0;
+	if (font_index == NONE)
+		return FALSE;
+	if (!text || !*text)
+		return TRUE;
+	bounds.y0 = 0;
+	bounds.x0 = 0;
+	bounds.y1 = 2000;
+	bounds.x1 = 4000;
+	draw_string_set_draw_mode(font_index, NONE, 0, 0, &color);
+	draw_unicode_string_compute_bounds(&bounds, text, &text_bounds, &cursor_bounds);
+	if (text_bounds.x0 <= text_bounds.x1)
+		*text_width = (short)(text_bounds.x1 - MIN(text_bounds.x0, 0));
+	/* (the box draws a line whose baseline is in it: the last line's, about a quarter of a line
+	over its bottom) */
+	*text_height = (short)(cursor_bounds.y1 - (cursor_bounds.y1 - cursor_bounds.y0) / 4);
+	return TRUE;
+}
+
+#if defined(HALO_LINUX) && !defined(HALO_RELEASE)
+/* (tests only) a text box of the menus' XML (its tag pc\...) whose text its
+box cuts - wider than it, or more lines than it is tall - said in halo.log
+once ("menus: text cut: ..."), as it is drawn: the screenshots' tests of
+Menu style Classic+ look for it. A text with the game's button icons in it
+is not measured (the icons are not letters) */
+void ui_widget_port_text_check(
+	struct widget_instance *widget,
+	wchar_t const *text)
+{
+	static unsigned long said[512];
+	static short said_count;
+	char const *name = tag_get_name(widget->definition_tag_index);
+	unsigned long hash = 2166136261u ^ (unsigned long)widget->definition_tag_index;
+	short room_width, room_height, text_width, text_height;
+	long index;
+
+	if (!name || strncmp(name, "pc\\", 3) || !text || !*text || string_has_icons_to_draw((wchar_t *)text))
+		return;
+	for (index = 0; text[index]; index++)
+		hash = (hash ^ (unsigned short)text[index]) * 16777619u;
+	for (index = 0; index < said_count; index++)
+	{
+		if (said[index] == hash)
+			return;
+	}
+	if (said_count < (short)NUMBEROF(said))
+		said[said_count++] = hash;
+	if (!ui_widget_port_text_measure(widget, text, &room_width, &room_height, &text_width, &text_height))
+		return;
+	if (text_width > room_width || text_height > room_height)
+	{
+		void platform_log(char const *format, ...);
+		char ascii[160];
+
+		for (index = 0; text[index] && index < (long)sizeof(ascii) - 1; index++)
+			ascii[index] = text[index] == '\n' || text[index] == '\r' ? '|' : text[index] < 0x80 ? (char)text[index] : '~';
+		ascii[index] = 0;
+		platform_log("menus: text cut: %s \"%s\" takes %dx%d, its box %dx%d", name, ascii, text_width, text_height,
+			room_width, room_height);
+	}
+}
+#endif
+
+/* port: a text box's left (its bounds' and its text's offset) and right in its parent */
+void ui_widget_port_text_box_span(
+	struct widget_instance *widget,
+	short *left,
+	short *right)
+{
+	struct ui_widget_definition *definition = ui_widget_definition_get(widget->definition_tag_index);
+
+	*left = (short)(definition->bounds.x0 + definition->horizontal_offset);
+	*right = definition->bounds.x1;
+}
+
 /* port: the width of a text box (its definition's bounds), which a line
 of its text fits in */
 short ui_widget_port_text_box_width(
@@ -5759,6 +5856,16 @@ static void widget_instance_render_text_box(
 		{
 			widget->parameters.text_box.text = L"<out of memory>";
 		}
+#ifdef HALO_LINUX
+		/* (Menu style Classic+'s screens: the string fitted to the box, port/linux/game/menu_functions.c) */
+		if (widget->parameters.text_box.text && widget != ui_widget_port_error_text_box &&
+			!string_has_icons_to_draw(widget->parameters.text_box.text))
+		{
+			void ui_widget_port_classic_fit(struct widget_instance *widget);
+
+			ui_widget_port_classic_fit(widget);
+		}
+#endif
 	}
 	text = &widget->parameters.text_box.text;
 	if (!*text || !**text)
@@ -5852,6 +5959,14 @@ static void widget_instance_render_text_box(
 			widget_globals.current_system_milliseconds *
 				SECONDS_PER_MILLISECOND * 3.0f) + 1.5f) * 0.4f) * color.alpha;
 	}
+#if defined(HALO_LINUX) && !defined(HALO_RELEASE)
+	/* (tests: a text of the port's screens that its box cuts, said once) */
+	{
+		void ui_widget_port_text_check(struct widget_instance *widget, wchar_t const *text);
+
+		ui_widget_port_text_check(widget, *text);
+	}
+#endif
 	draw_string_set_draw_mode(font_index, NONE, justification, 0, &color);
 	if (string_has_icons_to_draw(*text))
 		draw_string_and_hack_in_icons(&bounds, &clip, NULL, 0, *text, FALSE);
@@ -6525,6 +6640,154 @@ void ui_widget_port_pointer_drag(
 	ui_widget_port_pointer_state.dragging = dragging;
 }
 
+/* port: a finger dragged in the menus (the Vita's front screen, the tests'
+drags) moves the list it is on: past VITA_TAP_SLOP's distance, in the menus'
+pixels, it is a drag, never a tap or a highlight, and a row goes by for each
+row's height the finger goes. The port's lists move by themselves
+(browser_view_drag); the game's own step, as the d-pad but following the finger
+(down = on down the list), stopping at their ends where the d-pad would wrap. Any screen, any Menu style; the pad does as
+it did. A screen with a drag of its own says so
+(menu_functions_mouse_drag_own) */
+#define UI_TOUCH_DRAG_SLOP 21
+#define UI_TOUCH_DRAG_ROW 24
+#define UI_TOUCH_DRAG_MINIMUM_ROW 16
+#define UI_TOUCH_DRAG_MAXIMUM_ROW 64
+
+boolean menu_functions_mouse_drag_own(void);
+void browser_view_drag(int rows);
+int browser_view_drag_unclaimed(void);
+
+static struct
+{
+	boolean down;
+	boolean dragging;
+	boolean across;
+	short start;
+	short row;
+	long rows_done;
+} ui_touch_drag;
+
+/* whether a step of the d-pad would go on without wrapping to the other end */
+static boolean ui_touch_drag_can_step(
+	struct widget_instance *widget,
+	boolean forward)
+{
+	struct widget_instance *child;
+
+	if ((widget->type == _ui_widget_type_spinner_list || widget->type == _ui_widget_type_column_list) &&
+		widget->parameters.list.list_items && widget->parameters.list.number_of_items > 0)
+	{
+		return forward ? widget->parameters.list.selected_index + 1 < widget->parameters.list.number_of_items :
+			widget->parameters.list.selected_index > 0;
+	}
+	if (!widget->focused_child)
+		return TRUE;
+	if (forward)
+	{
+		for (child = widget->focused_child->next; child; child = child->next)
+		{
+			if (!child->disabled)
+				return TRUE;
+		}
+		return FALSE;
+	}
+	for (child = widget->child; child && child != widget->focused_child; child = child->next)
+	{
+		if (!child->disabled)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* (a frame after asking) the rows no list of the port's took: the d-pad's
+steps on the game's own list */
+static void ui_touch_drag_step(
+	struct widget_instance *widget)
+{
+	/* (the rows asked for are the port's lists': finger up = later rows. The game's own list has no
+	view of its own to move, so its highlight follows the finger: finger down, highlight down) */
+	long asked = browser_view_drag_unclaimed();
+	long rows = -asked;
+	short back, forward;
+
+	if (!asked || !widget)
+		return;
+	ui_mouse_list_directions(widget, &back, &forward);
+	/* (a step a frame, the rest asked for again; the end of the list ends
+	them) */
+	if (ui_mouse_press_count)
+	{
+		browser_view_drag((int)asked);
+		return;
+	}
+	if (!ui_touch_drag_can_step(widget, rows > 0))
+		return;
+	platform_log("menus: a drag's step %s", rows > 0 ? "on" : "back");
+	ui_mouse_press(rows > 0 ? forward : back);
+	browser_view_drag((int)-(rows > 0 ? rows - 1 : rows + 1));
+}
+
+/* TRUE while a finger's moves are a drag's */
+static boolean ui_touch_drag_update(
+	struct halo_ui_pointer const *pointer,
+	boolean present)
+{
+	struct widget_instance *menu = ui_mouse_menu();
+	struct widget_instance *widget = menu ? ui_mouse_wheel_widget(menu) : NULL;
+	boolean dragging = ui_touch_drag.dragging;
+	short at;
+
+	if (ui_touch_drag.dragging)
+		ui_touch_drag_step(widget);
+	if (!present || !pointer->held || virtual_keyboard_active() || menu_functions_mouse_drag_own())
+	{
+		ui_touch_drag.down = FALSE;
+		ui_touch_drag.dragging = FALSE;
+		browser_view_drag_unclaimed();
+		return dragging;
+	}
+	if (!ui_touch_drag.down)
+	{
+		struct ui_mouse_target *under = ui_mouse_target_at(pointer->x, pointer->y);
+		short back = _widget_event_dpad_up, forward = _widget_event_dpad_down;
+
+		if (widget)
+			ui_mouse_list_directions(widget, &back, &forward);
+		ui_touch_drag.down = TRUE;
+		ui_touch_drag.dragging = FALSE;
+		ui_touch_drag.across = back == _widget_event_dpad_left;
+		ui_touch_drag.start = ui_touch_drag.across ? pointer->x : pointer->y;
+		ui_touch_drag.rows_done = 0;
+		/* (the row it came down on is the list's row height) */
+		ui_touch_drag.row = UI_TOUCH_DRAG_ROW;
+		if (under)
+		{
+			ui_touch_drag.row = (short)(ui_touch_drag.across ? under->bounds.x1 - under->bounds.x0 :
+				under->bounds.y1 - under->bounds.y0);
+			ui_touch_drag.row = PIN(ui_touch_drag.row, UI_TOUCH_DRAG_MINIMUM_ROW, UI_TOUCH_DRAG_MAXIMUM_ROW);
+		}
+		return FALSE;
+	}
+	at = ui_touch_drag.across ? pointer->x : pointer->y;
+	if (!ui_touch_drag.dragging && ABS(at - ui_touch_drag.start) > UI_TOUCH_DRAG_SLOP)
+	{
+		ui_touch_drag.dragging = TRUE;
+		platform_log("menus: a drag on the list (rows of %d)", (int)ui_touch_drag.row);
+	}
+	if (ui_touch_drag.dragging)
+	{
+		/* (the finger going up or left: on down the list) */
+		long rows = (ui_touch_drag.start - at) / ui_touch_drag.row;
+
+		if (rows != ui_touch_drag.rows_done)
+		{
+			browser_view_drag((int)(rows - ui_touch_drag.rows_done));
+			ui_touch_drag.rows_done = rows;
+		}
+	}
+	return ui_touch_drag.dragging;
+}
+
 /* the pointer's motion, clicks and wheel since the last frame, as the first
 player's controller events */
 static void ui_widgets_process_mouse(
@@ -6534,6 +6797,7 @@ static void ui_widgets_process_mouse(
 	struct ui_mouse_target *target;
 	short controller_index = 0;
 	boolean present = halo_ui_pointer_update(ui_mouse_menus_active(), &pointer);
+	boolean touch_dragging;
 
 	ui_widget_port_pointer_state.present = present;
 	ui_widget_port_pointer_state.held = present && pointer.held;
@@ -6542,11 +6806,24 @@ static void ui_widgets_process_mouse(
 		ui_widget_port_pointer_state.x = pointer.x;
 		ui_widget_port_pointer_state.y = pointer.y;
 	}
+	touch_dragging = ui_touch_drag_update(&pointer, present);
 	if (!present || virtual_keyboard_active())
 	{
 		ui_mouse_press_count = 0;
 		ui_mouse_hover_pending = FALSE;
 		ui_mouse_click_pending = FALSE;
+	}
+	else if (touch_dragging)
+	{
+		/* (a finger's drag: the list's rows move, nothing highlighted or
+		tapped by it; the steps a game's own list took, posted) */
+		ui_mouse_hover_pending = FALSE;
+		ui_mouse_click_pending = FALSE;
+		if (ui_mouse_press_count)
+		{
+			event_manager_post_button(controller_index, ui_mouse_presses[0]);
+			csmemmove(ui_mouse_presses, ui_mouse_presses + 1, --ui_mouse_press_count * sizeof(ui_mouse_presses[0]));
+		}
 	}
 	else if (ui_widget_port_pointer_state.dragging)
 	{

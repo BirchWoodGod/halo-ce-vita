@@ -66,6 +66,9 @@ the keys of its own the layout has no room for: forge_keys):
   shows the scoreboard; the click alone is the Spartan's zoom, as in any
   game, and nothing for the monitor;
 - Start: the Forge menu (resume, monitor or Spartan, the controls, leave).
+The Vita's front screen does some of this too (forge_touch.inc): drag an
+object to carry it, tap one and drag the screen to turn it, or drag to turn
+the one held.
 
 The palette is every tag of the loaded map that the browser offers, with a
 readable name each (forge_names: our own names for the multiplayer maps'
@@ -137,6 +140,8 @@ HALO_TEST_COMMANDS):
                            camera and held (the budget as the browser's)
   forge fill <count> <name>  that many spawned and let go on a grid in front
                            of the camera, while the budget allows
+  forge touch <x> <y> [<x2> <y2>] | up | probe  the tests' fingers on the
+                           front screen (forge_touch.inc)
   forge grab [#id] | drop  the object under the crosshair (or the layout's
                            of that id) grabbed, the held one dropped
   forge turn <degrees>     the held (or aimed at) object turned about up
@@ -244,6 +249,7 @@ Each logs what it did ("forge: ...").
 #include "forge_blocks.h"
 #include "forge_files.h"
 #include "forge_net_protocol.h"
+#include "forge_touch.h"
 #include "halo_menus.h"
 #include "scene_pack.h"
 #include "scene_packs.h"
@@ -297,6 +303,7 @@ enum
 	FORGE_KEY_WHEEL = 1 << 3,
 	/* a notice's time on the screen */
 	FORGE_NOTICE_MILLISECONDS = 3000,
+	FORGE_WARNING_MILLISECONDS = 7000,
 	/* the undo history's steps */
 	FORGE_UNDO_DEPTH = 32,
 	/* the HUD's lines (UTF-8) */
@@ -346,6 +353,29 @@ exact angles' step with no snapping (degrees) */
 #define FORGE_ROTATE_MOUSE_STEP 0.1f
 #define FORGE_ANGLE_STEP 15
 
+/* (forge_precision.inc) */
+#define FORGE_METRES_PER_WORLD_UNIT 3.048f
+/* a block's face drawn to another's within this (world units: 45 cm) */
+#define FORGE_MAGNET_RANGE 0.15f
+/* the blocks looked at for the magnets: within this of the held one's
+middle (world units) */
+#define FORGE_MAGNET_REACH 12.f
+
+/* the nudge's steps, centimetres */
+static short const forge_nudge_steps[] = { 5, 10, 25, 1 };
+
+enum
+{
+	_forge_nudge_ahead,
+	_forge_nudge_back,
+	_forge_nudge_left,
+	_forge_nudge_right,
+	_forge_nudge_up,
+	_forge_nudge_down,
+	NUMBER_OF_FORGE_NUDGES
+};
+
+
 /* the in-game set's screens (halo3/forge.xml) */
 #define FORGE_BROWSER_SCREEN "h3/forge/browser/screen"
 #define FORGE_MENU_SCREEN "h3/forge/pause/screen"
@@ -384,22 +414,41 @@ enum
 /* the browser's categories' names (forge.h's order) */
 static char const *const forge_category_names[NUMBER_OF_FORGE_CATEGORIES] =
 {
-	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("AI"), N_("BLOCKS"), N_("SPAWNING"),
+	N_("VEHICLES"), N_("WEAPONS"), N_("EQUIPMENT"), N_("SCENERY"), N_("AI"), N_("BLOCKS"), N_("TELEPORTERS"), N_("OBJECTIVES"),
+	N_("SPAWNING"),
 };
 /* (the log's) */
 static char const *const forge_category_log_names[NUMBER_OF_FORGE_CATEGORIES] =
 {
-	"vehicles", "weapons", "equipment", "scenery", "characters", "blocks", "spawning",
+	"vehicles", "weapons", "equipment", "scenery", "characters", "blocks", "teleporters", "objectives", "spawning",
 };
-/* (forge_spawns.inc) the SPAWNING category's items, its kinds' names */
-static char const *const forge_spawn_kind_names[NUMBER_OF_FORGE_SPAWN_KINDS] =
+/* (forge_spawns.inc) the markers' categories' items (SPAWNING's,
+TELEPORTERS'), its kinds' names */
+static char const *const forge_spawn_kind_names[NUMBER_OF_FORGE_MARKER_KINDS] =
 {
-	N_("Respawn Point"), N_("Initial Spawn"),
+	N_("Respawn Point"), N_("Initial Spawn"), N_("Teleporter Sender"), N_("Teleporter Receiver"),
+	N_("CTF Flag"), N_("Hill Point"), N_("Oddball Spawn"), N_("Race Checkpoint"),
 };
-static char const *const forge_spawn_kind_log_names[NUMBER_OF_FORGE_SPAWN_KINDS] =
+static char const *const forge_spawn_kind_log_names[NUMBER_OF_FORGE_MARKER_KINDS] =
 {
-	"respawn point", "initial spawn",
+	"respawn point", "initial spawn", "teleporter sender", "teleporter receiver",
+	"ctf flag", "hill point", "oddball spawn", "race checkpoint",
 };
+/* a markers' category's first kind and its kinds (NONE: not one) */
+static short forge_marker_category_first(
+	short category)
+{
+	return category == _forge_category_spawning ? _forge_spawn_respawn :
+		category == _forge_category_teleporters ? _forge_spawn_teleporter_sender :
+		category == _forge_category_objectives ? _forge_spawn_flag : NONE;
+}
+static short forge_marker_category_count(
+	short category)
+{
+	return category == _forge_category_spawning ? NUMBER_OF_FORGE_SPAWN_KINDS :
+		category == _forge_category_teleporters ? FORGE_TELEPORTER_KINDS :
+		category == _forge_category_objectives ? FORGE_OBJECTIVE_KINDS : 0;
+}
 
 /* the lobby's maps: the Xbox's multiplayer maps, in the order of ui.map's
 pictures of them (ui\shell\bitmaps\mp_map_grafix, as
@@ -648,6 +697,8 @@ struct forge_placed
 	already: a new round's, a variant's or a respawn's -, placed as soon as
 	one alive is fewer; no object meanwhile */
 	boolean waiting;
+	/* (forge_physics.inc) its collision switch set by its PHASED physics */
+	boolean phased_applied;
 };
 
 /* a step of the undo history */
@@ -690,6 +741,9 @@ struct forge_spawn
 	signed char team;
 	/* FORGE_FILE_GAME_TYPE_* bits, 0 for all */
 	unsigned short game_types;
+	/* (a teleporter's: forge_netgame.inc) its channel, 0 to
+	FORGE_TELEPORTER_CHANNELS - 1 */
+	short channel;
 	/* where, facing along the ground */
 	struct forge_transform home;
 };
@@ -902,6 +956,34 @@ static struct
 	long spawn_wait_since[FORGE_SPAWN_PLAYERS];
 	/* (the console's forge spawns) the map's own spawns the last frame drew */
 	short map_markers_drawn;
+	/* (forge_precision.inc) L's mode nudges instead of turning; the nudge's
+	step (forge_nudge_steps' index), the hold's offset and the object it is
+	of, each axis's stick flicked; the magnets off; their last pull said */
+	boolean nudge_mode;
+	short nudge_step;
+	real_vector3d held_nudge;
+	long nudge_object;
+	boolean nudge_flicked[3];
+	boolean magnets_off;
+	boolean magnet_said;
+	/* (forge_touch.inc) the fingers' gesture, what they are doing
+	(_forge_touch_*), waiting for the object they grabbed; the object held's
+	place on the view (tangents across its middle), each axis's drag towards
+	a snapped step, the object selected; forge_camera_get looking along a
+	place on the view; a finger turned the object this frame; the console's
+	fingers (forge touch) */
+	struct forge_touch_gesture touch_gesture;
+	short touch_mode;
+	boolean touch_waiting;
+	real touch_hold_across, touch_hold_up;
+	real touch_turn[2];
+	long touch_selected;
+	boolean touch_aiming;
+	real touch_aim_across, touch_aim_up;
+	boolean touch_turning;
+	struct forge_touch_finger test_touch[2];
+	short test_touch_count;
+	boolean test_touch_probe;
 } forge_globals = { FALSE, "", FALSE, FALSE, 0, NONE, FALSE, NONE, 0.f, { 0.f }, { 0.f }, _forge_speed_normal };
 
 /* ---------- private code */
@@ -948,7 +1030,35 @@ static void forge_spawn_choose(short kind);
 static void forge_spawn_delete(long id);
 static void forge_spawn_log(char const *what, struct forge_spawn const *spawn);
 static struct forge_spawn *forge_spawn_add(long id, short kind, signed char team, unsigned short game_types,
-	struct forge_transform const *home);
+	short channel, struct forge_transform const *home);
+static void forge_netgame_changed(void);
+static boolean forge_spawn_is_teleporter(struct forge_spawn const *spawn);
+static boolean forge_spawn_is_objective(struct forge_spawn const *spawn);
+static short forge_objective_indices(short kind);
+static short forge_objectives_count(short kind, short index);
+static boolean forge_marker_kind_room(short kind, short index, boolean notice);
+static short forge_marker_new_index(short kind);
+static short forge_teleporters_count(short kind, short channel);
+static short forge_teleporter_new_channel(short kind);
+static void forge_netgame_update(void);
+static void forge_nudge_update(struct forge_pad const *pad);
+static void forge_nudge_step_next(void);
+static void forge_nudge(short direction);
+static void forge_magnets_apply(long object_index, real_point3d *position, real_vector3d const *forward,
+	real_vector3d const *up);
+static short forge_physics_mode(struct forge_placed const *placed);
+static unsigned char forge_physics_flags(short mode);
+static void forge_physics_apply(struct forge_placed *placed);
+static void forge_physics_update(void);
+static void forge_touch_update(boolean menu_open);
+static void forge_touch_hold_aim(boolean on);
+static void forge_touch_reset(void);
+static void forge_touch_probe(void);
+static void forge_touch_ray(real across, real up, real_vector3d *forward);
+static boolean forge_net_grab_waiting(void);
+static char const *const forge_physics_log_names[NUMBER_OF_FORGE_PHYSICS_MODES] = { "normal", "fixed", "phased" };
+static void forge_netgame_log(void);
+static char const *forge_netgame_flags_warning(void);
 static void forge_spawn_remove(struct forge_spawn *spawn);
 static void forge_net_update(void);
 static void forge_net_monitor_pack_want(void);
@@ -1377,6 +1487,23 @@ static void forge_menu_notice(
 	forge_notice("%s", forge_globals.menu_status);
 }
 
+/* a warning: on the HUD and the Forge menu's status line, longer than a
+notice (a whole sentence to read) */
+static void forge_warning(
+	char const *text)
+{
+	forge_menu_notice("%s", text);
+	forge_globals.notice_until = system_milliseconds() + FORGE_WARNING_MILLISECONDS;
+}
+
+/* a warning on the HUD alone (the menu's status line left as it is) */
+static void forge_warning_hud(
+	char const *text)
+{
+	forge_notice("%s", text);
+	forge_globals.notice_until = system_milliseconds() + FORGE_WARNING_MILLISECONDS;
+}
+
 /* ---- the budget */
 
 /* whether an object is there and not being deleted (object_delete only
@@ -1582,6 +1709,13 @@ static void forge_homes_update(
 		if (placed->object_index != forge_globals.held_object_index &&
 			((long)(placed->settle_until - now) <= 0 || object->object.parent_object_index != NONE ||
 				TEST_FLAG(object->object.damage_flags, _object_dead_bit)))
+		{
+			continue;
+		}
+		/* (a fixed one let go: where it was let go, never where it falls -
+		forge_physics_update holds it there) */
+		if ((placed->flags & FORGE_RECORD_PHYSICS_FIXED) && placed->has_home &&
+			placed->object_index != forge_globals.held_object_index)
 		{
 			continue;
 		}
@@ -2096,6 +2230,9 @@ static boolean forge_camera_get(
 		return FALSE;
 	*position = camera->position;
 	*forward = camera->forward;
+	/* (forge_touch.inc: a finger's line) */
+	if (forge_globals.touch_aiming)
+		forge_touch_ray(forge_globals.touch_aim_across, forge_globals.touch_aim_up, forward);
 	return TRUE;
 }
 
@@ -2163,7 +2300,8 @@ static long forge_object_under_crosshair_at(
 			FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
 			FLAG(_collision_test_objects_bit) | FLAG(_collision_test_objects_bipeds_bit) |
 			FLAG(_collision_test_objects_vehicles_bit) | FLAG(_collision_test_objects_scenery_bit) |
-			FLAG(_collision_test_objects_machines_bit) | FLAG(_collision_test_objects_controls_bit),
+			FLAG(_collision_test_objects_machines_bit) | FLAG(_collision_test_objects_controls_bit) |
+			FLAG(_collision_test_forge_phased_objects_bit),
 			&position,
 			&vector,
 			ignored,
@@ -2245,6 +2383,17 @@ static void forge_held_object_place(
 		real_vector3d up = forge_globals.held_up;
 
 		forge_snapped(&position, &facing, &up);
+		/* (forge_precision.inc: a block drawn flush to its neighbours, then
+		the hold's nudge - a new hold's none) */
+		forge_magnets_apply(forge_globals.held_object_index, &position, &facing, &up);
+		if (forge_globals.nudge_object != forge_globals.held_object_index)
+		{
+			forge_globals.nudge_object = forge_globals.held_object_index;
+			forge_globals.held_nudge = *global_zero_vector3d;
+		}
+		position.x += forge_globals.held_nudge.i;
+		position.y += forge_globals.held_nudge.j;
+		position.z += forge_globals.held_nudge.k;
 		object_set_position(forge_globals.held_object_index, &position, &facing, &up);
 	}
 	/* (it hangs where it is held: what the physics gave it this tick
@@ -2949,6 +3098,7 @@ static boolean forge_begin(
 	players_unzoom_all();
 	forge_palette_ready();
 	forge_globals.held_object_index = NONE;
+	forge_touch_reset();
 	director_forge_camera(forge_globals.local_player_index, TRUE, &position, &forward);
 	forge_globals.active = TRUE;
 	forge_monitor_flying = 1;
@@ -2989,6 +3139,7 @@ static void forge_end(
 	director_forge_camera(forge_globals.local_player_index, FALSE, NULL, NULL);
 	forge_globals.active = FALSE;
 	forge_monitor_flying = 0;
+	forge_touch_reset();
 	if (unit)
 	{
 		platform_log("forge: player mode at %.2f %.2f %.2f, %s (%ld spawned, %ld deleted)", unit->object.position.x,
@@ -3058,7 +3209,8 @@ static void forge_hud_update(
 			forge_objects_counted(), FORGE_MAXIMUM_OBJECTS, forge_ai_alive(), forge_ai_maximum());
 	forge_globals.hud_label[0] = 0;
 	forge_globals.hud_label_held = object_try_and_get(forge_globals.held_object_index) != NULL;
-	object_index = forge_globals.hud_label_held ? forge_globals.held_object_index : forge_object_under_crosshair();
+	object_index = forge_globals.hud_label_held ? forge_globals.held_object_index :
+		object_try_and_get(forge_globals.touch_selected) ? forge_globals.touch_selected : forge_object_under_crosshair();
 	if (object_index != NONE)
 		forge_object_name(object_index, forge_globals.hud_label, sizeof(forge_globals.hud_label));
 	/* (a spawn marker held, or under the crosshair before what is behind
@@ -3105,7 +3257,12 @@ static void forge_hud_update(
 
 		forge_rotate_snap_text(snap, sizeof(snap));
 		snprintf(snapping, sizeof(snapping), T("Rotation snap: %s"), snap);
-		if (forge_globals.rotating)
+		if (forge_globals.rotating && forge_globals.nudge_mode)
+		{
+			snprintf(forge_globals.hud_rotate, sizeof(forge_globals.hud_rotate), T("Nudge: %d cm. L + D-pad up: rotate"),
+				forge_nudge_steps[PIN(forge_globals.nudge_step, 0, 3)]);
+		}
+		else if (forge_globals.rotating)
 		{
 			float angles[3];
 
@@ -3119,6 +3276,12 @@ static void forge_hud_update(
 		{
 			snprintf(forge_globals.hud_rotate, sizeof(forge_globals.hud_rotate), "%s", snapping);
 		}
+	}
+	/* (forge_touch.inc: tapped) */
+	else if (object_try_and_get(forge_globals.touch_selected) && !forge_globals.held_marker_id)
+	{
+		snprintf(forge_globals.hud_rotate, sizeof(forge_globals.hud_rotate), "%s",
+			T("Selected. Drag the screen: turn it. Tap away: let it go"));
 	}
 }
 
@@ -3673,6 +3836,19 @@ static void forge_property_apply(
 		placed->flags ^= FORGE_RECORD_AI_OFF;
 		forge_ai_apply(placed);
 		break;
+	case _forge_property_physics:
+	{
+		/* (normal, fixed, phased, round: not a character's) */
+		short mode = forge_physics_mode(placed);
+
+		if (placed->ai)
+			return;
+		mode = (short)((mode + step + NUMBER_OF_FORGE_PHYSICS_MODES) % NUMBER_OF_FORGE_PHYSICS_MODES);
+		placed->flags = (unsigned char)((placed->flags & ~FORGE_RECORD_PHYSICS_MASK) | forge_physics_flags(mode));
+		forge_physics_apply(placed);
+		platform_log("forge: #%ld's physics %s", placed->id, forge_physics_log_names[mode]);
+		break;
+	}
 	}
 	{
 		float angles[3];
@@ -4000,6 +4176,12 @@ static boolean forge_variant_capture(
 			record->ai_team = (unsigned char)(placed->ai_team % NUMBER_OF_FORGE_AI_TEAMS);
 		else
 			record->flags &= (unsigned char)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
+		/* (an object's physics: version 7, never a character's, never both) */
+		if (placed->ai || group_tag == ACTOR_VARIANT_DEFINITION_TAG ||
+			(record->flags & FORGE_RECORD_PHYSICS_MASK) == FORGE_RECORD_PHYSICS_MASK)
+		{
+			record->flags &= (unsigned char)~FORGE_RECORD_PHYSICS_MASK;
+		}
 		/* (a character's respawn: version 3, after a second or more) */
 		if ((record->flags & FORGE_RECORD_AI_RESPAWN) && !record->respawn_seconds)
 			record->flags &= (unsigned char)~FORGE_RECORD_AI_RESPAWN;
@@ -4074,6 +4256,7 @@ static void forge_variant_save(
 	char title[FORGE_FILE_TITLE_SIZE];
 	char author[FORGE_FILE_AUTHOR_SIZE];
 	char const *file_name = NULL;
+	char const *warning;
 	boolean done = FALSE;
 
 	forge_globals.save_requested = FALSE;
@@ -4112,7 +4295,22 @@ static void forge_variant_save(
 	}
 	if (!done)
 		platform_log("forge: the map variant was not saved: %s", forge_globals.save_status);
-	forge_menu_notice("%s", forge_globals.save_status);
+	/* (saved, but with the flags nearer the other team's spawns: that is
+	said too, after the save message - the menu line keeps both, the HUD
+	shows the warning - so a save always confirms) */
+	warning = done ? forge_netgame_flags_warning() : NULL;
+	if (warning)
+	{
+		char both[FORGE_STORE_WHY_SIZE];
+
+		snprintf(both, sizeof(both), "%s\n%s", forge_globals.save_status, warning);
+		forge_menu_notice("%s", both);
+		forge_warning_hud(warning);
+	}
+	else
+	{
+		forge_menu_notice("%s", forge_globals.save_status);
+	}
 }
 
 /* (the session's start) the map variant read for it placed: each record's
@@ -4170,6 +4368,15 @@ static void forge_variant_apply(
 
 		/* (a player spawn: taken as the map loaded, forge_spawns_from_layout) */
 		if (record->kind == _forge_record_player_spawn && forge_file_layout_version(layout) >= 4)
+			continue;
+		/* (a teleporter, a game type object: as the map loaded too,
+		forge_spawns_from_layout) */
+		if ((record->kind == _forge_record_teleporter_in || record->kind == _forge_record_teleporter_out) &&
+			forge_file_layout_version(layout) >= 5)
+		{
+			continue;
+		}
+		if (record->kind == _forge_record_flag && forge_file_layout_version(layout) >= 6)
 			continue;
 		if (record->kind != _forge_record_object)
 		{
@@ -4237,7 +4444,12 @@ static void forge_variant_apply(
 				entry->ai_team = FORGE_AI_TEAM_DEFAULT;
 				entry->flags &= (unsigned char)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
 			}
+			else
+			{
+				entry->flags &= (unsigned char)~FORGE_RECORD_PHYSICS_MASK;
+			}
 			forge_ai_apply(entry);
+			forge_physics_apply(entry);
 		}
 		placed++;
 	}
@@ -5076,10 +5288,32 @@ boolean forge_properties_get(
 	if (spawn)
 	{
 		forge_spawn_properties_get(spawn, properties);
+		/* (where it stands, metres: forge_precision.inc) */
+		{
+			real_point3d const *at = spawn->id == forge_globals.held_marker_id ? &forge_globals.held_marker_position :
+				&spawn->home.position;
+
+			properties->has_position = TRUE;
+			properties->position[0] = at->x * FORGE_METRES_PER_WORLD_UNIT;
+			properties->position[1] = at->y * FORGE_METRES_PER_WORLD_UNIT;
+			properties->position[2] = at->z * FORGE_METRES_PER_WORLD_UNIT;
+		}
 		return TRUE;
 	}
 	if (!placed)
 		return FALSE;
+	{
+		struct object_datum *object = object_try_and_get(placed->object_index);
+		real_point3d const *at = object ? &object->object.position : placed->has_home ? &placed->home.position : NULL;
+
+		if (at)
+		{
+			properties->has_position = TRUE;
+			properties->position[0] = at->x * FORGE_METRES_PER_WORLD_UNIT;
+			properties->position[1] = at->y * FORGE_METRES_PER_WORLD_UNIT;
+			properties->position[2] = at->z * FORGE_METRES_PER_WORLD_UNIT;
+		}
+	}
 	forge_object_name(placed->object_index, properties->name, sizeof(properties->name));
 	properties->team = placed->team;
 	/* (a character's: 0, never, unless it respawns) */
@@ -5094,6 +5328,8 @@ boolean forge_properties_get(
 		properties->roll = (short)forge_round(RADIANS_TO_DEGREES(angles[2]));
 	}
 	properties->ai = placed->ai;
+	properties->has_physics = !placed->ai;
+	properties->physics = forge_physics_mode(placed);
 	properties->ai_team = placed->ai_team;
 	properties->ai_on = !(placed->flags & FORGE_RECORD_AI_OFF);
 	if (placed->ai_team == FORGE_AI_TEAM_DEFAULT && forge_object_alive(placed->object_index))
@@ -5314,6 +5550,9 @@ void forge_map_loaded(
 	forge_spawns_clear();
 	if (forge_globals.game_active && forge_globals.variant_pending)
 		forge_spawns_from_layout(&forge_variant_layout);
+	/* (its teleporters the engine's netgame flags as its game starts:
+	forge_netgame.inc; any other game's the map's own) */
+	forge_netgame_changed();
 	/* (the session's packs, before the map's objects are placed; a network
 	Forge game's the Monitor's after them, for the other monitors) */
 	if (forge_globals.game_active)
@@ -5379,9 +5618,10 @@ short forge_category_item_count(
 {
 	if (category < 0 || category >= NUMBER_OF_FORGE_CATEGORIES)
 		return 0;
-	/* (SPAWNING: the respawn point and the initial spawn, in a Forge game) */
-	if (category == _forge_category_spawning)
-		return forge_globals.game_active && !forge_globals.playing ? NUMBER_OF_FORGE_SPAWN_KINDS : 0;
+	/* (SPAWNING: the respawn point and the initial spawn; TELEPORTERS: the
+	sender and the receiver; in a Forge game) */
+	if (forge_marker_category_first(category) != NONE)
+		return forge_globals.game_active && !forge_globals.playing ? forge_marker_category_count(category) : 0;
 	forge_palette_ready();
 	return forge_globals.palette_counts[category];
 }
@@ -5395,11 +5635,13 @@ boolean forge_category_item(
 
 	if (item_index < 0 || item_index >= forge_category_item_count(category))
 		return FALSE;
-	if (category == _forge_category_spawning)
+	if (forge_marker_category_first(category) != NONE)
 	{
+		short kind = (short)(forge_marker_category_first(category) + item_index);
+
 		csmemset(item, 0, sizeof(*item));
-		snprintf(item->name, sizeof(item->name), "%s", T(forge_spawn_kind_names[item_index]));
-		item->placed = forge_spawns_of_kind(item_index);
+		snprintf(item->name, sizeof(item->name), "%s", T(forge_spawn_kind_names[kind]));
+		item->placed = forge_spawns_of_kind(kind);
 		return TRUE;
 	}
 	entry = &forge_globals.palette[forge_globals.palette_first[category] + item_index];
@@ -5416,7 +5658,8 @@ void forge_browser_choose(
 {
 	if (item_index < 0 || item_index >= forge_category_item_count(category))
 		return;
-	forge_globals.browser_choice = category == _forge_category_spawning ? (short)(FORGE_BROWSER_SPAWN_CHOICE + item_index) :
+	forge_globals.browser_choice = forge_marker_category_first(category) != NONE ?
+		(short)(FORGE_BROWSER_SPAWN_CHOICE + forge_marker_category_first(category) + item_index) :
 		(short)(forge_globals.palette_first[category] + item_index);
 	forge_globals.browser_chosen = TRUE;
 }
@@ -5672,6 +5915,8 @@ void forge_update(
 	if (forge_globals.test_sticks_frames > 0)
 		forge_globals.test_sticks_frames--;
 	forge_session_update();
+	/* (the layout's teleporters the engine's flags, before the tick) */
+	forge_netgame_update();
 	forge_game_playing = forge_globals.active || (forge_globals.game_active && !forge_globals.playing);
 	/* (a map variant played: the layout kept and given to joiners, nothing
 	of Forge's asked for or shown - no monitor, menu, save, AI or round
@@ -5693,6 +5938,7 @@ void forge_update(
 		{
 			forge_placed_update();
 			forge_homes_update();
+			forge_physics_update();
 			/* (its characters that respawn: the game's host's) */
 			forge_ai_life_update();
 			forge_net_update();
@@ -5849,6 +6095,7 @@ void forge_update(
 	forge_globals.menu_was_open = menu_open;
 	forge_placed_update();
 	forge_homes_update();
+	forge_physics_update();
 	/* (a network Forge game: the requests and the layout's changes) */
 	forge_net_update();
 	/* (a network game: the game's own Start opens the multiplayer pause,
@@ -5900,7 +6147,7 @@ void forge_update(
 
 		forge_globals.browser_chosen = FALSE;
 		if (forge_globals.held_marker_id && ((choice >= 0 && choice < forge_globals.palette_count) ||
-			(choice >= FORGE_BROWSER_SPAWN_CHOICE && choice < FORGE_BROWSER_SPAWN_CHOICE + NUMBER_OF_FORGE_SPAWN_KINDS)))
+			(choice >= FORGE_BROWSER_SPAWN_CHOICE && choice < FORGE_BROWSER_SPAWN_CHOICE + NUMBER_OF_FORGE_MARKER_KINDS)))
 		{
 			forge_marker_drop();
 		}
@@ -5910,8 +6157,9 @@ void forge_update(
 				forge_drop();
 			forge_spawn(forge_globals.palette[choice].tag_index);
 		}
-		/* (SPAWNING: a player spawn point, held as its marker) */
-		else if (choice >= FORGE_BROWSER_SPAWN_CHOICE && choice < FORGE_BROWSER_SPAWN_CHOICE + NUMBER_OF_FORGE_SPAWN_KINDS)
+		/* (SPAWNING, TELEPORTERS: a player spawn point, a teleporter, held as
+		its marker) */
+		else if (choice >= FORGE_BROWSER_SPAWN_CHOICE && choice < FORGE_BROWSER_SPAWN_CHOICE + NUMBER_OF_FORGE_MARKER_KINDS)
 		{
 			if (object_try_and_get(forge_globals.held_object_index))
 				forge_drop();
@@ -5931,9 +6179,21 @@ void forge_update(
 		}
 		boolean rotating = pad.down[_forge_button_alternate] && object_try_and_get(forge_globals.held_object_index);
 
-		/* (D-pad right: in rotate mode its snapping, else the movement
-		speed) */
-		if (pressed[_forge_button_speed] && rotating)
+		/* (L + D-pad up, the right stick's click: rotate mode and nudge mode
+		flipped - forge_precision.inc) */
+		if (pressed[_gamepad_binary_button_right_thumb] && rotating && !pad.toggle)
+		{
+			forge_globals.nudge_mode = !forge_globals.nudge_mode;
+			forge_notice("%s", forge_globals.nudge_mode ? T("L: nudge") : T("L: rotate"));
+			platform_log("forge: L's mode %s", forge_globals.nudge_mode ? "nudge" : "rotate");
+		}
+		/* (D-pad right: in rotate mode its snapping, in nudge mode its step,
+		else the movement speed) */
+		if (pressed[_forge_button_speed] && rotating && forge_globals.nudge_mode)
+		{
+			forge_nudge_step_next();
+		}
+		else if (pressed[_forge_button_speed] && rotating)
 		{
 			char snap[16];
 
@@ -6003,7 +6263,11 @@ void forge_update(
 			}
 		}
 		rotating = rotating && object_try_and_get(forge_globals.held_object_index);
-		if (rotating)
+		if (rotating && forge_globals.nudge_mode)
+		{
+			forge_nudge_update(&pad);
+		}
+		else if (rotating)
 		{
 			forge_rotate_update(&pad, seconds);
 		}
@@ -6016,6 +6280,8 @@ void forge_update(
 				forge_globals.rotate_flicked[axis] = FALSE;
 				forge_globals.rotate_mouse[axis] = 0.f;
 			}
+			for (axis = 0; axis < 3; axis++)
+				forge_globals.nudge_flicked[axis] = FALSE;
 		}
 		forge_globals.rotating = rotating;
 		if (object_try_and_get(forge_globals.held_object_index))
@@ -6028,8 +6294,14 @@ void forge_update(
 	{
 		forge_globals.rotating = FALSE;
 	}
+	/* (the front screen, forge_touch.inc: the pad's own grab, turn and
+	drop; a finger's turn shown as rotate mode's) */
+	forge_touch_update(menu_open);
+	if (forge_globals.touch_turning)
+		forge_globals.rotating = TRUE;
 	forge_globals.pending_mouse_turn = 0.f;
 	forge_globals.pending_mouse_pitch = 0.f;
+	forge_touch_hold_aim(TRUE);
 	if (object_try_and_get(forge_globals.held_object_index))
 		forge_held_object_place();
 	if (forge_globals.held_marker_id)
@@ -6038,6 +6310,7 @@ void forge_update(
 			FORGE_MINIMUM_HOLD_DISTANCE, FORGE_MAXIMUM_HOLD_DISTANCE);
 		forge_marker_held_update();
 	}
+	forge_touch_hold_aim(FALSE);
 	forge_hud_update();
 
 	return;
@@ -6126,6 +6399,7 @@ void forge_draw(
 	bounds.y1 = (short)(bounds.y0 + height);
 	forge_draw_line(font_index, &bounds, 0, 0.62f, 0.71f, 0.80f, forge_globals.hud_budget);
 	/* (a network game: the other players' monitors where they fly) */
+	forge_touch_probe();
 	forge_net_draw_monitors(font_index, height);
 	/* the notice, a while, at the left below the middle (where Halo
 	Online's Forge says "Movement Speed: Fast") */
@@ -6381,6 +6655,38 @@ boolean forge_command(
 		}
 		return TRUE;
 	}
+	if (!strcmp(word, "touch"))
+	{
+		/* ("touch <x> <y> [<x2> <y2>]": the tests' fingers on the front
+		screen, in the menus' 640x480, as vita_pad.c gives them, until "touch
+		up" lifts them; "touch probe" says where the renderer shows the
+		object held, for a finger's place to be checked against) */
+		int x = 0, y = 0, x2 = 0, y2 = 0;
+		int given = sscanf(rest, "%d %d %d %d", &x, &y, &x2, &y2);
+
+		if (!strncmp(rest, "up", 2))
+		{
+			forge_globals.test_touch_count = 0;
+			return TRUE;
+		}
+		if (!strncmp(rest, "probe", 5))
+		{
+			forge_globals.test_touch_probe = TRUE;
+			return TRUE;
+		}
+		if (given != 2 && given != 4)
+			return FALSE;
+		forge_globals.test_touch[0].id = 1;
+		forge_globals.test_touch[0].x = (short)x;
+		forge_globals.test_touch[0].y = (short)y;
+		forge_globals.test_touch[0].reserved = 0;
+		forge_globals.test_touch[1].id = 2;
+		forge_globals.test_touch[1].x = (short)x2;
+		forge_globals.test_touch[1].y = (short)y2;
+		forge_globals.test_touch[1].reserved = 0;
+		forge_globals.test_touch_count = given == 4 ? 2 : 1;
+		return TRUE;
+	}
 	if (!strcmp(word, "look"))
 	{
 		/* ("look <yaw> <pitch>": the mouse's look, radians - positive yaw
@@ -6448,10 +6754,12 @@ boolean forge_command(
 			else
 			{
 				platform_log("forge: object %d: %s (id %ld) %s at %.2f %.2f %.2f, placed at %.2f %.2f %.2f facing %.3f %.3f %.3f "
-					"up %.3f %.3f %.3f", index, name, placed->id, state, object ? object->object.position.x : 0.f,
+					"up %.3f %.3f %.3f, physics %s%s", index, name, placed->id, state, object ? object->object.position.x : 0.f,
 					object ? object->object.position.y : 0.f, object ? object->object.position.z : 0.f, placed->home.position.x,
 					placed->home.position.y, placed->home.position.z, placed->home.forward.i, placed->home.forward.j,
-					placed->home.forward.k, placed->home.up.i, placed->home.up.j, placed->home.up.k);
+					placed->home.forward.k, placed->home.up.i, placed->home.up.j, placed->home.up.k,
+					forge_physics_log_names[forge_physics_mode(placed)],
+					object && TEST_FLAG(object->object.flags, _object_no_collisions_bit) ? " (no collision)" : "");
 			}
 		}
 		if (characters)
@@ -6506,6 +6814,13 @@ boolean forge_command(
 	/* (tests, the monitor's or the Spartan's: forge_blocks.c) */
 	if (!strcmp(word, "blocks"))
 		return forge_blocks_command(rest);
+	/* (tests, any game: forge_netgame.inc) the netgame flags of the game
+	types and their objects where they stand */
+	if (!strcmp(word, "netflags"))
+	{
+		forge_netgame_log();
+		return TRUE;
+	}
 	if (!forge_globals.active && strcmp(word, "where") && strcmp(word, "markers") && strcmp(word, "spawns"))
 	{
 		platform_log("forge: %s: not in monitor mode (\"forge on\")", word);
@@ -6676,6 +6991,8 @@ boolean forge_command(
 			property = _forge_property_ai_team;
 		else if (!strncmp(rest, "brain", 5))
 			property = _forge_property_ai_brain;
+		else if (!strncmp(rest, "physics", 7))
+			property = _forge_property_physics;
 		else if (!strncmp(rest, "yaw", 3))
 			property = _forge_property_yaw;
 		else if (!strncmp(rest, "pitch", 5))
@@ -6690,6 +7007,10 @@ boolean forge_command(
 			property = _forge_property_respawn;
 		else if (!strcmp(rest, "kind"))
 			property = _forge_property_place_at_start;
+		/* (a teleporter's: "channel"; a game type object's: "index" - the
+		team's row) */
+		else if (!strncmp(rest, "channel", 7) || !strncmp(rest, "index", 5))
+			property = _forge_property_team;
 		if (strchr(rest, '-'))
 			step = -1;
 		if (property == NONE || (!forge_properties_target() && !forge_properties_spawn()))
@@ -6749,6 +7070,44 @@ boolean forge_command(
 		platform_log("forge: filled %d of %d %s", placed, count, forge_globals.palette[index].name);
 		return TRUE;
 	}
+#ifndef HALO_RELEASE
+	if (!strcmp(word, "board"))
+	{
+		/* (tests) "board #<vehicle> #<unit>": the layout's unit in the first
+		seat of the layout's vehicle that takes it: run_forge_test.sh
+		phaserider */
+		long vehicle_id = 0, unit_id = 0, vehicle_index = NONE, unit_index = NONE;
+		short index;
+		short seat;
+		short seats;
+
+		if (sscanf(rest, "#%ld #%ld", &vehicle_id, &unit_id) != 2)
+			return FALSE;
+		for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+		{
+			if (forge_globals.placed[index].id == vehicle_id && forge_object_alive(forge_globals.placed[index].object_index))
+				vehicle_index = forge_globals.placed[index].object_index;
+			if (forge_globals.placed[index].id == unit_id && forge_object_alive(forge_globals.placed[index].object_index))
+				unit_index = forge_globals.placed[index].object_index;
+		}
+		if (vehicle_index == NONE || unit_index == NONE)
+		{
+			platform_log("forge: board: no such objects");
+			return FALSE;
+		}
+		seats = (short)unit_definition_get(unit_get(vehicle_index)->definition_index)->unit.seats.count;
+		for (seat = 0; seat < seats; seat++)
+		{
+			if (unit_enter_seat(unit_index, vehicle_index, seat))
+			{
+				platform_log("forge: board: #%ld in seat %d of #%ld", unit_id, (int)seat, vehicle_id);
+				return TRUE;
+			}
+		}
+		platform_log("forge: board: no seat of #%ld takes #%ld", vehicle_id, unit_id);
+		return FALSE;
+	}
+#endif
 	if (!strcmp(word, "grab"))
 	{
 		long object_index = forge_object_under_crosshair();
@@ -6838,7 +7197,10 @@ boolean forge_command(
 			forge_marker_drop();
 		if (object_try_and_get(forge_globals.held_object_index))
 			forge_drop();
-		forge_spawn_choose(!strcmp(rest, "initial") ? _forge_spawn_initial : _forge_spawn_respawn);
+		forge_spawn_choose(!strcmp(rest, "initial") ? _forge_spawn_initial : !strcmp(rest, "sender") ?
+			_forge_spawn_teleporter_sender : !strcmp(rest, "receiver") ? _forge_spawn_teleporter_receiver :
+			!strcmp(rest, "flag") ? _forge_spawn_flag : !strcmp(rest, "hill") ? _forge_spawn_hill :
+			!strcmp(rest, "oddball") ? _forge_spawn_oddball : !strcmp(rest, "race") ? _forge_spawn_race : _forge_spawn_respawn);
 		return TRUE;
 	}
 	/* (tests) "closemenus": the menus over the game closed, as B in them */
@@ -6861,11 +7223,18 @@ boolean forge_command(
 	{
 		short index;
 
-		platform_log("forge: %d player spawn points (%d initial, %d respawn), %d markers drawn (%d of the map's), budget %d/%d",
-			forge_globals.spawn_count, forge_spawns_of_kind(_forge_spawn_initial), forge_spawns_of_kind(_forge_spawn_respawn),
-			forge_globals.markers_drawn, forge_globals.map_markers_drawn, forge_objects_counted(), FORGE_MAXIMUM_OBJECTS);
+		platform_log("forge: %d player spawn points (%d initial, %d respawn), %d teleporters (%d senders, %d receivers), %d "
+			"markers drawn (%d of the map's), budget %d/%d", forge_spawns_of_kind(_forge_spawn_initial) +
+			forge_spawns_of_kind(_forge_spawn_respawn), forge_spawns_of_kind(_forge_spawn_initial),
+			forge_spawns_of_kind(_forge_spawn_respawn), forge_spawns_of_kind(_forge_spawn_teleporter_sender) +
+			forge_spawns_of_kind(_forge_spawn_teleporter_receiver), forge_spawns_of_kind(_forge_spawn_teleporter_sender),
+			forge_spawns_of_kind(_forge_spawn_teleporter_receiver), forge_globals.markers_drawn,
+			forge_globals.map_markers_drawn, forge_objects_counted(), FORGE_MAXIMUM_OBJECTS);
 		for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
 			forge_spawn_log("spawns:", &forge_globals.spawns[index]);
+		platform_log("forge: %d game type objects (%d CTF flags, %d hill points, %d oddball spawns, %d race checkpoints)",
+			forge_objectives_count(NONE, NONE), forge_spawns_of_kind(_forge_spawn_flag), forge_spawns_of_kind(_forge_spawn_hill),
+			forge_spawns_of_kind(_forge_spawn_oddball), forge_spawns_of_kind(_forge_spawn_race));
 		return TRUE;
 	}
 	if (!strcmp(word, "turn"))
@@ -6876,6 +7245,44 @@ boolean forge_command(
 			return FALSE;
 		forge_turn(object_index, DEGREES_TO_RADIANS((real)atof(rest)));
 		platform_log("forge: turned %s by %s degrees", forge_tag_leaf(object_get(object_index)->definition_index), rest);
+		return TRUE;
+	}
+	/* (forge_precision.inc) "nudge ahead|back|left|right|up|down [count]",
+	"nudgestep", "nudgemode", "magnets [on|off]" */
+	if (!strcmp(word, "nudge"))
+	{
+		static char const *const names[NUMBER_OF_FORGE_NUDGES] = { "ahead", "back", "left", "right", "up", "down" };
+		short direction;
+		int count = 1;
+		char name[16] = "";
+
+		sscanf(rest, "%15s %d", name, &count);
+		for (direction = 0; direction < NUMBER_OF_FORGE_NUDGES; direction++)
+		{
+			if (!strcmp(name, names[direction]))
+				break;
+		}
+		if (direction == NUMBER_OF_FORGE_NUDGES || !object_try_and_get(forge_globals.held_object_index))
+			return FALSE;
+		for (; count > 0 && count <= 100; count--)
+			forge_nudge(direction);
+		return TRUE;
+	}
+	if (!strcmp(word, "nudgestep"))
+	{
+		forge_nudge_step_next();
+		return TRUE;
+	}
+	if (!strcmp(word, "nudgemode"))
+	{
+		forge_globals.nudge_mode = !forge_globals.nudge_mode;
+		platform_log("forge: L's mode %s", forge_globals.nudge_mode ? "nudge" : "rotate");
+		return TRUE;
+	}
+	if (!strcmp(word, "magnets"))
+	{
+		forge_globals.magnets_off = !strcmp(rest, "off") ? TRUE : !strcmp(rest, "on") ? FALSE : !forge_globals.magnets_off;
+		platform_log("forge: magnets %s", forge_globals.magnets_off ? "off" : "on");
 		return TRUE;
 	}
 	if (!strcmp(word, "distance"))
@@ -6991,3 +7398,7 @@ boolean forge_command(
 #include "forge_net.inc"
 #include "forge_markers.inc"
 #include "forge_spawns.inc"
+#include "forge_netgame.inc"
+#include "forge_physics.inc"
+#include "forge_precision.inc"
+#include "forge_touch.inc"

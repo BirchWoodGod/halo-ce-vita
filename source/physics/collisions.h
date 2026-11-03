@@ -55,6 +55,9 @@ enum
 	without player collisions: network_coop_player_collisions; OpenCE's,
 	62fa7e13) */
 	_collision_test_skip_player_bipeds_bit,
+	/* port: Forge's PHASED objects met too (shots and every other line pass
+	them: the monitor's crosshair must not; forge_physics.inc) */
+	_collision_test_forge_phased_objects_bit,
 
 	NUMBER_OF_COLLISION_TEST_FLAGS,
 

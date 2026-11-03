@@ -760,6 +760,23 @@ controller's layout above has no room for, held at the last poll: Shift
 bit 2, as well as Y), and whether the wheel is scrolling (bit 3: its Y is
 not a delete there); and the wheel's notches since the last call (push and
 pull). None on the Vita, whose port 0 is its own controls */
+/* (Forge's monitor: forge_touch.inc) the fingers on the Vita's front screen,
+none on the desktop builds */
+struct forge_touch_finger;
+
+long halo_linux_forge_touch(struct forge_touch_finger *fingers, long maximum)
+{
+#ifdef HALO_VITA
+	extern long vita_pad_forge_touch(struct forge_touch_finger *fingers, long maximum);
+
+	return vita_pad_forge_touch(fingers, maximum);
+#else
+	(void)fingers;
+	(void)maximum;
+	return 0;
+#endif
+}
+
 unsigned long halo_linux_forge_keys(float *wheel_notches)
 {
 	unsigned long keys;

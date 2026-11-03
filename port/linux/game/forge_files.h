@@ -57,6 +57,41 @@ holds), any other as before, so a variant without spawn points stays readable
 by older builds; a version 4 file has one at least. The game reads player
 spawns of a version 4 file only (an older file's, never written by a build,
 are skipped as ever).
+
+Version 5 (Oct 30 2026) adds teleporters: a sender (_forge_record_teleporter_in)
+and a receiver (_forge_record_teleporter_out), no path, linked by their
+channel (the team byte: 0 to FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS - 1; the
+engine's netgame flags' team index, as a map's own teleporters pair theirs),
+their yaw (pitch and roll zero) and nothing else; at most
+FORGE_FILE_MAXIMUM_TELEPORTERS of them, every sender's channel with a
+receiver (a sender that leads nowhere is not one a writer makes). A file of
+version 4 or before holds none (the kinds were never written: refused there);
+a layout with a teleporter is written as version 5, and a version 5 file has
+one at least.
+
+Version 6 (Oct 30 2026) adds game type objects: a record of kind
+_forge_record_flag, no path, is one of the engine's netgame flags
+(scenario_definitions.h), its type in the variant byte from a fixed list
+(FORGE_FILE_FLAG_TYPE_*: a CTF flag's spot, a King of the Hill hill's point,
+an oddball's spawn, a race checkpoint) and its index in the team byte (a CTF
+flag's team, 0 red or 1 blue; a hill's number, below FORGE_FILE_MAXIMUM_HILLS;
+an oddball's ball, below FORGE_FILE_MAXIMUM_ODDBALLS; a checkpoint's order,
+below FORGE_FILE_MAXIMUM_RACE_CHECKPOINTS), its yaw and nothing else; at most
+FORGE_FILE_MAXIMUM_GAME_OBJECTS of them, a hill's points at most
+FORGE_FILE_MAXIMUM_HILL_POINTS. Played, a type the variant has replaces the
+map's own flags of that type for the game (a CTF flag a team's), one it has
+none of keeps the map's. A file of version 5 or before holds none (the kind
+was never written: refused there); a layout with one is written as version
+6, and a version 6 file has one at least.
+
+Version 7 (Oct 30 2026) adds an object's physics (Halo 3's Physics: Normal,
+Fixed, Phased): flag bit 4, FORGE_RECORD_PHYSICS_FIXED (it never moves: held
+where the editor put it), or flag bit 5, FORGE_RECORD_PHYSICS_PHASED (no
+collision: players, vehicles and objects pass through it; others' collision
+as ever), never both, on an object's record (_forge_record_object) that is
+not a character's only. A file of version 6 or before holds neither (the
+bits must be zero in them); a layout with one is written as version 7, and
+a version 7 file has one at least.
 */
 
 #ifndef __FORGE_FILES_H
@@ -66,7 +101,7 @@ are skipped as ever).
 
 #define FORGE_FILE_EXTENSION ".hmv"
 /* the version written when a layout needs it, and the oldest read */
-#define FORGE_FILE_VERSION 4
+#define FORGE_FILE_VERSION 7
 #define FORGE_FILE_FIRST_VERSION 1
 #define FORGE_FILE_HEADER_SIZE 64
 #define FORGE_FILE_MAXIMUM_SIZE 65536
@@ -109,6 +144,24 @@ player spawns: infection too), a bit each in the engine's order */
 #define FORGE_FILE_SPAWN_GAME_TYPES_MASK 0x3F
 /* a player spawn's teams: any (-1), red, blue */
 #define FORGE_FILE_MAXIMUM_SPAWN_TEAM 1
+/* (version 5) teleporters: their channels (a record's team), the most of
+them in a layout */
+#define FORGE_FILE_MAXIMUM_TELEPORTER_CHANNELS 16
+#define FORGE_FILE_MAXIMUM_TELEPORTERS 32
+/* (version 6) game type objects: the netgame flag types a record may be
+(the engine's _netgame_flag_*, scenario_definitions.h), each one's indices,
+the most of them in a layout and of one hill's points (the engine's
+MAXIMUM_HILL_POINTS) */
+#define FORGE_FILE_FLAG_TYPE_CTF 0
+#define FORGE_FILE_FLAG_TYPE_ODDBALL 2
+#define FORGE_FILE_FLAG_TYPE_RACE 3
+#define FORGE_FILE_FLAG_TYPE_HILL 8
+#define FORGE_FILE_MAXIMUM_CTF_TEAMS 2
+#define FORGE_FILE_MAXIMUM_HILLS 16
+#define FORGE_FILE_MAXIMUM_ODDBALLS 16
+#define FORGE_FILE_MAXIMUM_RACE_CHECKPOINTS 32
+#define FORGE_FILE_MAXIMUM_GAME_OBJECTS 64
+#define FORGE_FILE_MAXIMUM_HILL_POINTS 12
 /* a record's path index when its kind names no object */
 #define FORGE_FILE_NO_PATH 0xFFFF
 
@@ -133,10 +186,16 @@ enum
 	/* (version 4, a player spawn's only) an initial spawn (a round's first
 	spawns), else a respawn point */
 	FORGE_RECORD_SPAWN_INITIAL = 1 << 3,
+	/* (version 7, an object's that is no character's only) its physics:
+	fixed (never moves), or phased (no collision); never both */
+	FORGE_RECORD_PHYSICS_FIXED = 1 << 4,
+	FORGE_RECORD_PHYSICS_PHASED = 1 << 5,
+	FORGE_RECORD_PHYSICS_MASK = FORGE_RECORD_PHYSICS_FIXED | FORGE_RECORD_PHYSICS_PHASED,
 	FORGE_RECORD_FLAGS_VERSION_1 = FORGE_RECORD_PLACE_AT_START,
 	FORGE_RECORD_FLAGS_VERSION_2 = FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF,
 	FORGE_RECORD_FLAGS_VERSION_3 = FORGE_RECORD_PLACE_AT_START | FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN,
-	FORGE_RECORD_FLAGS_KNOWN = FORGE_RECORD_FLAGS_VERSION_3 | FORGE_RECORD_SPAWN_INITIAL,
+	FORGE_RECORD_FLAGS_VERSION_4 = FORGE_RECORD_FLAGS_VERSION_3 | FORGE_RECORD_SPAWN_INITIAL,
+	FORGE_RECORD_FLAGS_KNOWN = FORGE_RECORD_FLAGS_VERSION_4 | FORGE_RECORD_PHYSICS_MASK,
 };
 
 /* (version 2) a character's AI team: whom it fights. The engine's teams
@@ -165,8 +224,12 @@ enum
 	_forge_record_player_spawn,
 	_forge_record_weapon_spawn,
 	_forge_record_vehicle_spawn,
+	/* (version 6) a game type object: variant its FORGE_FILE_FLAG_TYPE_*,
+	team its index */
 	_forge_record_flag,
+	/* (never written: refused) */
 	_forge_record_hill,
+	/* (version 5) a teleporter's sender and its receiver: team its channel */
 	_forge_record_teleporter_in,
 	_forge_record_teleporter_out,
 	_forge_record_kill_zone,
@@ -287,8 +350,8 @@ int forge_file_layout_check(
 	char const *expected_map);
 
 /* the version a layout is written as: its own when set, else the lowest
-that holds it (4 with a player spawn, 3 with a respawning character, 2 when
-a record has an AI setting) */
+that holds it (7 with an object's physics, 6 with a game type object, 5 with a teleporter, 4 with a player spawn, 3 with a
+respawning character, 2 when a record has an AI setting) */
 int forge_file_layout_version(
 	struct forge_file_layout const *layout);
 
@@ -336,6 +399,12 @@ void forge_file_name_received(
 	unsigned int hash,
 	char *file_name,
 	int size);
+
+/* (version 6) a game type object's index limit for its flag type
+(FORGE_FILE_FLAG_TYPE_*): the indices below it; 0 for a type not in the
+list */
+int forge_file_flag_type_indices(
+	int flag_type);
 
 /* an angle in radians brought within +-pi (the writer's) */
 float forge_file_angle_reduce(

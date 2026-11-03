@@ -251,6 +251,12 @@ static struct
 		long machine_index;
 		boolean answered;
 		boolean refused;
+		/* (1.1.2) the features it said it plays (_forge_net_lobby_features);
+		its answer held until it says them, when the layout needs them, and
+		since when */
+		uint32_t features;
+		boolean answer_pending;
+		unsigned long answer_time;
 		unsigned long joined_time;
 		unsigned long hello_time;
 		uint32_t packs_ready;
@@ -354,6 +360,60 @@ static boolean forge_net_capable(
 {
 #ifndef HALO_RELEASE
 	char const *setting = getenv("HALO_FORGE_NET");
+
+	if (setting && setting[0] == '0')
+		return FALSE;
+#endif
+	return TRUE;
+}
+
+/* (1.1.2) the Forge features the layout uses now (FORGE_NET_FEATURE_*): a
+teleporter, a game type object, an object's physics - what a joiner must
+play to have the host's map -, and those of the map variant its game is to
+place (asked in the lobby, before the map loads) */
+static uint32_t forge_net_layout_features(
+	void)
+{
+	uint32_t features = 0;
+	short index;
+
+	if (forge_globals.variant_pending)
+	{
+		for (index = 0; index < forge_variant_layout.record_count && index < FORGE_FILE_MAXIMUM_RECORDS; index++)
+		{
+			struct forge_file_record const *record = &forge_variant_layout.records[index];
+
+			if (record->kind == _forge_record_teleporter_in || record->kind == _forge_record_teleporter_out)
+				features |= FORGE_NET_FEATURE_MARKERS;
+			else if (record->kind == _forge_record_flag)
+				features |= FORGE_NET_FEATURE_OBJECTIVES;
+			if (record->flags & FORGE_RECORD_PHYSICS_MASK)
+				features |= FORGE_NET_FEATURE_PHYSICS;
+		}
+	}
+
+	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+	{
+		if (forge_spawn_is_teleporter(&forge_globals.spawns[index]))
+			features |= FORGE_NET_FEATURE_MARKERS;
+		else if (forge_spawn_is_objective(&forge_globals.spawns[index]))
+			features |= FORGE_NET_FEATURE_OBJECTIVES;
+	}
+	for (index = 0; index < forge_globals.placed_count && index < FORGE_MAXIMUM_OBJECTS; index++)
+	{
+		if (forge_globals.placed[index].flags & FORGE_RECORD_PHYSICS_MASK)
+			features |= FORGE_NET_FEATURE_PHYSICS;
+	}
+	return features;
+}
+
+/* (tests) a joiner that says no 1.1.2 features, as a 1.1.1 build:
+HALO_FORGE_NET_FEATURES=0 */
+static boolean forge_net_says_features(
+	void)
+{
+#ifndef HALO_RELEASE
+	char const *setting = getenv("HALO_FORGE_NET_FEATURES");
 
 	if (setting && setting[0] == '0')
 		return FALSE;
@@ -902,6 +962,19 @@ static void forge_net_host_lobby_update(
 		}
 		if (forge_net.machines[slot].answered)
 			continue;
+		/* (1.1.2: answered, the layout needing what it has not said it
+		plays: refused once its features are overdue - an older build) */
+		if (forge_net.machines[slot].answer_pending)
+		{
+			if (now - forge_net.machines[slot].answer_time >= FORGE_NET_FEATURES_MILLISECONDS)
+			{
+				platform_log("forge net: machine %ld refused: This Forge map needs version 1.1.2 (it said no 1.1.2 Forge "
+					"features: an older build)", machine_index);
+				forge_notice("%s", T("A player on an older Halo CE was refused: this Forge map needs version 1.1.2"));
+				forge_net_refuse_machine(slot, _forge_net_refusal_incapable, _rejection_code_version_too_old);
+			}
+			continue;
+		}
 		if (now - forge_net.machines[slot].joined_time >= FORGE_NET_HELLO_MILLISECONDS)
 		{
 			platform_log("forge net: machine %ld did not answer the Forge hello in %d ms (a build without network Forge): "
@@ -978,7 +1051,21 @@ void forge_net_server_handle_lobby_message(
 		forge_net.machines[slot].building_time = system_milliseconds();
 		return;
 	}
-	if (forge_net.machines[slot].answered)
+	/* (1.1.2: the features it plays, after its answer) */
+	if (answer.command == _forge_net_lobby_features)
+	{
+		forge_net.machines[slot].features = answer.capabilities;
+		platform_log("forge net: machine %ld plays the 1.1.2 Forge features (%x)", machine_index, (unsigned)answer.capabilities);
+		if (forge_net.machines[slot].answer_pending && (answer.capabilities & forge_net_layout_features()) == forge_net_layout_features())
+		{
+			forge_net.machines[slot].answer_pending = FALSE;
+			forge_net.machines[slot].answered = TRUE;
+			platform_log("forge net: machine %ld plays the Forge game (packs ready %x)", machine_index,
+				(unsigned)forge_net.machines[slot].packs_ready);
+		}
+		return;
+	}
+	if (forge_net.machines[slot].answered || forge_net.machines[slot].answer_pending)
 		return;
 	if (answer.version != FORGE_NET_VERSION || !(answer.capabilities & FORGE_NET_CAPABILITY_FORGE))
 	{
@@ -988,8 +1075,18 @@ void forge_net_server_handle_lobby_message(
 			_forge_net_refusal_incapable, _rejection_code_version_too_old);
 		return;
 	}
-	forge_net.machines[slot].answered = TRUE;
 	forge_net.machines[slot].packs_ready = answer.packs_ready;
+	/* (1.1.2: a layout that needs features it has not said it plays: held
+	until it says them, refused if it never does) */
+	if ((forge_net.machines[slot].features & forge_net_layout_features()) != forge_net_layout_features())
+	{
+		forge_net.machines[slot].answer_pending = TRUE;
+		forge_net.machines[slot].answer_time = system_milliseconds();
+		platform_log("forge net: machine %ld answered: the layout needs the 1.1.2 Forge features (%x), waiting for its",
+			machine_index, (unsigned)forge_net_layout_features());
+		return;
+	}
+	forge_net.machines[slot].answered = TRUE;
 	platform_log("forge net: machine %ld plays the Forge game (packs ready %x)", machine_index, (unsigned)answer.packs_ready);
 }
 
@@ -1163,6 +1260,21 @@ void forge_net_client_handle_lobby_message(
 
 		if (!reply || !network_game_client_send_to_server(client, reply))
 			network_event("forge net: the answer could not be sent");
+	}
+	/* (1.1.2: the features this build plays, to a host that has them) */
+	if (hello.version >= FORGE_NET_HOST_VERSION_MARKERS && forge_net_says_features())
+	{
+		struct forge_net_lobby_message features;
+		void *reply;
+
+		csmemset(&features, 0, sizeof(features));
+		features.command = _forge_net_lobby_features;
+		features.version = FORGE_NET_VERSION;
+		features.capabilities = FORGE_NET_FEATURES_KNOWN;
+		features.session = hello.session;
+		reply = create_network_game_message(_message_client_forge, &features, sizeof(features));
+		if (!reply || !network_game_client_send_to_server(client, reply))
+			network_event("forge net: the features could not be sent");
 	}
 	/* (the packs it brings, and the building blocks of the host's map,
 	built meanwhile in the lobby, at the main menu's pace: what is not
@@ -1875,13 +1987,16 @@ static void forge_net_host_request(
 			struct forge_transform home;
 			struct forge_spawn *spawn;
 
-			if (forge_objects_counted() >= FORGE_MAXIMUM_OBJECTS || forge_globals.spawn_count >= FORGE_MAXIMUM_SPAWNS)
+			/* (a teleporter's end: within the teleporters' most too, its channel
+			the host's choice, as its own browser makes one) */
+			if (forge_objects_counted() >= FORGE_MAXIMUM_OBJECTS || forge_globals.spawn_count >= FORGE_MAXIMUM_SPAWNS ||
+				!forge_marker_kind_room(request.aux, NONE, FALSE))
 			{
 				forge_net_refuse(actor, &request, _forge_net_refuse_budget, FORGE_MAXIMUM_OBJECTS, 0);
 				return;
 			}
 			forge_net_transform_to(&request.transform, &home.position, &home.forward, &home.up);
-			spawn = forge_spawn_add(0, request.aux, NONE, 0, &home);
+			spawn = forge_spawn_add(0, request.aux, NONE, 0, forge_marker_new_index(request.aux), &home);
 			if (!spawn)
 			{
 				forge_net_refuse(actor, &request, _forge_net_refuse_cannot_place, 0, 0);
@@ -2323,6 +2438,9 @@ static void forge_net_entry_fill(
 		record->record_flags &= (uint8_t)~(FORGE_RECORD_AI_OFF | FORGE_RECORD_AI_RESPAWN);
 	if (!record->respawn_seconds)
 		record->record_flags &= (uint8_t)~FORGE_RECORD_AI_RESPAWN;
+	/* (its physics in the step, never in the flags an older joiner checks) */
+	record->record_flags &= (uint8_t)FORGE_NET_RECORD_FLAGS_KNOWN;
+	record->step = (int8_t)(placed->ai ? 0 : forge_physics_mode(placed));
 	if (placed->has_home)
 		home = placed->home;
 	else if (forge_object_alive(placed->object_index))
@@ -2351,6 +2469,16 @@ static void forge_net_spawn_entry_fill(
 	record->team = (int8_t)(spawn->team == 0 || spawn->team == 1 ? spawn->team : -1);
 	record->record_flags = spawn->kind == _forge_spawn_initial ? FORGE_NET_SPAWN_INITIAL : 0;
 	record->value = (uint16_t)(spawn->game_types & FORGE_NET_SPAWN_GAME_TYPES_MASK);
+	/* (a later marker: its kind and channel, a joiner of version 4 or
+	before dropping it) */
+	if (spawn->kind >= NUMBER_OF_FORGE_SPAWN_KINDS)
+	{
+		record->flags = FORGE_NET_FLAG_PLAYER_SPAWN | FORGE_NET_FLAG_MARKER;
+		record->aux = (uint8_t)spawn->kind;
+		record->team = -1;
+		record->record_flags = 0;
+		record->value = (uint16_t)spawn->channel;
+	}
 	forge_net_transform_from(&record->transform, &spawn->home.position, &spawn->home.forward, global_up3d);
 }
 
@@ -2389,6 +2517,7 @@ static void forge_net_shadow_entry(
 		before.sequence = entry->sequence = 0;
 		home_only = before.op == entry->op && before.object == entry->object && before.tag == entry->tag &&
 			before.player == entry->player && before.flags == entry->flags && before.team == entry->team &&
+			before.aux == entry->aux &&
 			before.record_flags == entry->record_flags && before.respawn_seconds == entry->respawn_seconds &&
 			before.ai_team == entry->ai_team && before.value == entry->value;
 		if (!home_only || (!forge_net_transforms_near(&before.transform, &entry->transform) &&
@@ -2451,7 +2580,7 @@ static void forge_net_host_broadcast(
 			home_only = before.op == entry.op && before.object == entry.object && before.tag == entry.tag &&
 				before.player == entry.player && before.flags == entry.flags && before.team == entry.team &&
 				before.record_flags == entry.record_flags && before.respawn_seconds == entry.respawn_seconds &&
-				before.ai_team == entry.ai_team;
+				before.ai_team == entry.ai_team && before.step == entry.step;
 			if (!home_only || (!forge_net_transforms_near(&before.transform, &entry.transform) &&
 				now - shadow->entry_time >= FORGE_NET_ENTRY_MILLISECONDS))
 			{
@@ -2489,11 +2618,17 @@ static void forge_net_host_broadcast(
 		}
 	}
 	/* (the player spawn points, to draw: a Forge game's, not a map variant
-	played) */
-	for (index = 0; !forge_net.host_play && index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+	played; the teleporters any game's: they are drawn, and the netgame
+	flags of every machine's game) */
+	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
 	{
 		struct forge_net_record entry;
 
+		if (forge_net.host_play && !forge_spawn_is_teleporter(&forge_globals.spawns[index]) &&
+			!forge_spawn_is_objective(&forge_globals.spawns[index]))
+		{
+			continue;
+		}
 		forge_net_spawn_entry_fill(&forge_globals.spawns[index], &entry);
 		if (forge_net_update_valid(&entry, forge_net.net_count))
 			forge_net_shadow_entry(forge_globals.spawns[index].id, &entry, now);
@@ -2643,9 +2778,15 @@ static void forge_net_host_sync(
 			forge_net_outgoing_add(&forge_net.direct, &record);
 		}
 	}
-	/* (the player spawn points: entries, taken before the end of the sync) */
-	for (index = 0; !forge_net.host_play && index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
+	/* (the player spawn points: entries, taken before the end of the sync;
+	the teleporters in a map variant played too) */
+	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS; index++)
 	{
+		if (forge_net.host_play && !forge_spawn_is_teleporter(&forge_globals.spawns[index]) &&
+			!forge_spawn_is_objective(&forge_globals.spawns[index]))
+		{
+			continue;
+		}
 		forge_net_spawn_entry_fill(&forge_globals.spawns[index], &record);
 		if (forge_net_update_valid(&record, forge_net.net_count))
 		{
@@ -2922,6 +3063,14 @@ static void forge_net_client_spawn(
 	platform_log("forge net: asked the host to spawn %s", forge_tag_leaf(tag_index));
 }
 
+/* (forge_touch.inc) whether the host is still to answer a grab, or its
+object is still to arrive */
+static boolean forge_net_grab_waiting(
+	void)
+{
+	return forge_net_client() && (forge_net.grant_pending || forge_net.grant_id != NONE);
+}
+
 static void forge_net_client_grab(
 	long object_index)
 {
@@ -3033,6 +3182,12 @@ static boolean forge_net_client_property(
 
 	if (property >= _forge_property_yaw && property <= _forge_property_reset_rotation)
 		return FALSE;
+	/* (PHYSICS: of a host of version 7) */
+	if (property == _forge_property_physics && forge_net.host_version < FORGE_NET_HOST_VERSION_PHYSICS)
+	{
+		forge_notice("%s", T("The host's game has no physics settings"));
+		return TRUE;
+	}
 	forge_net_request_init(&record, _forge_net_request_property);
 	if (!forge_net_reference(forge_globals.held_object_index, &record))
 		return TRUE;
@@ -3116,9 +3271,21 @@ static void forge_net_client_spawn_point(
 		forge_notice("%s", T("The host's game has no spawn points"));
 		return;
 	}
+	/* (a later marker - a teleporter's end: of a host of version 5; a game
+	type object: of 6) */
+	if (kind >= NUMBER_OF_FORGE_SPAWN_KINDS && forge_net.host_version < FORGE_NET_HOST_VERSION_MARKERS)
+	{
+		forge_notice("%s", T("The host's game has no teleporters"));
+		return;
+	}
+	if (kind >= _forge_spawn_flag && forge_net.host_version < FORGE_NET_HOST_VERSION_OBJECTIVES)
+	{
+		forge_notice("%s", T("The host's game has no game type objects"));
+		return;
+	}
 	forge_net_request_init(&record, _forge_net_request_spawn);
 	record.flags = FORGE_NET_FLAG_PLAYER_SPAWN;
-	record.aux = (uint8_t)(kind == _forge_spawn_initial ? _forge_spawn_initial : _forge_spawn_respawn);
+	record.aux = (uint8_t)(kind >= 0 && kind < NUMBER_OF_FORGE_MARKER_KINDS ? kind : _forge_spawn_respawn);
 	forge_net_transform_from(&record.transform, &home->position, &home->forward, &home->up);
 	forge_net_request_send(&record);
 	platform_log("forge net: asked the host for a spawn point (%s) at %.2f %.2f %.2f", forge_spawn_kind_log_names[record.aux],
@@ -3359,6 +3526,11 @@ static void forge_net_mirror_take(
 	placed->ai = (record->flags & FORGE_NET_FLAG_AI) != 0;
 	placed->team = record->team;
 	placed->flags = record->record_flags;
+	/* (its physics: the entry's step, or a layout's link's flags) */
+	if (record->step > 0 && record->step < NUMBER_OF_FORGE_PHYSICS_MODES && !placed->ai)
+		placed->flags = (unsigned char)((placed->flags & ~FORGE_RECORD_PHYSICS_MASK) | forge_physics_flags(record->step));
+	if (placed->ai)
+		placed->flags &= (unsigned char)~FORGE_RECORD_PHYSICS_MASK;
 	placed->respawn_seconds = record->respawn_seconds;
 	placed->ai_team = record->ai_team;
 	placed->holder = record->player != FORGE_NET_NO_PLAYER ? record->player : NONE;
@@ -3414,15 +3586,24 @@ static void forge_net_client_update_take(
 			struct forge_spawn *spawn = forge_spawn_of_id((long)record->id);
 			struct forge_transform home;
 			short kind = (record->record_flags & FORGE_NET_SPAWN_INITIAL) ? _forge_spawn_initial : _forge_spawn_respawn;
+			/* (a later marker's: its kind and channel, checked in range) */
+			boolean marker = (record->flags & FORGE_NET_FLAG_MARKER) != 0;
+			short channel = marker ? (short)PIN(record->value, 0, FORGE_TELEPORTER_CHANNELS - 1) : 0;
 
+			if (marker)
+			{
+				kind = (short)PIN(record->aux, NUMBER_OF_FORGE_SPAWN_KINDS, NUMBER_OF_FORGE_MARKER_KINDS - 1);
+				channel = (short)PIN(record->value, 0, forge_net_marker_indices(kind) - 1);
+			}
 			forge_net_transform_to(&record->transform, &home.position, &home.forward, &home.up);
 			if (!spawn)
-				spawn = forge_spawn_add((long)record->id, kind, record->team, record->value, &home);
+				spawn = forge_spawn_add((long)record->id, kind, record->team, marker ? 0 : record->value, channel, &home);
 			if (!spawn)
 				return;
 			spawn->kind = kind;
-			spawn->team = (signed char)(record->team == 0 || record->team == 1 ? record->team : NONE);
-			spawn->game_types = (unsigned short)(record->value & FORGE_FILE_SPAWN_GAME_TYPES_MASK);
+			spawn->team = (signed char)(!marker && (record->team == 0 || record->team == 1) ? record->team : NONE);
+			spawn->game_types = (unsigned short)(marker ? 0 : record->value & FORGE_FILE_SPAWN_GAME_TYPES_MASK);
+			spawn->channel = channel;
 			/* (the one held here: where the host has it once let go) */
 			if (spawn->id != forge_globals.held_marker_id)
 			{

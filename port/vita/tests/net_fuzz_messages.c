@@ -185,6 +185,44 @@ network_messages.c) */
 		__builtin_free(decoded);
 	}
 	__builtin_printf("%s every message type decodes into its own structure as encoded\n", failures ? "FAIL" : "PASS");
+	/* the join request of OpenCE's 40: the bytes of every other wire's, 234
+	zeros, the type; and every other wire's unchanged */
+	{
+		byte structure[sizeof(message_client_join_game_request)];
+		static byte plain[0x200], padded[0x200];
+		long plain_size, padded_size, index;
+		boolean good;
+		byte *message;
+
+		for (index = 0; index < (long)sizeof(structure); index++)
+			structure[index] = (byte)(index % 251 + 1);
+		message = create_network_game_message(_message_client_join_game_request, structure, (short)sizeof(structure));
+		plain_size = message ? GET_MESSAGE_SIZE(*(message_header *)message) - (long)sizeof(message_header) : 0;
+		if (plain_size > 0 && plain_size <= (long)sizeof(plain))
+			__builtin_memcpy(plain, message + sizeof(message_header), (size_t)plain_size);
+		message = create_network_game_join_request_padded(structure, (short)sizeof(structure), 234);
+		padded_size = message ? GET_MESSAGE_SIZE(*(message_header *)message) - (long)sizeof(message_header) : 0;
+		if (padded_size > 0 && padded_size <= (long)sizeof(padded))
+			__builtin_memcpy(padded, message + sizeof(message_header), (size_t)padded_size);
+		good = sizeof(structure) == 0x70 && plain_size >= 0x71 && padded_size == plain_size + 234 &&
+			!__builtin_memcmp(plain, padded, (size_t)plain_size - 1) && padded[padded_size - 1] == plain[plain_size - 1];
+		for (index = plain_size - 1; good && index < padded_size - 1; index++)
+			good = padded[index] == 0;
+		good = good && plain[plain_size - 1] == (byte)_message_client_join_game_request;
+		if (!good)
+		{
+			__builtin_printf("FAIL the join request of 40 (%ld and %ld bytes)\n", plain_size, padded_size);
+			failures++;
+		}
+		__builtin_printf("%s the join request of 40: 346 bytes, the older wires' 112 unchanged (%ld and %ld with the version and type bytes)\n",
+			good ? "PASS" : "FAIL", padded_size, plain_size);
+		good = !create_network_game_join_request_padded(structure, (short)sizeof(structure), 0x7000);
+		if (!good)
+		{
+			__builtin_printf("FAIL zeros past the buffer not refused\n");
+			failures++;
+		}
+	}
 	for (type = 0; folder && type < group->packet_type_count; type++)
 	{
 		long structure_size;

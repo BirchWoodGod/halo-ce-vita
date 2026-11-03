@@ -237,6 +237,7 @@ symbols in this file:
 #include "data.h"
 #include "devices/devices.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "network_game_record.h" /* port: port/linux/game/network_game_record.c */
 #include "../../port/linux/src/lang.h" /* port: port/linux/src/lang.c */
 #include "cutscene/cinematics.h" /* port: network co-op's first spawns */
 #include "editor/editor_stubs.h"
@@ -4955,7 +4956,9 @@ void players_update_after_game(
 		players_coop_state.structure_bsp_index = global_structure_bsp_index;
 		players_coop_state.bsp_switch_time = game_time_get();
 	}
-	if (network_coop_active() && network_game_distributed_client())
+	/* (a dedicated server has no player to wait for: it tells the players
+	what it needs by its notices) */
+	if (network_coop_active() && network_game_distributed_client() && !network_game_record_host_is_dedicated())
 		players_coop_show_host_wait();
 
 	data_iterator_new(&iterator, player_data);

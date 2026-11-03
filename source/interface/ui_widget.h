@@ -177,6 +177,19 @@ boolean ui_widget_port_text_too_wide(
 	struct widget_instance *widget,
 	wchar_t const *text,
 	short width);
+/* port: a text box's room and what the text takes there, wrapped as drawn */
+boolean ui_widget_port_text_measure(
+	struct widget_instance *widget,
+	wchar_t const *text,
+	short *room_width,
+	short *room_height,
+	short *text_width,
+	short *text_height);
+/* port: a text box's left and right in its parent */
+void ui_widget_port_text_box_span(
+	struct widget_instance *widget,
+	short *left,
+	short *right);
 /* port: the width of a text box (its bounds) */
 short ui_widget_port_text_box_width(
 	struct widget_instance *widget);

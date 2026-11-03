@@ -759,6 +759,17 @@ static void pack_window_note(long change)
 	pack_window_free_least = MIN(pack_window_free_least, largest);
 }
 
+/* (scene_pack_heap_room) whether the C heap has size bytes and 8 MB over:
+the system's libraries and the renderer share it, so the backdrop's build takes
+from it only what leaves that much */
+static boolean pack_heap_room(unsigned long size)
+{
+	unsigned long in_use, capacity;
+
+	platform_heap_usage(&in_use, &capacity);
+	return capacity > in_use && capacity - in_use >= size + 8ul * 1024 * 1024;
+}
+
 static void *pack_window_alloc(unsigned long size)
 {
 	void *data;
@@ -922,6 +933,7 @@ static void packs_prepare(struct scene_pack_slot **slots, short count, unsigned 
 			scene_pack_big_free = pack_window_free;
 			scene_pack_big_grow = pack_window_grow;
 			scene_pack_big_only = TRUE;
+			scene_pack_heap_room = pack_heap_room;
 		}
 		/* (a source map's tag data larger than the tag cache's free room -
 the menus' backdrop loaded beside the menus takes 8.7 MB of it - read into
@@ -943,6 +955,7 @@ the memory window, not the C heap) */
 		scene_pack_big_free = NULL;
 		scene_pack_big_grow = NULL;
 		scene_pack_big_only = FALSE;
+		scene_pack_heap_room = NULL;
 		(void)built;
 		for (index = 0; index < group_count; index++)
 		{

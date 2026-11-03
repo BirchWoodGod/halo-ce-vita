@@ -57,6 +57,10 @@
 #            game type list, nothing but Halo 3 screens -; B: the multiplayer
 #            lobby; Menu style Halo CE's CREATE GAME INTERNET still
 #            OpenCE's Server Setup (HALO_TEST_SHOTS: the lobby's pictures)
+#   touchdrag  a finger's drag (HALO_TEST_TAPS' drags, as the Vita's front screen's) in each
+#            Menu style: the games browser's 16 games move under it, the row in focus
+#            staying, stopping at the end and at the top, never wrapping, and no game
+#            picked; the Halo CE main menu's rows are stepped, stopping at the first
 #   h3mptouch  taps: MULTIPLAYER, the lobby's MAP, BLOOD GULCH in its picker,
 #            the lobby's Back
 #   h3coop   co-op from the Halo 3 campaign lobby (HALO_TEST_PROFILE; skipped
@@ -480,7 +484,7 @@ menus_data=${HALO_TEST_DATA_MENUS:-$root/../triage/menus/data}
 out=${HALO_TEST_OUT:-${TMPDIR:-/tmp}/halo_menus_test.$$}
 . "$here/test_out.sh"
 test_out_begin "$out"
-all_cases="fresh level xbox pause h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows onlinegridnav h3models h3modelswitch h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3hostbots h3livelobby h3groups browserreopen h3nonet h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain ceplusmp ceplusprofile cepluspregame cepluspause ceplusforge h3scoreboard"
+all_cases="fresh level xbox pause touchdrag h3renamed pausesave h3probe h3classic h3xbox h3broken h3style h3online h3touch h3campaign h3resume h3pause h3mp h3browser h3create h3mptouch h3coop h3coopguide h3scenes h3profiles h3proftouch h3customize h3customrows onlinegridnav h3models h3modelswitch h3nameplate h3damaged h3mods h3modspicker h3modstouch h3mpcustom h3lan h3adhoc h3adhoccoop h3oddrows h3lobbyscenes h3modelsmany h3friends h3friendsbackup h3friendspanel h3partyplates h3party h3partyonline browserprofile h3players browserrows profilepaths h3mppause h3friendsfit h3hostonline h3hostbots h3livelobby h3groups browserreopen h3nonet h3livebrowse profileio h3vitapc h3createwho h3carnage h3gametypes h3offline h3offlineend msgboxes ceplusmain ceplusmp ceplusprofile cepluspregame cepluspause ceplusforge h3scoreboard"
 # (the PC build's own, asked for by name: not in the default list)
 pc_cases="pctext pcclassic pcnoadhoc"
 cases=${*:-$all_cases}
@@ -892,6 +896,52 @@ for case in $cases; do
 		run h3nonet "$menus_data" 60 "$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:1500 a wait:150:800 a wait:150:1500 a wait:150:800 a wait:150:1500 a wait:150:800 a wait:150:1500 a wait:150:800 b wait:150:1500" \
 			HALO_MENU_STYLE=halo3 $h3net
 		check_h3 h3nonet halo3 ;;
+	touchdrag)
+		skip_null touchdrag "drags" && continue
+		for style in halo3 online; do
+			# (the browser, as h3browser reaches it, the Online style's first row; a finger up
+			# 3 rows' worth, up past the end, down past the top)
+			case $style in
+			halo3) reach="$h3mppad down:150:500 down:150:500 down:150:500 down:150:500 down:150:500 a wait:150:3000 a wait:150:2000 a wait:150:2000 a wait:150:5000" ;;
+			online) reach="wait:150:3000 a wait:150:3000 a wait:150:3000" ;;
+			esac
+			run touchdrag_$style "$menus_data" 46 "$reach wait:150:28000" \
+				HALO_MENU_STYLE=$style $h3net HALO_TEST_BROWSER_GAMES=16 HALO_TEST_BROWSER_PC=1 \
+				"HALO_TEST_TAPS=28000:320,320>320,240 31000:320,380>320,80 34000:320,80>320,380 37000:320,380>320,80"
+			log=$out/touchdrag_$style/run.log
+			echo "--- touchdrag_$style"
+			[ "$(cat "$out/touchdrag_$style/exit")" = 0 ] || fail touchdrag_$style "exit $(cat "$out/touchdrag_$style/exit")"
+			grep -aqiE "assert|exception|halt" "$log" && fail touchdrag_$style "an assertion, exception or halt"
+			[ "$(grep -ac 'menus: a drag on the list' "$log")" -ge 4 ] || fail touchdrag_$style "the drags were not taken as drags"
+			[ "$(grep -ac "menus: a drag's step" "$log")" = 0 ] || fail touchdrag_$style "a list of the port's was stepped, not moved"
+			grep -a "menus: the server browser's game .* chosen\|test drag" "$log" | sed 's/^halo-linux: //' > "$out/touchdrag_$style/chosen.txt"
+			chosen=$out/touchdrag_$style/chosen.txt
+			# (rows move: the first row's number changes, the choice's row on the screen stays)
+			sed -n '/test drag: 320,320 to 320,240/,/test drag: 320,380 to 320,80/p' "$chosen" | grep -q "rows from [2-9]" ||
+				fail touchdrag_$style "the first drag did not move the rows"
+			# (the second, 12 rows' worth from row 4 of 18: the end of the list, no wrap)
+			sed -n '/test drag: 320,380 to 320,80/,/test drag: 320,80 to 320,380/p' "$chosen" | grep -q "rows from 7" ||
+				fail touchdrag_$style "the long drag did not reach the end"
+			sed -n '/test drag: 320,380 to 320,80/,$p' "$chosen" | grep -q "game 1 of 16.*rows from 7" &&
+				fail touchdrag_$style "the drag wrapped"
+			# (down past the top: the first rows)
+			sed -n '/test drag: 320,80 to 320,380/,/test drag: 320,380 to 320,80/p' "$chosen" | grep -q "rows from 1)" ||
+				fail touchdrag_$style "the drag down did not reach the top"
+			grep -aq "Halo 3 screen h3/password/screen for\|menus: joining" "$log" && fail touchdrag_$style "a drag picked a game"
+		done
+		# (the Halo CE style's own rows: the d-pad's steps, stopping at the list's first)
+		run touchdrag_classic "$menus_data" 16 "wait:150:13000" HALO_MENU_STYLE=classic \
+			"HALO_TEST_TAPS=5000:320,180>320,380 8000:320,380>320,180"
+		log=$out/touchdrag_classic/run.log
+		[ "$(grep -ac "menus: a drag's step" "$log")" -ge 1 ] || fail touchdrag_classic "no step of the game's own list"
+		grep -aE "menus: a drag|test drag|ui: screen" "$log" | cut -c1-80 > "$out/touchdrag_classic/steps.txt"
+		# (the finger down steps the highlight on down the list, the finger up back; none after the other way)
+		sed -n '/test drag: 320,180 to 320,380/,/test drag: 320,380 to 320,180/p' "$out/touchdrag_classic/steps.txt" | grep -q "drag's step on" ||
+			fail touchdrag_classic "a finger down did not step the highlight down"
+		sed -n '/test drag: 320,180 to 320,380/,/test drag: 320,380 to 320,180/p' "$out/touchdrag_classic/steps.txt" | grep -q "drag's step back" &&
+			fail touchdrag_classic "a finger down stepped the highlight up"
+		sed -n '/test drag: 320,380 to 320,180/,$p' "$out/touchdrag_classic/steps.txt" | grep -q "drag's step back" ||
+			fail touchdrag_classic "a finger up did not step the highlight up" ;;
 	h3browser)
 		# (down five to BROWSE GAMES, A: the profile (A joins, A the profile, A): the games
 		# browser; A on the first game - the fullest Vita game, locked -: its password; A: typed,
@@ -3421,8 +3471,8 @@ PY
 		grep -aE "ui: screen|menus: h3 gametypes" "$log" | head -8
 		[ "$(cat "$out/ceplusmp_gametypes/exit")" = 0 ] || fail ceplusmp "gametypes: exit $(cat "$out/ceplusmp_gametypes/exit")"
 		grep -aqiE "assert|exception|halt_and_catch_fire" "$log" && fail ceplusmp "gametypes: an assertion, exception or halt"
-		grep -aq "ui: screen pc.h3.gametypes.screen" "$log" || fail ceplusmp "GAMETYPES PLUS did not open GAME TYPES"
-		sed -n '/ui: screen pc.h3.gametypes.screen/,$p' "$log" | grep -aq "ui: screen pc.mp.screen" ||
+		grep -aq "ui: screen pc.cp.gametypes.screen" "$log" || fail ceplusmp "GAMETYPES PLUS did not open GAME TYPES (Classic+'s: classic/standins.xml)"
+		sed -n '/ui: screen pc.cp.gametypes.screen/,$p' "$log" | grep -aq "ui: screen pc.mp.screen" ||
 			fail ceplusmp "B did not go back to the Multiplayer screen"
 		# (Create Game Internet, the fourth row: Server Setup; down five to BOTS - OFF, the tests' -,
 		# right: 1; down, START GAME)
@@ -3504,8 +3554,8 @@ PY
 			fail cepluspregame "MAP VARIANT did not step through Blood Gulch's variants"
 		grep -aq "forge net: hosting a game of a map variant of levels.test.bloodgulch.bloodgulch" "$log" ||
 			fail cepluspregame "the map variant was not hosted (the joiners asked to play it)"
-		sed -n '/ui: screen pc.ce.lobby.screen/,$p' "$log" | grep -aq "ui: screen pc.h3.players.screen" ||
-			fail cepluspregame "PLAYERS did not open the players' screen"
+		sed -n '/ui: screen pc.ce.lobby.screen/,$p' "$log" | grep -aq "ui: screen pc.cp.players.screen" ||
+			fail cepluspregame "PLAYERS did not open the players' screen (Classic+'s: classic/players.xml)"
 		grep -a "ui: screen" "$log" | tail -1 | grep -q "connected_pregame_screen" ||
 			fail cepluspregame "B, B did not go back to the pregame" ;;
 	cepluspause)
@@ -3525,9 +3575,9 @@ PY
 		grep -aqE "menus: Menu style Halo CE: the Xbox screens' [0-9]+ widgets with the port's rows" <(sed -n '/new map: loading/,$p' "$log") ||
 			fail cepluspause "the level's Xbox pause was not given the port's rows"
 		grep -aq "ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game" "$log" || fail cepluspause "Start did not open the Xbox's pause"
-		sed -n '/ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game/,$p' "$log" | grep -aq "ui: screen pc.h3.players.screen" ||
-			fail cepluspause "PLAYERS did not open the players' screen"
-		sed -n '/ui: screen pc.h3.players.screen/,$p' "$log" | grep -aq "ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game" ||
+		sed -n '/ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game/,$p' "$log" | grep -aq "ui: screen pc.cp.players.screen" ||
+			fail cepluspause "PLAYERS did not open the players' screen (Classic+'s: classic/players.xml, over the level)"
+		sed -n '/ui: screen pc.cp.players.screen/,$p' "$log" | grep -aq "ui: screen ui.shell.multiplayer_game.pause_game.1p_pause_game" ||
 			fail cepluspause "B did not go back to the pause"
 		grep -aq "menus: h3 mp pause: the Party page asked for" "$log" || fail cepluspause "PARTY did not ask for the Party page"
 		grep -aq "requesting a player removal" "$out/cepluspause/data/debug.txt" 2>/dev/null &&

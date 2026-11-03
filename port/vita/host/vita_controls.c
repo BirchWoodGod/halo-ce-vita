@@ -19,6 +19,9 @@ The zones, in the screen's 960 x 544 pixels:
 	rear, right half    520..960 x all      (a strip between the two counts
 	                                         for neither)
 The bottom corners are left alone: the motion tracker is bottom left.
+Forge's monitor turns the zones off and takes the front screen for its
+fingers, but for a finger that comes down in a zone, which counts for nothing
+(vita_pad.c vita_pad_forge_touch, port/linux/game/forge_touch.inc).
 
 The rear pad is where the hands holding the Vita rest, so its fingers go
 through a guard (the panel's Rear touch guard): one that comes down in the
@@ -591,11 +594,25 @@ int vita_gyro_take(struct vita_gyro_state *state, const struct vita_gyro_config 
 
 /* ---------- the menus' pointer (vita_controls.h) */
 
+void vita_touch_to_menus(int screen_width, int touch_x, int touch_y, short *x, short *y)
+{
+	int drawn_width, left;
+
+	if (screen_width < 640)
+		screen_width = 640;
+	drawn_width = screen_width * VITA_TOUCH_HEIGHT / 480;
+	if (drawn_width > VITA_TOUCH_WIDTH)
+		drawn_width = VITA_TOUCH_WIDTH;
+	left = (VITA_TOUCH_WIDTH - drawn_width) / 2;
+	*x = (short)((touch_x - left) * screen_width / drawn_width - (screen_width - 640) / 2);
+	*y = (short)(touch_y * 480 / VITA_TOUCH_HEIGHT);
+}
+
 int vita_touch_pointer(struct vita_touch_pointer *pointer, const struct vita_touch_contact *contacts, int count,
 	unsigned long long now_us, int screen_width, short *x, short *y, int *tap, int *moved)
 {
 	const struct vita_touch_contact *finger = NULL;
-	int index, drawn_width, left;
+	int index;
 
 	*tap = 0;
 	*moved = 0;
@@ -613,14 +630,7 @@ int vita_touch_pointer(struct vita_touch_pointer *pointer, const struct vita_tou
 		*tap = now_us - pointer->since <= VITA_TAP_MICROSECONDS;
 		return 1;
 	}
-	if (screen_width < 640)
-		screen_width = 640;
-	drawn_width = screen_width * VITA_TOUCH_HEIGHT / 480;
-	if (drawn_width > VITA_TOUCH_WIDTH)
-		drawn_width = VITA_TOUCH_WIDTH;
-	left = (VITA_TOUCH_WIDTH - drawn_width) / 2;
-	*x = (short)((finger->x - left) * screen_width / drawn_width - (screen_width - 640) / 2);
-	*y = (short)(finger->y * 480 / VITA_TOUCH_HEIGHT);
+	vita_touch_to_menus(screen_width, finger->x, finger->y, x, y);
 	if (!pointer->down || pointer->id != finger->id)
 	{
 		pointer->down = 1;

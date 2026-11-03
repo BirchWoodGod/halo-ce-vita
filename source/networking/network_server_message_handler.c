@@ -272,6 +272,7 @@ symbols in this file:
 #include "network_wire.h"
 #include "main/main.h"
 #include "custom_edition_maps.h"
+#include <stdlib.h>
 /* system_milliseconds(), for the settings update interval */
 #include "cseries/cseries_windows.h"
 
@@ -780,6 +781,22 @@ boolean network_game_server_send_message_to_client_machine(
 	return network_game_server_write(connection, buffer, size, NULL, 1);
 }
 
+/* port: (automated tests only, never in release builds) HALO_TEST_HOST_REFUSE:
+this host, a stand-in for a dedicated server of OpenCE's, refuses every
+joiner with that code (run_netns_crossplay_test.sh opencerefuse); -1 none */
+static long network_game_server_test_refusal(
+	struct transport_address const *source_address)
+{
+#ifndef HALO_RELEASE
+	const char *value = getenv("HALO_TEST_HOST_REFUSE");
+
+	/* (never this machine's own client: its game is the stand-in) */
+	if (value && value[0] && source_address->address.long_words[0] != 0x7F000001)
+		return strtol(value, NULL, 10) & 0xFFFF;
+#endif
+	return -1;
+}
+
 /* port: the game settings record (struct network_game) as the wire sends
 it: the legacy Vita wire's 13,092 bytes, or the crossplay wire's 13,120
 (network_game_record.c); its size in game_size. NULL if it cannot be. */
@@ -787,7 +804,8 @@ static void const *network_game_server_settings_on_wire(
 	void const *game,
 	long *game_size)
 {
-	static byte record[HALO_PORT_NETWORK_GAME_SIZE];
+	/* (and room for a test's stand-in, below) */
+	static byte record[HALO_PORT_NETWORK_GAME_SIZE + 16];
 	short format = network_game_record_format_current();
 
 	if (*game_size != sizeof(struct network_game) ||
@@ -795,7 +813,7 @@ static void const *network_game_server_settings_on_wire(
 	{
 		return NULL;
 	}
-	*game_size = network_game_record_size(format);
+	*game_size = network_game_record_test_stand_in(record, network_game_record_size(format), (long)sizeof(record));
 	return record;
 }
 
@@ -2160,7 +2178,7 @@ static boolean network_game_server_handle_message_client_join_game_request(
 				FALSE);
 			if ((network_game_server_get_state(server, NULL) == _network_game_server_state_pregame || late_join) &&
 				network_game_server_game_is_open(server) &&
-				!full)
+				!full && network_game_server_test_refusal(&source_address) < 0)
 			{
 				byte join_game_token[JOIN_GAME_TOKEN_LENGTH];
 
@@ -2347,6 +2365,8 @@ static boolean network_game_server_handle_message_client_join_game_request(
 				struct network_message *reply;
 
 				rejection.reason = full ? _rejection_code_game_is_full : _network_game_server_rejection_reason_game_not_open;
+				if (network_game_server_test_refusal(&source_address) >= 0)
+					rejection.reason = (word)network_game_server_test_refusal(&source_address);
 				network_event(
 					"client machine '%s' @%s tried to join game when they should not be",
 					join_game_request.machine_name,

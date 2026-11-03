@@ -410,6 +410,12 @@ static const struct config_setting config_settings[] =
 		"private, with room (the join goes to each friend alone, sealed; never\n"
 		"to a stranger or a blocked player); a game with a password asks them\n"
 		"for it, unless its host invited them." },
+	{ "friends.fileshare", _config_boolean, "true", "HALO_FRIENDS_FILESHARE", _environment_value, _platform_all,
+		"Share with friends (File Share, port/linux/src/p2p_fileshare.h): friends\n"
+		"may browse the map variants and game variants you mark shared and\n"
+		"download them, and you can send a variant to a friend and take one\n"
+		"(asked each time; every file checked before it is saved). False: no\n"
+		"friend sees your files, and none is sent or taken." },
 	{ "network.public_lobby", _config_boolean, "true", "HALO_NET_PUBLIC_LOBBY", _environment_value, _platform_all,
 		"The server browser: public games are listed through the signalling\n"
 		"brokers, and the settings panel's Browse public games shows them.\n"
@@ -560,6 +566,14 @@ static const struct config_setting config_settings[] =
 		"offers no Vita, and takes \"vita\" as Vita PC). Taken as a game is\n"
 		"hosted; never everyone in ad hoc play. Best effort: a modified\n"
 		"client can say it is a Vita (docs/crossplay.md)." },
+	{ "network.crossplay_updates", _config_boolean, "true", "HALO_NET_CROSSPLAY_UPDATES", _environment_value,
+		_platform_all,
+		"Keep the list of OpenCE's network versions this game can join up to\n"
+		"date: at start, and once a day while internet play is on, it fetches\n"
+		"the owner's signed crossplay version table from GitHub (a few hundred\n"
+		"bytes, never code; kept beside the saves). false uses the list this\n"
+		"version was released with, and the last table kept. On a PC,\n"
+		"update.auto = false turns it off too." },
 	{ "network.host_crossplay", _config_boolean, "false", "HALO_NET_HOST_CROSSPLAY", _environment_value, _platform_all,
 		"Retired (Oct 20 2026) for network.who_can_join: read only when that\n"
 		"is empty, true as \"everyone\" (what was \"Vitas and PC\")." },
@@ -929,6 +943,43 @@ int config_file_write(const char *path, const char *text, size_t size)
 	return config_write_file_length(path, text, size);
 }
 
+int config_file_replace(const char *path, const char *text, size_t size)
+{
+#ifdef HALO_NOT_DESKTOP
+	return config_write_file_length(path, text, size);
+#else
+	char temporary[1100];
+
+	if (snprintf(temporary, sizeof(temporary), "%s.new", path) >= (int)sizeof(temporary))
+		return 0;
+	if (SDL_SaveFile(temporary, text, size) && SDL_RenamePath(temporary, path))
+		return 1;
+	SDL_RemovePath(temporary);
+	return 0;
+#endif
+}
+
+long long config_file_size(const char *path)
+{
+#ifdef HALO_NOT_DESKTOP
+	struct posix_file_information information;
+
+	return posix_stat(path, &information) == 0 ?
+		(long long)((unsigned long long)information.size_high << 32 | information.size_low) : -1;
+#else
+	/* (not SDL_GetPathInfo: this file's -malign-double lays out its structure
+	otherwise than SDL's own build) */
+	SDL_IOStream *file = SDL_IOFromFile(path, "rb");
+	long long size;
+
+	if (!file)
+		return -1;
+	size = (long long)SDL_GetIOSize(file);
+	SDL_CloseIO(file);
+	return size;
+#endif
+}
+
 /* whether there is a file (or anything) at path */
 static int config_file_exists(const char *path)
 {
@@ -944,7 +995,7 @@ static int config_file_exists(const char *path)
 /* (a start after a write stopped between taking the old file away and
 putting the new one in place: the new one, whole - config_write_file_length
 removes the old one only once the new one is on the card) */
-static void config_file_settle(const char *path)
+void config_file_settle(const char *path)
 {
 #ifdef HALO_NOT_DESKTOP
 	char temporary[1100];

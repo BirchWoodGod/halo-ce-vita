@@ -175,11 +175,11 @@
 		<data input="port forge title" />
 	</widget>
 	<widget name="online/forge/pause/column" left="28" top="122" width="236" height="256" bitmap="online/f_panel" />
-	<widget name="online/forge/pause/status" type="text" left="36" top="382" width="236" height="64" font="online/font_small" color="#FF9FD8FF" />
-	<widget name="online/forge/pause/controls_panel" left="280" top="150" width="320" height="194" bitmap="online/f_panel" />
+	<widget name="online/forge/pause/status" type="text" left="36" top="382" width="508" height="64" font="online/font_small" color="#FF9FD8FF" />
+	<widget name="online/forge/pause/controls_panel" left="280" top="150" width="320" height="224" bitmap="online/f_panel" />
 	<widget name="online/forge/pause/controls_caption" type="text" left="292" top="156" width="296" height="16" font="online/font_small" color="#FF9FB6CC" string_list="h3/forge_menu" string_index="6" />
 	<widget name="online/forge/pause/controls_rule" left="292" top="174" width="296" height="2" bitmap="online/f_rule" />
-	<widget name="online/forge/pause/controls" type="text" left="292" top="180" width="304" height="160" font="online/font_small" color="#FFD3CBC3">
+	<widget name="online/forge/pause/controls" type="text" left="292" top="180" width="304" height="190" font="online/font_small" color="#FFD3CBC3">
 		<data input="port forge controls" />
 	</widget>
 	<widget name="online/forge/pause/list" type="column_list" flags="pass_unhandled_to_focused_child up_down_tabs_items">

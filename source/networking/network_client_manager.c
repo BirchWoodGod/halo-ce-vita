@@ -870,9 +870,11 @@ static long network_game_client_advertised_wire(
 	version = network_game_client_advertised_versions[game_index].version;
 	flags = network_game_client_advertised_versions[game_index].flags;
 	game_wire = network_wire_of_version(version);
+	/* (the flags' meanings by the rules the version plays: a version the
+	crossplay version table adds, by its built-in one's) */
 	if (platform)
 		*platform = crossplay_guard_platform_of_advertisement(game_wire == 1, game_wire < 0 &&
-			version != HALO_PORT_NETWORK_VERSION, version, flags);
+			version != HALO_PORT_NETWORK_VERSION, network_wire_rules_version(version), flags);
 	return game_wire;
 }
 
@@ -3009,6 +3011,32 @@ void network_game_client_rejected_by_game(
 		reason = network_wire_rejection_is_name_refused(rejection_code) ? "name refused (OpenCE 39)" :
 			"_rejection_code_vitas_only";
 		break;
+
+	/* (port: OpenCE's 40 and 41; only its dedicated servers send them, and
+	a number the host makes up stays "<unknown>", the generic failure) */
+	case NETWORK_WIRE_REJECTION_VPN_LINK_REQUIRED:
+		reason = "vpn link required (OpenCE 40)";
+		break;
+
+	case NETWORK_WIRE_REJECTION_VPN_BLOCKED:
+		reason = "vpn blocked (OpenCE 40)";
+		break;
+
+	case NETWORK_WIRE_REJECTION_VPN_LINK_INVALID:
+		reason = "vpn link invalid (OpenCE 40)";
+		break;
+
+	case NETWORK_WIRE_REJECTION_VPN_LINK_TOO_NEW:
+		reason = "vpn link too new (OpenCE 40)";
+		break;
+
+	case NETWORK_WIRE_REJECTION_VPN_LINK_IN_USE:
+		reason = "vpn link in use (OpenCE 40)";
+		break;
+
+	case NETWORK_WIRE_REJECTION_ADDRESS_FULL:
+		reason = "address full (OpenCE 41)";
+		break;
 	}
 
 	network_event(
@@ -3031,6 +3059,16 @@ void network_game_client_rejected_by_game(
 	}
 	else if (rejection_code == _rejection_code_vitas_only)
 		platform_show_message(T("Halo: cannot join this game"), crossplay_guard_vitas_only_text());
+	/* (a fixed text by the code: nothing of the host's is shown, and the
+	join ends below like any refusal, never tried again by itself) */
+	else if (network_wire_rejection_text(rejection_code))
+	{
+		void menu_functions_join_refused(void);
+
+		platform_show_message(T("Halo: cannot join this game"), network_wire_rejection_text(rejection_code));
+		/* (menu style Halo 3: back to the games browser, with the message) */
+		menu_functions_join_refused();
+	}
 #endif
 	/* port: the join went to the pregame screen at once (and a machine
 	refused a game in progress, network_game_server_refuse_late_joiner, is in
@@ -3231,9 +3269,9 @@ joins, whose join is refused with the player told why
 		{
 			long game_index = advertised_game - available_games;
 
-			network_game_client_advertised_versions[game_index].version = (word)(
-				advertisement->__unknown5A[HALO_PORT_ADVERTISED_VERSION_OFFSET] |
-				(advertisement->__unknown5A[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] << 8));
+			network_game_client_advertised_versions[game_index].version = (word)network_wire_version_heard(
+				(unsigned int)(advertisement->__unknown5A[HALO_PORT_ADVERTISED_VERSION_OFFSET] |
+				(advertisement->__unknown5A[HALO_PORT_ADVERTISED_VERSION_OFFSET + 1] << 8)));
 			network_game_client_advertised_versions[game_index].flags =
 				advertisement->__unknown5A[HALO_PORT_ADVERTISED_FLAGS_OFFSET];
 			network_game_client_advertised_versions[game_index].difficulty =
@@ -3626,6 +3664,7 @@ static boolean network_game_client_idle_joining(
 			{
 				struct message_client_join_game_request join_game_request;
 				message_header *message;
+				short join_request_padding;
 
 				csmemset(&join_game_request, 0, sizeof(join_game_request));
 				network_game_generate_local_machine_name(join_game_request.machine_name);
@@ -3653,10 +3692,19 @@ static boolean network_game_client_idle_joining(
 					csmemcpy(join_game_request.hardware_id, hardware_id, csstrlen(hardware_id));
 				}
 
-				message = create_network_game_message(
-					_message_client_join_game_request,
-					&join_game_request,
-					sizeof(join_game_request));
+				/* (port: to a host of 40 or more, 234 more bytes, all zero:
+				the one message that differs by version, here and not in the
+				message table every other wire shares: network_messages.h) */
+				join_request_padding = (short)network_wire_join_request_padding();
+				message = join_request_padding ?
+					create_network_game_join_request_padded(
+						&join_game_request,
+						sizeof(join_game_request),
+						join_request_padding) :
+					create_network_game_message(
+						_message_client_join_game_request,
+						&join_game_request,
+						sizeof(join_game_request));
 				if (message)
 				{
 					if (network_game_client_write(
@@ -3666,6 +3714,7 @@ static boolean network_game_client_idle_joining(
 						NULL,
 						1))
 					{
+						network_event("sent a join request of %d bytes", (int)sizeof(join_game_request) + join_request_padding);
 						SET_FLAG(
 							client->flags,
 							_network_game_client_join_request_sent_bit,
@@ -3937,7 +3986,8 @@ boolean network_game_client_advertised_game_compatible(
 	boolean vita_host;
 	boolean vita_client = FALSE;
 	char message[600];
-	char joined[32];
+	char joined[96];
+	char refusal[96];
 	long game_wire;
 	int platform = CROSSPLAY_PLATFORM_VITA;
 
@@ -3977,7 +4027,16 @@ boolean network_game_client_advertised_game_compatible(
 		host's, else the newest) */
 		ours = network_wire_crossplay_version_near(theirs);
 		network_wire_crossplay_versions_text(joined, (int)sizeof(joined));
-		if (distributed && theirs < ours)
+		/* (port: what the signed crossplay version table says of it, when it
+		names it: netversion_table.h) */
+		if (network_wire_crossplay_refusal(theirs, refusal, (int)sizeof(refusal)))
+		{
+			snprintf(message, sizeof(message),
+				T("This PC game's network version (%u) can't be joined: %s.\n\n"
+				"Join another game."),
+				theirs, refusal);
+		}
+		else if (distributed && theirs < ours)
 		{
 			snprintf(message, sizeof(message),
 				T("This PC game's host runs an older version of OpenCE or ChupathingyCE (network version %u). "
@@ -4002,9 +4061,10 @@ boolean network_game_client_advertised_game_compatible(
 		}
 		if (tell)
 		{
-			network_event("not joining a host of network version %u%s (crossplay: this machine joins %s)%s", theirs,
+			network_event("not joining a host of network version %u%s (crossplay: this machine joins %s)%s%s", theirs,
 				distributed ? "" : " with the lockstep netcode", joined,
-				distributed && theirs < ours ? ": an older PC build" : distributed ? ": a newer PC build" : "");
+				refusal[0] ? ": the crossplay version table says " : distributed && theirs < ours ? ": an older PC build" :
+				distributed ? ": a newer PC build" : "", refusal);
 			platform_show_message(T("Halo: cannot join this game"), message);
 		}
 		return FALSE;
@@ -4299,7 +4359,7 @@ short network_game_client_listed_games(
 					(long)sizeof(game->map.name), game->engine_type);
 #ifdef HALO_PORT_VITA_NETWORK
 				listed->dedicated = crossplay_guard_advertised_dedicated(listed->crossplay,
-					network_game_client_advertised_versions[game_index].version,
+					network_wire_rules_version(network_game_client_advertised_versions[game_index].version),
 					network_game_client_advertised_versions[game_index].flags) != 0;
 #endif
 			}

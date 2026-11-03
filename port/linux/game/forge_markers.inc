@@ -56,7 +56,7 @@ enum
 	_forge_marker_player_spawn,
 	/* (the map's own: grey) */
 	_forge_marker_map_spawn,
-	NUMBER_OF_FORGE_MARKER_KINDS
+	NUMBER_OF_FORGE_MARKER_DRAW_KINDS
 };
 
 /* ---------- structures */
@@ -309,11 +309,57 @@ static boolean forge_marker_of_spawn(
 	return TRUE;
 }
 
-/* a player spawn point's colour: its team's (any: white) */
+/* a player spawn point's colour: its team's (any: white); a teleporter's
+its channel's (a sender and its receiver the same) */
 static void forge_marker_spawn_color(
 	struct forge_spawn const *spawn,
 	struct forge_marker *marker)
 {
+	/* (a game type object's: a CTF flag its team's, a hill point yellow, an
+	oddball spawn white, a race checkpoint orange) */
+	if (forge_spawn_is_objective(spawn))
+	{
+		static real const objective_colors[4][3] =
+		{
+			{ 1.00f, 1.00f, 1.00f }, /* (a flag: its team's, below) */
+			{ 1.00f, 0.92f, 0.25f },
+			{ 0.95f, 0.95f, 0.95f },
+			{ 1.00f, 0.55f, 0.15f },
+		};
+		short kind = (short)(spawn->kind - _forge_spawn_flag);
+
+		marker->red = objective_colors[kind][0];
+		marker->green = objective_colors[kind][1];
+		marker->blue = objective_colors[kind][2];
+		if (spawn->kind == _forge_spawn_flag)
+		{
+			marker->red = spawn->channel == 0 ? 1.f : 0.28f;
+			marker->green = spawn->channel == 0 ? 0.28f : 0.55f;
+			marker->blue = spawn->channel == 0 ? 0.22f : 1.f;
+		}
+		return;
+	}
+	if (forge_spawn_is_teleporter(spawn))
+	{
+		static real const channel_colors[8][3] =
+		{
+			{ 0.35f, 1.00f, 0.35f }, /* green, the teleporters' flash */
+			{ 0.30f, 0.85f, 1.00f }, /* cyan */
+			{ 1.00f, 0.80f, 0.20f }, /* gold */
+			{ 0.85f, 0.45f, 1.00f }, /* violet */
+			{ 1.00f, 0.50f, 0.25f }, /* orange */
+			{ 0.55f, 0.65f, 1.00f }, /* periwinkle */
+			{ 1.00f, 0.45f, 0.70f }, /* pink */
+			{ 0.75f, 1.00f, 0.75f }, /* mint */
+		};
+		short channel = (short)(spawn->channel & 7);
+		real shade = spawn->channel >= 8 ? 0.7f : 1.f;
+
+		marker->red = channel_colors[channel][0] * shade;
+		marker->green = channel_colors[channel][1] * shade;
+		marker->blue = channel_colors[channel][2] * shade;
+		return;
+	}
 	if (spawn->team == 0)
 	{
 		marker->red = 1.f;
@@ -451,6 +497,43 @@ static long forge_marker_under_crosshair(
 	return nearest_id;
 }
 
+/* the layout's teleporters drawn for a player who is not the monitor (the
+Spartan in a Forge game, anyone in a map variant played: forge_netgame.inc):
+a teleporter is no object, its marker is what shows it */
+static short forge_markers_render_teleporters(
+	void)
+{
+	short index;
+	short drawn = 0;
+
+	for (index = 0; index < forge_globals.spawn_count && index < FORGE_MAXIMUM_SPAWNS && drawn < FORGE_MARKER_MOST_DRAWN; index++)
+	{
+		struct forge_spawn const *spawn = &forge_globals.spawns[index];
+		struct forge_marker marker;
+		real_vector3d to_marker;
+
+		if (!forge_spawn_is_teleporter(spawn))
+			continue;
+		csmemset(&marker, 0, sizeof(marker));
+		marker.kind = _forge_marker_player_spawn;
+		marker.initial = spawn->kind == _forge_spawn_teleporter_sender;
+		marker.position = spawn->home.position;
+		marker.forward = spawn->home.forward;
+		to_marker.i = marker.position.x - render.camera.position.x;
+		to_marker.j = marker.position.y - render.camera.position.y;
+		to_marker.k = marker.position.z - render.camera.position.z;
+		if (dot_product3d(&to_marker, &render.camera.forward) < -FORGE_MARKER_HEIGHT ||
+			!render_frustum_sphere_visible(&render.frustum, &marker.position, FORGE_MARKER_HEIGHT))
+		{
+			continue;
+		}
+		forge_marker_spawn_color(spawn, &marker);
+		forge_marker_draw(&marker);
+		drawn++;
+	}
+	return drawn;
+}
+
 /* (render.c's hook) every character's marker */
 static void forge_markers_render(
 	void)
@@ -461,7 +544,7 @@ static void forge_markers_render(
 
 	if (!forge_markers_shown())
 	{
-		forge_globals.markers_drawn = 0;
+		forge_globals.markers_drawn = forge_globals.game_active ? forge_markers_render_teleporters() : 0;
 		forge_globals.map_markers_drawn = 0;
 		return;
 	}
@@ -498,7 +581,10 @@ static void forge_markers_render(
 
 		csmemset(&marker, 0, sizeof(marker));
 		marker.kind = _forge_marker_player_spawn;
-		marker.initial = spawn->kind == _forge_spawn_initial;
+		/* (an initial spawn's, a teleporter sender's: a second ring and a
+		filled centre) */
+		marker.initial = spawn->kind == _forge_spawn_initial || spawn->kind == _forge_spawn_teleporter_sender ||
+			spawn->kind == _forge_spawn_flag || spawn->kind == _forge_spawn_oddball;
 		forge_marker_of_spawn(spawn, &marker.position, &marker.forward);
 		to_marker.i = marker.position.x - render.camera.position.x;
 		to_marker.j = marker.position.y - render.camera.position.y;
@@ -603,6 +689,16 @@ static void forge_marker_held_update(
 	real_vector3d down;
 	struct collision_result collision;
 	struct forge_placed *placed = forge_placed_of_id(forge_globals.held_marker_id);
+	/* (what a marker is put on: the structure and the solid objects - scenery,
+	machines, controls -, so that it stands on a crate or a ledge's object where
+	the crosshair meets it, as an object put there would; never a PHASED
+	object, which a player falls through, nor the monitor's own unit) */
+	unsigned long flags = FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit) |
+		FLAG(_collision_test_objects_bit) | FLAG(_collision_test_objects_scenery_bit) |
+		FLAG(_collision_test_objects_machines_bit) | FLAG(_collision_test_objects_controls_bit);
+	long player_index = local_player_get_player_index(forge_globals.local_player_index);
+	long ignored = forge_globals.unit_index != NONE ? forge_globals.unit_index :
+		player_index != NONE ? player_get(player_index)->unit_index : NONE;
 
 	if (!placed && !forge_spawn_of_id(forge_globals.held_marker_id))
 	{
@@ -619,8 +715,7 @@ static void forge_marker_held_update(
 		along.i = forward.i * forge_globals.held_distance;
 		along.j = forward.j * forge_globals.held_distance;
 		along.k = forward.k * forge_globals.held_distance;
-		if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit),
-			&position, &along, NONE, &collision))
+		if (collision_test_vector(flags, &position, &along, ignored, &collision))
 		{
 			real t = MAX(collision.t * forge_globals.held_distance - 0.1f, 0.f);
 
@@ -645,8 +740,7 @@ static void forge_marker_held_update(
 	down.i = 0.f;
 	down.j = 0.f;
 	down.k = -4.f;
-	if (collision_test_vector(FLAG(_collision_test_structure_bit) | FLAG(_collision_test_front_facing_surfaces_bit), &position,
-		&down, NONE, &collision))
+	if (collision_test_vector(flags, &position, &down, ignored, &collision))
 	{
 		/* (a little over it: a character placed there stands on it, never
 		in it) */

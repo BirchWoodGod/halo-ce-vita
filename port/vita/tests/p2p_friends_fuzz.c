@@ -37,6 +37,14 @@ pending, so that every handler is reached. The input's first byte says how:
 	   then read as a restore reads them (the second byte's 1: with a list;
 	   2: its magic, version, flags and key made right and its sizes
 	   bounded; 4: its list's and marks' magic and hashes made right too)
+	12 the rest as a file-share message's body from F (an ask, a list, a
+	   download, an offer, a pull, a chunk, an end: p2p_fileshare.inc),
+	   signed by F and sealed with the pair's key, T asking F for its list,
+	   downloading from F, sending to F and sharing a file, so that every
+	   handler is reached (the second byte's 8: T's sharing off; 4: T's
+	   download already pulling; its high four bits: the type)
+	13 the rest as T's file-share marks file (fileshare.dat; its magic,
+	   version and hash made right with the second byte's 1)
 
 and its second byte its flags: the clock stepped, the header's type and
 recipient kept from the input, the list read after. After each input the
@@ -55,7 +63,7 @@ enum
 	F = 1,
 	S = 2,
 	MAXIMUM_INPUT = 2 + BACKUP_PLAIN_SIZE + 64,
-	MODES = 12,
+	MODES = 14,
 };
 
 /* T's party as setup made it: F leads, T and S members (put back when an
@@ -76,6 +84,12 @@ static void setup(void)
 	quiet = 1;
 	for (index = 0; index < MACHINES; index++)
 	{
+		/* (file share's transfers' memory let go first) */
+		int upload;
+
+		for (upload = 0; upload < FILES_UPLOADS; upload++)
+			free(machines[index].files.uploads[upload].bytes);
+		free(machines[index].files.download.bytes);
 		memset(&machines[index], 0, sizeof(machines[index]));
 		snprintf(roots[index], sizeof(roots[index]), "%s/m%d_%d", fuzz_root, index, count & 7);
 		mkdir(roots[index], 0755);
@@ -176,6 +190,148 @@ static void check_party(void)
 				__builtin_trap();
 	p2p_party_status(text, sizeof(text));
 	p2p_party_follow_pending(NULL);
+}
+
+/* file share's state for mode 12: T asks F for its list, downloads from F
+and sends to F (each with the id the seeds' bodies carry), shares one file */
+static const unsigned char fuzz_files_id[FILES_ID_LENGTH] = { 0xF1, 0x1E, 0x5A, 0x4E, 0x01, 0x02, 0x03, 0x04 };
+static unsigned char fuzz_files_bytes[3000];
+static unsigned char fuzz_files_digest[P2P_SHA256_SIZE];
+static unsigned long files_listed, files_chunks, files_offers;
+
+static void fileshare_prepare(int flags)
+{
+	struct files_state *files = &machines[T].files;
+	int index;
+
+	for (index = 0; index < (int)sizeof(fuzz_files_bytes); index++)
+		fuzz_files_bytes[index] = (unsigned char)(index * 13);
+	p2p_sha256(fuzz_files_bytes, (int)sizeof(fuzz_files_bytes), fuzz_files_digest);
+	fileshare_setting[T] = flags & 8 ? 0 : 1;
+	machines[T].test_appeared_offline = 0;
+	files->marks_loaded = 1;
+	files->mark_count = 1;
+	files->marks[0].kind = P2P_FILESHARE_KIND_MAP_VARIANT;
+	snprintf(files->marks[0].map, sizeof(files->marks[0].map), "bloodgulch");
+	snprintf(files->marks[0].file, sizeof(files->marks[0].file), "fuzz.hmv");
+	files->local_count = 1;
+	files->local_given = 1;
+	files->local_time = clock_now;
+	memset(&files->local[0], 0, sizeof(files->local[0]));
+	files->local[0].kind = P2P_FILESHARE_KIND_MAP_VARIANT;
+	snprintf(files->local[0].map, sizeof(files->local[0].map), "bloodgulch");
+	snprintf(files->local[0].file, sizeof(files->local[0].file), "fuzz.hmv");
+	snprintf(files->local[0].title, sizeof(files->local[0].title), "Fuzz");
+	files->local[0].size = (int)sizeof(fuzz_files_bytes);
+	files->local[0].hashed = 1;
+	memcpy(files->local[0].digest, fuzz_files_digest, P2P_SHA256_SIZE);
+	if (files->browse.state != P2P_FILESHARE_BROWSE_ASKING)
+	{
+		memset(&files->browse, 0, sizeof(files->browse));
+		files->browse.state = P2P_FILESHARE_BROWSE_ASKING;
+		memcpy(files->browse.key, machines[F].key, P2P_KEY_SIZE);
+		memcpy(files->browse.id, fuzz_files_id, FILES_ID_LENGTH);
+		files->browse.time = clock_now;
+	}
+	if (!files->download.state)
+	{
+		struct files_download *download = &files->download;
+
+		memcpy(download->key, machines[F].key, P2P_KEY_SIZE);
+		memcpy(download->id, fuzz_files_id, FILES_ID_LENGTH);
+		download->kind = P2P_FILESHARE_KIND_MAP_VARIANT;
+		download->size = sizeof(fuzz_files_bytes);
+		memcpy(download->file, fuzz_files_digest, FILES_FILE_ID_LENGTH);
+		memcpy(download->digest, fuzz_files_digest, P2P_SHA256_SIZE);
+		download->started_time = download->progress_time = clock_now;
+		snprintf(download->title, sizeof(download->title), "Fuzz");
+		download->state = FILES_GETTING;
+		if (flags & 4)
+		{
+			use(T);
+			pthread_mutex_lock(&friends_lock);
+			fileshare_download_begin(&machines[T].friends[0]);
+			pthread_mutex_unlock(&friends_lock);
+			machines[T].outbound_count = 0;
+		}
+	}
+	else if (files->download.state == FILES_SAVING)
+	{
+		/* (the game's job, as fileshare_friends.c does it: refused) */
+		struct p2p_fileshare_job job;
+		static unsigned char job_bytes[P2P_FILESHARE_MAXIMUM_BYTES];
+
+		use(T);
+		if (p2p_fileshare_take_job(&job, job_bytes, sizeof(job_bytes)) == P2P_FILESHARE_JOB_SAVE)
+			p2p_fileshare_job_saved(job.serial, 0, "fuzz");
+	}
+	if (files->uploads[0].state != FILES_OFFERED)
+	{
+		struct files_upload *upload = &files->uploads[0];
+
+		fileshare_upload_end(upload);
+		upload->state = FILES_OFFERED;
+		memcpy(upload->key, machines[F].key, P2P_KEY_SIZE);
+		memcpy(upload->id, fuzz_files_id, FILES_ID_LENGTH);
+		upload->kind = P2P_FILESHARE_KIND_MAP_VARIANT;
+		upload->bytes = malloc(sizeof(fuzz_files_bytes));
+		memcpy(upload->bytes, fuzz_files_bytes, sizeof(fuzz_files_bytes));
+		upload->size = (int)sizeof(fuzz_files_bytes);
+		upload->chunk_count = (upload->size + FILES_CHUNK_BYTES - 1) / FILES_CHUNK_BYTES;
+		upload->started_time = upload->heard_time = clock_now;
+		snprintf(upload->title, sizeof(upload->title), "Fuzz");
+	}
+	/* (F's budgets full again: each input reaches its handler) */
+	memset(&machines[T].friends[0].files, 0, sizeof(machines[T].friends[0].files));
+	machines[T].friends[0].presence.online = 1;
+}
+
+/* file share's state and every text it shows, bounded */
+static void check_files(void)
+{
+	struct files_state *files = &machines[T].files;
+	struct p2p_fileshare_remote remote[P2P_FILESHARE_SHARED_MAXIMUM];
+	struct p2p_fileshare_offer offer;
+	char name[P2P_FRIEND_NAME_SIZE], id[P2P_FRIEND_ID_SIZE], text[P2P_FILESHARE_TEXT_SIZE];
+	int count = 0, index, at;
+
+	use(T);
+	if (files->browse.count > P2P_FILESHARE_SHARED_MAXIMUM || files->mark_count > P2P_FILESHARE_SHARED_MAXIMUM ||
+		files->download.have_count > files->download.chunk_count || files->download.chunk_count > FILES_MAXIMUM_CHUNKS ||
+		(files->download.state && files->download.size > P2P_FILESHARE_MAXIMUM_BYTES))
+		__builtin_trap();
+	if (p2p_fileshare_browse_state(name, id, remote, P2P_FILESHARE_SHARED_MAXIMUM, &count) ==
+		P2P_FILESHARE_BROWSE_LISTED)
+	{
+		files_listed++;
+		for (index = 0; index < count; index++)
+		{
+			if (!fileshare_size_valid(remote[index].kind, (unsigned long)remote[index].size) ||
+				!memchr(remote[index].title, 0, sizeof(remote[index].title)) ||
+				!memchr(remote[index].map, 0, sizeof(remote[index].map)))
+				__builtin_trap();
+			for (at = 0; remote[index].title[at]; at++)
+				if (remote[index].title[at] < 0x20 || remote[index].title[at] > 0x7E)
+					__builtin_trap();
+		}
+		/* (asked again next: the browse back to asking) */
+		memset(&files->browse, 0, sizeof(files->browse));
+	}
+	files_chunks += files->download.have_count;
+	if (p2p_fileshare_take_offer(&offer))
+	{
+		files_offers++;
+		if (!fileshare_size_valid(offer.kind, (unsigned long)offer.size) || !memchr(offer.title, 0, sizeof(offer.title)))
+			__builtin_trap();
+		for (at = 0; offer.title[at]; at++)
+			if (offer.title[at] < 0x20 || offer.title[at] > 0x7E)
+				__builtin_trap();
+		p2p_fileshare_answer(offer.id, offer.size & 1);
+	}
+	p2p_fileshare_status(text, sizeof(text));
+	if (!memchr(text, 0, sizeof(text)))
+		__builtin_trap();
+	machines[T].outbound_count = 0;
 }
 
 static void check_entries(void)
@@ -333,6 +489,57 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		check_party();
 		if (flags & 4)
 			check_entries();
+		return 0;
+	}
+	case 12:
+	{
+		static const int types[7] = { TYPE_FILES_ASK, TYPE_FILES_LIST, TYPE_FILES_GET, TYPE_FILES_OFFER, TYPE_FILES_PULL,
+			TYPE_FILES_CHUNK, TYPE_FILES_END };
+		int type = types[(flags >> 4) % 7];
+		int plain_size;
+
+		fileshare_prepare(flags);
+		plain_size = plain_from(F, type, machines[T].key, data, size, flags & 2, plain);
+		use(F);
+		if (!machines[F].friend_count || !friend_keys(&machines[F].friends[0]))
+			return 0;
+		payload_size = envelope_seal(KIND_PAIR, machines[F].friends[0].send_key, plain, plain_size > MAXIMUM_PLAIN_SIZE ?
+			MAXIMUM_PLAIN_SIZE : plain_size, payload);
+		use(T);
+		p2p_friends_heard(P2P_FRIENDS_MAILBOX, payload, payload_size);
+		clock_now += flags & 1 ? 4000 : 50;
+		p2p_friends_update(&hosts[T]);
+		check_files();
+		return 0;
+	}
+	case 13:
+	{
+		unsigned char bytes[FILES_MARKS_MAXIMUM_SIZE + 64];
+		int length = size > sizeof(bytes) ? (int)sizeof(bytes) : (int)size, index;
+		struct files_mark marks[P2P_FILESHARE_SHARED_MAXIMUM];
+		int mark_count = machines[T].files.mark_count;
+
+		memcpy(marks, machines[T].files.marks, sizeof(marks));
+		memcpy(bytes, data, (size_t)length);
+		if ((flags & 1) && length >= P2P_SHA256_SIZE + 6)
+		{
+			memcpy(bytes, "HFSM", 4);
+			bytes[4] = FILES_MARKS_VERSION;
+			p2p_sha256(bytes, length - P2P_SHA256_SIZE, bytes + length - P2P_SHA256_SIZE);
+		}
+		use(T);
+		if (fileshare_marks_decode(bytes, length))
+		{
+			lists_taken++;
+			if (machines[T].files.mark_count > P2P_FILESHARE_SHARED_MAXIMUM)
+				__builtin_trap();
+			for (index = 0; index < machines[T].files.mark_count; index++)
+				if (!fileshare_names_valid(machines[T].files.marks[index].kind, machines[T].files.marks[index].map,
+					machines[T].files.marks[index].file))
+					__builtin_trap();
+		}
+		memcpy(machines[T].files.marks, marks, sizeof(marks));
+		machines[T].files.mark_count = mark_count;
 		return 0;
 	}
 	case 4:
@@ -534,7 +741,7 @@ static unsigned int next_random(void)
 
 enum
 {
-	SEEDS = 48,
+	SEEDS = 196,
 };
 
 static unsigned char seeds[SEEDS][MAXIMUM_INPUT];
@@ -602,11 +809,58 @@ static void make_seeds(void)
 			seeds[index][1] = (unsigned char)(nth << 4);
 			break;
 		}
+		case 12:
+		{
+			/* (each file-share message's body, as F would send it to T's
+			ask, download and upload) */
+			static const int types[7] = { TYPE_FILES_ASK, TYPE_FILES_LIST, TYPE_FILES_GET, TYPE_FILES_OFFER,
+				TYPE_FILES_PULL, TYPE_FILES_CHUNK, TYPE_FILES_END };
+			int nth = (index / MODES) % 7, at;
+
+			fileshare_prepare(0);
+			message.type = types[nth];
+			memcpy(message.files_id, fuzz_files_id, FILES_ID_LENGTH);
+			message.files_page = 0;
+			message.files_pages = 1;
+			message.files_count = message.type == TYPE_FILES_PULL ? 8 : 2;
+			for (at = 0; at < 2; at++)
+			{
+				message.files_entries[at].kind = at ? P2P_FILESHARE_KIND_GAME_VARIANT : P2P_FILESHARE_KIND_MAP_VARIANT;
+				memcpy(message.files_entries[at].file, fuzz_files_digest, FILES_FILE_ID_LENGTH);
+				message.files_entries[at].size = at ? P2P_FILESHARE_GAME_VARIANT_BYTES : sizeof(fuzz_files_bytes);
+				snprintf(message.files_entries[at].map, sizeof(message.files_entries[at].map), at ? "" : "bloodgulch");
+				snprintf(message.files_entries[at].title, sizeof(message.files_entries[at].title), at ? "Swords" : "Fuzz");
+			}
+			memcpy(message.files_file, fuzz_files_digest, FILES_FILE_ID_LENGTH);
+			message.files_flags = index / MODES >= 7 ? FILES_OFFER_UNASKED : 0;
+			message.files_kind = P2P_FILESHARE_KIND_MAP_VARIANT;
+			message.files_size = sizeof(fuzz_files_bytes);
+			memcpy(message.files_digest, fuzz_files_digest, P2P_SHA256_SIZE);
+			snprintf(message.files_map, sizeof(message.files_map), "bloodgulch");
+			snprintf(message.files_title, sizeof(message.files_title), "Fuzz");
+			message.files_first = 0;
+			message.files_data_size = FILES_CHUNK_BYTES;
+			memcpy(message.files_data, fuzz_files_bytes, FILES_CHUNK_BYTES);
+			message.files_reason = FILES_END_SAVED;
+			seeds[index][1] = (unsigned char)(nth << 4 | (index & 2 ? 4 : 0));
+			break;
+		}
 		default:
 			message.type = TYPE_PRESENCE;
 			break;
 		}
 		size = body_encode(&message, plain);
+		if (mode == 13)
+		{
+			/* (a real marks file: T's, two marks) */
+			use(T);
+			machines[T].files.mark_count = 2;
+			machines[T].files.marks[1].kind = P2P_FILESHARE_KIND_GAME_VARIANT;
+			machines[T].files.marks[1].map[0] = 0;
+			snprintf(machines[T].files.marks[1].file, sizeof(machines[T].files.marks[1].file), "4F2A00C1");
+			size = fileshare_marks_encode(plain);
+			seeds[index][1] = (unsigned char)(index & 2 ? 1 : 0);
+		}
 		if (mode == 5)
 		{
 			use(T);
@@ -732,8 +986,9 @@ int main(int count, char **arguments)
 			fprintf(stderr, "%lu inputs\n", run + 1);
 	}
 	printf("PASS (%lu inputs; lists read whole %lu times, %lu entries checked; party chat shown after %lu inputs, a follow "
-		"taken after %lu; backups' contents read whole %lu times)\n", runs, lists_taken, friends_seen, party_lines,
-		party_follows, backups_read);
+		"taken after %lu; backups' contents read whole %lu times; file share: lists read %lu times, %lu chunks had, %lu "
+		"offers asked)\n", runs, lists_taken, friends_seen, party_lines, party_follows, backups_read, files_listed,
+		files_chunks, files_offers);
 	return 0;
 }
 #endif

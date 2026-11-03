@@ -442,6 +442,10 @@ static char const *const port_function_names[] =
 	"port host multiplayer", "port host forge", "port host campaign", "port host next", "port host previous",
 	"port host edit",
 	"port online custom grid",
+	"port fileshare share ask", "port fileshare share option", "port fileshare send init", "port fileshare send act",
+	"port fileshare friend init", "port fileshare friend ask", "port fileshare friend download",
+	"port fileshare friend refresh", "port fileshare friend page up", "port fileshare friend page down",
+	"port forge magnets", "port forge nudge step",
 };
 
 /* the port's game data functions (menu_functions.c), from
@@ -475,6 +479,7 @@ static char const *const port_game_data_input_names[] =
 	"port online version", "port online custom", "port online switch", "port online lobby",
 	"port host",
 	"port h3 content notice",
+	"port fileshare share", "port fileshare send", "port fileshare friend", "port fileshare friend question",
 };
 
 static struct
@@ -2946,6 +2951,16 @@ boolean menu_tags_bitmap_fits_widget(
 			return TRUE;
 	}
 	return FALSE;
+}
+
+static long menu_tags_online(long tag_index);
+
+/* the widget standing for a Halo 3 one in the Menu style chosen (the classic set's for Classic+,
+the online set's for Online), else the tag itself: what opens in its place */
+long menu_tags_stand_in(
+	long tag_index)
+{
+	return menu_tags_online(tag_index);
 }
 
 /* (Menu style Online) the online set's widget for a Halo 3 one, when it has

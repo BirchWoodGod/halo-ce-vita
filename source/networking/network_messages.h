@@ -108,6 +108,16 @@ void network_event(
 	char *format,
 	...);
 
+/* port: a join request with zero_bytes zeros past its structure, as a host
+of OpenCE's network version 40 or more reads it (network_wire_join_request_padding).
+The message table stays 0x70: every older wire and this build's own hosts
+go on reading that, and a shared definition that grew would refuse them all
+with no word */
+void *create_network_game_join_request_padded(
+	const void *message_struct,
+	short message_struct_size,
+	short zero_bytes);
+
 void *create_network_game_message(
 	enum network_game_message_type message_type,
 	const void *message_struct,
